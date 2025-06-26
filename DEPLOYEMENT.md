@@ -17,7 +17,7 @@
 
 ```bash
 # Choose Ubuntu 22.04 LTS
-# Security group: Open ports 22 (SSH), 80 (HTTP), 443 (HTTPS), 3000 (API)
+# Security group: Open ports 22 (SSH), 80 (HTTP), 443 (HTTPS), 8000 (API)
 ```
 
 2. **Connect to Instance**
@@ -77,7 +77,7 @@ module.exports = {
     exec_mode: 'cluster',
     env: {
       NODE_ENV: 'production',
-      PORT: 3000
+      PORT: 8000
     },
     error_file: './logs/pm2-error.log',
     out_file: './logs/pm2-out.log',
@@ -104,7 +104,7 @@ server {
     server_name your-domain.com;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:8000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

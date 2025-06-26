@@ -98,10 +98,28 @@ export class AICostTrackerService {
     ): Promise<void> {
         const tracker = await this.getTracker();
 
-        // The tracker will automatically call our custom storage save method
-        await tracker.trackUsage(
-            { ...request, ...response, ...metadata, sessionId: userId }
-        );
+        // Normalize payload to flat structure with correct field names
+        let payload = { ...request, ...response, ...metadata, sessionId: userId };
+        // Flatten 'usage' object if present
+        if (payload.usage && typeof payload.usage === 'object') {
+            payload = { ...payload, ...payload.usage };
+            delete payload.usage;
+        }
+        // Rename 'service' to 'provider' if present
+        if (payload.service && !payload.provider) {
+            payload.provider = payload.service;
+            delete payload.service;
+        }
+        // Rename 'cost' to 'estimatedCost' if present
+        if (payload.cost && !payload.estimatedCost) {
+            payload.estimatedCost = payload.cost;
+            delete payload.cost;
+        }
+        // Always include 'prompt' field
+        if (typeof payload.prompt !== 'string') {
+            payload.prompt = '';
+        }
+        await tracker.trackUsage(payload);
     }
 
     /**
@@ -114,8 +132,13 @@ export class AICostTrackerService {
     ): Promise<any> {
         const tracker = await this.getTracker();
 
+        // Always include 'prompt' field
+        let payload = { ...request, ...metadata, sessionId: userId };
+        if (typeof payload.prompt !== 'string') {
+            payload.prompt = '';
+        }
         // This will automatically track the usage via our custom storage
-        return tracker.makeRequest({ ...request, ...metadata, sessionId: userId });
+        return tracker.makeRequest(payload);
     }
 
     /**

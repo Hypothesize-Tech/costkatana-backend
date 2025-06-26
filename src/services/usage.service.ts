@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Usage, IUsage } from '../models/Usage';
 import { Alert } from '../models/Alert';
 import { logger } from '../utils/logger';
@@ -5,6 +6,7 @@ import { PaginationOptions, paginate } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
 import { eventService } from './event.service';
 import { AICostTrackerService } from './aiCostTracker.service';
+import { getUserIdFromToken } from '../controllers/usage.controller';
 
 interface TrackUsageData {
     userId: string;
@@ -35,46 +37,46 @@ interface UsageFilters {
 
 export class UsageService {
 
-    static async trackUsage(data: TrackUsageData): Promise<IUsage> {
+    static async trackUsage(data: any, req?: any): Promise<IUsage | null> {
         try {
-            // Initialize AI Cost Tracker if not already done
-            await AICostTrackerService.initialize();
-
-            // Let the AI Cost Tracker handle the tracking
-            // This will automatically call our custom storage and save to MongoDB
-            await AICostTrackerService.trackRequest(
-                {
-                    model: data.model,
-                    prompt: data.prompt,
-                    maxTokens: data.metadata?.maxTokens,
-                    temperature: data.metadata?.temperature
-                },
-                {
-                    content: data.completion,
-                    usage: {
-                        promptTokens: data.promptTokens,
-                        completionTokens: data.completionTokens,
-                        totalTokens: data.totalTokens
-                    }
-                },
-                data.userId,
-                {
-                    service: data.service,
-                    responseTime: data.responseTime,
-                    ...data.metadata,
-                    tags: data.tags
-                }
-            );
-
-            // The usage record is already created by our custom storage
-            // Just return the latest usage record
-            const usage = await Usage.findOne({ userId: data.userId })
-                .sort({ createdAt: -1 })
-                .limit(1);
-
-            return usage!;
-        } catch (error) {
-            logger.error('Error tracking usage with AI Cost Tracker:', error);
+            console.log('UsageService.trackUsage called with:', data);
+            // Ensure userId is a valid ObjectId
+            let userId = data.userId;
+            // If userId is missing, try to get from req (if provided)
+            if (!userId && req) {
+                userId = getUserIdFromToken(req) || req.user?.id || req.user?._id || req.userId;
+            }
+            if (typeof userId === 'string') {
+                userId = new mongoose.Types.ObjectId(userId);
+            }
+            // Create usage document
+            const usageData = {
+                userId,
+                service: data.service,
+                model: data.model,
+                prompt: data.prompt || '',
+                completion: data.completion,
+                promptTokens: data.promptTokens,
+                completionTokens: data.completionTokens,
+                totalTokens: data.totalTokens,
+                cost: data.cost || 0,
+                responseTime: data.responseTime || 0,
+                metadata: data.metadata || {},
+                tags: data.tags || [],
+                optimizationApplied: data.optimizationApplied || false,
+                errorOccurred: data.errorOccurred || false,
+                errorMessage: data.errorMessage,
+                ipAddress: data.ipAddress,
+                userAgent: data.userAgent
+            };
+            console.log('Creating usage with data:', usageData);
+            const usage = new Usage(usageData);
+            const savedUsage = await usage.save();
+            console.log('Usage saved successfully:', savedUsage._id);
+            return savedUsage;
+        } catch (error: any) {
+            console.error('Error in UsageService.trackUsage:', error);
+            console.error('Error stack:', error.stack);
             throw error;
         }
     }
@@ -413,7 +415,7 @@ export class UsageService {
 
             for (const data of usageData) {
                 const usage = await this.trackUsage(data);
-                results.push(usage);
+                results.push(usage!);
             }
 
             // Send bulk update event to frontend
@@ -523,6 +525,82 @@ export class UsageService {
             logger.info(`Historical sync completed for user ${userId}`);
         } catch (error) {
             logger.error('Error syncing historical data:', error);
+            throw error;
+        }
+    }
+
+    // Add a robust createUsage method for direct usage
+    static async createUsage(data: any, req?: any) {
+        const mongoose = require('mongoose');
+        const jwt = require('jsonwebtoken');
+
+        try {
+            console.log('Creating usage with data:', JSON.stringify(data, null, 2));
+
+            // Get userId from request like in usage.controller.ts
+            let userId = getUserIdFromToken(req);
+            if (!userId && req) {
+                // Try to get from JWT token first
+                const authHeader = req.headers?.authorization || '';
+                const token = authHeader.replace(/^Bearer\s+/, '');
+                if (token) {
+                    try {
+                        const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+                        const decoded: any = jwt.verify(token, JWT_SECRET);
+                        userId = decoded.id || decoded.userId;
+                    } catch (err) {
+                        // Token verification failed, continue with other methods
+                    }
+                }
+
+                // Fallback to req.user or req.userId
+                if (!userId) {
+                    userId = req.user?.id || req.userId;
+                }
+            }
+
+            if (!userId) {
+                throw new Error('User authentication required - no userId found');
+            }
+
+            // Ensure all required fields are present
+            const usageData = {
+                userId: userId,
+                service: data.service || data.provider,
+                model: data.model,
+                prompt: data.prompt || '',
+                completion: data.completion,
+                promptTokens: data.promptTokens,
+                completionTokens: data.completionTokens,
+                totalTokens: data.totalTokens,
+                cost: data.cost ?? data.estimatedCost ?? 0,
+                responseTime: data.responseTime ?? 0,
+                metadata: data.metadata || {},
+                tags: data.tags || [],
+                optimizationApplied: data.optimizationApplied ?? false,
+                errorOccurred: data.errorOccurred ?? false,
+                errorMessage: data.errorMessage,
+                ipAddress: data.ipAddress,
+                userAgent: data.userAgent
+            };
+
+            // Check if userId is valid ObjectId
+            if (!mongoose.Types.ObjectId.isValid(usageData.userId)) {
+                throw new Error(`Invalid userId: ${usageData.userId}`);
+            }
+
+            console.log('Validated usage data:', usageData);
+            const usage = new Usage(usageData);
+            const savedUsage = await usage.save();
+            console.log('Usage saved successfully:', savedUsage._id);
+            return savedUsage;
+        } catch (error: any) {
+            console.error('Error in createUsage:', error);
+            console.error('Error details:', {
+                name: error.name,
+                message: error.message,
+                errors: error.errors
+            });
             throw error;
         }
     }

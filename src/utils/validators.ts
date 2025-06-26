@@ -38,18 +38,23 @@ export const trackUsageSchema = z.object({
 });
 
 export const sdkTrackUsageSchema = z.object({
-    provider: z.string(),
-    model: z.string().min(1, 'Model is required'),
-    prompt: z.string().min(1, 'Prompt is required'),
+    provider: z.enum(['openai', 'anthropic', 'aws-bedrock', 'google-ai', 'huggingface', 'cohere']).optional(),
+    service: z.enum(['openai', 'anthropic', 'aws-bedrock', 'google-ai', 'huggingface', 'cohere']).optional(),
+    model: z.string(),
+    prompt: z.string().optional().default(''),
     completion: z.string().optional(),
-    promptTokens: z.number().int().nonnegative(),
-    completionTokens: z.number().int().nonnegative(),
-    totalTokens: z.number().int().nonnegative(),
-    estimatedCost: z.number().nonnegative(),
-    responseTime: z.number().nonnegative(),
-    metadata: z.record(z.any()).optional(),
-    tags: z.array(z.string()).optional(),
-});
+    promptTokens: z.number().min(0),
+    completionTokens: z.number().min(0),
+    totalTokens: z.number().min(0).optional(),
+    cost: z.number().min(0).optional(),
+    estimatedCost: z.number().min(0).optional(),
+    responseTime: z.number().min(0).optional().default(0),
+    metadata: z.object({}).optional().default({}),
+    tags: z.array(z.string()).optional().default([])
+}).refine(
+    (data) => data.provider || data.service,
+    { message: "Either 'provider' or 'service' must be provided" }
+);
 
 // Analytics validation schemas
 export const analyticsQuerySchema = z.object({

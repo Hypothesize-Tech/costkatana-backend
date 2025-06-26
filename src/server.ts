@@ -49,17 +49,17 @@ app.use(compression());
 // Logging
 app.use(morgan('combined', { stream }));
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: config.rateLimit.windowMs,
-    max: config.rateLimit.max,
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-});
+// // Rate limiting
+// const limiter = rateLimit({
+//     windowMs: config.rateLimit.windowMs,
+//     max: config.rateLimit.max,
+//     message: 'Too many requests from this IP, please try again later.',
+//     standardHeaders: true,
+//     legacyHeaders: false,
+// });
 
-// Apply rate limiting to all routes
-app.use('/api/', limiter);
+// // Apply rate limiting to all routes
+// app.use('/api/', limiter);
 
 // Stricter rate limiting for auth routes
 const authLimiter = rateLimit({

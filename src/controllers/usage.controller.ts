@@ -2,6 +2,21 @@ import { Response, NextFunction } from 'express';
 import { UsageService } from '../services/usage.service';
 import { trackUsageSchema, paginationSchema, sdkTrackUsageSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
+import jwt from 'jsonwebtoken';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
+
+export function getUserIdFromToken(req: any): string | null {
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/, '');
+    if (!token) return null;
+    try {
+        const decoded: any = jwt.verify(token, JWT_SECRET);
+        return decoded.id || decoded.userId || null;
+    } catch (err) {
+        return null;
+    }
+}
 
 export class UsageController {
     static async trackUsage(req: any, res: Response, next: NextFunction) {
@@ -18,10 +33,10 @@ export class UsageController {
                 success: true,
                 message: 'Usage tracked successfully',
                 data: {
-                    id: usage._id,
-                    cost: usage.cost,
-                    tokens: usage.totalTokens,
-                    optimizationApplied: usage.optimizationApplied,
+                    id: usage?._id,
+                    cost: usage?.cost,
+                    tokens: usage?.totalTokens,
+                    optimizationApplied: usage?.optimizationApplied,
                 },
             });
         } catch (error: any) {
@@ -30,29 +45,104 @@ export class UsageController {
         }
     }
 
-    static async trackUsageFromSDK(req: any, res: Response, next: NextFunction) {
+    static async trackUsageFromSDK(req: any, res: Response) {
         try {
-            console.log('trackUsageFromSDK', req.body);
-            const userId = req.user!.id;
-            const validatedData = sdkTrackUsageSchema.parse(req.body);
-
-            const usage = await UsageService.trackUsage({
+            console.log('trackUsageFromSDK raw body:', req.body);
+            // Normalize payload
+            let body = { ...req.body };
+            let transformed = false;
+            // Flatten 'usage' object if exists
+            if (body.usage && typeof body.usage === 'object') {
+                body = { ...body, ...body.usage };
+                delete body.usage;
+                transformed = true;
+            }
+            // Convert 'provider' to 'service' (model expects 'service')
+            if (body.provider && !body.service) {
+                body.service = body.provider;
+                delete body.provider;
+                transformed = true;
+            }
+            // Handle cost field
+            if (body.estimatedCost && !body.cost) {
+                body.cost = body.estimatedCost;
+                delete body.estimatedCost;
+                transformed = true;
+            }
+            if (transformed) {
+                logger.warn('trackUsageFromSDK: Transformed payload', { original: req.body, transformed: body });
+            }
+            // Get userId from JWT token
+            let userId = getUserIdFromToken(req);
+            if (!userId) {
+                userId = req.user?.id || req.user?._id || req.userId;
+            }
+            if (!userId) {
+                logger.error('No user ID found in request or token');
+                return res.status(401).json({
+                    success: false,
+                    error: 'User authentication required'
+                });
+            }
+            console.log('Found userId:', userId);
+            // Validate transformed data
+            const validationResult = sdkTrackUsageSchema.safeParse(body);
+            if (!validationResult.success) {
+                logger.error('SDK usage validation failed:', validationResult.error.issues);
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid usage data',
+                    details: validationResult.error.issues
+                });
+            }
+            const data = validationResult.data;
+            // Ensure all required fields have values
+            const usageData = {
                 userId,
-                ...validatedData,
-                service: validatedData.provider,
-                cost: validatedData.estimatedCost,
-            });
-
-            res.status(201).json({
+                service: (data as any).service || data.provider || 'openai',
+                model: data.model,
+                prompt: data.prompt || '',
+                completion: data.completion || undefined,
+                promptTokens: data.promptTokens,
+                completionTokens: data.completionTokens,
+                totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
+                cost: (data as any).cost || data.estimatedCost || calculateCost(
+                    (data as any).service || data.provider || 'openai',
+                    data.model,
+                    data.promptTokens,
+                    data.completionTokens
+                ),
+                responseTime: data.responseTime || 0,
+                metadata: data.metadata || {},
+                tags: data.tags || [],
+                optimizationApplied: false,
+                errorOccurred: false
+            };
+            console.log('Prepared usage data:', usageData);
+            // Track usage
+            const usage = await UsageService.trackUsage(usageData);
+            if (!usage) {
+                throw new Error('Usage creation returned null');
+            }
+            console.log('Usage tracked successfully:', usage._id);
+            return res.status(201).json({
                 success: true,
                 message: 'Usage tracked successfully from SDK',
                 data: {
-                    id: usage._id,
-                },
+                    id: usage?._id,
+                    cost: usage?.cost,
+                    totalTokens: usage?.totalTokens
+                }
             });
         } catch (error: any) {
             logger.error('Track usage from SDK error:', error);
-            next(error);
+            console.error('Full error:', error);
+            // Always return a response
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to track usage',
+                message: error.message || 'Internal server error'
+            });
         }
     }
 
@@ -194,4 +284,30 @@ export class UsageController {
             next(error);
         }
     }
+}
+
+// Add the cost calculation function for SDK usage
+function calculateCost(provider: string, model: string, promptTokens: number, completionTokens: number): number {
+    // Only OpenAI and Anthropic for now, extend as needed
+    const pricing: Record<string, Record<string, { prompt: number; completion: number }>> = {
+        openai: {
+            'gpt-4': { prompt: 0.03, completion: 0.06 },
+            'gpt-4-turbo': { prompt: 0.01, completion: 0.03 },
+            'gpt-3.5-turbo': { prompt: 0.0005, completion: 0.0015 },
+            'gpt-3.5-turbo-16k': { prompt: 0.003, completion: 0.004 }
+        },
+        anthropic: {
+            'claude-3-opus': { prompt: 0.015, completion: 0.075 },
+            'claude-3-sonnet': { prompt: 0.003, completion: 0.015 },
+            'claude-3-haiku': { prompt: 0.00025, completion: 0.00125 }
+        }
+    };
+    const modelPricing = pricing[provider]?.[model];
+    if (!modelPricing) {
+        logger.warn(`No pricing found for ${provider}/${model}`);
+        return 0;
+    }
+    const promptCost = (promptTokens / 1000) * modelPricing.prompt;
+    const completionCost = (completionTokens / 1000) * modelPricing.completion;
+    return Number((promptCost + completionCost).toFixed(6));
 }

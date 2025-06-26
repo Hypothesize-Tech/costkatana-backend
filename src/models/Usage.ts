@@ -50,7 +50,7 @@ const usageSchema = new Schema<IUsage>({
     },
     prompt: {
         type: String,
-        required: true,
+        default: ''
     },
     completion: String,
     promptTokens: {
@@ -72,11 +72,13 @@ const usageSchema = new Schema<IUsage>({
         type: Number,
         required: true,
         min: 0,
+        default: 0
     },
     responseTime: {
         type: Number,
         required: true,
         min: 0,
+        default: 0
     },
     metadata: {
         type: Schema.Types.Mixed,
