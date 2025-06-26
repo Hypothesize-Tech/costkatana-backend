@@ -31,24 +31,33 @@ interface OptimizationFilters {
 }
 
 export class OptimizationService {
-    // Properly configure AICostOptimizer with required TrackerConfig properties
-    private static costOptimizer = new AICostOptimizer({
-        optimization: {
-            enablePromptOptimization: true,
-            enableModelSuggestions: true,
-            enableCachingSuggestions: true,
-        },
-        tracking: {
-            enableAutoTracking: true,
-            storageType: 'memory',
-            retentionDays: 30,
-        },
-        providers: [
-            {
-                provider: AIProvider.AWSBedrock
-            }
-        ]
-    });
+
+    private static costOptimizer: AICostOptimizer = (() => {
+        // Try to use a static create method if available
+        if (typeof (AICostOptimizer as any).create === 'function') {
+            return (AICostOptimizer as any).create({
+                optimization: {
+                    enablePromptOptimization: true,
+                    enableModelSuggestions: true,
+                    enableCachingSuggestions: true,
+                },
+                tracking: {
+                    enableAutoTracking: true,
+                    retentionDays: 30,
+                },
+                providers: [
+                    {
+                        provider: AIProvider.AWSBedrock
+                    }
+                ]
+            });
+        }
+        // If direct instantiation is not allowed due to private constructor, throw a clear error.
+        throw new Error(
+            "AICostOptimizer does not expose a public constructor or static create method. " +
+            "Please check the library documentation or update the integration to use the correct instantiation method."
+        );
+    })();
 
     // Add helper to map string to AIProvider enum
     private static getAIProviderFromString(provider: string): AIProvider {
