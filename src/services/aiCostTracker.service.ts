@@ -31,23 +31,23 @@ export class AICostTrackerService {
     private static async createTracker(): Promise<AICostTracker> {
         // Only include providers that have API keys configured
         const providers = [];
-        
+
         if (process.env.OPENAI_API_KEY) {
             providers.push({ provider: AIProvider.OpenAI, apiKey: process.env.OPENAI_API_KEY });
         }
-        
+
         if (process.env.AWS_REGION) {
             providers.push({ provider: AIProvider.AWSBedrock, region: process.env.AWS_REGION });
         }
-        
+
         if (process.env.ANTHROPIC_API_KEY) {
             providers.push({ provider: AIProvider.Anthropic, apiKey: process.env.ANTHROPIC_API_KEY });
         }
-        
+
         if (process.env.GOOGLE_AI_API_KEY) {
             providers.push({ provider: AIProvider.Google, apiKey: process.env.GOOGLE_AI_API_KEY });
         }
-        
+
         if (process.env.COHERE_API_KEY) {
             providers.push({ provider: AIProvider.Cohere, apiKey: process.env.COHERE_API_KEY });
         }
@@ -92,7 +92,7 @@ export class AICostTrackerService {
             }
         });
 
-        logger.info('AI Cost Tracker initialized successfully', { 
+        logger.info('AI Cost Tracker initialized successfully', {
             providersConfigured: providers.length,
             providers: providers.map(p => p.provider)
         });

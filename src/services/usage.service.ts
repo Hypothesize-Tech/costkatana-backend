@@ -34,7 +34,6 @@ interface UsageFilters {
 
 
 export class UsageService {
-    // private static costOptimizer = new AICostOptimizer();
 
     static async trackUsage(data: TrackUsageData): Promise<IUsage> {
         try {

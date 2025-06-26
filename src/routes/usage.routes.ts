@@ -16,9 +16,6 @@ router.post('/', validate(trackUsageSchema), asyncHandler(UsageController.trackU
 // Track new usage from SDK
 router.post('/sdk', asyncHandler(UsageController.trackUsageFromSDK));
 
-// Get usage data
-router.get('/', validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
-
 // Get usage statistics
 router.get('/stats', asyncHandler(UsageController.getUsageStats));
 
@@ -30,5 +27,8 @@ router.get('/search', validateQuery(paginationSchema), asyncHandler(UsageControl
 
 // Export usage data
 router.get('/export', asyncHandler(UsageController.exportUsage));
+
+// Get usage data
+router.get('/', validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
 
 export default router;

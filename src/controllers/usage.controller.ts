@@ -32,6 +32,7 @@ export class UsageController {
 
     static async trackUsageFromSDK(req: any, res: Response, next: NextFunction) {
         try {
+            console.log('trackUsageFromSDK', req.body);
             const userId = req.user!.id;
             const validatedData = sdkTrackUsageSchema.parse(req.body);
 

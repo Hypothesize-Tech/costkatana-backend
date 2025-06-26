@@ -5,7 +5,8 @@ import { Alert } from '../models/Alert';
 import { BedrockService } from './bedrock.service';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
-import AICostTracker, { AIProvider, CostEstimate, TokenCounter } from 'ai-cost-tracker';
+import { AICostTrackerService } from './aiCostTracker.service';
+import { AIProvider, CostEstimate } from 'ai-cost-tracker';
 
 interface OptimizationRequest {
     userId: string;
@@ -30,34 +31,9 @@ interface OptimizationFilters {
 }
 
 export class OptimizationService {
-    // Initialize the AI Cost Tracker as per npm package docs
-    private static trackerPromise = AICostTracker.create({
-        providers: [
-            {
-                provider: AIProvider.AWSBedrock,
-                // Add region or apiKey if needed
-            }
-        ],
-        optimization: {
-            enablePromptOptimization: true,
-            enableModelSuggestions: true,
-            enableCachingSuggestions: true,
-            thresholds: {
-                highCostPerRequest: 0.1,    // 10% minimum reduction to suggest optimization
-                highTokenUsage: 0.05,       // 5% minimum savings to suggest model change
-                frequencyThreshold: 0.02    // 2% minimum savings to suggest caching
-            },
-        },
-        tracking: {
-            enableAutoTracking: true,
-            storageType: 'memory',
-            retentionDays: 30,
-        }
-    });
-
-    // Helper to resolve the tracker instance
+    // Helper to get the tracker instance
     private static async getTracker() {
-        return await this.trackerPromise;
+        return await AICostTrackerService.getTracker();
     }
 
     // Helper to map string to AIProvider enum
@@ -166,16 +142,12 @@ export class OptimizationService {
             // If alternatives are present, estimate tokens and cost for each
             if (optimization.metadata?.alternatives) {
                 for (const alt of optimization.metadata.alternatives) {
-                    alt.tokens = await OptimizationService.estimateTokensAsync(
-                        alt.prompt,
-                        this.getAIProviderFromString(request.service),
-                        request.model
-                    );
                     const altEstimate: CostEstimate = await tracker.estimateCost(
                         alt.prompt,
                         request.model,
                         this.getAIProviderFromString(request.service)
                     );
+                    alt.tokens = (altEstimate.breakdown?.promptTokens ?? 0) + (altEstimate.breakdown?.completionTokens ?? 0);
                     alt.cost = altEstimate.totalCost;
                 }
             }
@@ -326,77 +298,28 @@ export class OptimizationService {
 
     static async analyzeOptimizationOpportunities(userId: string) {
         try {
-            // Get frequently used prompts
-            const frequentPrompts = await Usage.aggregate([
-                {
-                    $match: {
-                        userId,
-                        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Last 30 days
-                    },
-                },
-                {
-                    $group: {
-                        _id: '$prompt',
-                        count: { $sum: 1 },
-                        totalCost: { $sum: '$cost' },
-                        avgTokens: { $avg: '$totalTokens' },
-                        service: { $first: '$service' },
-                        model: { $first: '$model' },
-                    },
-                },
-                {
-                    $match: {
-                        count: { $gte: 5 }, // Used at least 5 times
-                    },
-                },
-                {
-                    $sort: { totalCost: -1 },
-                },
-                {
-                    $limit: 20,
-                },
-            ]);
-
-            // Check which prompts already have optimizations
-            const existingOptimizations = await Optimization.find({
-                userId,
-                originalPrompt: { $in: frequentPrompts.map((p: any) => p._id) },
-            }).select('originalPrompt');
-
-            const optimizedPrompts = new Set(existingOptimizations.map((o: any) => o.originalPrompt));
-
-            // Filter out already optimized prompts
-            const opportunities = frequentPrompts
-                .filter((p: any) => !optimizedPrompts.has(p._id))
-                .map((p: any) => ({
-                    prompt: p._id,
-                    usageCount: p.count,
-                    totalCost: p.totalCost,
-                    avgTokens: p.avgTokens,
-                    service: p.service,
-                    model: p.model,
-                    potentialSavings: p.totalCost * 0.3, // Estimate 30% savings
-                }));
+            const tracker = await this.getTracker();
+            const suggestions = await tracker.getOptimizationSuggestions(undefined, undefined, userId);
 
             // Create alerts for top opportunities
-            if (opportunities.length > 0) {
-                const topOpportunity = opportunities[0];
+            if (suggestions.length > 0) {
+                const topOpportunity = suggestions[0];
                 await Alert.create({
                     userId,
                     type: 'optimization_available',
                     title: 'Optimization Opportunities Found',
-                    message: `You have ${opportunities.length} prompts that could be optimized. The top opportunity could save approximately $${topOpportunity.potentialSavings.toFixed(2)}.`,
+                    message: `You have ${suggestions.length} prompts that could be optimized. The top opportunity could save approximately ${topOpportunity.estimatedSavings.toFixed(2)}%.`,
                     severity: 'low',
                     data: {
-                        opportunitiesCount: opportunities.length,
+                        opportunitiesCount: suggestions.length,
                         topOpportunity,
                     },
                 });
             }
 
             return {
-                opportunities,
-                totalPotentialSavings: opportunities.reduce((sum: number, o: any) => sum + o.potentialSavings, 0),
+                opportunities: suggestions,
+                totalPotentialSavings: suggestions.reduce((sum, s) => sum + s.estimatedSavings, 0),
             };
         } catch (error) {
             logger.error('Error analyzing optimization opportunities:', error);
@@ -460,13 +383,4 @@ export class OptimizationService {
         return 'prompt_reduction'; // Default category
     }
 
-    // Use ai-cost-tracker's TokenCounter for accurate token estimation
-    private static async estimateTokensAsync(text: string, provider: AIProvider, model: string): Promise<number> {
-        try {
-            return await TokenCounter.countTokens(text, provider, model);
-        } catch {
-            // fallback: ~4 chars per token
-            return Math.ceil(text.length / 4);
-        }
-    }
 }
