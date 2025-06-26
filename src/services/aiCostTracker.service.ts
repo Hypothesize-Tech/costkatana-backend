@@ -62,18 +62,6 @@ export class AICostTrackerService {
             providers,
             tracking: {
                 enableAutoTracking: true,
-                storageType: 'custom',
-                customStorage: {
-                    save: async (data: UsageMetadata) => {
-                        await this.saveUsageData(data);
-                    },
-                    load: async (filter?: any) => {
-                        return await this.loadUsageData(filter);
-                    },
-                    clear: async () => {
-                        // Implement if needed
-                    }
-                },
                 retentionDays: 90
             },
             optimization: {
