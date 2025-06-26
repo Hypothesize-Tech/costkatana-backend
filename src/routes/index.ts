@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import authRoutes from './auth.routes';
-import usageRoutes from './usage.routes';
-import analyticsRoutes from './analytics.routes';
-import optimizationRoutes from './optimization.routes';
-import userRoutes from './user.routes';
-import eventRoutes from './events.routes';
+import authRouter from './auth.routes';
+import userRouter from './user.routes';
+import usageRouter from './usage.routes';
+import optimizationRouter from './optimization.routes';
+import analyticsRouter from './analytics.routes';
+import eventRouter from './events.routes';
+import { trackerRouter } from './tracker.routes';
 
 const router = Router();
 
@@ -19,11 +20,12 @@ router.get('/version', (_, res) => {
 });
 
 // Mount routes
-router.use('/auth', authRoutes);
-router.use('/usage', usageRoutes);
-router.use('/analytics', analyticsRoutes);
-router.use('/optimizations', optimizationRoutes);
-router.use('/user', userRoutes);
-router.use('/events', eventRoutes);
+router.use('/auth', authRouter);
+router.use('/user', userRouter);
+router.use('/usage', usageRouter);
+router.use('/optimizations', optimizationRouter);
+router.use('/analytics', analyticsRouter);
+router.use('/events', eventRouter);
+router.use('/tracker', trackerRouter);
 
-export default router;
+export const apiRouter = router;

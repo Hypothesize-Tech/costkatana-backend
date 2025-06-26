@@ -2,64 +2,39 @@ import { Response } from 'express';
 import { logger } from '../utils/logger';
 
 interface Client {
-    id: string;
-    res: Response;
+    id: number;
+    response: Response;
 }
 
 class EventService {
     private clients: Client[] = [];
+    private nextClientId = 1;
 
-    constructor() {
-        // Periodically ping clients to keep connections open
-        setInterval(() => {
-            this.clients.forEach(client => {
-                client.res.write(': ping\\n\\n');
-            });
-        }, 20000);
-    }
+    public addClient(response: Response): number {
+        const clientId = this.nextClientId++;
+        const newClient: Client = {
+            id: clientId,
+            response,
+        };
+        this.clients.push(newClient);
 
-    addClient(res: Response, userId: string) {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders();
-
-        const client: Client = { id: userId, res };
-        this.clients.push(client);
-
-        logger.info(`SSE client connected: ${userId}`);
-
-        // Send a welcome message
-        this.sendToClient(userId, 'connected', {
-            message: 'Connection established successfully'
+        response.on('close', () => {
+            this.removeClient(clientId);
+            logger.info(`Client ${clientId} disconnected`);
         });
 
-        res.on('close', () => {
-            this.removeClient(userId);
-        });
+        logger.info(`Client ${clientId} connected`);
+        return clientId;
     }
 
-    removeClient(userId: string) {
-        this.clients = this.clients.filter(client => client.id !== userId);
-        logger.info(`SSE client disconnected: ${userId}`);
+    public removeClient(clientId: number): void {
+        this.clients = this.clients.filter(client => client.id !== clientId);
     }
 
-    sendToClient(userId: string, event: string, data: any) {
-        const client = this.clients.find(c => c.id === userId);
-        if (client) {
-            client.res.write(`event: ${event}\\n`);
-            client.res.write(`data: ${JSON.stringify(data)}\\n\\n`);
-        }
-    }
-
-    broadcast(event: string, data: any) {
-        if (this.clients.length === 0) {
-            return;
-        }
-        logger.info(`Broadcasting event '${event}' to ${this.clients.length} clients`);
+    public sendEvent<T>(eventName: string, data: T): void {
+        const eventString = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
         this.clients.forEach(client => {
-            client.res.write(`event: ${event}\\n`);
-            client.res.write(`data: ${JSON.stringify(data)}\\n\\n`);
+            client.response.write(eventString);
         });
     }
 }

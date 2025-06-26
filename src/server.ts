@@ -9,7 +9,10 @@ import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
 import { logger, stream } from './utils/logger';
-import routes from './routes';
+import { apiRouter } from './routes';
+import { AICostTrackerService } from './services/aiCostTracker.service';
+import { setupCronJobs } from './utils/cronJobs';
+import cookieParser from 'cookie-parser';
 
 // Create Express app
 const app: Application = express();
@@ -36,6 +39,9 @@ app.use(cors(config.cors));
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Cookie parsing
+app.use(cookieParser());
 
 // Compression
 app.use(compression());
@@ -70,7 +76,7 @@ app.use('/api/auth/register', authLimiter);
 app.use(sanitizeInput);
 
 // API routes
-app.use('/api', routes);
+app.use('/api', apiRouter);
 
 // Health check route
 app.get('/', (_, res) => {
@@ -88,26 +94,29 @@ app.use(notFoundHandler);
 // Error handler
 app.use(errorHandler);
 
-// Initialize database connection
-export const initializeApp = async () => {
+const PORT = process.env.PORT || 8000;
+
+export const startServer = async () => {
     try {
         await connectDatabase();
-        logger.info('Application initialized successfully');
+        logger.info('MongoDB connected');
+
+        // Initialize AI Cost Tracker
+        await AICostTrackerService.initialize();
+        logger.info('AI Cost Tracker initialized');
+
+        // Setup Cron Jobs
+        setupCronJobs();
+
+        app.listen(PORT, () => {
+            logger.info(`Server is running on port ${PORT}`);
+        });
     } catch (error) {
-        logger.error('Failed to initialize application:', error);
+        logger.error('Failed to start server:', error);
         process.exit(1);
     }
 };
 
-const PORT = process.env.PORT || 8000;
-
-initializeApp().then(() => {
-    app.listen(PORT, () => {
-        logger.info(`Server running on port ${PORT}`);
-    });
-}).catch((error) => {
-    logger.error('Failed to start server:', error);
-    process.exit(1);
-});
+startServer();
 
 export default app;

@@ -189,7 +189,10 @@ export class AuthController {
         return;
     }
 
-    static async logout(res: Response) {
+    static async logout(req: any, res: Response) {
+        const userId = req.user?.id || 'unknown';
+        logger.info(`User logged out: ${userId}`);
+
         res.clearCookie('refreshToken');
 
         res.json({

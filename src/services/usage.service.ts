@@ -1,11 +1,10 @@
 import { Usage, IUsage } from '../models/Usage';
-import { User } from '../models/User';
 import { Alert } from '../models/Alert';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
-import { EmailService } from './email.service';
-import { CloudWatchService } from './cloudwatch.service';
+import { eventService } from './event.service';
+import { AICostTrackerService } from './aiCostTracker.service';
 
 interface TrackUsageData {
     userId: string;
@@ -33,77 +32,50 @@ interface UsageFilters {
     maxCost?: number;
 }
 
+
 export class UsageService {
     // private static costOptimizer = new AICostOptimizer();
 
     static async trackUsage(data: TrackUsageData): Promise<IUsage> {
         try {
-            // Create usage record
-            const usage = await Usage.create(data);
+            // Initialize AI Cost Tracker if not already done
+            await AICostTrackerService.initialize();
 
-            // Update user's monthly usage
-            await User.findByIdAndUpdate(data.userId, {
-                $inc: {
-                    'usage.currentMonth.apiCalls': 1,
-                    'usage.currentMonth.totalCost': data.cost,
+            // Let the AI Cost Tracker handle the tracking
+            // This will automatically call our custom storage and save to MongoDB
+            await AICostTrackerService.trackRequest(
+                {
+                    model: data.model,
+                    prompt: data.prompt,
+                    maxTokens: data.metadata?.maxTokens,
+                    temperature: data.metadata?.temperature
                 },
-            });
-
-            // Check for cost threshold alerts
-            const user = await User.findById(data.userId);
-            if (user && user.preferences.emailAlerts) {
-                const monthlyTotal = user.usage.currentMonth.totalCost;
-                const threshold = user.preferences.alertThreshold;
-
-                if (monthlyTotal >= threshold && monthlyTotal - data.cost < threshold) {
-                    await this.createCostAlert(user._id.toString(), monthlyTotal, threshold);
+                {
+                    content: data.completion,
+                    usage: {
+                        promptTokens: data.promptTokens,
+                        completionTokens: data.completionTokens,
+                        totalTokens: data.totalTokens
+                    }
+                },
+                data.userId,
+                {
+                    service: data.service,
+                    responseTime: data.responseTime,
+                    ...data.metadata,
+                    tags: data.tags
                 }
-            }
+            );
 
-            // Send metrics to CloudWatch
-            await CloudWatchService.sendMetrics({
-                namespace: 'AICostOptimizer',
-                metricData: [
-                    {
-                        metricName: 'APIUsage',
-                        value: 1,
-                        unit: 'Count',
-                        dimensions: [
-                            { name: 'Service', value: data.service },
-                            { name: 'Model', value: data.model },
-                        ],
-                    },
-                    {
-                        metricName: 'TokenUsage',
-                        value: data.totalTokens,
-                        unit: 'Count',
-                        dimensions: [
-                            { name: 'Service', value: data.service },
-                            { name: 'Model', value: data.model },
-                        ],
-                    },
-                    {
-                        metricName: 'Cost',
-                        value: data.cost,
-                        unit: 'None',
-                        dimensions: [
-                            { name: 'Service', value: data.service },
-                            { name: 'Model', value: data.model },
-                        ],
-                    },
-                ],
-            });
+            // The usage record is already created by our custom storage
+            // Just return the latest usage record
+            const usage = await Usage.findOne({ userId: data.userId })
+                .sort({ createdAt: -1 })
+                .limit(1);
 
-            logger.info('Usage tracked successfully', {
-                userId: data.userId,
-                service: data.service,
-                model: data.model,
-                cost: data.cost,
-            });
-
-            return usage;
+            return usage!;
         } catch (error) {
-            logger.error('Error tracking usage:', error);
+            logger.error('Error tracking usage with AI Cost Tracker:', error);
             throw error;
         }
     }
@@ -153,7 +125,19 @@ export class UsageService {
                 Usage.countDocuments(query),
             ]);
 
-            return paginate(data, total, options);
+            const result = paginate(data, total, options);
+
+            // Send usage data update event to frontend
+            if (filters.userId) {
+                eventService.sendEvent('usage_data_updated', {
+                    userId: filters.userId,
+                    data: result,
+                    filters,
+                    timestamp: new Date(),
+                });
+            }
+
+            return result;
         } catch (error) {
             logger.error('Error fetching usage:', error);
             throw error;
@@ -268,7 +252,7 @@ export class UsageService {
                 },
             ]);
 
-            return {
+            const result = {
                 period,
                 startDate,
                 endDate: new Date(),
@@ -283,6 +267,16 @@ export class UsageService {
                 serviceBreakdown,
                 modelBreakdown,
             };
+
+            // Send stats update event to frontend
+            eventService.sendEvent('usage_stats_updated', {
+                userId,
+                period,
+                stats: result,
+                timestamp: new Date(),
+            });
+
+            return result;
         } catch (error) {
             logger.error('Error getting usage stats:', error);
             throw error;
@@ -346,45 +340,28 @@ export class UsageService {
                         severity: anomaly.severity,
                         data: { anomaly },
                     });
+
+                    // Send anomaly alert event to frontend
+                    eventService.sendEvent('anomaly_detected', {
+                        userId,
+                        anomaly,
+                        severity: anomaly.severity,
+                        timestamp: new Date(),
+                    });
                 }
             }
+
+            // Send anomaly analysis results to frontend
+            eventService.sendEvent('anomaly_analysis_completed', {
+                userId,
+                anomalies: anomalyResult.anomalies,
+                recommendations: anomalyResult.recommendations,
+                timestamp: new Date(),
+            });
 
             return anomalyResult;
         } catch (error) {
             logger.error('Error detecting anomalies:', error);
-            throw error;
-        }
-    }
-
-    private static async createCostAlert(
-        userId: string,
-        currentCost: number,
-        threshold: number
-    ) {
-        try {
-            const alert = await Alert.create({
-                userId,
-                type: 'cost_threshold',
-                title: 'Cost Threshold Alert',
-                message: `Your monthly AI API usage has reached $${currentCost.toFixed(2)}, exceeding your threshold of $${threshold.toFixed(2)}.`,
-                severity: 'high',
-                data: {
-                    currentValue: currentCost,
-                    threshold,
-                    percentage: (currentCost / threshold) * 100,
-                },
-                actionRequired: true,
-            });
-
-            // Send email notification
-            const user = await User.findById(userId);
-            if (user && user.preferences.emailAlerts) {
-                await EmailService.sendCostAlert(user, currentCost, threshold);
-            }
-
-            return alert;
-        } catch (error) {
-            logger.error('Error creating cost alert:', error);
             throw error;
         }
     }
@@ -410,9 +387,143 @@ export class UsageService {
                 }),
             ]);
 
-            return paginate(data, total, options);
+            const result = paginate(data, total, options);
+
+            // Send search results event to frontend
+            eventService.sendEvent('usage_search_completed', {
+                userId,
+                searchTerm,
+                results: result,
+                timestamp: new Date(),
+            });
+
+            return result;
         } catch (error) {
             logger.error('Error searching usage:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Bulk track usage for multiple requests
+     * Useful for batch processing and integration with ai-cost-tracker package
+     */
+    static async bulkTrackUsage(usageData: TrackUsageData[]): Promise<IUsage[]> {
+        try {
+            const results: IUsage[] = [];
+
+            for (const data of usageData) {
+                const usage = await this.trackUsage(data);
+                results.push(usage);
+            }
+
+            // Send bulk update event to frontend
+            eventService.sendEvent('bulk_usage_tracked', {
+                count: results.length,
+                totalCost: results.reduce((sum, usage) => sum + usage.cost, 0),
+                totalTokens: results.reduce((sum, usage) => sum + usage.totalTokens, 0),
+                timestamp: new Date(),
+            });
+
+            return results;
+        } catch (error) {
+            logger.error('Error bulk tracking usage:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get real-time usage summary for dashboard
+     */
+    static async getRealTimeUsageSummary(userId: string) {
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const summary = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: userId,
+                        createdAt: { $gte: today },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        todayCost: { $sum: '$cost' },
+                        todayTokens: { $sum: '$totalTokens' },
+                        todayCalls: { $sum: 1 },
+                        lastRequest: { $max: '$createdAt' },
+                    },
+                },
+            ]);
+
+            const result = summary[0] || {
+                todayCost: 0,
+                todayTokens: 0,
+                todayCalls: 0,
+                lastRequest: null,
+            };
+
+            // Send real-time summary to frontend
+            eventService.sendEvent('realtime_usage_summary', {
+                userId,
+                summary: result,
+                timestamp: new Date(),
+            });
+
+            return result;
+        } catch (error) {
+            logger.error('Error getting real-time usage summary:', error);
+            throw error;
+        }
+    }
+
+    // Add a method to sync historical data
+    static async syncHistoricalData(userId: string, days: number = 30): Promise<void> {
+        try {
+            const startDate = new Date();
+            startDate.setDate(startDate.getDate() - days);
+
+            const historicalUsage = await Usage.find({
+                userId,
+                createdAt: { $gte: startDate }
+            }).lean();
+
+            logger.info(`Syncing ${historicalUsage.length} historical records for user ${userId}`);
+
+            // Process in batches to avoid overwhelming the system
+            const batchSize = 100;
+            for (let i = 0; i < historicalUsage.length; i += batchSize) {
+                const batch = historicalUsage.slice(i, i + batchSize);
+
+                await Promise.all(batch.map(async (usage) => {
+                    await AICostTrackerService.trackRequest(
+                        {
+                            model: usage.model,
+                            prompt: usage.prompt
+                        },
+                        {
+                            content: usage.completion,
+                            usage: {
+                                promptTokens: usage.promptTokens,
+                                completionTokens: usage.completionTokens,
+                                totalTokens: usage.totalTokens
+                            }
+                        },
+                        usage.userId.toString(),
+                        {
+                            service: usage.service,
+                            historicalSync: true,
+                            originalCreatedAt: usage.createdAt
+                        }
+                    );
+                }));
+            }
+
+            logger.info(`Historical sync completed for user ${userId}`);
+        } catch (error) {
+            logger.error('Error syncing historical data:', error);
             throw error;
         }
     }

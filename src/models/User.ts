@@ -31,6 +31,7 @@ export interface IUser {
         currentMonth: {
             apiCalls: number;
             totalCost: number;
+            totalTokens: number;
             optimizationsSaved: number;
         };
     };
@@ -133,6 +134,10 @@ const userSchema = new Schema<IUser>({
                 type: Number,
                 default: 0,
             },
+            totalTokens: {
+                type: Number,
+                default: 0,
+            },
             optimizationsSaved: {
                 type: Number,
                 default: 0,
@@ -171,6 +176,34 @@ userSchema.pre('save', async function (next) {
 // Compare password method
 userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
     return bcrypt.compare(candidatePassword, this.password);
+};
+
+// Add a method to reset monthly usage
+userSchema.methods.resetMonthlyUsage = async function () {
+    this.usage.currentMonth = {
+        apiCalls: 0,
+        totalCost: 0,
+        totalTokens: 0,
+        optimizationsSaved: 0
+    };
+    await this.save();
+};
+
+// Add a static method to reset all users' monthly usage
+userSchema.statics.resetAllMonthlyUsage = async function () {
+    await this.updateMany(
+        {},
+        {
+            $set: {
+                'usage.currentMonth': {
+                    apiCalls: 0,
+                    totalCost: 0,
+                    totalTokens: 0,
+                    optimizationsSaved: 0
+                }
+            }
+        }
+    );
 };
 
 // Indexes

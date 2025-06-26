@@ -1,6 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
 import { logger } from '../utils/logger';
+import { User } from '../models/User';
+import { decrypt } from '../utils/helpers';
 
 export const authenticate = async (
     req: any,
@@ -25,10 +27,42 @@ export const authenticate = async (
 
         try {
             const payload = AuthService.verifyAccessToken(token);
+            const user = await User.findById(payload.id);
+
+            if (!user) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid token: User not found',
+                });
+            }
+
+            // If jti claim exists, it's an API key auth, so we validate it
+            if (payload.jti) {
+                const apiKeyId = payload.jti;
+                const isValidApiKey = user.apiKeys.some(apiKey => {
+                    if (!apiKey.encryptedKey) return false;
+                    try {
+                        const [iv, authTag, encrypted] = apiKey.encryptedKey.split(':');
+                        const decryptedKey = decrypt(encrypted, iv, authTag);
+                        return decryptedKey === apiKeyId;
+                    } catch (error) {
+                        logger.error('Error decrypting API key:', error);
+                        return false;
+                    }
+                });
+
+                if (!isValidApiKey) {
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Invalid API Key',
+                    });
+                }
+            }
+
             req.user = {
                 id: payload.id,
                 email: payload.email,
-                role: payload.role as 'user' | 'admin',
+                role: user.role as 'user' | 'admin',
             };
             req.userId = payload.id;
 
