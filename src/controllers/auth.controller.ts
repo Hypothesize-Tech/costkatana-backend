@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
 import { registerSchema, loginSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
@@ -50,7 +50,7 @@ export interface IUser {
 }
 
 export class AuthController {
-    static async register(req: Request, res: Response, next: NextFunction) {
+    static async register(req: any, res: Response, next: NextFunction) {
         try {
             // Validate input
             const validatedData = registerSchema.parse(req.body);
@@ -94,7 +94,7 @@ export class AuthController {
         return;
     }
 
-    static async login(req: Request, res: Response, next: NextFunction) {
+    static async login(req: any, res: Response, next: NextFunction) {
         try {
             // Validate input
             const { email, password } = loginSchema.parse(req.body);
@@ -147,7 +147,7 @@ export class AuthController {
         return;
     }
 
-    static async refreshTokens(req: Request, res: Response) {
+    static async refreshTokens(req: any, res: Response) {
         try {
             const { refreshToken } = req.cookies;
 
@@ -199,7 +199,7 @@ export class AuthController {
         return;
     }
 
-    static async verifyEmail(req: Request, res: Response, next: NextFunction) {
+    static async verifyEmail(req: any, res: Response, next: NextFunction) {
         try {
             const { token } = req.params;
 
@@ -231,7 +231,7 @@ export class AuthController {
         return;
     }
 
-    static async forgotPassword(req: Request, res: Response) {
+    static async forgotPassword(req: any, res: Response) {
         try {
             const { email } = req.body;
 
@@ -265,7 +265,7 @@ export class AuthController {
         return;
     }
 
-    static async resetPassword(req: Request, res: Response, next: NextFunction) {
+    static async resetPassword(req: any, res: Response, next: NextFunction) {
         try {
             const { token } = req.params;
             const { password } = req.body;
@@ -305,7 +305,7 @@ export class AuthController {
         return;
     }
 
-    static async changePassword(req: Request, res: Response, next: NextFunction) {
+    static async changePassword(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { oldPassword, newPassword } = req.body;

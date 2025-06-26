@@ -1,10 +1,10 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { OptimizationService } from '../services/optimization.service';
 import { optimizationRequestSchema, paginationSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
 
 export class OptimizationController {
-    static async createOptimization(req: Request, res: Response, next: NextFunction) {
+    static async createOptimization(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const validatedData = optimizationRequestSchema.parse(req.body);
@@ -33,7 +33,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimizations(req: Request, res: Response, next: NextFunction) {
+    static async getOptimizations(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
@@ -65,7 +65,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimization(req: Request, res: Response, next: NextFunction) {
+    static async getOptimization(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -95,7 +95,7 @@ export class OptimizationController {
         return;
     }
 
-    static async applyOptimization(req: Request, res: Response, next: NextFunction) {
+    static async applyOptimization(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -121,7 +121,7 @@ export class OptimizationController {
         return;
     }
 
-    static async provideFeedback(req: Request, res: Response, next: NextFunction) {
+    static async provideFeedback(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -166,7 +166,7 @@ export class OptimizationController {
         return;
     }
 
-    static async analyzeOpportunities(req: Request, res: Response, next: NextFunction) {
+    static async analyzeOpportunities(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -182,7 +182,7 @@ export class OptimizationController {
         }
     }
 
-    static async bulkOptimize(req: Request, res: Response, next: NextFunction) {
+    static async bulkOptimize(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { promptIds } = req.body;
@@ -215,7 +215,7 @@ export class OptimizationController {
         return;
     }
 
-    static async getOptimizationSummary(req: Request, res: Response, next: NextFunction) {
+    static async getOptimizationSummary(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const timeframe = (req.query.timeframe as string) || '30d';

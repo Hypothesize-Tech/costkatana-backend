@@ -5,8 +5,8 @@ import { Alert } from '../models/Alert';
 import { BedrockService } from './bedrock.service';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
-// import { AICostOptimizer } from 'ai-cost-optimizer-core';
-let AICostOptimizer: any = null;
+import AICostOptimizer from 'ai-cost-tracker';
+import { AIProvider, CostEstimate } from 'ai-cost-tracker/dist/types';
 
 interface OptimizationRequest {
     userId: string;
@@ -31,15 +31,51 @@ interface OptimizationFilters {
 }
 
 export class OptimizationService {
-    private static costOptimizer = new AICostOptimizer();
+    // Properly configure AICostOptimizer with required TrackerConfig properties
+    private static costOptimizer = new AICostOptimizer({
+        optimization: {
+            enablePromptOptimization: true,
+            enableModelSuggestions: true,
+            enableCachingSuggestions: true,
+        },
+        tracking: {
+            enableAutoTracking: true,
+            storageType: 'memory',
+            retentionDays: 30,
+        },
+        providers: [
+            {
+                provider: AIProvider.AWSBedrock
+            }
+        ]
+    });
+
+    // Add helper to map string to AIProvider enum
+    private static getAIProviderFromString(provider: string): AIProvider {
+        switch (provider.toLowerCase()) {
+            case 'openai':
+                return AIProvider.OpenAI;
+            case 'aws-bedrock':
+            case 'awsbedrock':
+                return AIProvider.AWSBedrock;
+            case 'anthropic':
+                return AIProvider.Anthropic;
+            case 'google':
+                return AIProvider.Google;
+            case 'cohere':
+                return AIProvider.Cohere;
+            default:
+                throw new Error(`Unknown AI provider: ${provider}`);
+        }
+    }
 
     static async createOptimization(request: OptimizationRequest): Promise<IOptimization> {
         try {
             // Get token count and cost for original prompt
-            const originalEstimate = await this.costOptimizer.estimateCost(
-                request.service as any,
+            const originalEstimate: CostEstimate = await OptimizationService.costOptimizer.estimateCost(
+                request.prompt,
                 request.model,
-                request.prompt
+                this.getAIProviderFromString(request.service)
             );
 
             // Use Bedrock to optimize the prompt
@@ -51,16 +87,19 @@ export class OptimizationService {
             });
 
             // Get token count and cost for optimized prompt
-            const optimizedEstimate = await this.costOptimizer.estimateCost(
-                request.service as any,
+            const optimizedEstimate: CostEstimate = await OptimizationService.costOptimizer.estimateCost(
+                optimizationResult.optimizedPrompt,
                 request.model,
-                optimizationResult.optimizedPrompt
+                this.getAIProviderFromString(request.service)
             );
 
             // Calculate savings
-            const tokensSaved = originalEstimate.totalTokens - optimizedEstimate.totalTokens;
+            // Use breakdown for token counts
+            const originalTokens = (originalEstimate.breakdown?.promptTokens ?? 0) + (originalEstimate.breakdown?.completionTokens ?? 0);
+            const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
+            const tokensSaved = originalTokens - optimizedTokens;
             const costSaved = originalEstimate.totalCost - optimizedEstimate.totalCost;
-            const improvementPercentage = (tokensSaved / originalEstimate.totalTokens) * 100;
+            const improvementPercentage = originalTokens > 0 ? (tokensSaved / originalTokens) * 100 : 0;
 
             // Determine category based on optimization techniques
             const category = this.determineCategory(optimizationResult.techniques);
@@ -71,8 +110,8 @@ export class OptimizationService {
                 originalPrompt: request.prompt,
                 optimizedPrompt: optimizationResult.optimizedPrompt,
                 optimizationTechniques: optimizationResult.techniques,
-                originalTokens: originalEstimate.totalTokens,
-                optimizedTokens: optimizedEstimate.totalTokens,
+                originalTokens,
+                optimizedTokens,
                 tokensSaved,
                 originalCost: originalEstimate.totalCost,
                 optimizedCost: optimizedEstimate.totalCost,
@@ -81,7 +120,7 @@ export class OptimizationService {
                 service: request.service,
                 model: request.model,
                 category,
-                suggestions: optimizationResult.suggestions.map((suggestion, index) => ({
+                suggestions: optimizationResult.suggestions.map((suggestion: string, index: number) => ({
                     type: 'general',
                     description: suggestion,
                     impact: index === 0 ? 'high' : index < 3 ? 'medium' : 'low',
@@ -91,7 +130,7 @@ export class OptimizationService {
                     analysisTime: Date.now(),
                     confidence: 0.85,
                     alternatives: request.options?.suggestAlternatives
-                        ? optimizationResult.alternatives?.map(alt => ({
+                        ? optimizationResult.alternatives?.map((alt: string) => ({
                             prompt: alt,
                             tokens: this.estimateTokens(alt),
                             cost: 0, // Will be calculated if needed
@@ -125,8 +164,8 @@ export class OptimizationService {
 
             logger.info('Optimization created', {
                 userId: request.userId,
-                originalTokens: originalEstimate.totalTokens,
-                optimizedTokens: optimizedEstimate.totalTokens,
+                originalTokens,
+                optimizedTokens,
                 savings: improvementPercentage,
             });
 
@@ -280,15 +319,15 @@ export class OptimizationService {
             // Check which prompts already have optimizations
             const existingOptimizations = await Optimization.find({
                 userId,
-                originalPrompt: { $in: frequentPrompts.map(p => p._id) },
+                originalPrompt: { $in: frequentPrompts.map((p: any) => p._id) },
             }).select('originalPrompt');
 
-            const optimizedPrompts = new Set(existingOptimizations.map(o => o.originalPrompt));
+            const optimizedPrompts = new Set(existingOptimizations.map((o: any) => o.originalPrompt));
 
             // Filter out already optimized prompts
             const opportunities = frequentPrompts
-                .filter(p => !optimizedPrompts.has(p._id))
-                .map(p => ({
+                .filter((p: any) => !optimizedPrompts.has(p._id))
+                .map((p: any) => ({
                     prompt: p._id,
                     usageCount: p.count,
                     totalCost: p.totalCost,
@@ -316,7 +355,7 @@ export class OptimizationService {
 
             return {
                 opportunities,
-                totalPotentialSavings: opportunities.reduce((sum, o) => sum + o.potentialSavings, 0),
+                totalPotentialSavings: opportunities.reduce((sum: number, o: any) => sum + o.potentialSavings, 0),
             };
         } catch (error) {
             logger.error('Error analyzing optimization opportunities:', error);
@@ -331,7 +370,7 @@ export class OptimizationService {
                 _id: { $in: promptIds },
             }).select('prompt service model');
 
-            const optimizations = [];
+            const optimizations: IOptimization[] = [];
 
             for (const promptData of prompts) {
                 try {

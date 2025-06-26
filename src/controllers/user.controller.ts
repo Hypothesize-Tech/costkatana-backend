@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
 import { updateProfileSchema, addApiKeySchema } from '../utils/validators';
@@ -6,7 +6,7 @@ import { encrypt } from '../utils/helpers';
 import { logger } from '../utils/logger';
 
 export class UserController {
-    static async getProfile(req: Request, res: Response, next: NextFunction) {
+    static async getProfile(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -30,7 +30,7 @@ export class UserController {
         return;
     }
 
-    static async updateProfile(req: Request, res: Response, next: NextFunction) {
+    static async updateProfile(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const validatedData = updateProfileSchema.parse(req.body);
@@ -60,7 +60,7 @@ export class UserController {
         return;
     }
 
-    static async addApiKey(req: Request, res: Response, next: NextFunction) {
+    static async addApiKey(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { service, key } = addApiKeySchema.parse(req.body);
@@ -116,7 +116,7 @@ export class UserController {
         return;
     }
 
-    static async removeApiKey(req: Request, res: Response, next: NextFunction) {
+    static async removeApiKey(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { service } = req.params;
@@ -151,7 +151,7 @@ export class UserController {
         return;
     }
 
-    static async getApiKeys(req: Request, res: Response, next: NextFunction) {
+    static async getApiKeys(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -181,7 +181,7 @@ export class UserController {
         return;
     }
 
-    static async getAlerts(req: Request, res: Response, next: NextFunction) {
+    static async getAlerts(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { page = 1, limit = 20, unreadOnly = false } = req.query;
@@ -218,7 +218,7 @@ export class UserController {
         }
     }
 
-    static async markAlertAsRead(req: Request, res: Response, next: NextFunction) {
+    static async markAlertAsRead(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -247,7 +247,7 @@ export class UserController {
         return;
     }
 
-    static async markAllAlertsAsRead(req: Request, res: Response, next: NextFunction) {
+    static async markAllAlertsAsRead(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -266,7 +266,7 @@ export class UserController {
         }
     }
 
-    static async deleteAlert(req: Request, res: Response, next: NextFunction) {
+    static async deleteAlert(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -291,7 +291,7 @@ export class UserController {
         return;
     }
 
-    static async getSubscription(req: Request, res: Response, next: NextFunction) {
+    static async getSubscription(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -329,7 +329,7 @@ export class UserController {
         return;
     }
 
-    static async updateSubscription(req: Request, res: Response, next: NextFunction) {
+    static async updateSubscription(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { plan } = req.body;

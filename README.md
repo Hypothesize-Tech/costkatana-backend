@@ -23,7 +23,7 @@ A comprehensive TypeScript backend service for tracking, analyzing, and optimizi
 - **Email**: Gmail API with OAuth2
 - **Monitoring**: AWS CloudWatch
 - **Validation**: Zod
-- **Core Package**: `ai-cost-optimizer-core`
+- **Core Package**: `ai-cost-tracker`
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ cp .env.example .env
 
 4. Install the core package:
 ```bash
-npm install ai-cost-optimizer-core@latest
+npm install ai-cost-tracker@latest
 ```
 
 ## Configuration

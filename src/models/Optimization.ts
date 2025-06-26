@@ -111,8 +111,7 @@ const optimizationSchema = new Schema<IOptimization>({
     category: {
         type: String,
         enum: ['prompt_reduction', 'context_optimization', 'response_formatting', 'batch_processing', 'model_selection'],
-        required: true,
-        index: true,
+        required: true
     },
     suggestions: [{
         type: {

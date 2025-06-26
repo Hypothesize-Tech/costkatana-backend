@@ -25,7 +25,7 @@ export class AppError extends Error {
 
 export const errorHandler = (
     err: Error | AppError | ZodError,
-    req: Request,
+    req: any,
     res: Response
 ) => {
     let error: AppError;

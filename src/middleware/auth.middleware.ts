@@ -1,9 +1,9 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
 import { logger } from '../utils/logger';
 
 export const authenticate = async (
-    req: Request,
+    req: any,
     res: Response,
     next: NextFunction
 ) => {
@@ -46,7 +46,7 @@ export const authenticate = async (
 };
 
 export const authorize = (...roles: string[]) => {
-    return (req: Request, res: Response, next: NextFunction) => {
+    return (req: any, res: Response, next: NextFunction) => {
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -67,7 +67,7 @@ export const authorize = (...roles: string[]) => {
 };
 
 export const optionalAuth = async (
-    req: Request,
+    req: any,
     next: NextFunction
 ) => {
     try {

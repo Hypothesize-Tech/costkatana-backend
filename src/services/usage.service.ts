@@ -6,8 +6,6 @@ import { PaginationOptions, paginate } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
 import { EmailService } from './email.service';
 import { CloudWatchService } from './cloudwatch.service';
-// import { AICostOptimizer } from 'ai-cost-optimizer-core';
-// let AICostOptimizer: any = null;
 
 interface TrackUsageData {
     userId: string;

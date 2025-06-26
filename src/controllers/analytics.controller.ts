@@ -1,10 +1,12 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { AnalyticsService } from '../services/analytics.service';
 import { analyticsQuerySchema, dateRangeSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
+import { UsageService } from '../services/usage.service';
+import { User } from '../models/User';
 
 export class AnalyticsController {
-    static async getAnalytics(req: Request, res: Response, next: NextFunction) {
+    static async getAnalytics(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const query = analyticsQuerySchema.parse(req.query);
@@ -29,7 +31,7 @@ export class AnalyticsController {
         }
     }
 
-    static async getComparativeAnalytics(req: Request, res: Response, next: NextFunction) {
+    static async getComparativeAnalytics(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { period1, period2 } = req.body;
@@ -67,7 +69,7 @@ export class AnalyticsController {
         return;
     }
 
-    static async exportAnalytics(req: Request, res: Response, next: NextFunction) {
+    static async exportAnalytics(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const format = (req.query.format as 'json' | 'csv') || 'json';
@@ -103,7 +105,7 @@ export class AnalyticsController {
         }
     }
 
-    static async getInsights(req: Request, res: Response, next: NextFunction) {
+    static async getInsights(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const timeframe = (req.query.timeframe as string) || '30d';
@@ -167,7 +169,7 @@ export class AnalyticsController {
         }
     }
 
-    static async getDashboardData(req: Request, res: Response, next: NextFunction) {
+    static async getDashboardData(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -175,7 +177,7 @@ export class AnalyticsController {
             const endDate = new Date();
             const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-            const [analytics, todayStats, yesterdayStats] = await Promise.all([
+            const [analytics, todayStats, yesterdayStats, user] = await Promise.all([
                 AnalyticsService.getAnalytics({
                     userId,
                     startDate,
@@ -191,34 +193,36 @@ export class AnalyticsController {
                     startDate: new Date(new Date(Date.now() - 24 * 60 * 60 * 1000).setHours(0, 0, 0, 0)),
                     endDate: new Date(new Date(Date.now() - 24 * 60 * 60 * 1000).setHours(23, 59, 59, 999)),
                 }),
+                User.findById(userId).select('name email subscription usage').lean(),
             ]);
 
             const dashboardData = {
+                user,
                 overview: {
                     totalCost: {
                         value: analytics.summary.totalCost,
-                        change: this.calculateChange(
+                        change: AnalyticsController.calculateChange(
                             yesterdayStats.summary.totalCost,
                             todayStats.summary.totalCost
                         ),
                     },
                     totalCalls: {
                         value: analytics.summary.totalCalls,
-                        change: this.calculateChange(
+                        change: AnalyticsController.calculateChange(
                             yesterdayStats.summary.totalCalls,
                             todayStats.summary.totalCalls
                         ),
                     },
                     avgCostPerCall: {
                         value: analytics.summary.avgCost,
-                        change: this.calculateChange(
+                        change: AnalyticsController.calculateChange(
                             yesterdayStats.summary.avgCost,
                             todayStats.summary.avgCost
                         ),
                     },
                     totalOptimizationSavings: {
                         value: analytics.optimizationStats.totalSaved,
-                        change: 0, // Calculate if needed
+                        change: 0,
                     },
                 },
                 charts: {
@@ -232,6 +236,26 @@ export class AnalyticsController {
                 },
                 insights: analytics.trends.insights.slice(0, 3),
             };
+
+            // Track the usage of this dashboard generation
+            if (analytics.summary.totalCost > 0) {
+                await UsageService.trackUsage({
+                    userId,
+                    service: 'dashboard-analytics',
+                    model: 'system-generated',
+                    prompt: 'Dashboard data generation',
+                    completion: JSON.stringify(dashboardData),
+                    promptTokens: 0,
+                    completionTokens: 0,
+                    totalTokens: analytics.summary.totalTokens,
+                    cost: analytics.summary.totalCost,
+                    responseTime: 0,
+                    metadata: {
+                        startDate: startDate.toISOString(),
+                        endDate: endDate.toISOString(),
+                    },
+                });
+            }
 
             res.json({
                 success: true,

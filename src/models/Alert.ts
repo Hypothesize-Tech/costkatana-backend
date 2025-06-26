@@ -34,13 +34,11 @@ const alertSchema = new Schema<IAlert>({
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true,
-        index: true,
     },
     type: {
         type: String,
         enum: ['cost_threshold', 'usage_spike', 'optimization_available', 'weekly_summary', 'monthly_summary', 'error_rate'],
         required: true,
-        index: true,
     },
     title: {
         type: String,
@@ -54,7 +52,6 @@ const alertSchema = new Schema<IAlert>({
         type: String,
         enum: ['low', 'medium', 'high', 'critical'],
         required: true,
-        index: true,
     },
     data: {
         type: Schema.Types.Mixed,
@@ -63,20 +60,17 @@ const alertSchema = new Schema<IAlert>({
     sent: {
         type: Boolean,
         default: false,
-        index: true,
     },
     sentAt: Date,
     sentTo: String,
     read: {
         type: Boolean,
         default: false,
-        index: true,
     },
     readAt: Date,
     actionRequired: {
         type: Boolean,
         default: false,
-        index: true,
     },
     actionTaken: {
         type: Boolean,
@@ -94,7 +88,6 @@ alertSchema.index({ userId: 1, sent: 1 });
 alertSchema.index({ userId: 1, read: 1 });
 alertSchema.index({ userId: 1, type: 1, createdAt: -1 });
 alertSchema.index({ createdAt: -1 });
-alertSchema.index({ expiresAt: 1 });
 
 // TTL index for automatic deletion of expired alerts
 alertSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

@@ -37,19 +37,16 @@ const usageSchema = new Schema<IUsage>({
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true,
+        required: true
     },
     service: {
         type: String,
         enum: ['openai', 'aws-bedrock', 'google-ai', 'anthropic', 'huggingface', 'cohere'],
-        required: true,
-        index: true,
+        required: true
     },
     model: {
         type: String,
-        required: true,
-        index: true,
+        required: true
     },
     prompt: {
         type: String,

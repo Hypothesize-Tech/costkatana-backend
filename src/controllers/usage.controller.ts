@@ -1,10 +1,10 @@
-import { Request, Response, NextFunction } from 'express';
+import { Response, NextFunction } from 'express';
 import { UsageService } from '../services/usage.service';
 import { trackUsageSchema, paginationSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
 
 export class UsageController {
-    static async trackUsage(req: Request, res: Response, next: NextFunction) {
+    static async trackUsage(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const validatedData = trackUsageSchema.parse(req.body);
@@ -30,7 +30,7 @@ export class UsageController {
         }
     }
 
-    static async getUsage(req: Request, res: Response, next: NextFunction) {
+    static async getUsage(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
@@ -64,7 +64,7 @@ export class UsageController {
         }
     }
 
-    static async getUsageStats(req: Request, res: Response, next: NextFunction) {
+    static async getUsageStats(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const period = (req.query.period as 'daily' | 'weekly' | 'monthly') || 'monthly';
@@ -81,7 +81,7 @@ export class UsageController {
         }
     }
 
-    static async detectAnomalies(req: Request, res: Response, next: NextFunction) {
+    static async detectAnomalies(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
 
@@ -97,7 +97,7 @@ export class UsageController {
         }
     }
 
-    static async searchUsage(req: Request, res: Response, next: NextFunction) {
+    static async searchUsage(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const { q, page, limit } = req.query;
@@ -128,7 +128,7 @@ export class UsageController {
         return;
     }
 
-    static async exportUsage(req: Request, res: Response, next: NextFunction) {
+    static async exportUsage(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
             const format = (req.query.format as 'json' | 'csv') || 'json';

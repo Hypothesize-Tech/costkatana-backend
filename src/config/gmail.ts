@@ -3,6 +3,10 @@ import nodemailer from 'nodemailer';
 
 const OAuth2 = google.auth.OAuth2;
 
+/**
+ * Creates and returns a Nodemailer transporter using Gmail OAuth2.
+ * Validates credentials on startup to fail fast if misconfigured.
+ */
 const createTransporter = async () => {
     const oauth2Client = new OAuth2(
         process.env.GMAIL_CLIENT_ID,
@@ -14,30 +18,28 @@ const createTransporter = async () => {
         refresh_token: process.env.GMAIL_REFRESH_TOKEN,
     });
 
-    await new Promise<string>((resolve, reject) => {
-        oauth2Client.getAccessToken((err, token) => {
-            if (err) {
-                reject(err);
-            } else {
-                resolve(token || '');
-            }
-        });
-    });
+    // Validate credentials and get an access token on startup
+    const accessToken = await oauth2Client.getAccessToken();
+    if (!accessToken || !accessToken.token) {
+        throw new Error('Failed to obtain Gmail OAuth2 access token. Please check your credentials.');
+    }
 
     const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
             type: 'OAuth2',
-            user: process.env.GMAIL_USER,
+            user: process.env.GMAIL_USER_EMAIL, // Use the correct env variable for the user email
             clientId: process.env.GMAIL_CLIENT_ID,
             clientSecret: process.env.GMAIL_CLIENT_SECRET,
             refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+            accessToken: accessToken.token,
         },
     });
 
     return transporter;
 };
 
+// Export a promise that resolves to the transporter
 export const gmailTransporter = createTransporter();
 
 export const EMAIL_CONFIG = {
