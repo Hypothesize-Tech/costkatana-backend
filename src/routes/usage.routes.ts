@@ -13,6 +13,9 @@ router.use(authenticate);
 // Track new usage
 router.post('/', validate(trackUsageSchema), asyncHandler(UsageController.trackUsage));
 
+// Track new usage from SDK
+router.post('/sdk', asyncHandler(UsageController.trackUsageFromSDK));
+
 // Get usage data
 router.get('/', validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
 

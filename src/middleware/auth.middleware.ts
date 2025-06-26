@@ -8,16 +8,20 @@ export const authenticate = async (
     next: NextFunction
 ) => {
     try {
-        const authHeader = req.headers.authorization;
+        let token: string | undefined;
 
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+            token = req.headers.authorization.substring(7);
+        } else if (req.query.token) {
+            token = req.query.token as string;
+        }
+
+        if (!token) {
             return res.status(401).json({
                 success: false,
                 message: 'No token provided',
             });
         }
-
-        const token = authHeader.substring(7);
 
         try {
             const payload = AuthService.verifyAccessToken(token);

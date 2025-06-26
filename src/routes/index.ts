@@ -4,6 +4,7 @@ import usageRoutes from './usage.routes';
 import analyticsRoutes from './analytics.routes';
 import optimizationRoutes from './optimization.routes';
 import userRoutes from './user.routes';
+import eventRoutes from './events.routes';
 
 const router = Router();
 
@@ -23,5 +24,6 @@ router.use('/usage', usageRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/optimizations', optimizationRoutes);
 router.use('/users', userRoutes);
+router.use('/events', eventRoutes);
 
 export default router;

@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { UsageService } from '../services/usage.service';
-import { trackUsageSchema, paginationSchema } from '../utils/validators';
+import { trackUsageSchema, paginationSchema, sdkTrackUsageSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
 
 export class UsageController {
@@ -26,6 +26,31 @@ export class UsageController {
             });
         } catch (error: any) {
             logger.error('Track usage error:', error);
+            next(error);
+        }
+    }
+
+    static async trackUsageFromSDK(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const validatedData = sdkTrackUsageSchema.parse(req.body);
+
+            const usage = await UsageService.trackUsage({
+                userId,
+                ...validatedData,
+                service: validatedData.provider,
+                cost: validatedData.estimatedCost,
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Usage tracked successfully from SDK',
+                data: {
+                    id: usage._id,
+                },
+            });
+        } catch (error: any) {
+            logger.error('Track usage from SDK error:', error);
             next(error);
         }
     }

@@ -37,6 +37,20 @@ export const trackUsageSchema = z.object({
     tags: z.array(z.string()).optional(),
 });
 
+export const sdkTrackUsageSchema = z.object({
+    provider: z.string(),
+    model: z.string().min(1, 'Model is required'),
+    prompt: z.string().min(1, 'Prompt is required'),
+    completion: z.string().optional(),
+    promptTokens: z.number().int().nonnegative(),
+    completionTokens: z.number().int().nonnegative(),
+    totalTokens: z.number().int().nonnegative(),
+    estimatedCost: z.number().nonnegative(),
+    responseTime: z.number().nonnegative(),
+    metadata: z.record(z.any()).optional(),
+    tags: z.array(z.string()).optional(),
+});
+
 // Analytics validation schemas
 export const analyticsQuerySchema = z.object({
     startDate: z.string().datetime().optional(),
