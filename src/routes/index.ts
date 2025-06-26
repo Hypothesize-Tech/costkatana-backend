@@ -23,7 +23,7 @@ router.use('/auth', authRoutes);
 router.use('/usage', usageRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/optimizations', optimizationRoutes);
-router.use('/users', userRoutes);
+router.use('/user', userRoutes);
 router.use('/events', eventRoutes);
 
 export default router;

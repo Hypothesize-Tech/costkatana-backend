@@ -5,8 +5,7 @@ import { Alert } from '../models/Alert';
 import { BedrockService } from './bedrock.service';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
-import AICostOptimizer from 'ai-cost-tracker';
-import { AIProvider, CostEstimate } from 'ai-cost-tracker/dist/types';
+import AICostTracker, { AIProvider, CostEstimate, TokenCounter } from 'ai-cost-tracker';
 
 interface OptimizationRequest {
     userId: string;
@@ -31,35 +30,37 @@ interface OptimizationFilters {
 }
 
 export class OptimizationService {
-
-    private static costOptimizer: AICostOptimizer = (() => {
-        // Try to use a static create method if available
-        if (typeof (AICostOptimizer as any).create === 'function') {
-            return (AICostOptimizer as any).create({
-                optimization: {
-                    enablePromptOptimization: true,
-                    enableModelSuggestions: true,
-                    enableCachingSuggestions: true,
-                },
-                tracking: {
-                    enableAutoTracking: true,
-                    retentionDays: 30,
-                },
-                providers: [
-                    {
-                        provider: AIProvider.AWSBedrock
-                    }
-                ]
-            });
+    // Initialize the AI Cost Tracker as per npm package docs
+    private static trackerPromise = AICostTracker.create({
+        providers: [
+            {
+                provider: AIProvider.AWSBedrock,
+                // Add region or apiKey if needed
+            }
+        ],
+        optimization: {
+            enablePromptOptimization: true,
+            enableModelSuggestions: true,
+            enableCachingSuggestions: true,
+            thresholds: {
+                highCostPerRequest: 0.1,    // 10% minimum reduction to suggest optimization
+                highTokenUsage: 0.05,       // 5% minimum savings to suggest model change
+                frequencyThreshold: 0.02    // 2% minimum savings to suggest caching
+            },
+        },
+        tracking: {
+            enableAutoTracking: true,
+            storageType: 'memory',
+            retentionDays: 30,
         }
-        // If direct instantiation is not allowed due to private constructor, throw a clear error.
-        throw new Error(
-            "AICostOptimizer does not expose a public constructor or static create method. " +
-            "Please check the library documentation or update the integration to use the correct instantiation method."
-        );
-    })();
+    });
 
-    // Add helper to map string to AIProvider enum
+    // Helper to resolve the tracker instance
+    private static async getTracker() {
+        return await this.trackerPromise;
+    }
+
+    // Helper to map string to AIProvider enum
     private static getAIProviderFromString(provider: string): AIProvider {
         switch (provider.toLowerCase()) {
             case 'openai':
@@ -73,6 +74,19 @@ export class OptimizationService {
                 return AIProvider.Google;
             case 'cohere':
                 return AIProvider.Cohere;
+            case 'azure':
+            case 'azure-openai':
+                return AIProvider.Azure;
+            case 'deepseek':
+                return AIProvider.DeepSeek;
+            case 'groq':
+                return AIProvider.Groq;
+            case 'huggingface':
+                return AIProvider.HuggingFace;
+            case 'ollama':
+                return AIProvider.Ollama;
+            case 'replicate':
+                return AIProvider.Replicate;
             default:
                 throw new Error(`Unknown AI provider: ${provider}`);
         }
@@ -80,14 +94,16 @@ export class OptimizationService {
 
     static async createOptimization(request: OptimizationRequest): Promise<IOptimization> {
         try {
+            const tracker = await this.getTracker();
+
             // Get token count and cost for original prompt
-            const originalEstimate: CostEstimate = await OptimizationService.costOptimizer.estimateCost(
+            const originalEstimate: CostEstimate = await tracker.estimateCost(
                 request.prompt,
                 request.model,
                 this.getAIProviderFromString(request.service)
             );
 
-            // Use Bedrock to optimize the prompt
+            // Use Bedrock to optimize the prompt (external service)
             const optimizationResult = await BedrockService.optimizePrompt({
                 prompt: request.prompt,
                 context: request.context,
@@ -96,14 +112,13 @@ export class OptimizationService {
             });
 
             // Get token count and cost for optimized prompt
-            const optimizedEstimate: CostEstimate = await OptimizationService.costOptimizer.estimateCost(
+            const optimizedEstimate: CostEstimate = await tracker.estimateCost(
                 optimizationResult.optimizedPrompt,
                 request.model,
                 this.getAIProviderFromString(request.service)
             );
 
             // Calculate savings
-            // Use breakdown for token counts
             const originalTokens = (originalEstimate.breakdown?.promptTokens ?? 0) + (originalEstimate.breakdown?.completionTokens ?? 0);
             const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
             const tokensSaved = originalTokens - optimizedTokens;
@@ -129,7 +144,7 @@ export class OptimizationService {
                 service: request.service,
                 model: request.model,
                 category,
-                suggestions: optimizationResult.suggestions.map((suggestion: string, index: number) => ({
+                suggestions: (optimizationResult.suggestions || []).map((suggestion: string, index: number) => ({
                     type: 'general',
                     description: suggestion,
                     impact: index === 0 ? 'high' : index < 3 ? 'medium' : 'low',
@@ -139,14 +154,31 @@ export class OptimizationService {
                     analysisTime: Date.now(),
                     confidence: 0.85,
                     alternatives: request.options?.suggestAlternatives
-                        ? optimizationResult.alternatives?.map((alt: string) => ({
+                        ? (optimizationResult.alternatives || []).map((alt: string) => ({
                             prompt: alt,
-                            tokens: this.estimateTokens(alt),
-                            cost: 0, // Will be calculated if needed
+                            tokens: 0, // Will be calculated below
+                            cost: 0,   // Will be calculated below
                         }))
                         : undefined,
                 },
             });
+
+            // If alternatives are present, estimate tokens and cost for each
+            if (optimization.metadata?.alternatives) {
+                for (const alt of optimization.metadata.alternatives) {
+                    alt.tokens = await OptimizationService.estimateTokensAsync(
+                        alt.prompt,
+                        this.getAIProviderFromString(request.service),
+                        request.model
+                    );
+                    const altEstimate: CostEstimate = await tracker.estimateCost(
+                        alt.prompt,
+                        request.model,
+                        this.getAIProviderFromString(request.service)
+                    );
+                    alt.cost = altEstimate.totalCost;
+                }
+            }
 
             // Update user's optimization count
             await User.findByIdAndUpdate(request.userId, {
@@ -243,7 +275,7 @@ export class OptimizationService {
 
             optimization.applied = true;
             optimization.appliedAt = new Date();
-            optimization.appliedCount += 1;
+            optimization.appliedCount = (optimization.appliedCount || 0) + 1;
             await optimization.save();
 
             logger.info('Optimization applied', {
@@ -428,8 +460,13 @@ export class OptimizationService {
         return 'prompt_reduction'; // Default category
     }
 
-    private static estimateTokens(text: string): number {
-        // Simple estimation: ~4 characters per token
-        return Math.ceil(text.length / 4);
+    // Use ai-cost-tracker's TokenCounter for accurate token estimation
+    private static async estimateTokensAsync(text: string, provider: AIProvider, model: string): Promise<number> {
+        try {
+            return await TokenCounter.countTokens(text, provider, model);
+        } catch {
+            // fallback: ~4 chars per token
+            return Math.ceil(text.length / 4);
+        }
     }
 }
