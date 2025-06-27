@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
-import { addApiKeySchema } from '../utils/validators';
+import { addApiKeySchema, updateProfileSchema, updateSubscriptionSchema } from '../utils/validators';
 import { encrypt } from '../utils/helpers';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/error.middleware';
@@ -41,7 +41,7 @@ export class UserController {
     static async updateProfile(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
-            const { name, preferences, avatar } = req.body;
+            const { name, preferences, avatar } = updateProfileSchema.parse(req.body);
 
             const user = await User.findById(userId);
 
@@ -363,7 +363,7 @@ export class UserController {
     static async updateSubscription(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
-            const { plan } = req.body;
+            const { plan } = updateSubscriptionSchema.parse(req.body);
 
             if (!['free', 'pro', 'enterprise'].includes(plan)) {
                 return res.status(400).json({

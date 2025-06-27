@@ -42,6 +42,35 @@ interface UsageAnalysisResponse {
 }
 
 export class BedrockService {
+    private static extractJson(text: string): string {
+        if (!text) {
+            return '';
+        }
+
+        const jsonRegex = /```json\s*([\s\S]*?)\s*```|```([\s\S]*?)```|\{([\s\S]*)\}/;
+        const match = text.match(jsonRegex);
+
+        if (match) {
+            // Prioritize the content within ```json ... ```
+            if (match[1]) return match[1];
+            // Fallback to content within ``` ... ```
+            if (match[2]) return match[2];
+            // Fallback to content within { ... }
+            if (match[3] && !match[3].includes("```")) {
+                // If we found braces, let's try to reconstruct a valid JSON object
+                // This is a bit of a safeguard
+                try {
+                    return `{${match[3]}}`;
+                } catch (e) {
+                    // ignore if it's not valid
+                }
+            }
+        }
+
+        // If no JSON block is found, assume the whole string is the JSON
+        return text;
+    }
+
     private static createMessagesPayload(prompt: string) {
         return {
             anthropic_version: "bedrock-2023-05-31",
@@ -157,7 +186,8 @@ Format your response as a single valid JSON object:
 }`;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const result = JSON.parse(response);
+            const cleanedResponse = this.extractJson(response);
+            const result = JSON.parse(cleanedResponse);
 
             logger.info('Prompt optimization completed', {
                 originalLength: request.prompt.length,
@@ -210,7 +240,8 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const result = JSON.parse(response);
+            const cleanedResponse = this.extractJson(response);
+            const result = JSON.parse(cleanedResponse);
 
             logger.info('Usage analysis completed', {
                 timeframe: request.timeframe,
@@ -262,7 +293,8 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const result = JSON.parse(response);
+            const cleanedResponse = this.extractJson(response);
+            const result = JSON.parse(cleanedResponse);
 
             logger.info('Model alternatives suggested', {
                 currentModel,
@@ -308,7 +340,8 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const result = JSON.parse(response);
+            const cleanedResponse = this.extractJson(response);
+            const result = JSON.parse(cleanedResponse);
 
             logger.info('Prompt template generated', { objective });
 
@@ -332,7 +365,7 @@ Format your response as JSON:
         recommendations: string[];
     }> {
         try {
-            const systemPrompt = `You are an AI cost anomaly detection system.Analyze the following data to identify any anomalies.
+            const systemPrompt = `You are an AI-powered security and cost anomaly detection system.Analyze the following data to identify any anomalies.
 
 Historical Daily Average:
             - Cost: $${historicalAverage.cost.toFixed(2)}
@@ -363,7 +396,8 @@ Format your response as JSON:
                     }`;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const result = JSON.parse(response);
+            const cleanedResponse = this.extractJson(response);
+            const result = JSON.parse(cleanedResponse);
 
             // Convert timestamp strings back to Date objects
             result.anomalies = result.anomalies.map((a: any) => ({

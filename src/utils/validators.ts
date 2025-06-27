@@ -119,3 +119,7 @@ export const emailSchema = z.object({
     body: z.string().min(1),
     html: z.boolean().optional(),
 });
+
+export const updateSubscriptionSchema = z.object({
+    plan: z.enum(['free', 'pro', 'enterprise']),
+});
