@@ -3,7 +3,7 @@ import mongoose, { Schema } from 'mongoose';
 export interface IUsage {
     _id?: any;
     userId: mongoose.Types.ObjectId;
-    service: 'openai' | 'aws-bedrock' | 'google-ai' | 'anthropic' | 'huggingface' | 'cohere';
+    service: 'openai' | 'aws-bedrock' | 'google-ai' | 'anthropic' | 'huggingface' | 'cohere' | 'dashboard-analytics';
     model: string;
     prompt: string;
     completion?: string;
@@ -41,7 +41,7 @@ const usageSchema = new Schema<IUsage>({
     },
     service: {
         type: String,
-        enum: ['openai', 'aws-bedrock', 'google-ai', 'anthropic', 'huggingface', 'cohere'],
+        enum: ['openai', 'aws-bedrock', 'google-ai', 'anthropic', 'huggingface', 'cohere', 'dashboard-analytics'],
         required: true
     },
     model: {

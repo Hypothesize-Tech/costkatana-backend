@@ -3,6 +3,7 @@ import { Optimization } from '../models/Optimization';
 import { logger } from '../utils/logger';
 import { getDateRange } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
+import mongoose from 'mongoose';
 
 interface AnalyticsQuery {
     userId: string;
@@ -38,7 +39,7 @@ export class AnalyticsService {
             const { startDate, endDate } = this.getDateRange(query);
 
             const baseMatch: any = {
-                userId: query.userId,
+                userId: new mongoose.Types.ObjectId(query.userId),
                 createdAt: { $gte: startDate, $lte: endDate },
             };
 
@@ -415,7 +416,7 @@ export class AnalyticsService {
         const stats = await Optimization.aggregate([
             {
                 $match: {
-                    userId,
+                    userId: new mongoose.Types.ObjectId(userId),
                     createdAt: { $gte: startDate, $lte: endDate },
                 },
             },
@@ -461,7 +462,7 @@ export class AnalyticsService {
 
     private static async analyzeTrends(userId: string, startDate: Date, endDate: Date) {
         const usageData = await Usage.find({
-            userId,
+            userId: new mongoose.Types.ObjectId(userId),
             createdAt: { $gte: startDate, $lte: endDate },
         })
             .select('createdAt cost totalTokens')

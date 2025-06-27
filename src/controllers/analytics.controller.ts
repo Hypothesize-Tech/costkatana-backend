@@ -4,6 +4,8 @@ import { analyticsQuerySchema, dateRangeSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
 import { UsageService } from '../services/usage.service';
 import { User } from '../models/User';
+import { Usage } from '../models/Usage';
+import mongoose from 'mongoose';
 
 export class AnalyticsController {
     static async getAnalytics(req: any, res: Response, next: NextFunction) {
@@ -172,10 +174,44 @@ export class AnalyticsController {
     static async getDashboardData(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
+            const objectUserId = new mongoose.Types.ObjectId(userId);
 
             // Get data for the last 30 days
-            const endDate = new Date();
-            const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            let endDate = new Date();
+            let startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+            const hasRecentUsage = await Usage.exists({
+                userId: objectUserId,
+                createdAt: { $gte: startDate, $lte: endDate },
+            });
+
+            if (!hasRecentUsage) {
+                const usageBounds = await Usage.aggregate([
+                    { $match: { userId: objectUserId } },
+                    {
+                        $group: {
+                            _id: null,
+                            minDate: { $min: '$createdAt' },
+                            maxDate: { $max: '$createdAt' },
+                        },
+                    },
+                ]);
+
+                if (usageBounds.length > 0 && usageBounds[0].minDate) {
+                    startDate = usageBounds[0].minDate;
+                    endDate = usageBounds[0].maxDate;
+                }
+            }
+
+            const today = new Date(endDate);
+            today.setHours(0, 0, 0, 0);
+            const todayEnd = new Date(endDate);
+            todayEnd.setHours(23, 59, 59, 999);
+
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const yesterdayEnd = new Date(yesterday);
+            yesterdayEnd.setHours(23, 59, 59, 999);
 
             const [analytics, todayStats, yesterdayStats, user] = await Promise.all([
                 AnalyticsService.getAnalytics({
@@ -185,13 +221,13 @@ export class AnalyticsController {
                 }),
                 AnalyticsService.getAnalytics({
                     userId,
-                    startDate: new Date(new Date().setHours(0, 0, 0, 0)),
-                    endDate: new Date(new Date().setHours(23, 59, 59, 999)),
+                    startDate: today,
+                    endDate: todayEnd,
                 }),
                 AnalyticsService.getAnalytics({
                     userId,
-                    startDate: new Date(new Date(Date.now() - 24 * 60 * 60 * 1000).setHours(0, 0, 0, 0)),
-                    endDate: new Date(new Date(Date.now() - 24 * 60 * 60 * 1000).setHours(23, 59, 59, 999)),
+                    startDate: yesterday,
+                    endDate: yesterdayEnd,
                 }),
                 User.findById(userId).select('name email subscription usage').lean(),
             ]);
