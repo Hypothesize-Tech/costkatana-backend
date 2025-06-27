@@ -2,7 +2,6 @@ import { Response, NextFunction } from 'express';
 import { AnalyticsService } from '../services/analytics.service';
 import { analyticsQuerySchema, dateRangeSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
-import { UsageService } from '../services/usage.service';
 import { User } from '../models/User';
 import { Usage } from '../models/Usage';
 import mongoose from 'mongoose';
@@ -272,26 +271,6 @@ export class AnalyticsController {
                 },
                 insights: analytics.trends.insights.slice(0, 3),
             };
-
-            // Track the usage of this dashboard generation
-            if (analytics.summary.totalCost > 0) {
-                await UsageService.trackUsage({
-                    userId,
-                    service: 'dashboard-analytics',
-                    model: 'system-generated',
-                    prompt: 'Dashboard data generation',
-                    completion: JSON.stringify(dashboardData),
-                    promptTokens: 0,
-                    completionTokens: 0,
-                    totalTokens: analytics.summary.totalTokens,
-                    cost: analytics.summary.totalCost,
-                    responseTime: 0,
-                    metadata: {
-                        startDate: startDate.toISOString(),
-                        endDate: endDate.toISOString(),
-                    },
-                });
-            }
 
             res.json({
                 success: true,
