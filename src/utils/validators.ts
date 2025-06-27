@@ -14,6 +14,7 @@ export const loginSchema = z.object({
 
 export const updateProfileSchema = z.object({
     name: z.string().min(2).optional(),
+    avatar: z.string().url().optional(),
     preferences: z.object({
         emailAlerts: z.boolean().optional(),
         alertThreshold: z.number().positive().optional(),

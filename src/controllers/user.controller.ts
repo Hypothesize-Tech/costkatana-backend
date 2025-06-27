@@ -1,9 +1,17 @@
 import { Response, NextFunction } from 'express';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
-import { updateProfileSchema, addApiKeySchema } from '../utils/validators';
+import { addApiKeySchema } from '../utils/validators';
 import { encrypt } from '../utils/helpers';
 import { logger } from '../utils/logger';
+import { AppError } from '../middleware/error.middleware';
+import { S3Service } from '../services/s3.service';
+import { z } from 'zod';
+
+const presignedUrlSchema = z.object({
+    fileName: z.string(),
+    fileType: z.string(),
+});
 
 export class UserController {
     static async getProfile(req: any, res: Response, next: NextFunction) {
@@ -33,20 +41,21 @@ export class UserController {
     static async updateProfile(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
-            const validatedData = updateProfileSchema.parse(req.body);
+            const { name, preferences, avatar } = req.body;
 
-            const user = await User.findByIdAndUpdate(
-                userId,
-                { $set: validatedData },
-                { new: true, runValidators: true }
-            ).select('-password -resetPasswordToken -resetPasswordExpires -verificationToken');
+            const user = await User.findById(userId);
 
             if (!user) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'User not found',
-                });
+                return next(new AppError('User not found', 404));
             }
+
+            if (name) user.name = name;
+            if (avatar) user.avatar = avatar;
+            if (preferences) {
+                user.preferences = { ...user.preferences, ...preferences };
+            }
+
+            await user.save();
 
             res.json({
                 success: true,
@@ -54,10 +63,32 @@ export class UserController {
                 data: user,
             });
         } catch (error: any) {
-            logger.error('Update profile error:', error);
+            logger.error(`Error updating profile for user ${req.user!.id}:`, error);
             next(error);
         }
-        return;
+    }
+
+    static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { fileName, fileType } = presignedUrlSchema.parse(req.body);
+
+            const { uploadUrl, key } = await S3Service.getPresignedAvatarUploadUrl(userId, fileName, fileType);
+
+            const finalUrl = `https://${process.env.AWS_S3_BUCKETNAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+
+            res.json({
+                success: true,
+                data: {
+                    uploadUrl,
+                    key,
+                    finalUrl
+                },
+            });
+        } catch (error) {
+            logger.error('Error getting pre-signed URL:', error);
+            next(error);
+        }
     }
 
     static async addApiKey(req: any, res: Response, next: NextFunction) {

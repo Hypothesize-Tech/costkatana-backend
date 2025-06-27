@@ -13,6 +13,7 @@ router.use(authenticate);
 // Profile routes
 router.get('/profile', asyncHandler(UserController.getProfile));
 router.put('/profile', validate(updateProfileSchema), asyncHandler(UserController.updateProfile));
+router.post('/profile/avatar-upload-url', asyncHandler(UserController.getPresignedAvatarUrl));
 
 // API key routes
 router.get('/api-keys', asyncHandler(UserController.getApiKeys));

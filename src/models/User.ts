@@ -5,6 +5,7 @@ export interface IUser {
     email: string;
     password: string;
     name: string;
+    avatar?: string;
     role: 'user' | 'admin';
     apiKeys: Array<{
         service: string;
@@ -63,6 +64,9 @@ const userSchema = new Schema<IUser>({
         type: String,
         required: true,
         trim: true,
+    },
+    avatar: {
+        type: String,
     },
     role: {
         type: String,
