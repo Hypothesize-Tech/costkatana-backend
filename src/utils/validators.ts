@@ -58,8 +58,8 @@ export const sdkTrackUsageSchema = z.object({
 
 // Analytics validation schemas
 export const analyticsQuerySchema = z.object({
-    startDate: z.string().datetime().optional(),
-    endDate: z.string().datetime().optional(),
+    startDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date format' }).optional(),
+    endDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date format' }).optional(),
     period: z.enum(['daily', 'weekly', 'monthly']).optional(),
     service: z.string().optional(),
     model: z.string().optional(),
@@ -105,8 +105,8 @@ export const paginationSchema = z.object({
 
 // Date range validation
 export const dateRangeSchema = z.object({
-    startDate: z.string().datetime(),
-    endDate: z.string().datetime(),
+    startDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date format' }),
+    endDate: z.string().refine((val) => !isNaN(Date.parse(val)), { message: 'Invalid date format' }),
 }).refine(data => new Date(data.startDate) <= new Date(data.endDate), {
     message: 'Start date must be before or equal to end date',
 });

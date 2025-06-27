@@ -6,13 +6,10 @@ export class AICostTrackerService {
     private static initPromise: Promise<AICostTracker> | null = null;
 
     /**
-     * Initialize the AI Cost Tracker with custom storage
+     * Initializes the AICostTracker instance.
+     * This method is called once and subsequent calls will return the existing promise.
      */
     static async initialize(): Promise<AICostTracker> {
-        if (this.tracker) {
-            return this.tracker;
-        }
-
         if (this.initPromise) {
             return this.initPromise;
         }
@@ -22,8 +19,10 @@ export class AICostTrackerService {
         return this.tracker;
     }
 
+    /**
+     * Creates and configures the AICostTracker instance.
+     */
     private static async createTracker(): Promise<AICostTracker> {
-        // Only include providers that have API keys configured
         const providers = [];
 
         if (process.env.OPENAI_API_KEY) {
@@ -46,7 +45,6 @@ export class AICostTrackerService {
             providers.push({ provider: AIProvider.Cohere, apiKey: process.env.COHERE_API_KEY });
         }
 
-        // If no providers are configured, add a default one to prevent initialization errors
         if (providers.length === 0) {
             logger.warn('No AI provider API keys configured. Adding default OpenAI provider with empty key for tracking purposes only.');
             providers.push({ provider: AIProvider.OpenAI, apiKey: 'dummy-key-for-tracking-only' });
@@ -80,16 +78,15 @@ export class AICostTrackerService {
         });
         return tracker;
     }
+
     /**
-     * Get the tracker instance
+     * Returns the singleton AICostTracker instance.
+     * Ensures the tracker is initialized before returning.
      */
     static async getTracker(): Promise<AICostTracker> {
         return this.initialize();
     }
 
-    /**
-     * Track a request manually
-     */
     static async trackRequest(
         request: any,
         response: any,
@@ -98,33 +95,25 @@ export class AICostTrackerService {
     ): Promise<void> {
         const tracker = await this.getTracker();
 
-        // Normalize payload to flat structure with correct field names
         let payload = { ...request, ...response, ...metadata, sessionId: userId };
-        // Flatten 'usage' object if present
         if (payload.usage && typeof payload.usage === 'object') {
             payload = { ...payload, ...payload.usage };
             delete payload.usage;
         }
-        // Rename 'service' to 'provider' if present
         if (payload.service && !payload.provider) {
             payload.provider = payload.service;
             delete payload.service;
         }
-        // Rename 'cost' to 'estimatedCost' if present
         if (payload.cost && !payload.estimatedCost) {
             payload.estimatedCost = payload.cost;
             delete payload.cost;
         }
-        // Always include 'prompt' field
         if (typeof payload.prompt !== 'string') {
             payload.prompt = '';
         }
         await tracker.trackUsage(payload);
     }
 
-    /**
-     * Make a tracked request
-     */
     static async makeTrackedRequest(
         request: any,
         userId: string,
@@ -132,36 +121,10 @@ export class AICostTrackerService {
     ): Promise<any> {
         const tracker = await this.getTracker();
 
-        // Always include 'prompt' field
         let payload = { ...request, ...metadata, sessionId: userId };
         if (typeof payload.prompt !== 'string') {
             payload.prompt = '';
         }
-        // This will automatically track the usage via our custom storage
         return tracker.makeRequest(payload);
-    }
-
-    /**
-     * Get analytics from tracker
-     */
-    static async getAnalytics(
-        startDate?: Date,
-        endDate?: Date,
-        userId?: string
-    ): Promise<any> {
-        const tracker = await this.getTracker();
-        return tracker.getAnalytics(startDate, endDate, userId);
-    }
-
-    /**
-     * Get optimization suggestions
-     */
-    static async getOptimizationSuggestions(
-        startDate?: Date,
-        endDate?: Date,
-        userId?: string
-    ): Promise<any> {
-        const tracker = await this.getTracker();
-        return tracker.getOptimizationSuggestions(startDate, endDate, userId);
     }
 } 

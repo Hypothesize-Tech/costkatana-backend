@@ -7,6 +7,7 @@ import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { AICostTrackerService } from './aiCostTracker.service';
 import { AIProvider, CostEstimate } from 'ai-cost-tracker';
+import mongoose from 'mongoose';
 
 interface OptimizationRequest {
     userId: string;
@@ -82,6 +83,8 @@ export class OptimizationService {
             // Use Bedrock to optimize the prompt (external service)
             const optimizationResult = await BedrockService.optimizePrompt({
                 prompt: request.prompt,
+                model: request.model,
+                service: request.service,
                 context: request.context,
                 targetReduction: request.options?.targetReduction,
                 preserveIntent: request.options?.preserveIntent,
@@ -381,6 +384,85 @@ export class OptimizationService {
         }
 
         return 'prompt_reduction'; // Default category
+    }
+
+    static async getPromptsForBulkOptimization(
+        userId: string,
+        filters: {
+            service?: string;
+            minCalls?: number;
+            timeframe?: string;
+        }
+    ) {
+        try {
+            const { service, minCalls = 1, timeframe = '30d' } = filters;
+
+            let startDate: Date;
+            const endDate = new Date();
+
+            switch (timeframe) {
+                case '1d':
+                    startDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+                    break;
+                case '7d':
+                    startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+                    break;
+                case '30d':
+                    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+                    break;
+                case 'all':
+                    startDate = new Date(0);
+                    break;
+                default:
+                    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            }
+
+            const matchStage: any = {
+                userId: new mongoose.Types.ObjectId(userId),
+                createdAt: { $gte: startDate, $lte: endDate },
+            };
+
+            if (service) {
+                matchStage.service = service;
+            }
+
+            const prompts = await Usage.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: '$prompt',
+                        count: { $sum: 1 },
+                        usageIds: { $push: '$_id' },
+                    },
+                },
+                { $match: { count: { $gte: minCalls } } },
+                { $sort: { count: -1 } },
+                { $limit: 10 },
+                {
+                    $project: {
+                        _id: 0,
+                        prompt: '$_id',
+                        count: 1,
+                        usageId: { $first: '$usageIds' },
+                    },
+                },
+            ]);
+
+            // We only need one usageId to get the model and service info
+            const usageIds = prompts.map(p => p.usageId);
+            const usageDocs = await Usage.find({ _id: { $in: usageIds } }).select('_id prompt');
+            const usageIdToPromptId = new Map(usageDocs.map(u => [u._id.toString(), u._id.toString()]));
+
+            return prompts.map(p => ({
+                prompt: p.prompt,
+                count: p.count,
+                promptId: usageIdToPromptId.get(p.usageId.toString()),
+            })).filter(p => p.promptId);
+
+        } catch (error) {
+            logger.error('Error fetching prompts for bulk optimization:', error);
+            throw error;
+        }
     }
 
 }

@@ -26,11 +26,36 @@ export const s3Client = new S3Client({
     },
 });
 
+// Helper function to detect model type
+function detectModelType(modelId: string): 'nova' | 'claude3' | 'claude' | 'titan' | 'unknown' {
+    const lowerModelId = modelId.toLowerCase();
+
+    if (lowerModelId.includes('nova')) {
+        return 'nova';
+    } else if (lowerModelId.includes('claude-3') || lowerModelId.includes('claude-v3')) {
+        return 'claude3';
+    } else if (lowerModelId.includes('claude')) {
+        return 'claude';
+    } else if (lowerModelId.includes('titan')) {
+        return 'titan';
+    }
+
+    return 'unknown';
+}
+
+const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0';
+const modelType = detectModelType(modelId);
+
 export const AWS_CONFIG = {
     bedrock: {
-        modelId: process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0',
-        maxTokens: 4096,
-        temperature: 0.7,
+        modelId,
+        modelType,
+        maxTokens: parseInt(process.env.AWS_BEDROCK_MAX_TOKENS || '4096'),
+        temperature: parseFloat(process.env.AWS_BEDROCK_TEMPERATURE || '0.7'),
+        // Model-specific configs
+        isNova: modelType === 'nova',
+        isClaude3: modelType === 'claude3',
+        isTitan: modelType === 'titan',
     },
     s3: {
         bucketName: process.env.AWS_S3_BUCKET || 'ai-cost-optimizer-reports',

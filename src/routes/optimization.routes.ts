@@ -16,6 +16,9 @@ router.post('/', validate(optimizationRequestSchema), asyncHandler(OptimizationC
 // Get optimizations
 router.get('/', validateQuery(paginationSchema), asyncHandler(OptimizationController.getOptimizations));
 
+// Get prompts for bulk optimization
+router.get('/bulk-prompts', asyncHandler(OptimizationController.getPromptsForBulkOptimization));
+
 // Get optimization summary
 router.get('/summary', asyncHandler(OptimizationController.getOptimizationSummary));
 

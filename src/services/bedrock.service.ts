@@ -5,6 +5,8 @@ import { retry } from '../utils/helpers';
 
 interface PromptOptimizationRequest {
     prompt: string;
+    model: string;
+    service: string;
     context?: string;
     targetReduction?: number;
     preserveIntent?: boolean;
@@ -40,21 +42,71 @@ interface UsageAnalysisResponse {
 }
 
 export class BedrockService {
-    private static async invokeModel(prompt: string): Promise<any> {
-        const payload = {
+    private static createMessagesPayload(prompt: string) {
+        return {
             anthropic_version: "bedrock-2023-05-31",
             max_tokens: AWS_CONFIG.bedrock.maxTokens,
             temperature: AWS_CONFIG.bedrock.temperature,
-            messages: [
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ]
+            messages: [{ role: "user", content: prompt }],
         };
+    }
+
+    private static createNovaPayload(prompt: string) {
+        return {
+            messages: [{ role: "user", content: [{ text: prompt }] }],
+            inferenceConfig: {
+                max_new_tokens: AWS_CONFIG.bedrock.maxTokens,
+                temperature: AWS_CONFIG.bedrock.temperature,
+                top_p: 0.9,
+            }
+        };
+    }
+
+    private static createLegacyPayload(prompt: string) {
+        return {
+            prompt: `\n\nHuman: ${prompt}\n\nAssistant:`,
+            max_tokens_to_sample: AWS_CONFIG.bedrock.maxTokens,
+            temperature: AWS_CONFIG.bedrock.temperature,
+            stop_sequences: ["\n\nHuman:"],
+        };
+    }
+
+    private static createTitanPayload(prompt: string) {
+        return {
+            inputText: prompt,
+            textGenerationConfig: {
+                maxTokenCount: AWS_CONFIG.bedrock.maxTokens,
+                temperature: AWS_CONFIG.bedrock.temperature,
+            },
+        };
+    }
+
+    private static async invokeModel(prompt: string, model: string): Promise<any> {
+        let payload: any;
+        let responsePath: string;
+
+        // Check model type and create appropriate payload
+        if (model.includes('claude-3') || model.includes('claude-v3')) {
+            payload = this.createMessagesPayload(prompt);
+            responsePath = 'content';
+        } else if (model.includes('nova')) {
+            payload = this.createNovaPayload(prompt);
+            responsePath = 'nova';
+        } else if (model.includes('amazon.titan')) {
+            payload = this.createTitanPayload(prompt);
+            responsePath = 'titan';
+        } else if (model.includes('claude')) {
+            // For older Claude models
+            payload = this.createLegacyPayload(prompt);
+            responsePath = 'completion';
+        } else {
+            // Default to messages format for unknown models
+            payload = this.createNovaPayload(prompt);
+            responsePath = 'nova';
+        }
 
         const command = new InvokeModelCommand({
-            modelId: AWS_CONFIG.bedrock.modelId,
+            modelId: model,
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify(payload),
@@ -63,16 +115,25 @@ export class BedrockService {
         try {
             const response = await retry(() => bedrockClient.send(command), 3, 1000);
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-            return responseBody.content[0].text;
+
+            // Extract text based on response format
+            if (responsePath === 'content') {
+                return responseBody.content[0].text;
+            } else if (responsePath === 'nova') {
+                return responseBody.output?.message?.content?.[0]?.text || responseBody.message?.content?.[0]?.text || '';
+            } else if (responsePath === 'titan') {
+                return responseBody.results?.[0]?.outputText || '';
+            }
+            return responseBody.completion || '';
         } catch (error) {
-            logger.error('Error invoking Bedrock model:', error);
+            logger.error('Error invoking Bedrock model:', { model, error });
             throw error;
         }
     }
 
     static async optimizePrompt(request: PromptOptimizationRequest): Promise<PromptOptimizationResponse> {
         try {
-            const systemPrompt = `You are an AI prompt optimization expert. Your task is to optimize the given prompt to reduce token usage while maintaining its intent and effectiveness.
+            const systemPrompt = `You are an AI prompt optimization expert. Your task is to optimize the given prompt to reduce token usage while maintaining its intent and effectiveness. The prompt is intended for the '${request.service}' service and the '${request.model}' model.
 
 Original Prompt: ${request.prompt}
 ${request.context ? `Context: ${request.context}` : ''}
@@ -86,7 +147,7 @@ Please provide:
 4. Specific suggestions for further optimization
 5. Alternative prompt variations (if applicable)
 
-Format your response as JSON:
+Format your response as a single valid JSON object:
 {
   "optimizedPrompt": "...",
   "techniques": ["...", "..."],
@@ -95,7 +156,7 @@ Format your response as JSON:
   "alternatives": ["...", "..."]
 }`;
 
-            const response = await this.invokeModel(systemPrompt);
+            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
             const result = JSON.parse(response);
 
             logger.info('Prompt optimization completed', {
@@ -132,23 +193,23 @@ Please analyze and provide:
 1. Usage patterns (repeated prompts, inefficient structures, etc.)
 2. Specific recommendations for cost reduction
 3. Estimated potential savings in dollars
-4. Optimization opportunities with specific prompts and reasons
+            4. Optimization opportunities with specific prompts and reasons
 
 Format your response as JSON:
-{
-  "patterns": ["...", "..."],
-  "recommendations": ["...", "..."],
-  "potentialSavings": 25.50,
-  "optimizationOpportunities": [
-    {
-      "prompt": "...",
-      "reason": "...",
-      "estimatedSaving": 5.00
-    }
-  ]
-}`;
+            {
+                "patterns": ["...", "..."],
+                    "recommendations": ["...", "..."],
+                        "potentialSavings": 25.50,
+                            "optimizationOpportunities": [
+                                {
+                                    "prompt": "...",
+                                    "reason": "...",
+                                    "estimatedSaving": 5.00
+                                }
+                            ]
+            } `;
 
-            const response = await this.invokeModel(systemPrompt);
+            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
             const result = JSON.parse(response);
 
             logger.info('Usage analysis completed', {
@@ -177,30 +238,30 @@ Format your response as JSON:
         }>;
     }> {
         try {
-            const systemPrompt = `You are an AI model selection expert. Based on the current model usage and requirements, suggest alternative models that could reduce costs.
+            const systemPrompt = `You are an AI model selection expert.Based on the current model usage and requirements, suggest alternative models that could reduce costs.
 
 Current Model: ${currentModel}
 Use Case: ${useCase}
-Requirements: ${requirements.join(', ')}
+            Requirements: ${requirements.join(', ')}
 
 Suggest alternative models that could:
-1. Reduce costs while meeting the requirements
-2. Provide similar or acceptable performance
-3. Be easily integrated
+            1. Reduce costs while meeting the requirements
+            2. Provide similar or acceptable performance
+            3. Be easily integrated
 
 Format your response as JSON:
-{
-  "recommendations": [
-    {
-      "model": "model-name",
-      "provider": "provider-name",
-      "estimatedCostReduction": 40,
-      "tradeoffs": ["...", "..."]
-    }
-  ]
-}`;
+            {
+                "recommendations": [
+                    {
+                        "model": "model-name",
+                        "provider": "provider-name",
+                        "estimatedCostReduction": 40,
+                        "tradeoffs": ["...", "..."]
+                    }
+                ]
+            } `;
 
-            const response = await this.invokeModel(systemPrompt);
+            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
             const result = JSON.parse(response);
 
             logger.info('Model alternatives suggested', {
@@ -226,33 +287,30 @@ Format your response as JSON:
         bestPractices: string[];
     }> {
         try {
-            const systemPrompt = `You are a prompt engineering expert. Create an optimized prompt template for the given objective.
+            const systemPrompt = `You are a prompt engineering expert.Create an optimized prompt template for the given objective.
 
-Objective: ${objective}
+                Objective: ${objective}
 Example Inputs: ${examples.join(', ')}
 ${constraints ? `Constraints: ${constraints.join(', ')}` : ''}
 
 Create a reusable prompt template that:
-1. Minimizes token usage
-2. Maximizes clarity and effectiveness
-3. Uses variables for dynamic content
+            1. Minimizes token usage
+            2. Maximizes clarity and effectiveness
+            3. Uses variables for dynamic content
 4. Follows prompt engineering best practices
 
 Format your response as JSON:
-{
-  "template": "...",
-  "variables": ["var1", "var2"],
-  "estimatedTokens": 150,
-  "bestPractices": ["...", "..."]
-}`;
+            {
+                "template": "...",
+                    "variables": ["var1", "var2"],
+                        "estimatedTokens": 150,
+                            "bestPractices": ["...", "..."]
+            } `;
 
-            const response = await this.invokeModel(systemPrompt);
+            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
             const result = JSON.parse(response);
 
-            logger.info('Prompt template generated', {
-                objective,
-                estimatedTokens: result.estimatedTokens,
-            });
+            logger.info('Prompt template generated', { objective });
 
             return result;
         } catch (error) {
@@ -274,11 +332,11 @@ Format your response as JSON:
         recommendations: string[];
     }> {
         try {
-            const systemPrompt = `You are an AI usage anomaly detection expert. Analyze the recent usage data for anomalies compared to historical averages.
+            const systemPrompt = `You are an AI cost anomaly detection system.Analyze the following data to identify any anomalies.
 
 Historical Daily Average:
-- Cost: $${historicalAverage.cost.toFixed(2)}
-- Tokens: ${historicalAverage.tokens}
+            - Cost: $${historicalAverage.cost.toFixed(2)}
+            - Tokens: ${historicalAverage.tokens}
 
 Recent Usage (last 7 entries):
 ${recentUsage
@@ -292,19 +350,19 @@ Identify:
 3. Recommendations to prevent future anomalies
 
 Format your response as JSON:
-{
-  "anomalies": [
-    {
-      "timestamp": "ISO-8601-timestamp",
-      "type": "cost_spike",
-      "severity": "high",
-      "description": "..."
-    }
-  ],
-  "recommendations": ["...", "..."]
-}`;
+                    {
+                        "anomalies": [
+                            {
+                                "timestamp": "ISO-8601-timestamp",
+                                "type": "cost_spike",
+                                "severity": "high",
+                                "description": "..."
+                            }
+                        ],
+                        "recommendations": ["..."]
+                    }`;
 
-            const response = await this.invokeModel(systemPrompt);
+            const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
             const result = JSON.parse(response);
 
             // Convert timestamp strings back to Date objects

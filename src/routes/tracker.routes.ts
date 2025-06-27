@@ -6,47 +6,6 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
-// Get AI Cost Tracker analytics
-router.get('/analytics', authenticate, async (req, res, next) => {
-    try {
-        const { startDate, endDate } = req.query;
-        const userId = (req as any).user.id;
-
-        const analytics = await AICostTrackerService.getAnalytics(
-            startDate ? new Date(startDate as string) : undefined,
-            endDate ? new Date(endDate as string) : undefined,
-            userId
-        );
-
-        res.json({
-            success: true,
-            data: analytics
-        });
-    } catch (error) {
-        next(error);
-    }
-});
-
-// Get optimization suggestions from AI Cost Tracker
-router.get('/suggestions', authenticate, async (req, res, next) => {
-    try {
-        const { startDate, endDate } = req.query;
-        const userId = (req as any).user.id;
-        const suggestions = await AICostTrackerService.getOptimizationSuggestions(
-            startDate ? new Date(startDate as string) : undefined,
-            endDate ? new Date(endDate as string) : undefined,
-            userId
-        );
-
-        res.json({
-            success: true,
-            data: suggestions
-        });
-    } catch (error) {
-        next(error);
-    }
-});
-
 // Make a tracked AI request
 router.post('/request', authenticate, async (req, res, next) => {
     try {

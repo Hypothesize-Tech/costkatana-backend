@@ -182,6 +182,27 @@ export class OptimizationController {
         }
     }
 
+    static async getPromptsForBulkOptimization(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { service, minCalls, timeframe } = req.query;
+
+            const prompts = await OptimizationService.getPromptsForBulkOptimization(userId, {
+                service: service as string,
+                minCalls: minCalls ? parseInt(minCalls as string) : undefined,
+                timeframe: timeframe as string,
+            });
+
+            res.json({
+                success: true,
+                data: prompts,
+            });
+        } catch (error: any) {
+            logger.error('Get prompts for bulk optimization error:', error);
+            next(error);
+        }
+    }
+
     static async bulkOptimize(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
@@ -242,6 +263,13 @@ export class OptimizationController {
                 { page: 1, limit: 1000 }
             );
 
+            if (!result) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Optimization summary not found',
+                });
+            }
+
             const summary = {
                 total: result.pagination.total,
                 totalSaved: result.data.reduce((sum, o) => sum + o.costSaved, 0),
@@ -253,7 +281,7 @@ export class OptimizationController {
                 applicationRate: result.data.length > 0
                     ? (result.data.filter(o => o.applied).length / result.data.length) * 100
                     : 0,
-                byCategory: this.groupByCategory(result.data),
+                byCategory: OptimizationController.groupByCategory(result.data),
                 topOptimizations: result.data
                     .sort((a, b) => b.costSaved - a.costSaved)
                     .slice(0, 5),
@@ -263,9 +291,11 @@ export class OptimizationController {
                 success: true,
                 data: summary,
             });
+            return;
         } catch (error: any) {
             logger.error('Get optimization summary error:', error);
             next(error);
+            return;
         }
     }
 
