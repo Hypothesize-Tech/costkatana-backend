@@ -58,8 +58,16 @@ export class PromptTemplateService {
                 }
 
                 // Check if user is member
-                const isMember = project.ownerId.toString() === userId ||
-                    project.members.some(m => m.userId.toString() === userId);
+                const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id 
+                    ? project.ownerId._id.toString() 
+                    : project.ownerId.toString();
+                const isMember = ownerIdString === userId ||
+                    project.members.some(m => {
+                        const memberIdString = typeof m.userId === 'object' && m.userId._id 
+                            ? m.userId._id.toString() 
+                            : m.userId.toString();
+                        return memberIdString === userId;
+                    });
 
                 if (!isMember) {
                     throw new Error('Unauthorized: Not a member of the project');

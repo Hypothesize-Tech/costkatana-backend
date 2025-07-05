@@ -4,8 +4,10 @@ import { User } from '../models/User';
 import { Alert } from '../models/Alert';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
-import { AICostTrackerService } from './aiCostTracker.service';
-import { AIProvider, CostEstimate, OptimizationResult } from 'ai-cost-tracker';
+import { AIProvider, CostEstimate, OptimizationResult } from '../types/aiCostTracker.types';
+import { estimateCost } from '../utils/pricing';
+import { estimateTokens } from '../utils/tokenCounter';
+import { generateOptimizationSuggestions } from '../utils/optimizationUtils';
 import mongoose from 'mongoose';
 import { ActivityService } from './activity.service';
 
@@ -52,10 +54,6 @@ interface OptimizationFilters {
 }
 
 export class OptimizationService {
-    // Helper to get the tracker instance
-    private static async getTracker() {
-        return await AICostTrackerService.getTracker();
-    }
 
     // Helper to map string to AIProvider enum
     private static getAIProviderFromString(provider: string): AIProvider {
@@ -91,26 +89,23 @@ export class OptimizationService {
 
     static async createOptimization(request: OptimizationRequest): Promise<IOptimization> {
         try {
-            const tracker = await this.getTracker();
-            const optimizer = tracker.getOptimizer();
+            const provider = this.getAIProviderFromString(request.service);
 
             // Get token count and cost for original prompt
-            const originalEstimate: CostEstimate = await tracker.estimateCost(
-                request.prompt,
+            const originalTokens = estimateTokens(request.prompt, provider);
+            const originalEstimate: CostEstimate = estimateCost(
+                provider,
                 request.model,
-                this.getAIProviderFromString(request.service)
+                originalTokens,
+                150 // Expected completion tokens
             );
 
-            // Run the enhanced optimization
-            const optimizationResult: OptimizationResult = await optimizer.optimizePrompt(
+            // Run the enhanced optimization using internal utilities
+            const optimizationResult: OptimizationResult = generateOptimizationSuggestions(
                 request.prompt,
+                provider,
                 request.model,
-                this.getAIProviderFromString(request.service),
-                {
-                    conversationHistory: request.conversationHistory,
-                    expectedOutput: request.context,
-                    constraints: request.options?.preserveIntent ? ['preserve_intent'] : []
-                }
+                request.conversationHistory
             );
 
             // Get the best optimization suggestion
@@ -120,18 +115,20 @@ export class OptimizationService {
             }
 
             // Get token count and cost for optimized prompt
-            const optimizedEstimate: CostEstimate = await tracker.estimateCost(
-                bestSuggestion.optimizedPrompt || request.prompt,
+            const optimizedTokens = estimateTokens(bestSuggestion.optimizedPrompt || request.prompt, provider);
+            const optimizedEstimate: CostEstimate = estimateCost(
+                provider,
                 request.model,
-                this.getAIProviderFromString(request.service)
+                optimizedTokens,
+                150 // Expected completion tokens
             );
 
             // Calculate savings
-            const originalTokens = (originalEstimate.breakdown?.promptTokens ?? 0) + (originalEstimate.breakdown?.completionTokens ?? 0);
-            const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
-            const tokensSaved = originalTokens - optimizedTokens;
+            const totalOriginalTokens = originalEstimate.breakdown?.promptTokens + originalEstimate.breakdown?.completionTokens;
+            const totalOptimizedTokens = optimizedEstimate.breakdown?.promptTokens + optimizedEstimate.breakdown?.completionTokens;
+            const tokensSaved = totalOriginalTokens - totalOptimizedTokens;
             const costSaved = originalEstimate.totalCost - optimizedEstimate.totalCost;
-            const improvementPercentage = originalTokens > 0 ? (tokensSaved / originalTokens) * 100 : 0;
+            const improvementPercentage = totalOriginalTokens > 0 ? (tokensSaved / totalOriginalTokens) * 100 : 0;
 
             // Determine category based on optimization type
             const category = this.determineCategoryFromType(bestSuggestion.type);
@@ -161,8 +158,8 @@ export class OptimizationService {
                 originalPrompt: request.prompt,
                 optimizedPrompt: bestSuggestion.optimizedPrompt || request.prompt,
                 optimizationTechniques: optimizationResult.appliedOptimizations,
-                originalTokens,
-                optimizedTokens,
+                originalTokens: totalOriginalTokens,
+                optimizedTokens: totalOptimizedTokens,
                 tokensSaved,
                 originalCost: originalEstimate.totalCost,
                 optimizedCost: optimizedEstimate.totalCost,
@@ -221,8 +218,8 @@ export class OptimizationService {
 
             logger.info('Optimization created', {
                 userId: request.userId,
-                originalTokens,
-                optimizedTokens,
+                originalTokens: totalOriginalTokens,
+                optimizedTokens: totalOptimizedTokens,
                 savings: improvementPercentage,
                 type: bestSuggestion.type,
             });
@@ -236,8 +233,8 @@ export class OptimizationService {
 
     static async createBatchOptimization(request: BatchOptimizationRequest): Promise<IOptimization[]> {
         try {
-            const tracker = await this.getTracker();
-            const optimizer = tracker.getOptimizer();
+            // Use internal optimization utilities instead of external tracker
+            const { generateOptimizationSuggestions } = require('../utils/optimizationUtils');
 
             // Convert requests to FusionRequest format
             const fusionRequests = request.requests.map(r => ({
@@ -250,7 +247,7 @@ export class OptimizationService {
             }));
 
             // Run request fusion optimization
-            const optimizationResult: OptimizationResult = await optimizer.optimizeRequests(fusionRequests);
+            const optimizationResult: OptimizationResult = generateOptimizationSuggestions(fusionRequests);
 
             const optimizations: IOptimization[] = [];
 
@@ -262,20 +259,22 @@ export class OptimizationService {
                     let originalTotalTokens = 0;
 
                     for (const req of request.requests) {
-                        const estimate = await tracker.estimateCost(
-                            req.prompt,
+                        const estimate = estimateCost(
+                            this.getAIProviderFromString(req.provider),
                             req.model,
-                            this.getAIProviderFromString(req.provider)
+                            estimateTokens(req.prompt, this.getAIProviderFromString(req.provider)),
+                            150
                         );
                         originalTotalCost += estimate.totalCost;
-                        originalTotalTokens += (estimate.breakdown?.promptTokens ?? 0) + (estimate.breakdown?.completionTokens ?? 0);
+                        originalTotalTokens += estimate.breakdown.promptTokens + estimate.breakdown.completionTokens;
                     }
 
                     // Calculate optimized cost
-                    const optimizedEstimate = await tracker.estimateCost(
-                        suggestion.optimizedPrompt!,
+                    const optimizedEstimate = estimateCost(
+                        this.getAIProviderFromString(request.requests[0].provider),
                         request.requests[0].model,
-                        this.getAIProviderFromString(request.requests[0].provider)
+                        estimateTokens(suggestion.optimizedPrompt!, this.getAIProviderFromString(request.requests[0].provider)),
+                        150
                     );
 
                     const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
@@ -458,8 +457,23 @@ export class OptimizationService {
 
     static async analyzeOptimizationOpportunities(userId: string) {
         try {
-            const tracker = await this.getTracker();
-            const suggestions = await tracker.getOptimizationSuggestions(undefined, undefined, userId);
+            // Get recent high-cost usage patterns for the user
+            const recentUsage = await Usage.find({ userId })
+                .sort({ createdAt: -1 })
+                .limit(50);
+
+            const suggestions = recentUsage
+                .filter(usage => usage.cost > 0.01) // High cost threshold
+                .map(usage => ({
+                    id: usage._id.toString(),
+                    type: 'prompt_optimization',
+                    originalPrompt: usage.prompt,
+                    estimatedSavings: usage.cost * 0.2, // Estimate 20% savings
+                    confidence: 0.8,
+                    explanation: `This prompt could be optimized to reduce token usage and costs.`,
+                    implementation: 'Consider simplifying the prompt or using a more efficient model.'
+                }))
+                .slice(0, 10); // Top 10 opportunities
 
             // Create alerts for top opportunities
             if (suggestions.length > 0) {
@@ -479,7 +493,7 @@ export class OptimizationService {
 
             return {
                 opportunities: suggestions,
-                totalPotentialSavings: suggestions.reduce((sum, s) => sum + s.estimatedSavings, 0),
+                totalPotentialSavings: suggestions.reduce((sum: number, s: any) => sum + s.estimatedSavings, 0),
             };
         } catch (error) {
             logger.error('Error analyzing optimization opportunities:', error);

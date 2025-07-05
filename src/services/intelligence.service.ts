@@ -1,6 +1,5 @@
 import { Tip, ITip, Usage, IUsage, User, IUser } from '../models';
 import { logger } from '../utils';
-import { AICostTrackerService } from './aiCostTracker.service';
 import { ActivityService } from './activity.service';
 
 export interface TipContext {
@@ -267,8 +266,13 @@ export class IntelligenceService {
                 .sort({ createdAt: -1 })
                 .limit(50);
 
-            const tracker = await AICostTrackerService.getTracker();
-            const optimizationConfig = tracker.getOptimizationConfig();
+            // Use internal optimization utilities instead of external tracker
+            // For now, return empty config until we implement internal optimization config
+            const optimizationConfig = {
+                enablePromptOptimization: true,
+                enableModelSuggestions: true,
+                enableCachingSuggestions: true
+            };
 
             const context: TipContext = {
                 user: user?.toObject(),

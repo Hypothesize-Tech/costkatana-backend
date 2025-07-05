@@ -1,112 +1,138 @@
-import AICostTracker, { AIProvider } from 'ai-cost-tracker';
 import { logger } from '../utils/logger';
 import { ProjectService } from './project.service';
 import { Usage } from '../models/Usage';
 import { User } from '../models/User';
 import { ActivityService } from './activity.service';
+import {
+    AIProvider,
+    OptimizationResult,
+    TrackerConfig,
+    ProviderConfig,
+    OptimizationConfig,
+    TrackingConfig
+} from '../types/aiCostTracker.types';
+import { calculateCost, estimateCost } from '../utils/pricing';
+import { estimateTokens } from '../utils/tokenCounter';
+import { generateOptimizationSuggestions, applyOptimizations } from '../utils/optimizationUtils';
 
 export class AICostTrackerService {
-    private static tracker: AICostTracker | null = null;
-    private static initPromise: Promise<AICostTracker> | null = null;
+    private static config: TrackerConfig | null = null;
+    private static initialized = false;
 
     /**
-     * Initializes the AICostTracker instance.
-     * This method is called once and subsequent calls will return the existing promise.
+     * Initializes the internal cost tracker configuration
      */
-    static async initialize(): Promise<AICostTracker> {
-        if (this.initPromise) {
-            return this.initPromise;
+    static async initialize(): Promise<void> {
+        if (this.initialized) {
+            return;
         }
 
-        this.initPromise = this.createTracker();
-        this.tracker = await this.initPromise;
-        return this.tracker;
-    }
-
-    /**
-     * Creates and configures the AICostTracker instance.
-     */
-    private static async createTracker(): Promise<AICostTracker> {
-        const providers = [];
+        const providers: ProviderConfig[] = [];
 
         if (process.env.OPENAI_API_KEY) {
-            providers.push({ provider: AIProvider.OpenAI, apiKey: process.env.OPENAI_API_KEY });
+            providers.push({
+                provider: AIProvider.OpenAI,
+                apiKey: process.env.OPENAI_API_KEY
+            });
         }
 
         if (process.env.AWS_REGION) {
-            providers.push({ provider: AIProvider.AWSBedrock, region: process.env.AWS_REGION });
+            providers.push({
+                provider: AIProvider.AWSBedrock,
+                region: process.env.AWS_REGION
+            });
         }
 
         if (process.env.ANTHROPIC_API_KEY) {
-            providers.push({ provider: AIProvider.Anthropic, apiKey: process.env.ANTHROPIC_API_KEY });
+            providers.push({
+                provider: AIProvider.Anthropic,
+                apiKey: process.env.ANTHROPIC_API_KEY
+            });
         }
 
         if (process.env.GOOGLE_AI_API_KEY) {
-            providers.push({ provider: AIProvider.Google, apiKey: process.env.GOOGLE_AI_API_KEY });
+            providers.push({
+                provider: AIProvider.Google,
+                apiKey: process.env.GOOGLE_AI_API_KEY
+            });
         }
 
         if (process.env.COHERE_API_KEY) {
-            providers.push({ provider: AIProvider.Cohere, apiKey: process.env.COHERE_API_KEY });
+            providers.push({
+                provider: AIProvider.Cohere,
+                apiKey: process.env.COHERE_API_KEY
+            });
         }
 
         if (providers.length === 0) {
-            logger.warn('No AI provider API keys configured. Adding default OpenAI provider with empty key for tracking purposes only.');
-            providers.push({ provider: AIProvider.OpenAI, apiKey: 'dummy-key-for-tracking-only' });
+            logger.warn('No AI provider API keys configured. Adding default OpenAI provider for tracking purposes only.');
+            providers.push({
+                provider: AIProvider.OpenAI,
+                apiKey: 'dummy-key-for-tracking-only'
+            });
         }
 
-        const tracker = await AICostTracker.create({
-            providers,
-            tracking: {
-                enableAutoTracking: true,
-                retentionDays: 90
+        const optimization: OptimizationConfig = {
+            enablePromptOptimization: true,
+            enableModelSuggestions: true,
+            enableCachingSuggestions: true,
+            enableCompression: true,
+            enableContextTrimming: true,
+            enableRequestFusion: true,
+            bedrockConfig: {
+                region: process.env.AWS_REGION || 'us-east-1',
+                modelId: 'anthropic.claude-3-haiku-20240307-v1:0'
             },
-            optimization: {
-                enablePromptOptimization: true,
-                enableModelSuggestions: true,
-                enableCachingSuggestions: true,
-                enableCompression: true,
-                enableContextTrimming: true,
-                enableRequestFusion: true,
-                bedrockConfig: {
-                    region: process.env.AWS_REGION || 'us-east-1',
-                    modelId: 'anthropic.claude-3-haiku-20240307-v1:0'
-                },
-                compressionSettings: {
-                    minCompressionRatio: 0.7,
-                    jsonCompressionThreshold: 100
-                },
-                contextTrimmingSettings: {
-                    maxContextLength: 4000,
-                    preserveRecentMessages: 3,
-                    summarizationModel: 'anthropic.claude-3-haiku-20240307-v1:0'
-                },
-                requestFusionSettings: {
-                    maxFusionBatch: 5,
-                    fusionWaitTime: 5000
-                },
-                thresholds: {
-                    highCostPerRequest: 0.01,
-                    highTokenUsage: 10000,
-                    frequencyThreshold: 1000
-                }
+            compressionSettings: {
+                minCompressionRatio: 0.7,
+                jsonCompressionThreshold: 100
+            },
+            contextTrimmingSettings: {
+                maxContextLength: 4000,
+                preserveRecentMessages: 3,
+                summarizationModel: 'anthropic.claude-3-haiku-20240307-v1:0'
+            },
+            requestFusionSettings: {
+                maxFusionBatch: 5,
+                fusionWaitTime: 5000
+            },
+            thresholds: {
+                highCostPerRequest: 0.01,
+                highTokenUsage: 10000,
+                frequencyThreshold: 1000
             }
-        });
+        };
 
-        logger.info('AI Cost Tracker initialized successfully', {
+        const tracking: TrackingConfig = {
+            enableAutoTracking: true,
+            retentionDays: 90
+        };
+
+        this.config = {
+            providers,
+            optimization,
+            tracking
+        };
+
+        this.initialized = true;
+
+        logger.info('Internal AI Cost Tracker initialized successfully', {
             providersConfigured: providers.length,
             providers: providers.map(p => p.provider)
         });
-        return tracker;
     }
 
     /**
-     * Returns the singleton AICostTracker instance.
-     * Ensures the tracker is initialized before returning.
+     * Returns the tracker configuration
      */
-    static async getTracker(): Promise<AICostTracker> {
-        return this.initialize();
+    static async getConfig(): Promise<TrackerConfig> {
+        await this.initialize();
+        return this.config!;
     }
 
+    /**
+     * Track a request and response
+     */
     static async trackRequest(
         request: any,
         response: any,
@@ -123,15 +149,39 @@ export class AICostTrackerService {
         }
     ): Promise<void> {
         try {
-            const tracker = await this.getTracker();
+            await this.initialize();
 
             // Extract usage data
             const promptTokens = response.usage?.promptTokens || request.promptTokens || 0;
             const completionTokens = response.usage?.completionTokens || request.completionTokens || 0;
             const totalTokens = response.usage?.totalTokens || (promptTokens + completionTokens);
 
-            // Estimate cost (rough calculation)
-            const estimatedCost = this.calculateCost(request.model, totalTokens);
+            // If tokens are not provided, estimate them
+            let finalPromptTokens = promptTokens;
+            let finalCompletionTokens = completionTokens;
+            let finalTotalTokens = totalTokens;
+
+            if (finalPromptTokens === 0 && request.prompt) {
+                const provider = this.mapServiceToProvider(metadata?.service || 'openai');
+                finalPromptTokens = estimateTokens(request.prompt, provider);
+            }
+
+            if (finalCompletionTokens === 0 && (response.content || response.choices?.[0]?.message?.content)) {
+                const provider = this.mapServiceToProvider(metadata?.service || 'openai');
+                const completion = response.content || response.choices?.[0]?.message?.content || '';
+                finalCompletionTokens = estimateTokens(completion, provider);
+            }
+
+            finalTotalTokens = finalPromptTokens + finalCompletionTokens;
+
+            // Calculate cost
+            const provider = this.mapServiceToProvider(metadata?.service || 'openai');
+            const estimatedCost = calculateCost(
+                provider,
+                request.model,
+                finalPromptTokens,
+                finalCompletionTokens
+            );
 
             // Check if approval is required for project
             if (metadata?.projectId && !metadata?.historicalSync) {
@@ -147,7 +197,7 @@ export class AICostTrackerService {
                         {
                             operation: 'API Call',
                             estimatedCost: estimatedCost,
-                            estimatedTokens: totalTokens,
+                            estimatedTokens: finalTotalTokens,
                             model: request.model,
                             prompt: request.prompt?.substring(0, 500),
                             reason: 'Exceeds project approval threshold'
@@ -158,31 +208,17 @@ export class AICostTrackerService {
                 }
             }
 
-            // Track the usage
-            const payload = {
-                provider: metadata?.service || 'openai',
-                model: request.model,
-                promptTokens,
-                completionTokens,
-                totalTokens,
-                prompt: request.prompt || '',
-                estimatedCost,
-                sessionId: userId
-            };
-
-            await tracker.trackUsage(payload);
-
             // Save to database
-            const usage = await Usage.create({
+            await Usage.create({
                 userId,
                 projectId: metadata?.projectId,
                 service: metadata?.service || 'openai',
                 model: request.model,
                 prompt: request.prompt || '',
                 completion: response.content || response.choices?.[0]?.message?.content || '',
-                promptTokens,
-                completionTokens,
-                totalTokens,
+                promptTokens: finalPromptTokens,
+                completionTokens: finalCompletionTokens,
+                totalTokens: finalTotalTokens,
                 cost: estimatedCost,
                 responseTime: metadata?.endpoint ? 100 : 0,
                 metadata: {
@@ -199,79 +235,212 @@ export class AICostTrackerService {
             // Update user monthly usage
             await User.findByIdAndUpdate(userId, {
                 $inc: {
-                    'usage.currentMonth.apiCalls': 1,
-                    'usage.currentMonth.totalCost': estimatedCost,
-                    'usage.currentMonth.totalTokens': totalTokens,
-                },
-            });
-
-            // Update project spending if projectId is provided
-            if (metadata?.projectId) {
-                await ProjectService.updateProjectSpending(metadata.projectId, {
-                    amount: estimatedCost,
-                    userId,
-                    usageId: usage._id.toString(),
-                    model: request.model,
-                    service: metadata?.service || 'openai'
-                });
-            }
-
-            // Track API call activity
-            await ActivityService.trackActivity(userId, {
-                type: 'api_call',
-                title: 'API Call Made',
-                description: `${metadata?.service || 'openai'} - ${request.model} (${totalTokens} tokens)`,
-                metadata: {
-                    service: metadata?.service || 'openai',
-                    model: request.model,
-                    cost: estimatedCost,
-                    tokens: totalTokens,
-                    projectId: metadata?.projectId
+                    'monthlyUsage.totalCost': estimatedCost,
+                    'monthlyUsage.totalTokens': finalTotalTokens,
+                    'monthlyUsage.requestCount': 1
                 }
             });
 
-            logger.info('Request tracked successfully', {
+            // Log activity if not historical sync
+            if (!metadata?.historicalSync) {
+                await ActivityService.trackActivity(userId, {
+                    type: 'api_call',
+                    title: `Made AI request using ${request.model}`,
+                    description: `AI request with ${finalTotalTokens} tokens and cost $${estimatedCost.toFixed(6)}`,
+                    metadata: {
+                        model: request.model,
+                        tokens: finalTotalTokens,
+                        cost: estimatedCost,
+                        projectId: metadata?.projectId
+                    }
+                });
+            }
+
+            logger.debug('Usage tracked successfully', {
                 userId,
-                projectId: metadata?.projectId,
-                service: metadata?.service || 'openai',
                 model: request.model,
+                tokens: finalTotalTokens,
                 cost: estimatedCost,
+                projectId: metadata?.projectId
             });
+
         } catch (error) {
-            logger.error('Error tracking request:', error);
+            logger.error('Error tracking usage:', error);
             throw error;
         }
     }
 
     /**
-     * Simple cost calculation based on model
+     * Generate optimization suggestions for a prompt
      */
-    private static calculateCost(model: string, tokens: number): number {
-        // Simple pricing estimates (per 1K tokens)
-        const pricing: Record<string, number> = {
-            'gpt-4': 0.03,
-            'gpt-4-turbo': 0.01,
-            'gpt-3.5-turbo': 0.002,
-            'claude-2': 0.008,
-            'claude-instant': 0.0024,
-            'default': 0.002
-        };
+    static async generateOptimizations(
+        prompt: string,
+        provider: AIProvider,
+        model: string,
+        conversationHistory?: any[]
+    ): Promise<OptimizationResult> {
+        await this.initialize();
 
-        const pricePerToken = (pricing[model] || pricing.default) / 1000;
-        return tokens * pricePerToken;
+        return generateOptimizationSuggestions(
+            prompt,
+            provider,
+            model,
+            conversationHistory
+        );
     }
 
+    /**
+     * Apply optimizations to a prompt
+     */
+    static async applyOptimizations(
+        prompt: string,
+        optimizations: any[],
+        conversationHistory?: any[]
+    ): Promise<{
+        optimizedPrompt: string;
+        optimizedHistory?: any[];
+        appliedOptimizations: string[];
+    }> {
+        await this.initialize();
+
+        return applyOptimizations(prompt, optimizations, conversationHistory);
+    }
+
+    /**
+     * Estimate cost for a request before making it
+     */
+    static async estimateRequestCost(
+        prompt: string,
+        model: string,
+        provider: AIProvider,
+        expectedCompletionTokens: number = 150
+    ): Promise<{
+        promptCost: number;
+        completionCost: number;
+        totalCost: number;
+        currency: string;
+        breakdown: {
+            promptTokens: number;
+            completionTokens: number;
+            pricePerPromptToken: number;
+            pricePerCompletionToken: number;
+        };
+    }> {
+        await this.initialize();
+
+        const promptTokens = estimateTokens(prompt, provider);
+        return estimateCost(provider, model, promptTokens, expectedCompletionTokens);
+    }
+
+    /**
+     * Map service string to AIProvider enum
+     */
+    private static mapServiceToProvider(service: string): AIProvider {
+        const serviceMap: Record<string, AIProvider> = {
+            'openai': AIProvider.OpenAI,
+            'aws-bedrock': AIProvider.AWSBedrock,
+            'bedrock': AIProvider.AWSBedrock,
+            'anthropic': AIProvider.Anthropic,
+            'google': AIProvider.Google,
+            'cohere': AIProvider.Cohere,
+            'gemini': AIProvider.Gemini,
+            'deepseek': AIProvider.DeepSeek,
+            'groq': AIProvider.Groq,
+            'huggingface': AIProvider.HuggingFace,
+            'ollama': AIProvider.Ollama,
+            'replicate': AIProvider.Replicate,
+            'azure': AIProvider.Azure
+        };
+
+        return serviceMap[service.toLowerCase()] || AIProvider.OpenAI;
+    }
+
+    /**
+     * Make a tracked request (placeholder for future implementation)
+     */
     static async makeTrackedRequest(
         request: any,
         userId: string,
         metadata?: any
     ): Promise<any> {
-        const tracker = await this.getTracker();
+        // This would be implemented to make actual API calls to providers
+        // For now, we'll just track the usage and return a mock response
 
-        let payload = { ...request, ...metadata, sessionId: userId };
-        if (typeof payload.prompt !== 'string') {
-            payload.prompt = '';
+        const mockResponse = {
+            content: 'Mock response for tracking purposes',
+            usage: {
+                promptTokens: estimateTokens(request.prompt || '', AIProvider.OpenAI),
+                completionTokens: 50,
+                totalTokens: 0
+            }
+        };
+
+        mockResponse.usage.totalTokens = mockResponse.usage.promptTokens + mockResponse.usage.completionTokens;
+
+        await this.trackRequest(request, mockResponse, userId, metadata);
+
+        return mockResponse;
+    }
+
+    /**
+     * Get usage analytics
+     */
+    static async getUsageAnalytics(
+        userId: string,
+        projectId?: string,
+        startDate?: Date,
+        endDate?: Date
+    ): Promise<any> {
+        await this.initialize();
+
+        const query: any = { userId };
+
+        if (projectId) {
+            query.projectId = projectId;
         }
-        return tracker.makeRequest(payload);
+
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = startDate;
+            if (endDate) query.createdAt.$lte = endDate;
+        }
+
+        const usage = await Usage.find(query);
+
+        const totalCost = usage.reduce((sum, u) => sum + u.cost, 0);
+        const totalTokens = usage.reduce((sum, u) => sum + u.totalTokens, 0);
+        const averageTokensPerRequest = usage.length > 0 ? totalTokens / usage.length : 0;
+
+        // Group by model
+        const modelUsage = usage.reduce((acc, u) => {
+            const key = `${u.service}-${u.model}`;
+            if (!acc[key]) {
+                acc[key] = {
+                    model: u.model,
+                    provider: this.mapServiceToProvider(u.service),
+                    requestCount: 0,
+                    totalTokens: 0,
+                    totalCost: 0,
+                    averageCostPerRequest: 0
+                };
+            }
+            acc[key].requestCount++;
+            acc[key].totalTokens += u.totalTokens;
+            acc[key].totalCost += u.cost;
+            acc[key].averageCostPerRequest = acc[key].totalCost / acc[key].requestCount;
+            return acc;
+        }, {} as any);
+
+        return {
+            totalCost,
+            totalTokens,
+            averageTokensPerRequest,
+            mostUsedModels: Object.values(modelUsage),
+            requestCount: usage.length,
+            dateRange: {
+                start: startDate,
+                end: endDate
+            }
+        };
     }
 } 

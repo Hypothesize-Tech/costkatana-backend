@@ -159,15 +159,28 @@ projectSchema.index({ isActive: 1 });
 
 // Methods
 projectSchema.methods.isMember = function (userId: string): boolean {
-    return this.members.some((member: any) =>
-        member.userId.toString() === userId ||
-        this.ownerId.toString() === userId
-    );
+    const ownerIdString = typeof this.ownerId === 'object' && this.ownerId._id
+        ? this.ownerId._id.toString()
+        : this.ownerId.toString();
+    return this.members.some((member: any) => {
+        const memberIdString = typeof member.userId === 'object' && member.userId._id
+            ? member.userId._id.toString()
+            : member.userId.toString();
+        return memberIdString === userId;
+    }) || ownerIdString === userId;
 };
 
 projectSchema.methods.getMemberRole = function (userId: string): string | null {
-    if (this.ownerId.toString() === userId) return 'owner';
-    const member = this.members.find((m: any) => m.userId.toString() === userId);
+    const ownerIdString = typeof this.ownerId === 'object' && this.ownerId._id
+        ? this.ownerId._id.toString()
+        : this.ownerId.toString();
+    if (ownerIdString === userId) return 'owner';
+    const member = this.members.find((m: any) => {
+        const memberIdString = typeof m.userId === 'object' && m.userId._id
+            ? m.userId._id.toString()
+            : m.userId.toString();
+        return memberIdString === userId;
+    });
     return member ? member.role : null;
 };
 

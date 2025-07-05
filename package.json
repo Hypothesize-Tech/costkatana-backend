@@ -27,7 +27,6 @@
         "@aws-sdk/client-s3": "^3.500.0",
         "@aws-sdk/s3-request-presigner": "^3.837.0",
         "@types/cookie-parser": "^1.4.9",
-        "ai-cost-tracker": "file:../ai-cost-optimizer",
         "axios": "^1.10.0",
         "bcryptjs": "^2.4.3",
         "compression": "^1.8.0",

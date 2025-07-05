@@ -28,7 +28,7 @@ export class AnalyticsController {
                 service: query.service,
                 model: query.model,
                 groupBy: query.groupBy,
-            });
+            }, { includeProjectBreakdown: true });
 
             res.json({
                 success: true,
@@ -212,7 +212,7 @@ export class AnalyticsController {
                     userId,
                     startDate,
                     endDate,
-                }),
+                }, { includeProjectBreakdown: true }),
                 AnalyticsService.getAnalytics({
                     userId,
                     startDate: today,
@@ -291,7 +291,20 @@ export class AnalyticsController {
 
             // Verify user has access to project
             const { ProjectService } = await import('../services/project.service');
-            const project = await ProjectService.getProjectById(projectId, userId);
+            let project;
+
+            try {
+                project = await ProjectService.getProjectById(projectId, userId);
+            } catch (error: any) {
+                if (error.message === 'Access denied' || error.message === 'Project not found') {
+                    res.status(404).json({
+                        success: false,
+                        error: 'Project not found or access denied'
+                    });
+                    return;
+                }
+                throw error; // Re-throw other errors
+            }
 
             if (!project) {
                 res.status(404).json({

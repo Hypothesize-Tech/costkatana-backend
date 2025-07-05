@@ -625,8 +625,16 @@ export class ProjectService {
         }
 
         // Check permissions
-        const role = project.ownerId.toString() === userId ? 'owner' :
-            project.members.find(m => m.userId.toString() === userId)?.role;
+        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+        const role = ownerIdString === userId ? 'owner' :
+            project.members.find(m => {
+                const memberIdString = typeof m.userId === 'object' && m.userId._id
+                    ? m.userId._id.toString()
+                    : m.userId.toString();
+                return memberIdString === userId;
+            })?.role;
 
         if (role !== 'owner' && role !== 'admin') {
             throw new Error('Unauthorized to update project');
@@ -664,21 +672,32 @@ export class ProjectService {
         }
 
         // Check permissions
-        const removedByRole = project.ownerId.toString() === removedBy ? 'owner' :
-            project.members.find(m => m.userId.toString() === removedBy)?.role;
+        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+        const removedByRole = ownerIdString === removedBy ? 'owner' :
+            project.members.find(m => {
+                const memberIdString = typeof m.userId === 'object' && m.userId._id
+                    ? m.userId._id.toString()
+                    : m.userId.toString();
+                return memberIdString === removedBy;
+            })?.role;
 
         if (removedByRole !== 'owner' && removedByRole !== 'admin') {
             throw new Error('Unauthorized to remove members');
         }
 
         // Cannot remove owner
-        if (project.ownerId.toString() === memberId) {
+        if (ownerIdString === memberId) {
             throw new Error('Cannot remove project owner');
         }
 
-        project.members = project.members.filter(
-            m => m.userId.toString() !== memberId
-        );
+        project.members = project.members.filter(m => {
+            const memberIdString = typeof m.userId === 'object' && m.userId._id
+                ? m.userId._id.toString()
+                : m.userId.toString();
+            return memberIdString !== memberId;
+        });
 
         await project.save();
 
@@ -859,8 +878,18 @@ export class ProjectService {
         }
 
         // Check if user has access
-        const hasAccess = project.ownerId.toString() === userId ||
-            project.members.some(m => m.userId.toString() === userId);
+        // Handle both ObjectId and populated object cases
+        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+
+        const hasAccess = ownerIdString === userId ||
+            project.members.some(m => {
+                const memberIdString = typeof m.userId === 'object' && m.userId._id
+                    ? m.userId._id.toString()
+                    : m.userId.toString();
+                return memberIdString === userId;
+            });
 
         if (!hasAccess) {
             throw new Error('Access denied');
@@ -879,7 +908,10 @@ export class ProjectService {
         }
 
         // Only owner can delete project
-        if (project.ownerId.toString() !== userId) {
+        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+        if (ownerIdString !== userId) {
             throw new Error('Access denied');
         }
 
@@ -916,8 +948,16 @@ export class ProjectService {
         }
 
         // Check permissions
-        const role = project.ownerId.toString() === userId ? 'owner' :
-            project.members.find(m => m.userId.toString() === userId)?.role;
+        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+            ? project.ownerId._id.toString()
+            : project.ownerId.toString();
+        const role = ownerIdString === userId ? 'owner' :
+            project.members.find(m => {
+                const memberIdString = typeof m.userId === 'object' && m.userId._id
+                    ? m.userId._id.toString()
+                    : m.userId.toString();
+                return memberIdString === userId;
+            })?.role;
 
         if (role !== 'owner' && role !== 'admin') {
             throw new Error('Access denied');
