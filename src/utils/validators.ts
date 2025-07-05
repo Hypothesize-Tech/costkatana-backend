@@ -36,6 +36,7 @@ export const trackUsageSchema = z.object({
     responseTime: z.number().nonnegative(),
     metadata: z.record(z.any()).optional(),
     tags: z.array(z.string()).optional(),
+    projectId: z.string().optional(),
 });
 
 export const sdkTrackUsageSchema = z.object({
@@ -51,7 +52,8 @@ export const sdkTrackUsageSchema = z.object({
     estimatedCost: z.number().min(0).optional(),
     responseTime: z.number().min(0).optional().default(0),
     metadata: z.object({}).optional().default({}),
-    tags: z.array(z.string()).optional().default([])
+    tags: z.array(z.string()).optional().default([]),
+    projectId: z.string().optional()
 }).refine(
     (data) => data.provider || data.service,
     { message: "Either 'provider' or 'service' must be provided" }
@@ -65,6 +67,7 @@ export const analyticsQuerySchema = z.object({
     service: z.string().optional(),
     model: z.string().optional(),
     groupBy: z.enum(['service', 'model', 'date', 'hour']).optional(),
+    projectId: z.string().optional(),
 });
 
 // Optimization validation schemas

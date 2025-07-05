@@ -12,6 +12,7 @@ const analyticsQuerySchema = z.object({
     service: z.string().optional(),
     model: z.string().optional(),
     groupBy: z.enum(['service', 'model', 'date', 'hour']).optional(),
+    projectId: z.string().optional(),
 });
 
 export class AnalyticsController {
@@ -28,6 +29,7 @@ export class AnalyticsController {
                 service: query.service,
                 model: query.model,
                 groupBy: query.groupBy,
+                projectId: query.projectId,
             }, { includeProjectBreakdown: true });
 
             res.json({
@@ -169,19 +171,26 @@ export class AnalyticsController {
         try {
             const userId = req.user!.id;
             const objectUserId = new mongoose.Types.ObjectId(userId);
+            const { projectId } = req.query;
+
+            // Build base filter
+            const baseFilter: any = { userId: objectUserId };
+            if (projectId && projectId !== 'all') {
+                baseFilter.projectId = new mongoose.Types.ObjectId(projectId as string);
+            }
 
             // Get data for the last 30 days
             let endDate = new Date();
             let startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
             const hasRecentUsage = await Usage.exists({
-                userId: objectUserId,
+                ...baseFilter,
                 createdAt: { $gte: startDate, $lte: endDate },
             });
 
             if (!hasRecentUsage) {
                 const usageBounds = await Usage.aggregate([
-                    { $match: { userId: objectUserId } },
+                    { $match: baseFilter },
                     {
                         $group: {
                             _id: null,
@@ -212,16 +221,19 @@ export class AnalyticsController {
                     userId,
                     startDate,
                     endDate,
+                    projectId: projectId as string,
                 }, { includeProjectBreakdown: true }),
                 AnalyticsService.getAnalytics({
                     userId,
                     startDate: today,
                     endDate: todayEnd,
+                    projectId: projectId as string,
                 }),
                 AnalyticsService.getAnalytics({
                     userId,
                     startDate: yesterday,
                     endDate: yesterdayEnd,
+                    projectId: projectId as string,
                 }),
                 User.findById(userId).select('name email subscription usage').lean(),
             ]);

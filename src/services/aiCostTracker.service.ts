@@ -207,7 +207,7 @@ export class AICostTrackerService {
                     throw new Error(`Approval required. Request ID: ${approvalRequest._id}`);
                 }
             }
-
+            console.log("metadatametadatametadata", metadata)
             // Save to database
             await Usage.create({
                 userId,

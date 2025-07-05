@@ -96,6 +96,15 @@ export class UsageController {
                 });
             }
             const data = validationResult.data;
+            // Extract projectId from multiple possible sources
+            let projectId = (data as any).projectId || req.query.projectId;
+
+            // If projectId is not found at top level, check in metadata (legacy support)
+            if (!projectId && data.metadata && (data.metadata as any).projectId) {
+                projectId = (data.metadata as any).projectId;
+                console.log('Found projectId in metadata (legacy approach):', projectId);
+            }
+
             // Ensure all required fields have values
             const usageData = {
                 userId,
@@ -118,6 +127,11 @@ export class UsageController {
                 optimizationApplied: false,
                 errorOccurred: false
             };
+
+            // Only add projectId if it exists and is valid
+            if (projectId && typeof projectId === 'string' && projectId.trim() !== '') {
+                (usageData as any).projectId = projectId.trim();
+            }
             console.log('Prepared usage data:', usageData);
             // Track usage
             const usage = await UsageService.trackUsage(usageData);
@@ -153,6 +167,7 @@ export class UsageController {
 
             const filters = {
                 userId,
+                projectId: req.query.projectId as string,
                 service: req.query.service as string,
                 model: req.query.model as string,
                 startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
@@ -220,8 +235,9 @@ export class UsageController {
         try {
             const userId = req.user!.id;
             const period = (req.query.period as 'daily' | 'weekly' | 'monthly') || 'monthly';
+            const projectId = req.query.projectId as string;
 
-            const stats = await UsageService.getUsageStats(userId, period);
+            const stats = await UsageService.getUsageStats(userId, period, projectId);
 
             res.json({
                 success: true,
@@ -345,8 +361,9 @@ export class UsageController {
     static async detectAnomalies(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
+            const projectId = req.query.projectId as string;
 
-            const anomalies = await UsageService.detectAnomalies(userId);
+            const anomalies = await UsageService.detectAnomalies(userId, projectId);
 
             res.json({
                 success: true,
@@ -361,7 +378,7 @@ export class UsageController {
     static async searchUsage(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
-            const { q, page, limit } = req.query;
+            const { q, page, limit, projectId } = req.query;
 
             if (!q) {
                 return res.status(400).json({
@@ -374,7 +391,8 @@ export class UsageController {
             const result = await UsageService.searchUsage(
                 userId,
                 q as string,
-                paginationOptions
+                paginationOptions,
+                projectId as string
             );
 
             res.json({
@@ -396,6 +414,7 @@ export class UsageController {
 
             const filters = {
                 userId,
+                projectId: req.query.projectId as string,
                 service: req.query.service as string,
                 model: req.query.model as string,
                 startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,

@@ -10,6 +10,7 @@ import { getUserIdFromToken } from '../controllers/usage.controller';
 
 interface TrackUsageData {
     userId: string;
+    projectId?: string;
     service: string;
     model: string;
     prompt: string;
@@ -40,7 +41,6 @@ export class UsageService {
 
     static async trackUsage(data: any, req?: any): Promise<IUsage | null> {
         try {
-            console.log('UsageService.trackUsage called with:', data);
             // Ensure userId is a valid ObjectId
             let userId = data.userId;
             // If userId is missing, try to get from req (if provided)
@@ -70,10 +70,14 @@ export class UsageService {
                 ipAddress: data.ipAddress,
                 userAgent: data.userAgent
             };
-            console.log('Creating usage with data:', usageData);
+
+            // Only add projectId if it exists and is not empty
+            if (data.projectId && typeof data.projectId === 'string' && data.projectId.trim() !== '') {
+                (usageData as any).projectId = new mongoose.Types.ObjectId(data.projectId);
+            }
+
             const usage = new Usage(usageData);
             const savedUsage = await usage.save();
-            console.log('Usage saved successfully:', savedUsage._id);
             return savedUsage;
         } catch (error: any) {
             console.error('Error in UsageService.trackUsage:', error);
@@ -90,7 +94,9 @@ export class UsageService {
             const query: any = {};
 
             if (filters.userId) query.userId = filters.userId;
-            if (filters.projectId) query.projectId = filters.projectId;
+            if (filters.projectId && filters.projectId !== 'all') {
+                query.projectId = new mongoose.Types.ObjectId(filters.projectId);
+            }
             if (filters.service) query.service = filters.service;
             if (filters.model) query.model = filters.model;
             if (filters.tags && filters.tags.length > 0) {
@@ -147,7 +153,7 @@ export class UsageService {
         }
     }
 
-    static async getUsageStats(userId: string, period: 'daily' | 'weekly' | 'monthly') {
+    static async getUsageStats(userId: string, period: 'daily' | 'weekly' | 'monthly', projectId?: string) {
         try {
             const now = new Date();
             let startDate: Date;
@@ -164,12 +170,18 @@ export class UsageService {
                     break;
             }
 
+            const matchCondition: any = {
+                userId: userId,
+                createdAt: { $gte: startDate },
+            };
+
+            if (projectId) {
+                matchCondition.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
             const stats = await Usage.aggregate([
                 {
-                    $match: {
-                        userId: userId,
-                        createdAt: { $gte: startDate },
-                    },
+                    $match: matchCondition,
                 },
                 {
                     $group: {
@@ -198,10 +210,7 @@ export class UsageService {
             // Get service breakdown
             const serviceBreakdown = await Usage.aggregate([
                 {
-                    $match: {
-                        userId: userId,
-                        createdAt: { $gte: startDate },
-                    },
+                    $match: matchCondition,
                 },
                 {
                     $group: {
@@ -225,10 +234,7 @@ export class UsageService {
             // Get model breakdown
             const modelBreakdown = await Usage.aggregate([
                 {
-                    $match: {
-                        userId: userId,
-                        createdAt: { $gte: startDate },
-                    },
+                    $match: matchCondition,
                 },
                 {
                     $group: {
@@ -286,10 +292,16 @@ export class UsageService {
         }
     }
 
-    static async detectAnomalies(userId: string) {
+    static async detectAnomalies(userId: string, projectId?: string) {
         try {
+            // Build query conditions
+            const baseQuery: any = { userId };
+            if (projectId) {
+                baseQuery.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
             // Get recent usage
-            const recentUsage = await Usage.find({ userId })
+            const recentUsage = await Usage.find(baseQuery)
                 .sort({ createdAt: -1 })
                 .limit(100)
                 .select('createdAt cost totalTokens')
@@ -299,12 +311,18 @@ export class UsageService {
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
+            const historicalMatchCondition: any = {
+                userId: userId,
+                createdAt: { $gte: thirtyDaysAgo },
+            };
+
+            if (projectId) {
+                historicalMatchCondition.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
             const historicalStats = await Usage.aggregate([
                 {
-                    $match: {
-                        userId: userId,
-                        createdAt: { $gte: thirtyDaysAgo },
-                    },
+                    $match: historicalMatchCondition,
                 },
                 {
                     $group: {
@@ -369,25 +387,28 @@ export class UsageService {
         }
     }
 
-    static async searchUsage(userId: string, searchTerm: string, options: PaginationOptions) {
+    static async searchUsage(userId: string, searchTerm: string, options: PaginationOptions, projectId?: string) {
         try {
             const page = options.page || 1;
             const limit = options.limit || 10;
             const skip = (page - 1) * limit;
 
+            const searchQuery: any = {
+                userId,
+                $text: { $search: searchTerm },
+            };
+
+            if (projectId) {
+                searchQuery.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
             const [data, total] = await Promise.all([
-                Usage.find({
-                    userId,
-                    $text: { $search: searchTerm },
-                })
+                Usage.find(searchQuery)
                     .sort({ score: { $meta: 'textScore' } })
                     .skip(skip)
                     .limit(limit)
                     .lean(),
-                Usage.countDocuments({
-                    userId,
-                    $text: { $search: searchTerm },
-                }),
+                Usage.countDocuments(searchQuery),
             ]);
 
             const result = paginate(data, total, options);
@@ -438,17 +459,23 @@ export class UsageService {
     /**
      * Get real-time usage summary for dashboard
      */
-    static async getRealTimeUsageSummary(userId: string) {
+    static async getRealTimeUsageSummary(userId: string, projectId?: string) {
         try {
             const today = new Date();
             today.setHours(0, 0, 0, 0);
 
+            const matchCondition: any = {
+                userId: userId,
+                createdAt: { $gte: today },
+            };
+
+            if (projectId) {
+                matchCondition.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
             const summary = await Usage.aggregate([
                 {
-                    $match: {
-                        userId: userId,
-                        createdAt: { $gte: today },
-                    },
+                    $match: matchCondition,
                 },
                 {
                     $group: {

@@ -10,6 +10,7 @@ interface AnalyticsQuery {
     service?: string;
     model?: string;
     groupBy?: 'service' | 'model' | 'date' | 'hour';
+    projectId?: string;
 }
 
 interface TimeSeriesData {
@@ -36,6 +37,9 @@ export class AnalyticsService {
 
             if (filters.service) match.service = filters.service;
             if (filters.model) match.model = filters.model;
+            if (filters.projectId && filters.projectId !== 'all') {
+                match.projectId = new mongoose.Types.ObjectId(filters.projectId);
+            }
 
             const [summary, timeline, breakdown] = await Promise.all([
                 this.getSummary(match),
@@ -44,7 +48,8 @@ export class AnalyticsService {
             ]);
 
             let projectBreakdown = null;
-            if (options.includeProjectBreakdown) {
+            if (options.includeProjectBreakdown && !filters.projectId) {
+                // Only include project breakdown when not filtering by a specific project
                 projectBreakdown = await this.calculateProjectBreakdown(filters.userId);
             }
 
