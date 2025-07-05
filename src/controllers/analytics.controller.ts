@@ -344,10 +344,27 @@ export class AnalyticsController {
                 metric = 'cost'
             } = req.query;
 
-            if (!projectIds || !Array.isArray(projectIds)) {
+            // Log incoming request for debugging
+            logger.debug('getProjectComparison called with params:', req.query);
+
+            // Handle array parameter from Express query parsing
+            let projectIdsArray: string[] = [];
+            if (Array.isArray(projectIds)) {
+                projectIdsArray = projectIds;
+            } else if (typeof projectIds === 'string') {
+                projectIdsArray = [projectIds];
+            } else {
                 res.status(400).json({
                     success: false,
-                    error: 'projectIds array is required'
+                    error: 'projectIds parameter is required'
+                });
+                return;
+            }
+
+            if (projectIdsArray.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'At least one project ID is required'
                 });
                 return;
             }
@@ -357,7 +374,7 @@ export class AnalyticsController {
             const userProjects = await ProjectService.getUserProjects(userId);
             const accessibleProjectIds = userProjects.map(p => p._id.toString());
 
-            const validProjectIds = projectIds.filter((id: string) =>
+            const validProjectIds = projectIdsArray.filter((id: string) =>
                 accessibleProjectIds.includes(id)
             );
 

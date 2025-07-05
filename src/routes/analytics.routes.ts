@@ -13,11 +13,11 @@ router.use(authenticate);
 // Get analytics data
 router.get('/', validateQuery(analyticsQuerySchema), asyncHandler(AnalyticsController.getAnalytics));
 
+// Compare multiple projects - MUST come before /projects/:projectId 
+router.get('/projects/compare', asyncHandler(AnalyticsController.getProjectComparison));
+
 // Get project-specific analytics
 router.get('/projects/:projectId', validateQuery(analyticsQuerySchema), asyncHandler(AnalyticsController.getProjectAnalytics));
-
-// Compare multiple projects
-router.get('/projects/compare', asyncHandler(AnalyticsController.getProjectComparison));
 
 // Get comparative analytics
 router.post('/compare', asyncHandler(AnalyticsController.getComparativeAnalytics));
