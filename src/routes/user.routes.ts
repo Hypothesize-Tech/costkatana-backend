@@ -33,6 +33,14 @@ router.put('/alerts/:id/read', asyncHandler(UserController.markAlertAsRead));
 router.put('/alerts/read-all', asyncHandler(UserController.markAllAlertsAsRead));
 router.delete('/alerts/:id', asyncHandler(UserController.deleteAlert));
 
+// Extended alert routes
+router.get('/alerts/settings', asyncHandler(UserController.getAlertSettings));
+router.put('/alerts/settings', asyncHandler(UserController.updateAlertSettings));
+router.post('/alerts/test', asyncHandler(UserController.testAlert));
+router.get('/alerts/unread-count', asyncHandler(UserController.getUnreadAlertCount));
+router.put('/alerts/:id/snooze', asyncHandler(UserController.snoozeAlert));
+router.get('/alerts/history', asyncHandler(UserController.getAlertHistory));
+
 // Subscription routes
 router.get('/subscription', asyncHandler(UserController.getSubscription));
 router.put('/subscription', asyncHandler(UserController.updateSubscription));

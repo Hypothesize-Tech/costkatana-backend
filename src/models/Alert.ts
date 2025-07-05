@@ -3,7 +3,7 @@ import mongoose, { Schema } from 'mongoose';
 export interface IAlert {
     _id?: any;
     userId: mongoose.Types.ObjectId;
-    type: 'cost_threshold' | 'usage_spike' | 'optimization_available' | 'weekly_summary' | 'monthly_summary' | 'error_rate';
+    type: 'cost_threshold' | 'usage_spike' | 'optimization_available' | 'weekly_summary' | 'monthly_summary' | 'error_rate' | 'cost' | 'optimization' | 'anomaly' | 'system';
     title: string;
     message: string;
     severity: 'low' | 'medium' | 'high' | 'critical';
@@ -15,11 +15,18 @@ export interface IAlert {
         recommendations?: string[];
         [key: string]: any;
     };
+    metadata?: {
+        isTest?: boolean;
+        testType?: string;
+        costImpact?: number;
+        [key: string]: any;
+    };
     sent: boolean;
     sentAt?: Date;
     sentTo?: string;
     read: boolean;
     readAt?: Date;
+    snoozedUntil?: Date;
     actionRequired: boolean;
     actionTaken?: boolean;
     actionTakenAt?: Date;
@@ -37,7 +44,7 @@ const alertSchema = new Schema<IAlert>({
     },
     type: {
         type: String,
-        enum: ['cost_threshold', 'usage_spike', 'optimization_available', 'weekly_summary', 'monthly_summary', 'error_rate'],
+        enum: ['cost_threshold', 'usage_spike', 'optimization_available', 'weekly_summary', 'monthly_summary', 'error_rate', 'cost', 'optimization', 'anomaly', 'system'],
         required: true,
     },
     title: {
@@ -57,6 +64,10 @@ const alertSchema = new Schema<IAlert>({
         type: Schema.Types.Mixed,
         default: {},
     },
+    metadata: {
+        type: Schema.Types.Mixed,
+        default: {},
+    },
     sent: {
         type: Boolean,
         default: false,
@@ -68,6 +79,7 @@ const alertSchema = new Schema<IAlert>({
         default: false,
     },
     readAt: Date,
+    snoozedUntil: Date,
     actionRequired: {
         type: Boolean,
         default: false,
@@ -89,7 +101,7 @@ alertSchema.index({ userId: 1, read: 1 });
 alertSchema.index({ userId: 1, type: 1, createdAt: -1 });
 alertSchema.index({ createdAt: -1 });
 
-// TTL index for automatic deletion of expired alerts
+
 alertSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export const Alert = mongoose.model<IAlert>('Alert', alertSchema);

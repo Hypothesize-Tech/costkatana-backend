@@ -222,6 +222,331 @@ export class UserController {
         return;
     }
 
+    static async getAlertSettings(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+
+            const user = await User.findById(userId).select('preferences');
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
+            // Default alert settings based on user preferences
+            const settings = {
+                email: {
+                    costAlerts: user.preferences.emailAlerts,
+                    optimizationSuggestions: user.preferences.optimizationSuggestions,
+                    weeklyReports: user.preferences.weeklyReports,
+                    monthlyReports: false,
+                    anomalyDetection: true,
+                },
+                push: {
+                    costAlerts: user.preferences.emailAlerts,
+                    optimizationSuggestions: user.preferences.optimizationSuggestions,
+                    anomalyDetection: true,
+                },
+                thresholds: {
+                    dailyCostLimit: user.preferences.alertThreshold,
+                    weeklyCostLimit: user.preferences.alertThreshold * 7,
+                    monthlyCostLimit: user.preferences.alertThreshold * 30,
+                    anomalyPercentage: 50,
+                },
+            };
+
+            res.json({
+                success: true,
+                data: settings,
+            });
+        } catch (error: any) {
+            logger.error('Get alert settings error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async updateAlertSettings(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { email, thresholds } = req.body;
+
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+            }
+
+            // Update user preferences based on alert settings
+            if (email) {
+                user.preferences.emailAlerts = email.costAlerts || false;
+                user.preferences.optimizationSuggestions = email.optimizationSuggestions || false;
+                user.preferences.weeklyReports = email.weeklyReports || false;
+            }
+
+            if (thresholds && thresholds.dailyCostLimit) {
+                user.preferences.alertThreshold = thresholds.dailyCostLimit;
+            }
+
+            await user.save();
+
+            res.json({
+                success: true,
+                message: 'Alert settings updated successfully',
+            });
+        } catch (error: any) {
+            logger.error('Update alert settings error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async testAlert(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { type } = req.body;
+
+            if (!type || !['cost', 'optimization', 'anomaly', 'system'].includes(type)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid alert type. Must be one of: cost, optimization, anomaly, system',
+                });
+            }
+
+            // Create a test alert
+            const testAlert = new Alert({
+                userId,
+                type,
+                title: `Test ${type} Alert`,
+                message: `This is a test ${type} alert to verify your notification settings.`,
+                severity: 'medium',
+                read: false,
+                metadata: {
+                    isTest: true,
+                    testType: type,
+                },
+            });
+
+            await testAlert.save();
+
+            res.json({
+                success: true,
+                message: `Test ${type} alert created successfully`,
+            });
+        } catch (error: any) {
+            logger.error('Test alert error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async getUnreadAlertCount(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+
+            const counts = await Alert.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId), read: false } },
+                {
+                    $group: {
+                        _id: '$severity',
+                        count: { $sum: 1 },
+                    },
+                },
+            ]);
+
+            const result = {
+                count: 0,
+                critical: 0,
+                high: 0,
+                medium: 0,
+                low: 0,
+            };
+
+            counts.forEach((item) => {
+                result[item._id as keyof typeof result] = item.count;
+                result.count += item.count;
+            });
+
+            res.json({
+                success: true,
+                data: result,
+            });
+        } catch (error: any) {
+            logger.error('Get unread alert count error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async snoozeAlert(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { id } = req.params;
+            const { until } = req.body;
+
+            if (!until) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Snooze until date is required',
+                });
+            }
+
+            const snoozeUntil = new Date(until);
+            if (snoozeUntil <= new Date()) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Snooze date must be in the future',
+                });
+            }
+
+            const alert = await Alert.findOneAndUpdate(
+                { _id: id, userId },
+                {
+                    snoozedUntil: snoozeUntil,
+                    read: true,
+                    readAt: new Date(),
+                },
+                { new: true }
+            );
+
+            if (!alert) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Alert not found',
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Alert snoozed successfully',
+            });
+        } catch (error: any) {
+            logger.error('Snooze alert error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async getAlertHistory(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { page = 1, limit = 20, groupBy = 'day' } = req.query;
+
+            // Calculate date grouping based on groupBy parameter
+            let dateGrouping;
+            switch (groupBy) {
+                case 'week':
+                    dateGrouping = {
+                        $dateToString: {
+                            format: '%Y-%U',
+                            date: '$createdAt',
+                        },
+                    };
+                    break;
+                case 'month':
+                    dateGrouping = {
+                        $dateToString: {
+                            format: '%Y-%m',
+                            date: '$createdAt',
+                        },
+                    };
+                    break;
+                default: // day
+                    dateGrouping = {
+                        $dateToString: {
+                            format: '%Y-%m-%d',
+                            date: '$createdAt',
+                        },
+                    };
+            }
+
+            const history = await Alert.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $group: {
+                        _id: dateGrouping,
+                        total: { $sum: 1 },
+                        costAlerts: {
+                            $sum: { $cond: [{ $eq: ['$type', 'cost'] }, 1, 0] },
+                        },
+                        optimizations: {
+                            $sum: { $cond: [{ $eq: ['$type', 'optimization'] }, 1, 0] },
+                        },
+                        anomalies: {
+                            $sum: { $cond: [{ $eq: ['$type', 'anomaly'] }, 1, 0] },
+                        },
+                        system: {
+                            $sum: { $cond: [{ $eq: ['$type', 'system'] }, 1, 0] },
+                        },
+                        totalCostImpact: { $sum: { $ifNull: ['$metadata.costImpact', 0] } },
+                    },
+                },
+                { $sort: { _id: -1 } },
+                { $skip: (Number(page) - 1) * Number(limit) },
+                { $limit: Number(limit) },
+            ]);
+
+            // Get summary statistics
+            const [summary] = await Alert.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $group: {
+                        _id: null,
+                        totalAlerts: { $sum: 1 },
+                        totalCostImpact: { $sum: { $ifNull: ['$metadata.costImpact', 0] } },
+                        types: { $push: '$type' },
+                    },
+                },
+            ]);
+
+            const formattedHistory = history.map((item) => ({
+                date: item._id,
+                counts: {
+                    total: item.total,
+                    costAlerts: item.costAlerts,
+                    optimizations: item.optimizations,
+                    anomalies: item.anomalies,
+                    system: item.system,
+                },
+                totalCostImpact: item.totalCostImpact,
+            }));
+
+            // Calculate most common type
+            let mostCommonType = 'N/A';
+            if (summary && summary.types) {
+                const typeCounts = summary.types.reduce((acc: any, type: string) => {
+                    acc[type] = (acc[type] || 0) + 1;
+                    return acc;
+                }, {});
+                mostCommonType = Object.keys(typeCounts).reduce((a, b) =>
+                    typeCounts[a] > typeCounts[b] ? a : b
+                );
+            }
+
+            const result = {
+                history: formattedHistory,
+                summary: {
+                    totalAlerts: summary?.totalAlerts || 0,
+                    avgPerDay: summary?.totalAlerts ? Math.round((summary.totalAlerts / 30) * 100) / 100 : 0,
+                    mostCommonType,
+                    totalCostImpact: summary?.totalCostImpact || 0,
+                },
+            };
+
+            res.json({
+                success: true,
+                data: result,
+            });
+        } catch (error: any) {
+            logger.error('Get alert history error:', error);
+            next(error);
+        }
+        return;
+    }
+
     static async getSubscription(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
