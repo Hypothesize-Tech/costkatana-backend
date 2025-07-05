@@ -2,12 +2,12 @@ import { Optimization, IOptimization } from '../models/Optimization';
 import { Usage } from '../models/Usage';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
-import { BedrockService } from './bedrock.service';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { AICostTrackerService } from './aiCostTracker.service';
-import { AIProvider, CostEstimate } from 'ai-cost-tracker';
+import { AIProvider, CostEstimate, OptimizationResult } from 'ai-cost-tracker';
 import mongoose from 'mongoose';
+import { ActivityService } from './activity.service';
 
 interface OptimizationRequest {
     userId: string;
@@ -15,11 +15,31 @@ interface OptimizationRequest {
     service: string;
     model: string;
     context?: string;
+    conversationHistory?: Array<{
+        role: 'user' | 'assistant' | 'system';
+        content: string;
+        timestamp?: Date;
+    }>;
     options?: {
         targetReduction?: number;
         preserveIntent?: boolean;
         suggestAlternatives?: boolean;
+        enableCompression?: boolean;
+        enableContextTrimming?: boolean;
+        enableRequestFusion?: boolean;
     };
+}
+
+interface BatchOptimizationRequest {
+    userId: string;
+    requests: Array<{
+        id: string;
+        prompt: string;
+        timestamp: number;
+        model: string;
+        provider: string;
+    }>;
+    enableFusion?: boolean;
 }
 
 interface OptimizationFilters {
@@ -72,6 +92,7 @@ export class OptimizationService {
     static async createOptimization(request: OptimizationRequest): Promise<IOptimization> {
         try {
             const tracker = await this.getTracker();
+            const optimizer = tracker.getOptimizer();
 
             // Get token count and cost for original prompt
             const originalEstimate: CostEstimate = await tracker.estimateCost(
@@ -80,19 +101,27 @@ export class OptimizationService {
                 this.getAIProviderFromString(request.service)
             );
 
-            // Use Bedrock to optimize the prompt (external service)
-            const optimizationResult = await BedrockService.optimizePrompt({
-                prompt: request.prompt,
-                model: request.model,
-                service: request.service,
-                context: request.context,
-                targetReduction: request.options?.targetReduction,
-                preserveIntent: request.options?.preserveIntent,
-            });
+            // Run the enhanced optimization
+            const optimizationResult: OptimizationResult = await optimizer.optimizePrompt(
+                request.prompt,
+                request.model,
+                this.getAIProviderFromString(request.service),
+                {
+                    conversationHistory: request.conversationHistory,
+                    expectedOutput: request.context,
+                    constraints: request.options?.preserveIntent ? ['preserve_intent'] : []
+                }
+            );
+
+            // Get the best optimization suggestion
+            const bestSuggestion = optimizationResult.suggestions[0];
+            if (!bestSuggestion) {
+                throw new Error('No optimization suggestions available');
+            }
 
             // Get token count and cost for optimized prompt
             const optimizedEstimate: CostEstimate = await tracker.estimateCost(
-                optimizationResult.optimizedPrompt,
+                bestSuggestion.optimizedPrompt || request.prompt,
                 request.model,
                 this.getAIProviderFromString(request.service)
             );
@@ -104,15 +133,34 @@ export class OptimizationService {
             const costSaved = originalEstimate.totalCost - optimizedEstimate.totalCost;
             const improvementPercentage = originalTokens > 0 ? (tokensSaved / originalTokens) * 100 : 0;
 
-            // Determine category based on optimization techniques
-            const category = this.determineCategory(optimizationResult.techniques);
+            // Determine category based on optimization type
+            const category = this.determineCategoryFromType(bestSuggestion.type);
+
+            // Build metadata based on optimization type
+            const metadata: any = {
+                analysisTime: optimizationResult.metadata.processingTime,
+                confidence: bestSuggestion.confidence,
+                optimizationType: bestSuggestion.type,
+                appliedTechniques: optimizationResult.appliedOptimizations,
+            };
+
+            // Add type-specific metadata
+            if (bestSuggestion.compressionDetails) {
+                metadata.compressionDetails = bestSuggestion.compressionDetails;
+            }
+            if (bestSuggestion.contextTrimDetails) {
+                metadata.contextTrimDetails = bestSuggestion.contextTrimDetails;
+            }
+            if (bestSuggestion.fusionDetails) {
+                metadata.fusionDetails = bestSuggestion.fusionDetails;
+            }
 
             // Create optimization record
             const optimization = await Optimization.create({
                 userId: request.userId,
                 originalPrompt: request.prompt,
-                optimizedPrompt: optimizationResult.optimizedPrompt,
-                optimizationTechniques: optimizationResult.techniques,
+                optimizedPrompt: bestSuggestion.optimizedPrompt || request.prompt,
+                optimizationTechniques: optimizationResult.appliedOptimizations,
                 originalTokens,
                 optimizedTokens,
                 tokensSaved,
@@ -123,37 +171,14 @@ export class OptimizationService {
                 service: request.service,
                 model: request.model,
                 category,
-                suggestions: (optimizationResult.suggestions || []).map((suggestion: string, index: number) => ({
-                    type: 'general',
-                    description: suggestion,
-                    impact: index === 0 ? 'high' : index < 3 ? 'medium' : 'low',
-                    implemented: false,
+                suggestions: optimizationResult.suggestions.map((suggestion, index) => ({
+                    type: suggestion.type,
+                    description: suggestion.explanation,
+                    impact: suggestion.estimatedSavings > 30 ? 'high' : suggestion.estimatedSavings > 15 ? 'medium' : 'low',
+                    implemented: index === 0,
                 })),
-                metadata: {
-                    analysisTime: Date.now(),
-                    confidence: 0.85,
-                    alternatives: request.options?.suggestAlternatives
-                        ? (optimizationResult.alternatives || []).map((alt: string) => ({
-                            prompt: alt,
-                            tokens: 0, // Will be calculated below
-                            cost: 0,   // Will be calculated below
-                        }))
-                        : undefined,
-                },
+                metadata,
             });
-
-            // If alternatives are present, estimate tokens and cost for each
-            if (optimization.metadata?.alternatives) {
-                for (const alt of optimization.metadata.alternatives) {
-                    const altEstimate: CostEstimate = await tracker.estimateCost(
-                        alt.prompt,
-                        request.model,
-                        this.getAIProviderFromString(request.service)
-                    );
-                    alt.tokens = (altEstimate.breakdown?.promptTokens ?? 0) + (altEstimate.breakdown?.completionTokens ?? 0);
-                    alt.cost = altEstimate.totalCost;
-                }
-            }
 
             // Update user's optimization count
             await User.findByIdAndUpdate(request.userId, {
@@ -162,18 +187,34 @@ export class OptimizationService {
                 },
             });
 
+            // Track activity
+            await ActivityService.trackActivity(request.userId, {
+                type: 'optimization_created',
+                title: 'Created Optimization',
+                description: `Saved $${costSaved.toFixed(4)} (${improvementPercentage.toFixed(1)}% improvement)`,
+                metadata: {
+                    optimizationId: optimization._id,
+                    service: request.service,
+                    model: request.model,
+                    cost: originalEstimate.totalCost,
+                    saved: costSaved,
+                    techniques: optimizationResult.appliedOptimizations
+                }
+            });
+
             // Create alert if significant savings
             if (improvementPercentage > 30) {
                 await Alert.create({
                     userId: request.userId,
                     type: 'optimization_available',
                     title: 'Significant Optimization Available',
-                    message: `You can save ${improvementPercentage.toFixed(1)}% on tokens for a frequently used prompt.`,
+                    message: `You can save ${improvementPercentage.toFixed(1)}% on tokens using ${bestSuggestion.type} optimization.`,
                     severity: 'medium',
                     data: {
                         optimizationId: optimization._id,
                         savings: costSaved,
                         percentage: improvementPercentage,
+                        optimizationType: bestSuggestion.type,
                     },
                 });
             }
@@ -183,6 +224,7 @@ export class OptimizationService {
                 originalTokens,
                 optimizedTokens,
                 savings: improvementPercentage,
+                type: bestSuggestion.type,
             });
 
             return optimization;
@@ -190,6 +232,108 @@ export class OptimizationService {
             logger.error('Error creating optimization:', error);
             throw error;
         }
+    }
+
+    static async createBatchOptimization(request: BatchOptimizationRequest): Promise<IOptimization[]> {
+        try {
+            const tracker = await this.getTracker();
+            const optimizer = tracker.getOptimizer();
+
+            // Convert requests to FusionRequest format
+            const fusionRequests = request.requests.map(r => ({
+                id: r.id,
+                prompt: r.prompt,
+                timestamp: r.timestamp,
+                model: r.model,
+                provider: this.getAIProviderFromString(r.provider),
+                metadata: {}
+            }));
+
+            // Run request fusion optimization
+            const optimizationResult: OptimizationResult = await optimizer.optimizeRequests(fusionRequests);
+
+            const optimizations: IOptimization[] = [];
+
+            // Create optimization records for each suggestion
+            for (const suggestion of optimizationResult.suggestions) {
+                if (suggestion.type === 'request_fusion' && suggestion.fusionDetails) {
+                    // Calculate costs for all fused requests
+                    let originalTotalCost = 0;
+                    let originalTotalTokens = 0;
+
+                    for (const req of request.requests) {
+                        const estimate = await tracker.estimateCost(
+                            req.prompt,
+                            req.model,
+                            this.getAIProviderFromString(req.provider)
+                        );
+                        originalTotalCost += estimate.totalCost;
+                        originalTotalTokens += (estimate.breakdown?.promptTokens ?? 0) + (estimate.breakdown?.completionTokens ?? 0);
+                    }
+
+                    // Calculate optimized cost
+                    const optimizedEstimate = await tracker.estimateCost(
+                        suggestion.optimizedPrompt!,
+                        request.requests[0].model,
+                        this.getAIProviderFromString(request.requests[0].provider)
+                    );
+
+                    const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
+                    const tokensSaved = originalTotalTokens - optimizedTokens;
+                    const costSaved = originalTotalCost - optimizedEstimate.totalCost;
+                    const improvementPercentage = originalTotalTokens > 0 ? (tokensSaved / originalTotalTokens) * 100 : 0;
+
+                    const optimization = await Optimization.create({
+                        userId: request.userId,
+                        originalPrompt: request.requests.map(r => r.prompt).join('\n\n---\n\n'),
+                        optimizedPrompt: suggestion.optimizedPrompt!,
+                        optimizationTechniques: ['request_fusion', suggestion.fusionDetails.fusionStrategy],
+                        originalTokens: originalTotalTokens,
+                        optimizedTokens,
+                        tokensSaved,
+                        originalCost: originalTotalCost,
+                        optimizedCost: optimizedEstimate.totalCost,
+                        costSaved,
+                        improvementPercentage,
+                        service: request.requests[0].provider,
+                        model: request.requests[0].model,
+                        category: 'batch_processing',
+                        suggestions: [{
+                            type: 'request_fusion',
+                            description: suggestion.explanation,
+                            impact: improvementPercentage > 30 ? 'high' : improvementPercentage > 15 ? 'medium' : 'low',
+                            implemented: true,
+                        }],
+                        metadata: {
+                            fusionDetails: suggestion.fusionDetails,
+                            originalRequestCount: request.requests.length,
+                            fusionStrategy: suggestion.fusionDetails.fusionStrategy,
+                        },
+                    });
+
+                    optimizations.push(optimization);
+                }
+            }
+
+            return optimizations;
+        } catch (error) {
+            logger.error('Error creating batch optimization:', error);
+            throw error;
+        }
+    }
+
+    private static determineCategoryFromType(type: string): string {
+        const typeMap: Record<string, string> = {
+            'prompt': 'prompt_reduction',
+            'compression': 'prompt_reduction',
+            'context_trimming': 'context_optimization',
+            'request_fusion': 'batch_processing',
+            'model': 'model_selection',
+            'caching': 'response_formatting',
+            'batching': 'batch_processing',
+        };
+
+        return typeMap[type] || 'prompt_reduction';
     }
 
     static async getOptimizations(
@@ -252,6 +396,19 @@ export class OptimizationService {
             optimization.appliedAt = new Date();
             optimization.appliedCount = (optimization.appliedCount || 0) + 1;
             await optimization.save();
+
+            // Track activity
+            await ActivityService.trackActivity(userId, {
+                type: 'optimization_applied',
+                title: 'Applied Optimization',
+                description: `Applied optimization saving $${optimization.costSaved.toFixed(4)}`,
+                metadata: {
+                    optimizationId: optimization._id,
+                    service: optimization.service,
+                    model: optimization.model,
+                    saved: optimization.costSaved
+                }
+            });
 
             logger.info('Optimization applied', {
                 optimizationId,
@@ -365,27 +522,6 @@ export class OptimizationService {
         }
     }
 
-    private static determineCategory(techniques: string[]): string {
-        const techniqueMap: Record<string, string> = {
-            'prompt reduction': 'prompt_reduction',
-            'context optimization': 'context_optimization',
-            'response formatting': 'response_formatting',
-            'batch processing': 'batch_processing',
-            'model selection': 'model_selection',
-        };
-
-        for (const technique of techniques) {
-            const lowerTechnique = technique.toLowerCase();
-            for (const [key, value] of Object.entries(techniqueMap)) {
-                if (lowerTechnique.includes(key)) {
-                    return value;
-                }
-            }
-        }
-
-        return 'prompt_reduction'; // Default category
-    }
-
     static async getPromptsForBulkOptimization(
         userId: string,
         filters: {
@@ -395,31 +531,17 @@ export class OptimizationService {
         }
     ) {
         try {
-            const { service, minCalls = 1, timeframe = '30d' } = filters;
+            const { service, minCalls = 5, timeframe = '30d' } = filters;
 
-            let startDate: Date;
-            const endDate = new Date();
+            // Calculate date range
+            const startDate = new Date();
+            const days = timeframe === '7d' ? 7 : timeframe === '30d' ? 30 : 90;
+            startDate.setDate(startDate.getDate() - days);
 
-            switch (timeframe) {
-                case '1d':
-                    startDate = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
-                    break;
-                case '7d':
-                    startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-                    break;
-                case '30d':
-                    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-                    break;
-                case 'all':
-                    startDate = new Date(0);
-                    break;
-                default:
-                    startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-            }
-
+            // Build aggregation pipeline
             const matchStage: any = {
                 userId: new mongoose.Types.ObjectId(userId),
-                createdAt: { $gte: startDate, $lte: endDate },
+                createdAt: { $gte: startDate }
             };
 
             if (service) {
@@ -432,37 +554,184 @@ export class OptimizationService {
                     $group: {
                         _id: '$prompt',
                         count: { $sum: 1 },
-                        usageIds: { $push: '$_id' },
-                    },
+                        totalCost: { $sum: '$cost' },
+                        avgTokens: { $avg: '$totalTokens' },
+                        models: { $addToSet: '$model' },
+                        services: { $addToSet: '$service' }
+                    }
                 },
                 { $match: { count: { $gte: minCalls } } },
                 { $sort: { count: -1 } },
-                { $limit: 10 },
+                { $limit: 50 },
                 {
                     $project: {
-                        _id: 0,
                         prompt: '$_id',
                         count: 1,
-                        usageId: { $first: '$usageIds' },
-                    },
-                },
+                        promptId: { $toString: '$_id' },
+                        totalCost: 1,
+                        avgTokens: 1,
+                        models: 1,
+                        services: 1
+                    }
+                }
             ]);
 
-            // We only need one usageId to get the model and service info
-            const usageIds = prompts.map(p => p.usageId);
-            const usageDocs = await Usage.find({ _id: { $in: usageIds } }).select('_id prompt');
-            const usageIdToPromptId = new Map(usageDocs.map(u => [u._id.toString(), u._id.toString()]));
-
-            return prompts.map(p => ({
-                prompt: p.prompt,
-                count: p.count,
-                promptId: usageIdToPromptId.get(p.usageId.toString()),
-            })).filter(p => p.promptId);
-
-        } catch (error) {
-            logger.error('Error fetching prompts for bulk optimization:', error);
-            throw error;
+            return prompts;
+        } catch (error: any) {
+            logger.error('Get prompts for bulk optimization error:', error);
+            throw new Error('Failed to get prompts for bulk optimization');
         }
     }
 
+    static async getOptimizationTemplates(category?: string) {
+        try {
+            // Get real optimization templates from database
+            const matchStage: any = {};
+            if (category) {
+                matchStage.category = category;
+            }
+
+            const templates = await Optimization.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: '$category',
+                        count: { $sum: 1 },
+                        avgImprovement: { $avg: '$improvementPercentage' },
+                        totalSaved: { $sum: '$costSaved' },
+                        examples: {
+                            $push: {
+                                before: '$originalPrompt',
+                                after: '$optimizedPrompt',
+                                savings: '$improvementPercentage'
+                            }
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        id: '$_id',
+                        name: {
+                            $switch: {
+                                branches: [
+                                    { case: { $eq: ['$_id', 'prompt_optimization'] }, then: 'Prompt Optimization' },
+                                    { case: { $eq: ['$_id', 'context_trimming'] }, then: 'Context Trimming' },
+                                    { case: { $eq: ['$_id', 'compression'] }, then: 'Compression' },
+                                    { case: { $eq: ['$_id', 'model_switching'] }, then: 'Model Switching' }
+                                ],
+                                default: 'General Optimization'
+                            }
+                        },
+                        category: '$_id',
+                        description: {
+                            $switch: {
+                                branches: [
+                                    { case: { $eq: ['$_id', 'prompt_optimization'] }, then: 'Optimize prompts for better efficiency and cost reduction' },
+                                    { case: { $eq: ['$_id', 'context_trimming'] }, then: 'Reduce context length while maintaining quality' },
+                                    { case: { $eq: ['$_id', 'compression'] }, then: 'Compress prompts using various techniques' },
+                                    { case: { $eq: ['$_id', 'model_switching'] }, then: 'Switch to more cost-effective models' }
+                                ],
+                                default: 'General optimization techniques'
+                            }
+                        },
+                        examples: { $slice: ['$examples', 3] },
+                        techniques: {
+                            $switch: {
+                                branches: [
+                                    { case: { $eq: ['$_id', 'prompt_optimization'] }, then: ['rewriting', 'simplification', 'structure_optimization'] },
+                                    { case: { $eq: ['$_id', 'context_trimming'] }, then: ['sliding_window', 'relevance_filtering', 'summarization'] },
+                                    { case: { $eq: ['$_id', 'compression'] }, then: ['json_compression', 'pattern_replacement', 'abbreviation'] },
+                                    { case: { $eq: ['$_id', 'model_switching'] }, then: ['cost_analysis', 'performance_comparison', 'capability_matching'] }
+                                ],
+                                default: ['general_optimization']
+                            }
+                        },
+                        avgImprovement: { $round: ['$avgImprovement', 2] }
+                    }
+                }
+            ]);
+
+            return templates;
+        } catch (error: any) {
+            logger.error('Get optimization templates error:', error);
+            throw new Error('Failed to get optimization templates');
+        }
+    }
+
+    static async getOptimizationHistory(promptHash: string, userId: string) {
+        try {
+            // Get optimization history for a specific prompt
+            const history = await Optimization.find({
+                userId: new mongoose.Types.ObjectId(userId),
+                $or: [
+                    { originalPrompt: { $regex: promptHash, $options: 'i' } },
+                    { optimizedPrompt: { $regex: promptHash, $options: 'i' } }
+                ]
+            })
+                .sort({ createdAt: -1 })
+                .limit(10)
+                .select('originalPrompt optimizedPrompt tokensSaved costSaved improvementPercentage applied appliedAt createdAt')
+                .lean();
+
+            const formattedHistory = history.map((opt, index) => ({
+                id: opt._id,
+                version: history.length - index, // Calculate version based on order
+                prompt: opt.optimizedPrompt || opt.originalPrompt,
+                tokens: opt.tokensSaved || 0,
+                cost: opt.costSaved || 0,
+                createdAt: opt.createdAt,
+                appliedAt: opt.appliedAt
+            }));
+
+            return {
+                history: formattedHistory,
+                currentVersion: formattedHistory.length > 0 ? formattedHistory[0].version : 1
+            };
+        } catch (error: any) {
+            logger.error('Get optimization history error:', error);
+            throw new Error('Failed to get optimization history');
+        }
+    }
+
+    static async revertOptimization(optimizationId: string, userId: string, version?: number) {
+        try {
+            // Find the optimization to revert
+            const optimization = await Optimization.findOne({
+                _id: new mongoose.Types.ObjectId(optimizationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!optimization) {
+                throw new Error('Optimization not found');
+            }
+
+            // Mark as not applied (revert)
+            optimization.applied = false;
+            optimization.appliedAt = undefined;
+
+            // Add metadata about the reversion
+            if (!optimization.metadata) {
+                optimization.metadata = {};
+            }
+            optimization.metadata.revertedAt = new Date();
+            optimization.metadata.revertedVersion = version || 1;
+
+            await optimization.save();
+
+            // Log the reversion
+            logger.info('Optimization reverted:', {
+                optimizationId,
+                userId,
+                revertedAt: optimization.metadata.revertedAt
+            });
+
+            return {
+                message: 'Optimization reverted successfully',
+                revertedAt: optimization.metadata.revertedAt
+            };
+        } catch (error: any) {
+            logger.error('Revert optimization error:', error);
+            throw new Error('Failed to revert optimization');
+        }
+    }
 }

@@ -1,13 +1,21 @@
 import { Response, NextFunction } from 'express';
+import { z } from 'zod';
 import { AnalyticsService } from '../services/analytics.service';
-import { analyticsQuerySchema, dateRangeSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
-import { User } from '../models/User';
-import { Usage } from '../models/Usage';
+import { Usage, User } from '../models';
 import mongoose from 'mongoose';
 
+const analyticsQuerySchema = z.object({
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    period: z.enum(['daily', 'weekly', 'monthly']).optional(),
+    service: z.string().optional(),
+    model: z.string().optional(),
+    groupBy: z.enum(['service', 'model', 'date', 'hour']).optional(),
+});
+
 export class AnalyticsController {
-    static async getAnalytics(req: any, res: Response, next: NextFunction) {
+    static async getAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const query = analyticsQuerySchema.parse(req.query);
@@ -32,30 +40,28 @@ export class AnalyticsController {
         }
     }
 
-    static async getComparativeAnalytics(req: any, res: Response, next: NextFunction) {
+    static async getComparativeAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
-            const { period1, period2 } = req.body;
+            const { period1Start, period1End, period2Start, period2End } = req.query;
 
-            if (!period1 || !period2) {
-                return res.status(400).json({
+            if (!period1Start || !period1End || !period2Start || !period2End) {
+                res.status(400).json({
                     success: false,
-                    message: 'Both period1 and period2 are required',
+                    error: 'All period dates are required',
                 });
+                return;
             }
-
-            const validatedPeriod1 = dateRangeSchema.parse(period1);
-            const validatedPeriod2 = dateRangeSchema.parse(period2);
 
             const comparison = await AnalyticsService.getComparativeAnalytics(
                 userId,
                 {
-                    startDate: new Date(validatedPeriod1.startDate),
-                    endDate: new Date(validatedPeriod1.endDate),
+                    startDate: new Date(period1Start as string),
+                    endDate: new Date(period1End as string),
                 },
                 {
-                    startDate: new Date(validatedPeriod2.startDate),
-                    endDate: new Date(validatedPeriod2.endDate),
+                    startDate: new Date(period2Start as string),
+                    endDate: new Date(period2End as string),
                 }
             );
 
@@ -64,21 +70,18 @@ export class AnalyticsController {
                 data: comparison,
             });
         } catch (error: any) {
-            logger.error('Get comparative analytics error:', error);
+            logger.error('Comparative analytics error:', error);
             next(error);
         }
-        return;
     }
 
-    static async exportAnalytics(req: any, res: Response, next: NextFunction) {
+    static async exportAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const format = (req.query.format as 'json' | 'csv') || 'json';
             const query = analyticsQuerySchema.parse(req.query);
 
             const exportData = await AnalyticsService.exportAnalytics(
-                userId,
-                format,
                 {
                     userId,
                     startDate: query.startDate ? new Date(query.startDate) : undefined,
@@ -87,7 +90,8 @@ export class AnalyticsController {
                     service: query.service,
                     model: query.model,
                     groupBy: query.groupBy,
-                }
+                },
+                format
             );
 
             const filename = `analytics-export-${Date.now()}.${format}`;
@@ -106,7 +110,7 @@ export class AnalyticsController {
         }
     }
 
-    static async getInsights(req: any, res: Response, next: NextFunction) {
+    static async getInsights(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const timeframe = (req.query.timeframe as string) || '30d';
@@ -138,26 +142,17 @@ export class AnalyticsController {
             const insights = {
                 summary: {
                     totalSpent: analytics.summary.totalCost,
-                    totalCalls: analytics.summary.totalCalls,
-                    avgCostPerCall: analytics.summary.avgCost,
+                    totalCalls: analytics.summary.totalRequests,
+                    avgCostPerCall: analytics.summary.averageCostPerRequest,
                     totalTokens: analytics.summary.totalTokens,
                 },
                 trends: analytics.trends,
                 topCostDrivers: {
-                    services: analytics.serviceBreakdown.slice(0, 3),
-                    models: analytics.modelBreakdown.slice(0, 3),
-                    prompts: analytics.topPrompts.slice(0, 3),
+                    services: analytics.breakdown.services.slice(0, 3),
+                    models: analytics.breakdown.models.slice(0, 3),
                 },
-                optimization: {
-                    totalSaved: analytics.optimizationStats.totalSaved,
-                    avgImprovement: analytics.optimizationStats.avgImprovement,
-                    opportunities: analytics.optimizationStats.totalOptimizations,
-                },
-                predictions: analytics.predictions,
-                recommendations: [
-                    ...(analytics.trends.insights || []),
-                    ...(analytics.predictions?.recommendations || []),
-                ].slice(0, 5),
+                timeline: analytics.timeline,
+                recommendations: analytics.trends.insights.slice(0, 5),
             };
 
             res.json({
@@ -170,7 +165,7 @@ export class AnalyticsController {
         }
     }
 
-    static async getDashboardData(req: any, res: Response, next: NextFunction) {
+    static async getDashboardData(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const objectUserId = new mongoose.Types.ObjectId(userId);
@@ -242,32 +237,32 @@ export class AnalyticsController {
                         ),
                     },
                     totalCalls: {
-                        value: analytics.summary.totalCalls,
+                        value: analytics.summary.totalRequests,
                         change: AnalyticsController.calculateChange(
-                            yesterdayStats.summary.totalCalls,
-                            todayStats.summary.totalCalls
+                            yesterdayStats.summary.totalRequests,
+                            todayStats.summary.totalRequests
                         ),
                     },
                     avgCostPerCall: {
-                        value: analytics.summary.avgCost,
+                        value: analytics.summary.averageCostPerRequest,
                         change: AnalyticsController.calculateChange(
-                            yesterdayStats.summary.avgCost,
-                            todayStats.summary.avgCost
+                            yesterdayStats.summary.averageCostPerRequest,
+                            todayStats.summary.averageCostPerRequest
                         ),
                     },
                     totalOptimizationSavings: {
-                        value: analytics.optimizationStats.totalSaved,
+                        value: 0, // Will be implemented when optimization stats are available
                         change: 0,
                     },
                 },
                 charts: {
-                    costOverTime: analytics.timeSeries,
-                    serviceBreakdown: analytics.serviceBreakdown,
-                    modelUsage: analytics.modelBreakdown.slice(0, 5),
+                    costOverTime: analytics.timeline,
+                    serviceBreakdown: analytics.breakdown.services,
+                    modelUsage: analytics.breakdown.models.slice(0, 5),
                 },
                 recentActivity: {
-                    topPrompts: analytics.topPrompts.slice(0, 5),
-                    optimizationOpportunities: analytics.optimizationStats.totalOptimizations,
+                    topPrompts: [], // Will be implemented when top prompts are available
+                    optimizationOpportunities: 0, // Will be implemented when optimization stats are available
                 },
                 insights: analytics.trends.insights.slice(0, 3),
             };
@@ -278,6 +273,114 @@ export class AnalyticsController {
             });
         } catch (error: any) {
             logger.error('Get dashboard data error:', error);
+            next(error);
+        }
+    }
+
+    static async getProjectAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { projectId } = req.params;
+            const {
+                startDate,
+                endDate,
+                service,
+                model,
+                groupBy = 'date'
+            } = req.query;
+
+            // Verify user has access to project
+            const { ProjectService } = await import('../services/project.service');
+            const project = await ProjectService.getProjectById(projectId, userId);
+
+            if (!project) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Project not found or access denied'
+                });
+                return;
+            }
+
+            // Build filter object
+            const filters: any = { projectId };
+
+            if (startDate) filters.createdAt = { $gte: new Date(startDate as string) };
+            if (endDate) {
+                filters.createdAt = filters.createdAt || {};
+                filters.createdAt.$lte = new Date(endDate as string);
+            }
+            if (service) filters.service = service;
+            if (model) filters.model = model;
+
+            const analytics = await AnalyticsService.getProjectAnalytics(projectId, filters, {
+                groupBy: groupBy as string
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    ...analytics,
+                    project: {
+                        id: project._id,
+                        name: project.name,
+                        budget: project.budget,
+                        spending: project.spending
+                    }
+                }
+            });
+        } catch (error: any) {
+            logger.error('Get project analytics error:', error);
+            next(error);
+        }
+    }
+
+    static async getProjectComparison(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const {
+                projectIds,
+                startDate,
+                endDate,
+                metric = 'cost'
+            } = req.query;
+
+            if (!projectIds || !Array.isArray(projectIds)) {
+                res.status(400).json({
+                    success: false,
+                    error: 'projectIds array is required'
+                });
+                return;
+            }
+
+            // Verify user has access to all projects
+            const { ProjectService } = await import('../services/project.service');
+            const userProjects = await ProjectService.getUserProjects(userId);
+            const accessibleProjectIds = userProjects.map(p => p._id.toString());
+
+            const validProjectIds = projectIds.filter((id: string) =>
+                accessibleProjectIds.includes(id)
+            );
+
+            if (validProjectIds.length === 0) {
+                res.status(403).json({
+                    success: false,
+                    error: 'No accessible projects found'
+                });
+                return;
+            }
+
+            const comparison = await AnalyticsService.compareProjects(validProjectIds, {
+                startDate: startDate ? new Date(startDate as string) : undefined,
+                endDate: endDate ? new Date(endDate as string) : undefined,
+                metric: metric as string
+            });
+
+            res.json({
+                success: true,
+                data: comparison
+            });
+        } catch (error: any) {
+            logger.error('Get project comparison error:', error);
             next(error);
         }
     }

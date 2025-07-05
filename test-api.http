@@ -1,0 +1,46 @@
+### Test Project Creation
+POST http://localhost:8000/api/projects
+Content-Type: application/json
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4NWQxMzE4NzgwYmM0ZTI5OWJlYWI1MCIsImVtYWlsIjoiYWJkdWxAaHlwb3RoZXNpemUudGVjaCIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzUxNjk4Njk4LCJleHAiOjE3NTIzMDM0OTh9.HnKrws8h9P1ssxmvlQkHEJSmMSXLn4R4uC-L1ljVyHc
+Connection: keep-alive
+
+{
+  "name": "hypothesize",
+  "description": "hypothesize",
+  "tags": ["AI"],
+  "budget": {
+    "amount": 1000,
+    "period": "monthly",
+    "alerts": [
+      {
+        "threshold": 50,
+        "type": "both",
+        "recipients": []
+      },
+      {
+        "threshold": 80,
+        "type": "both",
+        "recipients": []
+      },
+      {
+        "threshold": 100,
+        "type": "both",
+        "recipients": []
+      }
+    ]
+  },
+  "settings": {
+    "costOptimization": {
+      "enabled": true,
+      "autoApply": false,
+      "strategies": ["context_trimming", "prompt_compression"]
+    },
+    "notifications": {
+      "budgetAlerts": true,
+      "weeklyReports": true,
+      "monthlyReports": true
+    }
+  }
+}
+
+### 

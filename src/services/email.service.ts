@@ -1,50 +1,50 @@
-import { gmailTransporter, EMAIL_CONFIG } from '../config/gmail';
+import { emailTransporter, EMAIL_CONFIG } from '../config/email';
 import { IUser } from '../models/User';
 import { IAlert } from '../models/Alert';
 import { logger } from '../utils/logger';
 import { formatCurrency } from '../utils/helpers';
 
 interface EmailOptions {
-    to: string | string[];
-    subject: string;
-    html: string;
-    text?: string;
-    attachments?: Array<{
-        filename: string;
-        content: Buffer | string;
-        contentType?: string;
-    }>;
+  to: string | string[];
+  subject: string;
+  html: string;
+  text?: string;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | string;
+    contentType?: string;
+  }>;
 }
 
 export class EmailService {
-    private static async sendEmail(options: EmailOptions): Promise<void> {
-        try {
-            const transporter = await gmailTransporter;
+  private static async sendEmail(options: EmailOptions): Promise<void> {
+    try {
+      const transporter = await emailTransporter;
 
-            const mailOptions = {
-                from: EMAIL_CONFIG.from,
-                to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
-                subject: options.subject,
-                html: options.html,
-                text: options.text || this.stripHtml(options.html),
-                attachments: options.attachments,
-            };
+      const mailOptions = {
+        from: EMAIL_CONFIG.from,
+        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+        subject: options.subject,
+        html: options.html,
+        text: options.text || this.stripHtml(options.html),
+        attachments: options.attachments,
+      };
 
-            const info = await transporter.sendMail(mailOptions);
+      const info = await transporter.sendMail(mailOptions);
 
-            logger.info('Email sent successfully', {
-                messageId: info.messageId,
-                to: options.to,
-                subject: options.subject,
-            });
-        } catch (error) {
-            logger.error('Error sending email:', error);
-            throw error;
-        }
+      logger.info('Email sent successfully', {
+        messageId: info.messageId,
+        to: options.to,
+        subject: options.subject,
+      });
+    } catch (error) {
+      logger.error('Error sending email:', error);
+      throw error;
     }
+  }
 
-    static async sendVerificationEmail(user: IUser, verificationUrl: string): Promise<void> {
-        const html = `
+  static async sendVerificationEmail(user: IUser, verificationUrl: string): Promise<void> {
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -80,15 +80,15 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: 'Verify your AI Cost Optimizer account',
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: 'Verify your AI Cost Optimizer account',
+      html,
+    });
+  }
 
-    static async sendPasswordResetEmail(user: IUser, resetUrl: string): Promise<void> {
-        const html = `
+  static async sendPasswordResetEmail(user: IUser, resetUrl: string): Promise<void> {
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -125,17 +125,17 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: 'Password Reset - AI Cost Optimizer',
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: 'Password Reset - AI Cost Optimizer',
+      html,
+    });
+  }
 
-    static async sendCostAlert(user: IUser, currentCost: number, threshold: number): Promise<void> {
-        const percentage = ((currentCost / threshold) * 100).toFixed(1);
+  static async sendCostAlert(user: IUser, currentCost: number, threshold: number): Promise<void> {
+    const percentage = ((currentCost / threshold) * 100).toFixed(1);
 
-        const html = `
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -196,15 +196,15 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: EMAIL_CONFIG.templates.costAlert.subject,
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: EMAIL_CONFIG.templates.costAlert.subject,
+      html,
+    });
+  }
 
-    static async sendOptimizationAlert(user: IUser, optimization: any): Promise<void> {
-        const html = `
+  static async sendOptimizationAlert(user: IUser, optimization: any): Promise<void> {
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -250,15 +250,15 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: EMAIL_CONFIG.templates.optimizationAvailable.subject,
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: EMAIL_CONFIG.templates.optimizationAvailable.subject,
+      html,
+    });
+  }
 
-    static async sendWeeklyReport(user: IUser, reportData: any): Promise<void> {
-        const html = `
+  static async sendWeeklyReport(user: IUser, reportData: any): Promise<void> {
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -307,8 +307,8 @@ export class EmailService {
                 <h3>Top Services by Cost</h3>
                 <ul>
                   ${reportData.topServices.map((s: any) =>
-            `<li>${s.service}: ${formatCurrency(s.cost)} (${s.percentage.toFixed(1)}%)</li>`
-        ).join('')}
+      `<li>${s.service}: ${formatCurrency(s.cost)} (${s.percentage.toFixed(1)}%)</li>`
+    ).join('')}
                 </ul>
               </div>
 
@@ -334,22 +334,22 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: EMAIL_CONFIG.templates.weeklyReport.subject,
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: EMAIL_CONFIG.templates.weeklyReport.subject,
+      html,
+    });
+  }
 
-    static async sendAlertNotification(user: IUser, alert: IAlert): Promise<void> {
-        const severityColors = {
-            low: '#3498db',
-            medium: '#f39c12',
-            high: '#e74c3c',
-            critical: '#c0392b',
-        };
+  static async sendAlertNotification(user: IUser, alert: IAlert): Promise<void> {
+    const severityColors = {
+      low: '#3498db',
+      medium: '#f39c12',
+      high: '#e74c3c',
+      critical: '#c0392b',
+    };
 
-        const html = `
+    const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -389,14 +389,14 @@ export class EmailService {
       </html>
     `;
 
-        await this.sendEmail({
-            to: user.email,
-            subject: `[${alert.severity.toUpperCase()}] ${alert.title}`,
-            html,
-        });
-    }
+    await this.sendEmail({
+      to: user.email,
+      subject: `[${alert.severity.toUpperCase()}] ${alert.title}`,
+      html,
+    });
+  }
 
-    private static stripHtml(html: string): string {
-        return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-    }
+  private static stripHtml(html: string): string {
+    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  }
 }

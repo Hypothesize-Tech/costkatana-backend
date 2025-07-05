@@ -12,6 +12,13 @@ export class OptimizationController {
             const optimization = await OptimizationService.createOptimization({
                 userId,
                 ...validatedData,
+                conversationHistory: req.body.conversationHistory,
+                options: {
+                    ...validatedData.options,
+                    enableCompression: req.body.enableCompression !== false,
+                    enableContextTrimming: req.body.enableContextTrimming !== false,
+                    enableRequestFusion: req.body.enableRequestFusion !== false,
+                }
             });
 
             res.status(201).json({
@@ -25,6 +32,7 @@ export class OptimizationController {
                     costSaved: optimization.costSaved,
                     tokensSaved: optimization.tokensSaved,
                     suggestions: optimization.suggestions,
+                    metadata: optimization.metadata,
                 },
             });
         } catch (error: any) {
@@ -296,6 +304,271 @@ export class OptimizationController {
             logger.error('Get optimization summary error:', error);
             next(error);
             return;
+        }
+    }
+
+    static async createBatchOptimization(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { requests } = req.body;
+
+            if (!Array.isArray(requests) || requests.length < 2) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'At least 2 requests are required for batch optimization',
+                });
+            }
+
+            if (requests.length > 10) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Maximum 10 requests can be optimized in a batch',
+                });
+            }
+
+            const optimizations = await OptimizationService.createBatchOptimization({
+                userId,
+                requests,
+                enableFusion: req.body.enableFusion !== false,
+            });
+
+            res.status(201).json({
+                success: true,
+                message: `Successfully created ${optimizations.length} batch optimizations`,
+                data: optimizations.map(opt => ({
+                    id: opt._id,
+                    improvementPercentage: opt.improvementPercentage,
+                    costSaved: opt.costSaved,
+                    tokensSaved: opt.tokensSaved,
+                    fusionStrategy: opt.metadata?.fusionStrategy,
+                })),
+            });
+        } catch (error: any) {
+            logger.error('Create batch optimization error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async optimizeConversation(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { messages, model, service } = req.body;
+
+            if (!Array.isArray(messages) || messages.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Array of conversation messages is required',
+                });
+            }
+
+            // Validate message format
+            const isValidMessages = messages.every(msg =>
+                msg.role && ['user', 'assistant', 'system'].includes(msg.role) &&
+                typeof msg.content === 'string'
+            );
+
+            if (!isValidMessages) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid message format. Each message must have role and content',
+                });
+            }
+
+            const optimization = await OptimizationService.createOptimization({
+                userId,
+                prompt: messages.map(m => `${m.role}: ${m.content}`).join('\n'),
+                service,
+                model,
+                conversationHistory: messages,
+                options: {
+                    enableCompression: req.body.enableCompression !== false,
+                    enableContextTrimming: req.body.enableContextTrimming !== false,
+                }
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Conversation optimization created successfully',
+                data: {
+                    id: optimization._id,
+                    originalMessages: messages.length,
+                    trimmedMessages: optimization.metadata?.contextTrimDetails?.trimmedMessages,
+                    improvementPercentage: optimization.improvementPercentage,
+                    costSaved: optimization.costSaved,
+                    tokensSaved: optimization.tokensSaved,
+                    optimizationType: optimization.metadata?.optimizationType,
+                    trimmingTechnique: optimization.metadata?.contextTrimDetails?.technique,
+                },
+            });
+        } catch (error: any) {
+            logger.error('Optimize conversation error:', error);
+            next(error);
+        }
+        return;
+    }
+
+    static async getOptimizationPreview(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { prompt, model, service, conversationHistory, enableCompression, enableContextTrimming, enableRequestFusion } = req.body;
+
+            if (!prompt || !model || !service) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Prompt, model, and service are required',
+                });
+                return;
+            }
+
+            const optimization = await OptimizationService.createOptimization({
+                userId,
+                prompt,
+                model,
+                service,
+                conversationHistory,
+                options: {
+                    enableCompression: enableCompression !== false,
+                    enableContextTrimming: enableContextTrimming !== false,
+                    enableRequestFusion: enableRequestFusion !== false,
+                }
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    suggestions: optimization.suggestions,
+                    totalSavings: optimization.costSaved,
+                    techniques: optimization.optimizationTechniques,
+                    originalTokens: optimization.originalTokens,
+                    optimizedTokens: optimization.optimizedTokens,
+                    improvementPercentage: optimization.improvementPercentage,
+                },
+            });
+        } catch (error: any) {
+            logger.error('Get optimization preview error:', error);
+            next(error);
+        }
+    }
+
+    static async getOptimizationConfig(res: Response, next: NextFunction) {
+        try {
+
+            // For now, return default configuration
+            // In a real implementation, this would be stored per user in the database
+            const defaultConfig = {
+                enabledTechniques: [
+                    'prompt_compression',
+                    'context_trimming',
+                    'request_fusion'
+                ],
+                defaultSettings: {
+                    promptCompression: {
+                        enabled: true,
+                        minCompressionRatio: 0.2,
+                        jsonCompressionThreshold: 1000
+                    },
+                    contextTrimming: {
+                        enabled: true,
+                        maxContextLength: 4000,
+                        preserveRecentMessages: 3
+                    },
+                    requestFusion: {
+                        enabled: true,
+                        maxFusionBatch: 5,
+                        fusionWaitTime: 1000
+                    }
+                },
+                thresholds: {
+                    highCostPerRequest: 0.01,
+                    highTokenUsage: 2000,
+                    frequencyThreshold: 5,
+                    batchingThreshold: 3,
+                    modelDowngradeConfidence: 0.8
+                }
+            };
+
+            res.json({
+                success: true,
+                data: defaultConfig,
+            });
+        } catch (error: any) {
+            logger.error('Get optimization config error:', error);
+            next(error);
+        }
+    }
+
+    static async updateOptimizationConfig(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const config = req.body;
+
+            // For now, just acknowledge the update
+            // In a real implementation, this would update the user's configuration in the database
+            logger.info('Optimization config updated for user:', { userId, config });
+
+            res.json({
+                success: true,
+                message: 'Optimization configuration updated successfully',
+                data: config,
+            });
+        } catch (error: any) {
+            logger.error('Update optimization config error:', error);
+            next(error);
+        }
+    }
+
+    static async getOptimizationTemplates(req: any, res: Response, next: NextFunction) {
+        try {
+            const { category } = req.query;
+
+            // Get real optimization templates from database
+            const templates = await OptimizationService.getOptimizationTemplates(category);
+
+            res.json({
+                success: true,
+                data: templates,
+            });
+        } catch (error: any) {
+            logger.error('Get optimization templates error:', error);
+            next(error);
+        }
+    }
+
+    static async getOptimizationHistory(req: any, res: Response, next: NextFunction) {
+        try {
+            const { promptHash } = req.params;
+            const userId = req.user!.id;
+
+            // Get real optimization history from database
+            const history = await OptimizationService.getOptimizationHistory(promptHash, userId);
+
+            res.json({
+                success: true,
+                data: history,
+            });
+        } catch (error: any) {
+            logger.error('Get optimization history error:', error);
+            next(error);
+        }
+    }
+
+    static async revertOptimization(req: any, res: Response, next: NextFunction) {
+        try {
+            const { id } = req.params;
+            const userId = req.user!.id;
+            const { version } = req.body;
+
+            // Revert optimization to previous version
+            await OptimizationService.revertOptimization(id, userId, version);
+
+            res.json({
+                success: true,
+                message: 'Optimization reverted successfully',
+            });
+        } catch (error: any) {
+            logger.error('Revert optimization error:', error);
+            next(error);
         }
     }
 

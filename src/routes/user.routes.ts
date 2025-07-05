@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { UserController } from '../controllers/user.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, requirePermission } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validation.middleware';
-import { updateProfileSchema, addApiKeySchema } from '../utils/validators';
+import { updateProfileSchema } from '../utils/validators';
 import { asyncHandler } from '../middleware/error.middleware';
 
 const router = Router();
@@ -15,10 +15,17 @@ router.get('/profile', asyncHandler(UserController.getProfile));
 router.put('/profile', validate(updateProfileSchema), asyncHandler(UserController.updateProfile));
 router.post('/profile/avatar-upload-url', asyncHandler(UserController.getPresignedAvatarUrl));
 
-// API key routes
-router.get('/api-keys', asyncHandler(UserController.getApiKeys));
-router.post('/api-keys', validate(addApiKeySchema), asyncHandler(UserController.addApiKey));
-router.delete('/api-keys/:service', asyncHandler(UserController.removeApiKey));
+// Get user stats
+router.get('/stats', asyncHandler(UserController.getUserStats));
+
+// Get user activities
+router.get('/activities', asyncHandler(UserController.getUserActivities));
+
+// Dashboard API key routes
+router.get('/dashboard-api-keys', asyncHandler(UserController.getDashboardApiKeys));
+router.post('/dashboard-api-keys', requirePermission('write', 'admin'), asyncHandler(UserController.createDashboardApiKey));
+router.put('/dashboard-api-keys/:keyId', requirePermission('write', 'admin'), asyncHandler(UserController.updateDashboardApiKey));
+router.delete('/dashboard-api-keys/:keyId', requirePermission('write', 'admin'), asyncHandler(UserController.deleteDashboardApiKey));
 
 // Alert routes
 router.get('/alerts', asyncHandler(UserController.getAlerts));

@@ -11,6 +11,7 @@ import { sanitizeInput } from './middleware/validation.middleware';
 import { logger, stream } from './utils/logger';
 import { apiRouter } from './routes';
 import { AICostTrackerService } from './services/aiCostTracker.service';
+import { intelligenceService } from './services/intelligence.service';
 import { setupCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 
@@ -104,6 +105,10 @@ export const startServer = async () => {
         // Initialize AI Cost Tracker
         await AICostTrackerService.initialize();
         logger.info('AI Cost Tracker initialized');
+
+        // Initialize default tips
+        await intelligenceService.initializeDefaultTips();
+        logger.info('Default tips initialized');
 
         // Setup Cron Jobs
         setupCronJobs();

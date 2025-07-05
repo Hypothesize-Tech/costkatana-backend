@@ -6,6 +6,9 @@ import optimizationRouter from './optimization.routes';
 import analyticsRouter from './analytics.routes';
 import eventRouter from './events.routes';
 import { trackerRouter } from './tracker.routes';
+import intelligenceRoutes from './intelligence.routes';
+import projectRoutes from './project.routes';
+import promptTemplateRoutes from './promptTemplate.routes';
 
 const router = Router();
 
@@ -27,5 +30,8 @@ router.use('/optimizations', optimizationRouter);
 router.use('/analytics', analyticsRouter);
 router.use('/events', eventRouter);
 router.use('/tracker', trackerRouter);
+router.use('/intelligence', intelligenceRoutes);
+router.use('/projects', projectRoutes);
+router.use('/prompt-templates', promptTemplateRoutes);
 
 export const apiRouter = router;

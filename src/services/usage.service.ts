@@ -25,6 +25,7 @@ interface TrackUsageData {
 
 interface UsageFilters {
     userId?: string;
+    projectId?: string;
     service?: string;
     model?: string;
     startDate?: Date;
@@ -89,6 +90,7 @@ export class UsageService {
             const query: any = {};
 
             if (filters.userId) query.userId = filters.userId;
+            if (filters.projectId) query.projectId = filters.projectId;
             if (filters.service) query.service = filters.service;
             if (filters.model) query.model = filters.model;
             if (filters.tags && filters.tags.length > 0) {
@@ -601,6 +603,78 @@ export class UsageService {
                 message: error.message,
                 errors: error.errors
             });
+            throw error;
+        }
+    }
+
+    /**
+     * Get usage by ID and verify ownership
+     */
+    static async getUsageById(usageId: string, userId: string): Promise<IUsage | null> {
+        try {
+            const usage = await Usage.findOne({
+                _id: usageId,
+                userId: userId
+            }).lean();
+
+            return usage;
+        } catch (error) {
+            logger.error('Error getting usage by ID:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update usage record
+     */
+    static async updateUsage(usageId: string, updateData: any): Promise<IUsage | null> {
+        try {
+            const updatedUsage = await Usage.findByIdAndUpdate(
+                usageId,
+                {
+                    ...updateData,
+                    updatedAt: new Date()
+                },
+                {
+                    new: true,
+                    runValidators: true
+                }
+            ).lean();
+
+            if (updatedUsage) {
+                // Send update event to frontend
+                eventService.sendEvent('usage_updated', {
+                    usageId,
+                    userId: updatedUsage.userId,
+                    updateData,
+                    timestamp: new Date(),
+                });
+            }
+
+            return updatedUsage;
+        } catch (error) {
+            logger.error('Error updating usage:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete usage record
+     */
+    static async deleteUsage(usageId: string): Promise<void> {
+        try {
+            const deletedUsage = await Usage.findByIdAndDelete(usageId);
+
+            if (deletedUsage) {
+                // Send delete event to frontend
+                eventService.sendEvent('usage_deleted', {
+                    usageId,
+                    userId: deletedUsage.userId,
+                    timestamp: new Date(),
+                });
+            }
+        } catch (error) {
+            logger.error('Error deleting usage:', error);
             throw error;
         }
     }

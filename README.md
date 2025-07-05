@@ -13,6 +13,37 @@ A comprehensive TypeScript backend service for tracking, analyzing, and optimizi
 - 🔄 **Real-time Metrics**: CloudWatch integration for monitoring
 - 🎯 **Multi-Provider Support**: OpenAI, AWS Bedrock, Google AI, Anthropic, and more
 
+## 🎯 Key Features
+
+### 🧠 Proactive Intelligence & Quality Assurance (New!)
+
+Transform your cost optimization with intelligent guidance:
+
+- **🎯 Contextual Tips**: Real-time suggestions based on your usage patterns
+  - Smart detection of optimization opportunities
+  - Priority-based recommendations
+  - Interactive actions to apply optimizations instantly
+
+- **📊 Quality Scoring**: Ensure optimizations don't compromise output quality
+  - AI-powered quality assessment
+  - Before/after comparison
+  - User feedback collection
+  - Multi-criteria evaluation (accuracy, relevance, completeness)
+
+- **🧙 Cost Audit Wizard**: Interactive step-by-step optimization guide
+  - Analyzes your usage patterns
+  - Identifies cost-saving opportunities
+  - Configures optimizations automatically
+  - Estimates potential savings
+
+- **💡 Smart Recommendations**:
+  - High token usage alerts (>4000 tokens)
+  - Expensive model warnings
+  - Unused feature notifications
+  - Pattern-based suggestions
+
+[Learn more about Proactive Intelligence →](docs/PROACTIVE_INTELLIGENCE.md)
+
 ## Tech Stack
 
 - **Runtime**: Node.js with TypeScript

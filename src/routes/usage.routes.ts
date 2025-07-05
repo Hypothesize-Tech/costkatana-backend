@@ -1,23 +1,37 @@
 import { Router } from 'express';
 import { UsageController } from '../controllers/usage.controller';
-import { authenticate } from '../middleware/auth.middleware';
+import { authenticate, optionalAuth, requirePermission } from '../middleware/auth.middleware';
 import { validate, validateQuery } from '../middleware/validation.middleware';
 import { trackUsageSchema, paginationSchema } from '../utils/validators';
 import { asyncHandler } from '../middleware/error.middleware';
 
 const router = Router();
 
-// All routes require authentication
-router.use(authenticate);
+// Routes that support optional authentication (API key access)
+// Track usage - key functionality for API integration
+router.post('/track', optionalAuth, validate(trackUsageSchema), asyncHandler(UsageController.trackUsage));
 
-// Track new usage
-router.post('/', validate(trackUsageSchema), asyncHandler(UsageController.trackUsage));
+// Track usage from SDK - supports API key authentication
+router.post('/track-sdk', optionalAuth, asyncHandler(UsageController.trackUsageFromSDK));
 
-// Track new usage from SDK
-router.post('/sdk', asyncHandler(UsageController.trackUsageFromSDK));
+// Get usage data - read-only, supports API key
+router.get('/', optionalAuth, validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
 
-// Get usage statistics
-router.get('/stats', asyncHandler(UsageController.getUsageStats));
+// Get usage by project - read-only, supports API key
+router.get('/project/:projectId', optionalAuth, validateQuery(paginationSchema), asyncHandler(UsageController.getUsageByProject));
+
+// Get usage statistics - read-only, supports API key
+router.get('/stats', optionalAuth, asyncHandler(UsageController.getUsageStats));
+
+// Routes that require full authentication (write operations beyond usage tracking)
+// Bulk upload usage data
+router.post('/bulk', authenticate, requirePermission('write', 'admin'), asyncHandler(UsageController.bulkUploadUsage));
+
+// Update usage data
+router.put('/:usageId', authenticate, requirePermission('write', 'admin'), asyncHandler(UsageController.updateUsage));
+
+// Delete usage data
+router.delete('/:usageId', authenticate, requirePermission('admin'), asyncHandler(UsageController.deleteUsage));
 
 // Detect anomalies
 router.get('/anomalies', asyncHandler(UsageController.detectAnomalies));
@@ -27,8 +41,5 @@ router.get('/search', validateQuery(paginationSchema), asyncHandler(UsageControl
 
 // Export usage data
 router.get('/export', asyncHandler(UsageController.exportUsage));
-
-// Get usage data
-router.get('/', validateQuery(paginationSchema), asyncHandler(UsageController.getUsage));
 
 export default router;

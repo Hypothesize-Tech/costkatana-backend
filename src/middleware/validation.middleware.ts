@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema } from 'zod';
+import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 
 export const validate = (schema: ZodSchema) => {
@@ -31,6 +32,21 @@ export const validate = (schema: ZodSchema) => {
             return;
         }
     };
+};
+
+// Express-validator middleware
+export const validateRequest = (req: Request, res: Response, next: NextFunction): void => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        logger.debug('Express-validator validation error:', errors.array());
+        res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors.array()
+        });
+        return;
+    }
+    next();
 };
 
 export const validateQuery = (schema: ZodSchema) => {

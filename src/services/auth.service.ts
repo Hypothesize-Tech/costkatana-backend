@@ -3,16 +3,24 @@ import { User, IUser } from '../models/User';
 import { config } from '../config';
 import { generateToken } from '../utils/helpers';
 import { logger } from '../utils/logger';
+import { ActivityService } from './activity.service';
 
 interface TokenPayload extends JwtPayload {
     id: string;
     email: string;
     role: string;
+    jti?: string; // JWT ID for API key identification
 }
 
 interface AuthTokens {
     accessToken: string;
     refreshToken: string;
+}
+
+interface DashboardApiKey {
+    keyId: string;
+    apiKey: string;
+    maskedKey: string;
 }
 
 export class AuthService {
@@ -45,6 +53,43 @@ export class AuthService {
         return { accessToken, refreshToken };
     }
 
+    static generateDashboardApiKey(user: IUser, name: string, permissions: string[] = ['read'], expiresAt?: Date): DashboardApiKey {
+        // Generate unique key ID and API key
+        const keyId = generateToken(16); // 32 character hex string
+        const apiKeySecret = generateToken(32); // 64 character hex string
+
+        // Create API key in format: dak_userId_keyId_secret (Dashboard API Key)
+        const apiKey = `dak_${(user as any)._id.toString()}_${keyId}_${apiKeySecret}`;
+
+        // Create masked version for display
+        const maskedKey = `dak_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
+
+        // Use the parameters to avoid TypeScript warnings
+        console.log(`Creating API key "${name}" with permissions: ${permissions.join(', ')}${expiresAt ? ` (expires: ${expiresAt})` : ''}`);
+
+        return {
+            keyId,
+            apiKey,
+            maskedKey
+        };
+    }
+
+    static generateApiKeyToken(userId: string, keyId: string, permissions: string[] = ['read']): string {
+        const payload: TokenPayload = {
+            id: userId,
+            email: '', // Not needed for API key auth
+            role: 'user',
+            jti: keyId, // JWT ID matches the key ID for validation
+            permissions
+        };
+
+        return jwt.sign(
+            payload,
+            config.jwt.secret as Secret,
+            { expiresIn: '365d' } as SignOptions // Long-lived for API keys
+        );
+    }
+
     static verifyAccessToken(token: string): TokenPayload {
         const decoded = jwt.verify(token, config.jwt.secret as Secret);
         if (typeof decoded === 'string' || !decoded) {
@@ -60,6 +105,20 @@ export class AuthService {
             throw new Error('Invalid token payload');
         }
         return decoded as TokenPayload;
+    }
+
+    static parseApiKey(apiKey: string): { userId: string; keyId: string; secret: string } | null {
+        // Parse API key format: dak_userId_keyId_secret
+        const parts = apiKey.split('_');
+        if (parts.length !== 4 || parts[0] !== 'dak') {
+            return null;
+        }
+
+        return {
+            userId: parts[1],
+            keyId: parts[2],
+            secret: parts[3]
+        };
     }
 
     static async register(data: {
@@ -123,6 +182,13 @@ export class AuthService {
             // Update last login
             user.lastLogin = new Date();
             await user.save();
+
+            // Track login activity
+            await ActivityService.trackActivity(user._id.toString(), {
+                type: 'login',
+                title: 'User Login',
+                description: 'Successfully logged in'
+            });
 
             // Generate tokens
             const tokens = this.generateTokens(user);

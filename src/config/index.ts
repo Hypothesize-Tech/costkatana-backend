@@ -48,4 +48,4 @@ export const config = {
 
 export * from './database';
 export * from './aws';
-export * from './gmail';
+export * from './email';

@@ -180,6 +180,42 @@ export class UsageController {
         }
     }
 
+    static async getUsageByProject(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { projectId } = req.params;
+            const { page, limit, sort, order } = paginationSchema.parse(req.query);
+
+            const filters = {
+                userId,
+                projectId,
+                service: req.query.service as string,
+                model: req.query.model as string,
+                startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
+                endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
+                tags: req.query.tags ? (req.query.tags as string).split(',') : undefined,
+                minCost: req.query.minCost ? parseFloat(req.query.minCost as string) : undefined,
+                maxCost: req.query.maxCost ? parseFloat(req.query.maxCost as string) : undefined,
+            };
+
+            const result = await UsageService.getUsage(filters, {
+                page,
+                limit,
+                sort,
+                order,
+            });
+
+            res.json({
+                success: true,
+                data: result.data,
+                pagination: result.pagination,
+            });
+        } catch (error: any) {
+            logger.error('Get usage by project error:', error);
+            next(error);
+        }
+    }
+
     static async getUsageStats(req: any, res: Response, next: NextFunction) {
         try {
             const userId = req.user!.id;
@@ -193,6 +229,115 @@ export class UsageController {
             });
         } catch (error: any) {
             logger.error('Get usage stats error:', error);
+            next(error);
+        }
+    }
+
+    static async bulkUploadUsage(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { usageData } = req.body;
+
+            if (!Array.isArray(usageData)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Usage data must be an array',
+                });
+                return;
+            }
+
+            const results = [];
+            const errors = [];
+
+            for (let i = 0; i < usageData.length; i++) {
+                try {
+                    const validatedData = trackUsageSchema.parse(usageData[i]);
+                    const usage = await UsageService.trackUsage({
+                        userId,
+                        ...validatedData,
+                    });
+                    results.push({
+                        index: i,
+                        id: usage?._id,
+                        success: true,
+                    });
+                } catch (error: any) {
+                    errors.push({
+                        index: i,
+                        error: error.message,
+                        data: usageData[i],
+                    });
+                }
+            }
+
+            res.json({
+                success: true,
+                message: `Processed ${usageData.length} usage records`,
+                data: {
+                    successful: results.length,
+                    failed: errors.length,
+                    results,
+                    errors,
+                },
+            });
+        } catch (error: any) {
+            logger.error('Bulk upload usage error:', error);
+            next(error);
+        }
+    }
+
+    static async updateUsage(req: any, res: Response, next: NextFunction) {
+        try {
+            const userId = req.user!.id;
+            const { usageId } = req.params;
+            const updateData = req.body;
+
+            // Validate that the usage belongs to the user
+            const existingUsage = await UsageService.getUsageById(usageId, userId);
+            if (!existingUsage) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Usage record not found',
+                });
+                return;
+            }
+
+            const updatedUsage = await UsageService.updateUsage(usageId, updateData);
+
+            res.json({
+                success: true,
+                message: 'Usage updated successfully',
+                data: updatedUsage,
+            });
+        } catch (error: any) {
+            logger.error('Update usage error:', error);
+            next(error);
+        }
+    }
+
+    static async deleteUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { usageId } = req.params;
+
+            // Validate that the usage belongs to the user
+            const existingUsage = await UsageService.getUsageById(usageId, userId);
+            if (!existingUsage) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Usage record not found',
+                });
+                return;
+            }
+
+            await UsageService.deleteUsage(usageId);
+
+            res.json({
+                success: true,
+                message: 'Usage deleted successfully',
+            });
+        } catch (error: any) {
+            logger.error('Delete usage error:', error);
             next(error);
         }
     }

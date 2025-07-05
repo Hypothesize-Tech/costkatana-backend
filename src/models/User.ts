@@ -7,11 +7,15 @@ export interface IUser {
     name: string;
     avatar?: string;
     role: 'user' | 'admin';
-    apiKeys: Array<{
-        service: string;
-        key: string;
-        encryptedKey?: string;
-        addedAt: Date;
+    dashboardApiKeys: Array<{
+        name: string;
+        keyId: string;
+        encryptedKey: string;
+        maskedKey: string;
+        permissions: string[];
+        lastUsed?: Date;
+        createdAt: Date;
+        expiresAt?: Date;
     }>;
     preferences: {
         emailAlerts: boolean;
@@ -73,20 +77,36 @@ const userSchema = new Schema<IUser>({
         enum: ['user', 'admin'],
         default: 'user',
     },
-    apiKeys: [{
-        service: {
+    dashboardApiKeys: [{
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        keyId: {
+            type: String,
+            required: true,
+            unique: true,
+        },
+        encryptedKey: {
             type: String,
             required: true,
         },
-        key: {
+        maskedKey: {
             type: String,
             required: true,
         },
-        encryptedKey: String,
-        addedAt: {
+        permissions: [{
+            type: String,
+            enum: ['read', 'write', 'admin'],
+            default: 'read',
+        }],
+        lastUsed: Date,
+        createdAt: {
             type: Date,
             default: Date.now,
         },
+        expiresAt: Date,
     }],
     preferences: {
         emailAlerts: {
@@ -213,5 +233,6 @@ userSchema.statics.resetAllMonthlyUsage = async function () {
 // Indexes
 userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ 'dashboardApiKeys.keyId': 1 });
 
 export const User = mongoose.model<IUser>('User', userSchema);
