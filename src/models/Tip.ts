@@ -85,7 +85,6 @@ const TipSchema = new Schema<ITip>({
 });
 
 // Indexes for efficient querying
-TipSchema.index({ tipId: 1 });
 TipSchema.index({ 'trigger.condition': 1, isActive: 1 });
 TipSchema.index({ type: 1, priority: -1 });
 
