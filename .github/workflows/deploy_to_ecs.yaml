@@ -3,7 +3,7 @@ name: Deploy to ECS Production
 on:
   push:
     branches:
-      - main
+      - master
       - devops
 
   pull_request:
