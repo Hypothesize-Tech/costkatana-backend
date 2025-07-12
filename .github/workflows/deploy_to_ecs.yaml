@@ -66,6 +66,6 @@ jobs:
         run: |
           aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
-            --service "hypothesize-ai-cost-optimizer-service" \
+            --service "hypothesize-ai-cost-optimizer-service-jczpswhs" \
             --desired-count 4 \
             --force-new-deployment
