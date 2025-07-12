@@ -32,7 +32,7 @@ jobs:
 
       - name: Download environment file from S3
         run: |
-          aws s3 cp s3://ai-cost-optimizer-env/.env
+          aws s3 cp s3://ai-cost-optimizer-env/.env .env
 
       - name: Debug environment variables
         run: echo "ECR_REPOSITORY=${ECR_REPOSITORY}"
