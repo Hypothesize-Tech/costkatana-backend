@@ -1,0 +1,71 @@
+name: Deploy to ECS Production
+
+on:
+  push:
+    branches:
+      - main
+      - devops
+
+  pull_request:
+    branches:
+      - qa
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Log in to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.$AWS_REGION.amazonaws.com"
+
+      - name: Download environment file from S3
+        run: |
+          aws s3 cp s3://ai-cost-optimizer-env/.env
+
+      - name: Debug environment variables
+        run: echo "ECR_REPOSITORY=${ECR_REPOSITORY}"
+
+      - name: Build and Push Docker Image
+        run: |
+          docker build -t "${ECR_REPOSITORY}:latest" .
+          docker tag "${ECR_REPOSITORY}:latest" "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest"
+          docker push "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest"
+
+      - name: Update ECS Task Definition
+        run: |
+          # Fetch the current task definition
+          task_def=$(aws ecs describe-task-definition --task-definition arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/hypothesize-ai-cost-optimizer)
+
+          # Clean the task definition by removing unwanted fields
+          new_task_def=$(echo "$task_def" | jq '
+            .taskDefinition |
+            del(.status, .revision, .taskDefinitionArn, .requiresAttributes, .registeredAt, .registeredBy, .compatibilities) |
+            .containerDefinitions[0].image = "'${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest'"
+          ')
+
+          # Save the cleaned task definition to a file
+          echo "$new_task_def" > ecsTaskDef.json
+
+      - name: Register Updated Task Definition
+        run: |
+          aws ecs register-task-definition --cli-input-json file://ecsTaskDef.json
+
+      - name: Update ECS Service to Use New Task Definition
+        run: |
+          aws ecs update-service \
+            --cluster "${ECS_CLUSTER}" \
+            --service "hypothesize-ai-cost-optimizer-service" \
+            --desired-count 4 \
+            --force-new-deployment

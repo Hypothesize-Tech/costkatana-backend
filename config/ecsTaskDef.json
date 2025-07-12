@@ -1,0 +1,50 @@
+{
+  "family": "hypothesize-p3m-backend-production",
+  "executionRoleArn": "arn:aws:iam::148123604300:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "containerDefinitions": [
+    {
+      "name": "ai-cost-optimizer-app",
+      "image": "148123604300.dkr.ecr.us-east-1.amazonaws.com/hypothesize/ai-cost-optimizer:latest",
+      "cpu": 0,
+      "portMappings": [
+        {
+          "name": "access-port",
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "essential": true,
+      "environment": [],
+      "environmentFiles": [
+        {
+          "value": "arn:aws:s3:::ai-cost-optimizer-env/.env",
+          "type": "s3"
+        }
+      ],
+      "mountPoints": [],
+      "volumesFrom": [],
+      "ulimits": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/hypothesize-ai-cost-optimizer",
+          "awslogs-create-group": "true",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        },
+        "secretOptions": []
+      },
+      "systemControls": []
+    }
+  ],
+  "cpu": "1024",
+  "memory": "2048",
+  "requiresCompatibilities": ["FARGATE"],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  }
+}
