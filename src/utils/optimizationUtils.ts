@@ -9,7 +9,28 @@ import {
     FusionRequest
 } from '../types/aiCostTracker.types';
 import { estimateTokens, estimateConversationTokens } from './tokenCounter';
-import { calculateCost, getPricingForModel } from './pricing';
+import { calculateCost, getModelPricing } from './pricing';
+
+/**
+ * Convert AIProvider enum to string for pricing functions
+ */
+function providerEnumToString(provider: AIProvider): string {
+    const providerMap: Record<AIProvider, string> = {
+        [AIProvider.OpenAI]: 'OpenAI',
+        [AIProvider.Anthropic]: 'Anthropic',
+        [AIProvider.Google]: 'Google AI',
+        [AIProvider.Gemini]: 'Google AI',
+        [AIProvider.AWSBedrock]: 'AWS Bedrock',
+        [AIProvider.Cohere]: 'Cohere',
+        [AIProvider.DeepSeek]: 'DeepSeek',
+        [AIProvider.Groq]: 'Groq',
+        [AIProvider.HuggingFace]: 'Hugging Face',
+        [AIProvider.Ollama]: 'Ollama',
+        [AIProvider.Replicate]: 'Replicate',
+        [AIProvider.Azure]: 'Azure OpenAI'
+    };
+    return providerMap[provider] || 'OpenAI';
+}
 
 /**
  * Compress prompt by removing unnecessary elements
@@ -351,7 +372,7 @@ export function suggestRequestFusion(
 
                     // Calculate estimated savings
                     const individualCosts = batch.map(req =>
-                        calculateCost(req.provider, req.model, estimateTokens(req.prompt), 150)
+                        calculateCost(estimateTokens(req.prompt), 150, providerEnumToString(req.provider), req.model)
                     );
                     const totalIndividualCost = individualCosts.reduce((sum, cost) => sum + cost, 0);
 
@@ -390,13 +411,13 @@ export function generateOptimizationSuggestions(
     const startTime = Date.now();
 
     const originalTokens = estimateTokens(prompt, provider);
-    const originalCost = calculateCost(provider, model, originalTokens, 150);
+    const originalCost = calculateCost(originalTokens, 150, providerEnumToString(provider), model);
 
     // Prompt compression suggestions
     const compressionResult = compressPrompt(prompt, 'medium');
     if (compressionResult.compressionRatio < 0.9) {
         const compressedTokens = estimateTokens(compressionResult.compressedPrompt, provider);
-        const compressedCost = calculateCost(provider, model, compressedTokens, 150);
+        const compressedCost = calculateCost(compressedTokens, 150, providerEnumToString(provider), model);
         const savings = originalCost - compressedCost;
 
         suggestions.push({
@@ -418,7 +439,7 @@ export function generateOptimizationSuggestions(
         const jsonCompressionResult = compressJsonInPrompt(prompt);
         if (jsonCompressionResult.compressionRatio < 0.95) {
             const jsonCompressedTokens = estimateTokens(jsonCompressionResult.compressedPrompt, provider);
-            const jsonCompressedCost = calculateCost(provider, model, jsonCompressedTokens, 150);
+            const jsonCompressedCost = calculateCost(jsonCompressedTokens, 150, providerEnumToString(provider), model);
             const jsonSavings = originalCost - jsonCompressedCost;
 
             suggestions.push({
@@ -441,7 +462,7 @@ export function generateOptimizationSuggestions(
         const contextTrimResult = trimConversationContext(conversationHistory, originalTokens * 0.7, provider);
         if (contextTrimResult.trimmedMessages.length < contextTrimResult.originalMessages.length) {
             const contextTokens = estimateConversationTokens(contextTrimResult.trimmedMessages, provider);
-            const contextCost = calculateCost(provider, model, contextTokens, 150);
+            const contextCost = calculateCost(contextTokens, 150, providerEnumToString(provider), model);
             const contextSavings = originalCost - contextCost;
 
             suggestions.push({
@@ -493,10 +514,10 @@ function suggestAlternativeModel(
     currentModel: string,
     tokenCount: number
 ): OptimizationSuggestion | null {
-    const currentPricing = getPricingForModel(provider, currentModel);
+    const currentPricing = getModelPricing(providerEnumToString(provider), currentModel);
     if (!currentPricing) return null;
 
-    const currentCost = calculateCost(provider, currentModel, tokenCount, 150);
+    const currentCost = calculateCost(tokenCount, 150, providerEnumToString(provider), currentModel);
 
     // Model alternatives by provider
     const alternatives: Record<AIProvider, string[]> = {
@@ -519,7 +540,7 @@ function suggestAlternativeModel(
 
     for (const altModel of modelAlternatives) {
         if (altModel !== currentModel) {
-            const altCost = calculateCost(provider, altModel, tokenCount, 150);
+            const altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
             const savings = currentCost - altCost;
 
             if (savings > 0 && (!bestAlternative || savings > bestAlternative.savings)) {

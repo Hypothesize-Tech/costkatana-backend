@@ -4,12 +4,39 @@ import { config } from '../config';
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
+// Safe JSON.stringify that handles circular references
+const safeStringify = (obj: any): string => {
+    const seen = new WeakSet();
+    return JSON.stringify(obj, (_key, value) => {
+        if (typeof value === 'object' && value !== null) {
+            if (seen.has(value)) {
+                return '[Circular]';
+            }
+            seen.add(value);
+        }
+        // Handle Error objects specifically
+        if (value instanceof Error) {
+            return {
+                name: value.name,
+                message: value.message,
+                stack: value.stack,
+                cause: value.cause
+            };
+        }
+        return value;
+    });
+};
+
 // Custom format for console logging
 const consoleFormat = printf(({ level, message, timestamp, stack, ...metadata }) => {
     let msg = `${timestamp} [${level}]: ${message}`;
 
     if (Object.keys(metadata).length > 0) {
-        msg += ` ${JSON.stringify(metadata)}`;
+        try {
+            msg += ` ${safeStringify(metadata)}`;
+        } catch (error) {
+            msg += ` [Unable to stringify metadata]`;
+        }
     }
 
     if (stack) {

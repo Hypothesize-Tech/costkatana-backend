@@ -5,11 +5,60 @@ import { Alert } from '../models/Alert';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { AIProvider, CostEstimate, OptimizationResult } from '../types/aiCostTracker.types';
-import { estimateCost } from '../utils/pricing';
+import { estimateCost, getModelPricing } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions } from '../utils/optimizationUtils';
 import mongoose from 'mongoose';
 import { ActivityService } from './activity.service';
+
+/**
+ * Convert AIProvider enum to string for pricing functions
+ */
+function providerEnumToString(provider: AIProvider): string {
+    const providerMap: Record<AIProvider, string> = {
+        [AIProvider.OpenAI]: 'OpenAI',
+        [AIProvider.Anthropic]: 'Anthropic',
+        [AIProvider.Google]: 'Google AI',
+        [AIProvider.Gemini]: 'Google AI',
+        [AIProvider.AWSBedrock]: 'AWS Bedrock',
+        [AIProvider.Cohere]: 'Cohere',
+        [AIProvider.DeepSeek]: 'DeepSeek',
+        [AIProvider.Groq]: 'Groq',
+        [AIProvider.HuggingFace]: 'Hugging Face',
+        [AIProvider.Ollama]: 'Ollama',
+        [AIProvider.Replicate]: 'Replicate',
+        [AIProvider.Azure]: 'Azure OpenAI'
+    };
+    return providerMap[provider] || 'OpenAI';
+}
+
+/**
+ * Convert simple cost estimate to CostEstimate interface
+ */
+function convertToCostEstimate(
+    simpleEstimate: { inputCost: number; outputCost: number; totalCost: number },
+    promptTokens: number,
+    completionTokens: number,
+    provider: AIProvider,
+    model: string
+): CostEstimate {
+    const modelPricing = getModelPricing(providerEnumToString(provider), model);
+    const inputPricePerToken = modelPricing ? modelPricing.inputPrice / 1000000 : 0;
+    const outputPricePerToken = modelPricing ? modelPricing.outputPrice / 1000000 : 0;
+
+    return {
+        promptCost: simpleEstimate.inputCost,
+        completionCost: simpleEstimate.outputCost,
+        totalCost: simpleEstimate.totalCost,
+        currency: 'USD',
+        breakdown: {
+            promptTokens,
+            completionTokens,
+            pricePerPromptToken: inputPricePerToken,
+            pricePerCompletionToken: outputPricePerToken
+        }
+    };
+}
 
 interface OptimizationRequest {
     userId: string;
@@ -93,11 +142,18 @@ export class OptimizationService {
 
             // Get token count and cost for original prompt
             const originalTokens = estimateTokens(request.prompt, provider);
-            const originalEstimate: CostEstimate = estimateCost(
-                provider,
-                request.model,
+            const originalSimpleEstimate = estimateCost(
                 originalTokens,
-                150 // Expected completion tokens
+                150, // Expected completion tokens
+                providerEnumToString(provider),
+                request.model
+            );
+            const originalEstimate: CostEstimate = convertToCostEstimate(
+                originalSimpleEstimate,
+                originalTokens,
+                150,
+                provider,
+                request.model
             );
 
             // Run the enhanced optimization using internal utilities
@@ -116,11 +172,18 @@ export class OptimizationService {
 
             // Get token count and cost for optimized prompt
             const optimizedTokens = estimateTokens(bestSuggestion.optimizedPrompt || request.prompt, provider);
-            const optimizedEstimate: CostEstimate = estimateCost(
-                provider,
-                request.model,
+            const optimizedSimpleEstimate = estimateCost(
                 optimizedTokens,
-                150 // Expected completion tokens
+                150, // Expected completion tokens
+                providerEnumToString(provider),
+                request.model
+            );
+            const optimizedEstimate: CostEstimate = convertToCostEstimate(
+                optimizedSimpleEstimate,
+                optimizedTokens,
+                150,
+                provider,
+                request.model
             );
 
             // Calculate savings
@@ -259,25 +322,29 @@ export class OptimizationService {
                     let originalTotalTokens = 0;
 
                     for (const req of request.requests) {
+                        const provider = this.getAIProviderFromString(req.provider);
+                        const promptTokens = estimateTokens(req.prompt, provider);
                         const estimate = estimateCost(
-                            this.getAIProviderFromString(req.provider),
-                            req.model,
-                            estimateTokens(req.prompt, this.getAIProviderFromString(req.provider)),
-                            150
+                            promptTokens,
+                            150,
+                            providerEnumToString(provider),
+                            req.model
                         );
                         originalTotalCost += estimate.totalCost;
-                        originalTotalTokens += estimate.breakdown.promptTokens + estimate.breakdown.completionTokens;
+                        originalTotalTokens += promptTokens + 150;
                     }
 
                     // Calculate optimized cost
+                    const firstProvider = this.getAIProviderFromString(request.requests[0].provider);
+                    const optimizedPromptTokens = estimateTokens(suggestion.optimizedPrompt!, firstProvider);
                     const optimizedEstimate = estimateCost(
-                        this.getAIProviderFromString(request.requests[0].provider),
-                        request.requests[0].model,
-                        estimateTokens(suggestion.optimizedPrompt!, this.getAIProviderFromString(request.requests[0].provider)),
-                        150
+                        optimizedPromptTokens,
+                        150,
+                        providerEnumToString(firstProvider),
+                        request.requests[0].model
                     );
 
-                    const optimizedTokens = (optimizedEstimate.breakdown?.promptTokens ?? 0) + (optimizedEstimate.breakdown?.completionTokens ?? 0);
+                    const optimizedTokens = optimizedPromptTokens + 150;
                     const tokensSaved = originalTotalTokens - optimizedTokens;
                     const costSaved = originalTotalCost - optimizedEstimate.totalCost;
                     const improvementPercentage = originalTotalTokens > 0 ? (tokensSaved / originalTotalTokens) * 100 : 0;

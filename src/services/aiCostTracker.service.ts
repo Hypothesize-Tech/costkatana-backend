@@ -11,7 +11,7 @@ import {
     OptimizationConfig,
     TrackingConfig
 } from '../types/aiCostTracker.types';
-import { calculateCost, estimateCost } from '../utils/pricing';
+import { calculateCost, estimateCost, getModelPricing } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions, applyOptimizations } from '../utils/optimizationUtils';
 
@@ -176,11 +176,12 @@ export class AICostTrackerService {
 
             // Calculate cost
             const provider = this.mapServiceToProvider(metadata?.service || 'openai');
+            const providerString = this.providerEnumToString(provider);
             const estimatedCost = calculateCost(
-                provider,
-                request.model,
                 finalPromptTokens,
-                finalCompletionTokens
+                finalCompletionTokens,
+                providerString,
+                request.model
             );
 
             // Check if approval is required for project
@@ -329,7 +330,26 @@ export class AICostTrackerService {
         await this.initialize();
 
         const promptTokens = estimateTokens(prompt, provider);
-        return estimateCost(provider, model, promptTokens, expectedCompletionTokens);
+        const providerString = this.providerEnumToString(provider);
+        const costEstimate = estimateCost(promptTokens, expectedCompletionTokens, providerString, model);
+
+        // Convert to the expected format
+        const modelPricing = getModelPricing(providerString, model);
+        const inputPricePerToken = modelPricing ? modelPricing.inputPrice / 1000000 : 0;
+        const outputPricePerToken = modelPricing ? modelPricing.outputPrice / 1000000 : 0;
+
+        return {
+            promptCost: costEstimate.inputCost,
+            completionCost: costEstimate.outputCost,
+            totalCost: costEstimate.totalCost,
+            currency: 'USD',
+            breakdown: {
+                promptTokens,
+                completionTokens: expectedCompletionTokens,
+                pricePerPromptToken: inputPricePerToken,
+                pricePerCompletionToken: outputPricePerToken
+            }
+        };
     }
 
     /**
@@ -353,6 +373,28 @@ export class AICostTrackerService {
         };
 
         return serviceMap[service.toLowerCase()] || AIProvider.OpenAI;
+    }
+
+    /**
+     * Map AIProvider enum to string for pricing functions
+     */
+    private static providerEnumToString(provider: AIProvider): string {
+        const providerMap: Record<AIProvider, string> = {
+            [AIProvider.OpenAI]: 'OpenAI',
+            [AIProvider.Anthropic]: 'Anthropic',
+            [AIProvider.Google]: 'Google AI',
+            [AIProvider.Gemini]: 'Google AI',
+            [AIProvider.AWSBedrock]: 'AWS Bedrock',
+            [AIProvider.Cohere]: 'Cohere',
+            [AIProvider.DeepSeek]: 'DeepSeek',
+            [AIProvider.Groq]: 'Groq',
+            [AIProvider.HuggingFace]: 'Hugging Face',
+            [AIProvider.Ollama]: 'Ollama',
+            [AIProvider.Replicate]: 'Replicate',
+            [AIProvider.Azure]: 'Azure OpenAI'
+        };
+
+        return providerMap[provider] || 'OpenAI';
     }
 
     /**

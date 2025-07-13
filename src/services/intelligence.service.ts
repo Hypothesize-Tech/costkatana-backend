@@ -130,11 +130,26 @@ export class IntelligenceService {
      * Check if the model is considered expensive
      */
     private isExpensiveModel(model: string): boolean {
-        const expensiveModels = [
-            'gpt-4', 'gpt-4-turbo', 'claude-2', 'claude-3-opus',
-            'gemini-ultra', 'gpt-4-vision'
-        ];
-        return expensiveModels.some(expensiveModel => model.toLowerCase().includes(expensiveModel));
+        // Import the pricing utilities
+        const { MODEL_PRICING } = require('../utils/pricing');
+
+        // Find the model in pricing data
+        const modelPricing = MODEL_PRICING.find((pricing: any) =>
+            pricing.model.toLowerCase() === model.toLowerCase()
+        );
+
+        if (!modelPricing) {
+            // If model not found, check against known expensive model patterns
+            const expensivePatterns = ['gpt-4', 'claude-3-opus', 'gemini-ultra'];
+            return expensivePatterns.some(pattern => model.toLowerCase().includes(pattern));
+        }
+
+        // Consider expensive if input price > $20/1M tokens or output price > $60/1M tokens
+        const expensiveInputThreshold = 20; // $20 per 1M tokens
+        const expensiveOutputThreshold = 60; // $60 per 1M tokens
+
+        return modelPricing.inputPrice > expensiveInputThreshold ||
+            modelPricing.outputPrice > expensiveOutputThreshold;
     }
 
     /**

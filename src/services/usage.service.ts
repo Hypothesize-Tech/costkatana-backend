@@ -4,7 +4,6 @@ import { Alert } from '../models/Alert';
 import { logger } from '../utils/logger';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
-import { eventService } from './event.service';
 import { AICostTrackerService } from './aiCostTracker.service';
 import { getUserIdFromToken } from '../controllers/usage.controller';
 
@@ -135,16 +134,6 @@ export class UsageService {
             ]);
 
             const result = paginate(data, total, options);
-
-            // Send usage data update event to frontend
-            if (filters.userId) {
-                eventService.sendEvent('usage_data_updated', {
-                    userId: filters.userId,
-                    data: result,
-                    filters,
-                    timestamp: new Date(),
-                });
-            }
 
             return result;
         } catch (error) {
@@ -277,14 +266,6 @@ export class UsageService {
                 modelBreakdown,
             };
 
-            // Send stats update event to frontend
-            eventService.sendEvent('usage_stats_updated', {
-                userId,
-                period,
-                stats: result,
-                timestamp: new Date(),
-            });
-
             return result;
         } catch (error) {
             logger.error('Error getting usage stats:', error);
@@ -361,24 +342,8 @@ export class UsageService {
                         severity: anomaly.severity,
                         data: { anomaly },
                     });
-
-                    // Send anomaly alert event to frontend
-                    eventService.sendEvent('anomaly_detected', {
-                        userId,
-                        anomaly,
-                        severity: anomaly.severity,
-                        timestamp: new Date(),
-                    });
                 }
             }
-
-            // Send anomaly analysis results to frontend
-            eventService.sendEvent('anomaly_analysis_completed', {
-                userId,
-                anomalies: anomalyResult.anomalies,
-                recommendations: anomalyResult.recommendations,
-                timestamp: new Date(),
-            });
 
             return anomalyResult;
         } catch (error) {
@@ -413,14 +378,6 @@ export class UsageService {
 
             const result = paginate(data, total, options);
 
-            // Send search results event to frontend
-            eventService.sendEvent('usage_search_completed', {
-                userId,
-                searchTerm,
-                results: result,
-                timestamp: new Date(),
-            });
-
             return result;
         } catch (error) {
             logger.error('Error searching usage:', error);
@@ -440,14 +397,6 @@ export class UsageService {
                 const usage = await this.trackUsage(data);
                 results.push(usage!);
             }
-
-            // Send bulk update event to frontend
-            eventService.sendEvent('bulk_usage_tracked', {
-                count: results.length,
-                totalCost: results.reduce((sum, usage) => sum + usage.cost, 0),
-                totalTokens: results.reduce((sum, usage) => sum + usage.totalTokens, 0),
-                timestamp: new Date(),
-            });
 
             return results;
         } catch (error) {
@@ -494,13 +443,6 @@ export class UsageService {
                 todayCalls: 0,
                 lastRequest: null,
             };
-
-            // Send real-time summary to frontend
-            eventService.sendEvent('realtime_usage_summary', {
-                userId,
-                summary: result,
-                timestamp: new Date(),
-            });
 
             return result;
         } catch (error) {
@@ -668,16 +610,6 @@ export class UsageService {
                 }
             ).lean();
 
-            if (updatedUsage) {
-                // Send update event to frontend
-                eventService.sendEvent('usage_updated', {
-                    usageId,
-                    userId: updatedUsage.userId,
-                    updateData,
-                    timestamp: new Date(),
-                });
-            }
-
             return updatedUsage;
         } catch (error) {
             logger.error('Error updating usage:', error);
@@ -688,18 +620,10 @@ export class UsageService {
     /**
      * Delete usage record
      */
-    static async deleteUsage(usageId: string): Promise<void> {
+    static async deleteUsage(usageId: string): Promise<{ success: boolean, message: string }> {
         try {
-            const deletedUsage = await Usage.findByIdAndDelete(usageId);
-
-            if (deletedUsage) {
-                // Send delete event to frontend
-                eventService.sendEvent('usage_deleted', {
-                    usageId,
-                    userId: deletedUsage.userId,
-                    timestamp: new Date(),
-                });
-            }
+            await Usage.findByIdAndDelete(usageId);
+            return { success: true, message: 'Usage deleted successfully' };
         } catch (error) {
             logger.error('Error deleting usage:', error);
             throw error;

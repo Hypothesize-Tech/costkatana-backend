@@ -4,11 +4,12 @@ import userRouter from './user.routes';
 import usageRouter from './usage.routes';
 import optimizationRouter from './optimization.routes';
 import analyticsRouter from './analytics.routes';
-import eventRouter from './events.routes';
 import { trackerRouter } from './tracker.routes';
 import intelligenceRoutes from './intelligence.routes';
 import projectRoutes from './project.routes';
 import promptTemplateRoutes from './promptTemplate.routes';
+import { pricingRoutes } from './pricing.routes';
+import traceRoutes from './trace.routes';
 
 const router = Router();
 
@@ -28,10 +29,11 @@ router.use('/user', userRouter);
 router.use('/usage', usageRouter);
 router.use('/optimizations', optimizationRouter);
 router.use('/analytics', analyticsRouter);
-router.use('/events', eventRouter);
 router.use('/tracker', trackerRouter);
 router.use('/intelligence', intelligenceRoutes);
 router.use('/projects', projectRoutes);
 router.use('/prompt-templates', promptTemplateRoutes);
+router.use('/pricing', pricingRoutes);
+router.use('/traces', traceRoutes);
 
 export const apiRouter = router;
