@@ -15,7 +15,7 @@ const router = Router();
 
 // Health check
 router.get('/health', (_, res) => {
-    res.status(200).json({ status: 'ok' });
+    res.status(200).json({ status: 'AI Cost Optimizer Backend API' });
 });
 
 // API version

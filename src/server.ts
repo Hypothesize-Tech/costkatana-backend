@@ -10,8 +10,8 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
 import { logger, stream } from './utils/logger';
 import { apiRouter } from './routes';
-import { intelligenceService } from './services/intelligence.service';
-import { setupCronJobs } from './utils/cronJobs';
+// import { intelligenceService } from './services/intelligence.service';
+// import { setupCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 
 // Create Express app
@@ -102,11 +102,11 @@ export const startServer = async () => {
         logger.info('MongoDB connected');
 
         // Initialize default tips
-        await intelligenceService.initializeDefaultTips();
-        logger.info('Default tips initialized');
+        // await intelligenceService.initializeDefaultTips();
+        // logger.info('Default tips initialized');
 
-        // Setup Cron Jobs
-        setupCronJobs();
+        // // Setup Cron Jobs
+        // setupCronJobs();
 
         app.listen(PORT, () => {
             logger.info(`Server is running on port ${PORT}`);
