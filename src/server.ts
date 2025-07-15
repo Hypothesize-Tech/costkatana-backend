@@ -287,6 +287,7 @@ const PORT = process.env.PORT || 8000;
 
 export const startServer = async () => {
     try {
+        logger.info('Starting server...');
         await connectDatabase();
         logger.info('MongoDB connected');
 
