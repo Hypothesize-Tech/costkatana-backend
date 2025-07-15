@@ -1,4 +1,4 @@
-import express, { Application } from 'express';
+import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -6,13 +6,14 @@ import compression from 'compression';
 import morgan from 'morgan';
 import { config } from './config';
 import { connectDatabase } from './config/database';
-import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
 import { logger, stream } from './utils/logger';
 import { apiRouter } from './routes';
 // import { intelligenceService } from './services/intelligence.service';
 // import { setupCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
+import { recordBlockedRequest, recordRateLimit, securityMonitor } from './utils/security-monitor';
 
 // Create Express app
 const app: Application = express();
@@ -20,7 +21,7 @@ const app: Application = express();
 // Trust proxy
 app.set('trust proxy', 1);
 
-// Security middleware
+// Enhanced security middleware
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
@@ -31,7 +32,94 @@ app.use(helmet({
         },
     },
     crossOriginEmbedderPolicy: false,
+    hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+    }
 }));
+
+// Security middleware to block malicious requests
+const securityMiddleware = (req: Request, res: Response, next: NextFunction): any => {
+    const suspiciousPatterns = [
+        /wp-admin/i,
+        /wp-includes/i,
+        /wp-content/i,
+        /wordpress/i,
+        /\.php$/i,
+        /\.asp$/i,
+        /\.aspx$/i,
+        /admin/i,
+        /phpmyadmin/i,
+        /xmlrpc/i,
+        /\.env$/i,
+        /\.git/i,
+        /\.sql$/i,
+        /backup/i,
+        /dump/i,
+        /config/i,
+        /setup/i,
+        /install/i,
+        /cgi-bin/i,
+        /boaform/i,
+        /GponForm/i,
+        /sdk/i,
+        /manager/i,
+        /invoker/i,
+        /wlwmanifest\.xml$/i,
+        /license\.txt$/i
+    ];
+
+    const userAgent = req.get('User-Agent') || '';
+    const suspiciousAgents = [
+        /nmap/i,
+        /nikto/i,
+        /sqlmap/i,
+        /gobuster/i,
+        /dirb/i,
+        /masscan/i,
+        /ZmEu/i,
+        /libwww-perl/i,
+        /python-urllib/i,
+        /curl/i,
+        /wget/i
+    ];
+
+    // Check for suspicious paths
+    if (suspiciousPatterns.some(pattern => pattern.test(req.path))) {
+        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
+            reason: 'suspicious_path',
+            headers: req.headers
+        });
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Check for suspicious user agents
+    if (suspiciousAgents.some(pattern => pattern.test(userAgent))) {
+        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
+            reason: 'suspicious_user_agent',
+            headers: req.headers
+        });
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Block multiple consecutive slashes
+    if (req.path.includes('//')) {
+        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
+            reason: 'multiple_slashes',
+            headers: req.headers
+        });
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    next();
+};
+
+// Apply security middleware early
+app.use(securityMiddleware);
+
+// Security logging middleware
+app.use(securityLogger);
 
 // CORS
 app.use(cors(config.cors));
@@ -46,27 +134,80 @@ app.use(cookieParser());
 // Compression
 app.use(compression());
 
-// Logging
-app.use(morgan('combined', { stream }));
+// Custom logging middleware to filter health checks
+const customLogger = morgan('combined', {
+    stream,
+    skip: (req: Request, res: Response) => {
+        // Skip logging for health checks from ELB
+        const isHealthCheck = req.path === '/' &&
+            req.method === 'GET' &&
+            req.get('User-Agent')?.includes('ELB-HealthChecker');
 
-// // Rate limiting
-// const limiter = rateLimit({
-//     windowMs: config.rateLimit.windowMs,
-//     max: config.rateLimit.max,
-//     message: 'Too many requests from this IP, please try again later.',
-//     standardHeaders: true,
-//     legacyHeaders: false,
-// });
+        // Skip logging for successful requests from health checkers
+        if (isHealthCheck && res.statusCode < 400) {
+            return true;
+        }
 
-// // Apply rate limiting to all routes
-// app.use('/api/', limiter);
+        return false;
+    }
+});
+
+// Apply custom logging
+app.use(customLogger);
+
+// Enhanced rate limiting
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // 100 requests per window per IP
+    message: {
+        error: 'Too many requests from this IP, please try again later.',
+        retryAfter: 15 * 60 // seconds
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req: Request) => {
+        // Use forwarded IP for rate limiting in case of proxy
+        return req.ip || 'unknown';
+    },
+    handler: (req: Request, res: Response) => {
+        recordRateLimit(req.ip || 'unknown', req.path, req.method, req.get('User-Agent') || 'unknown', {
+            type: 'global_rate_limit',
+            windowMs: 15 * 60 * 1000,
+            max: 100
+        });
+        res.status(429).json({
+            error: 'Too many requests from this IP, please try again later.',
+            retryAfter: 15 * 60
+        });
+    }
+});
+
+// Apply global rate limiting to all routes
+app.use('/api/', globalLimiter);
 
 // Stricter rate limiting for auth routes
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 5, // 5 requests per window
-    message: 'Too many authentication attempts, please try again later.',
+    message: {
+        error: 'Too many authentication attempts, please try again later.',
+        retryAfter: 15 * 60
+    },
     skipSuccessfulRequests: true,
+    keyGenerator: (req: Request) => {
+        return req.ip || 'unknown';
+    },
+    handler: (req: Request, res: Response) => {
+        recordRateLimit(req.ip || 'unknown', req.path, req.method, req.get('User-Agent') || 'unknown', {
+            type: 'auth_rate_limit',
+            windowMs: 15 * 60 * 1000,
+            max: 5
+        });
+        res.status(429).json({
+            error: 'Too many authentication attempts, please try again later.',
+            retryAfter: 15 * 60
+        });
+    }
 });
 
 app.use('/api/auth/login', authLimiter);
@@ -78,13 +219,61 @@ app.use(sanitizeInput);
 // API routes
 app.use('/api', apiRouter);
 
-// Health check route
-app.get('/', (_, res) => {
+// Health check route with minimal logging
+app.get('/', (req, res) => {
+    const isHealthCheck = req.get('User-Agent')?.includes('ELB-HealthChecker');
+
+    if (!isHealthCheck) {
+        logger.info('Health check accessed', {
+            ip: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+    }
+
     res.json({
         success: true,
         message: 'AI Cost Optimizer Backend API',
         version: '1.0.0',
         docs: '/api-docs',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Health check route specifically for load balancers
+app.get('/health', (_req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Security monitoring dashboard (protected endpoint)
+app.get('/security-dashboard', (req, res): any => {
+    // Simple IP-based protection for security dashboard
+    const allowedIPs = ['*'];
+    const clientIP = req.ip || 'unknown';
+
+    // For production, you should implement proper authentication
+    if (process.env.NODE_ENV === 'production') {
+        // In production, require authentication or IP whitelisting
+        const isInternalIP = allowedIPs.some(range => {
+            if (range.includes('/')) {
+                // CIDR notation check would go here
+                return false;
+            }
+            return clientIP === range;
+        });
+
+        if (!isInternalIP) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+    }
+
+    const report = securityMonitor.generateSecurityReport();
+    res.json({
+        success: true,
+        data: report,
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -110,6 +299,9 @@ export const startServer = async () => {
 
         app.listen(PORT, () => {
             logger.info(`Server is running on port ${PORT}`);
+            logger.info('Security middleware enabled');
+            logger.info('Rate limiting enabled');
+            logger.info('Health check logging filtered');
         });
     } catch (error) {
         logger.error('Failed to start server:', error);
