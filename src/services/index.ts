@@ -12,5 +12,3 @@ export { ActivityService } from './activity.service';
 export { ProjectService } from './project.service';
 export { PromptTemplateService } from './promptTemplate.service';
 export { RealtimePricingService } from './realtime-pricing.service';
-export { TraceService } from './trace.service';
-export { InstrumentationService } from './instrumentation.service';

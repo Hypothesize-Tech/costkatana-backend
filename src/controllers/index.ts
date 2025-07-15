@@ -8,4 +8,3 @@ export { IntelligenceController } from './intelligence.controller';
 export { ProjectController } from './project.controller';
 export { PromptTemplateController } from './promptTemplate.controller';
 export { PricingController } from './pricing.controller';
-export { TraceController } from './trace.controller';

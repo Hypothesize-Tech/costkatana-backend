@@ -9,7 +9,6 @@ import intelligenceRoutes from './intelligence.routes';
 import projectRoutes from './project.routes';
 import promptTemplateRoutes from './promptTemplate.routes';
 import { pricingRoutes } from './pricing.routes';
-import traceRoutes from './trace.routes';
 
 const router = Router();
 
@@ -34,6 +33,5 @@ router.use('/intelligence', intelligenceRoutes);
 router.use('/projects', projectRoutes);
 router.use('/prompt-templates', promptTemplateRoutes);
 router.use('/pricing', pricingRoutes);
-router.use('/traces', traceRoutes);
 
 export const apiRouter = router;

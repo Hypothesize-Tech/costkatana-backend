@@ -7,8 +7,7 @@ export interface IActivity {
     'alert_created' | 'alert_resolved' | 'tip_viewed' | 'tip_applied' |
     'quality_scored' | 'settings_updated' | 'profile_updated' |
     'dashboard_api_key_created' | 'dashboard_api_key_deleted' | 'file_uploaded' | 'export_generated' |
-    'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed' |
-    'trace_created' | 'trace_completed' | 'trace_replayed';
+    'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed';
     title: string;
     description?: string;
     metadata?: {
@@ -42,8 +41,7 @@ const activitySchema = new Schema<IActivity>({
             'alert_created', 'alert_resolved', 'tip_viewed', 'tip_applied',
             'quality_scored', 'settings_updated', 'profile_updated',
             'dashboard_api_key_created', 'dashboard_api_key_deleted', 'file_uploaded', 'export_generated',
-            'bulk_optimization', 'cost_audit_completed', 'subscription_changed',
-            'trace_created', 'trace_completed', 'trace_replayed'
+            'bulk_optimization', 'cost_audit_completed', 'subscription_changed'
         ],
         required: true
     },

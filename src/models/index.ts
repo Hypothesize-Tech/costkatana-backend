@@ -8,4 +8,3 @@ export { Activity, IActivity } from './Activity';
 export { Project, IProject } from './Project';
 export { PromptTemplate, IPromptTemplate } from './PromptTemplate';
 export { ApprovalRequest, IApprovalRequest } from './ApprovalRequest';
-export { Trace, ITrace, ITraceSpan } from './Trace';
