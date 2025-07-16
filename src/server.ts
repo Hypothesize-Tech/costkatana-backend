@@ -21,6 +21,8 @@ const app: Application = express();
 // Trust proxy
 app.set('trust proxy', 1);
 
+
+
 // Enhanced security middleware
 app.use(helmet({
     contentSecurityPolicy: {

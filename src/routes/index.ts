@@ -9,6 +9,10 @@ import intelligenceRoutes from './intelligence.routes';
 import projectRoutes from './project.routes';
 import promptTemplateRoutes from './promptTemplate.routes';
 import { pricingRoutes } from './pricing.routes';
+import taggingRoutes from './tagging.routes';
+import forecastingRoutes from './forecasting.routes';
+import performanceCostAnalysisRoutes from './performanceCostAnalysis.routes';
+import { inferenceScalingRoutes } from './inferenceScaling.routes';
 
 const router = Router();
 
@@ -33,5 +37,9 @@ router.use('/intelligence', intelligenceRoutes);
 router.use('/projects', projectRoutes);
 router.use('/prompt-templates', promptTemplateRoutes);
 router.use('/pricing', pricingRoutes);
+router.use('/tags', taggingRoutes);
+router.use('/forecasting', forecastingRoutes);
+router.use('/performance-cost', performanceCostAnalysisRoutes);
+router.use('/inference-scaling', inferenceScalingRoutes);
 
 export const apiRouter = router;

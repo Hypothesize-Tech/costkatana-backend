@@ -8,3 +8,7 @@ export { IntelligenceController } from './intelligence.controller';
 export { ProjectController } from './project.controller';
 export { PromptTemplateController } from './promptTemplate.controller';
 export { PricingController } from './pricing.controller';
+export { TaggingController } from './tagging.controller';
+export { ForecastingController } from './forecasting.controller';
+export { PerformanceCostAnalysisController } from './performanceCostAnalysis.controller';
+export { InferenceScalingController } from './inferenceScaling.controller';

@@ -33,14 +33,14 @@ const createApiKeySchema = z.object({
 });
 
 export class UserController {
-    static async getProfile(req: any, res: Response, next: NextFunction) {
+    static async getProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
             const user = await User.findById(userId).select('-password -resetPasswordToken -resetPasswordExpires -verificationToken');
 
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -57,7 +57,7 @@ export class UserController {
         return;
     }
 
-    static async updateProfile(req: any, res: Response, next: NextFunction) {
+    static async updateProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { name, preferences, avatar } = updateProfileSchema.parse(req.body);
@@ -87,7 +87,7 @@ export class UserController {
         }
     }
 
-    static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction) {
+    static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { fileName, fileType } = presignedUrlSchema.parse(req.body);
@@ -112,7 +112,7 @@ export class UserController {
 
 
 
-    static async getAlerts(req: any, res: Response, next: NextFunction) {
+    static async getAlerts(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { page = 1, limit = 20, unreadOnly = false } = req.query;
@@ -149,7 +149,7 @@ export class UserController {
         }
     }
 
-    static async markAlertAsRead(req: any, res: Response, next: NextFunction) {
+    static async markAlertAsRead(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -161,7 +161,7 @@ export class UserController {
             );
 
             if (!alert) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Alert not found',
                 });
@@ -178,7 +178,7 @@ export class UserController {
         return;
     }
 
-    static async markAllAlertsAsRead(req: any, res: Response, next: NextFunction) {
+    static async markAllAlertsAsRead(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
@@ -197,7 +197,7 @@ export class UserController {
         }
     }
 
-    static async deleteAlert(req: any, res: Response, next: NextFunction) {
+    static async deleteAlert(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -205,7 +205,7 @@ export class UserController {
             const alert = await Alert.findOneAndDelete({ _id: id, userId });
 
             if (!alert) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Alert not found',
                 });
@@ -222,13 +222,13 @@ export class UserController {
         return;
     }
 
-    static async getAlertSettings(req: any, res: Response, next: NextFunction) {
+    static async getAlertSettings(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
-            const user = await User.findById(userId).select('preferences');
+            const user: any = await User.findById(userId).select('preferences');
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -267,14 +267,14 @@ export class UserController {
         return;
     }
 
-    static async updateAlertSettings(req: any, res: Response, next: NextFunction) {
+    static async updateAlertSettings(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { email, thresholds } = req.body;
 
-            const user = await User.findById(userId);
+            const user: any = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -304,13 +304,13 @@ export class UserController {
         return;
     }
 
-    static async testAlert(req: any, res: Response, next: NextFunction) {
+    static async testAlert(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { type } = req.body;
 
             if (!type || !['cost', 'optimization', 'anomaly', 'system'].includes(type)) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Invalid alert type. Must be one of: cost, optimization, anomaly, system',
                 });
@@ -343,7 +343,7 @@ export class UserController {
         return;
     }
 
-    static async getUnreadAlertCount(req: any, res: Response, next: NextFunction) {
+    static async getUnreadAlertCount(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
@@ -381,14 +381,14 @@ export class UserController {
         return;
     }
 
-    static async snoozeAlert(req: any, res: Response, next: NextFunction) {
+    static async snoozeAlert(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
             const { until } = req.body;
 
             if (!until) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Snooze until date is required',
                 });
@@ -396,7 +396,7 @@ export class UserController {
 
             const snoozeUntil = new Date(until);
             if (snoozeUntil <= new Date()) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Snooze date must be in the future',
                 });
@@ -413,7 +413,7 @@ export class UserController {
             );
 
             if (!alert) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Alert not found',
                 });
@@ -430,7 +430,7 @@ export class UserController {
         return;
     }
 
-    static async getAlertHistory(req: any, res: Response, next: NextFunction) {
+    static async getAlertHistory(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { page = 1, limit = 20, groupBy = 'day' } = req.query;
@@ -547,13 +547,13 @@ export class UserController {
         return;
     }
 
-    static async getSubscription(req: any, res: Response, next: NextFunction) {
+    static async getSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
-            const user = await User.findById(userId).select('subscription usage');
+            const user: any = await User.findById(userId).select('subscription usage');
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -585,13 +585,13 @@ export class UserController {
         return;
     }
 
-    static async updateSubscription(req: any, res: Response, next: NextFunction) {
+    static async updateSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { plan } = updateSubscriptionSchema.parse(req.body);
 
             if (!['free', 'pro', 'enterprise'].includes(plan)) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Invalid subscription plan',
                 });
@@ -603,7 +603,7 @@ export class UserController {
                 enterprise: { apiCalls: -1, optimizations: -1 }, // Unlimited
             };
 
-            const user = await User.findByIdAndUpdate(
+            const user: any = await User.findByIdAndUpdate(
                 userId,
                 {
                     'subscription.plan': plan,
@@ -614,7 +614,7 @@ export class UserController {
             ).select('subscription');
 
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -632,7 +632,7 @@ export class UserController {
         return;
     }
 
-    static async getUserStats(req: any, res: Response, next: NextFunction) {
+    static async getUserStats(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
@@ -641,9 +641,9 @@ export class UserController {
             const { Optimization } = await import('../models/Optimization');
 
             // Get user data
-            const user = await User.findById(userId).select('createdAt usage subscription');
+            const user: any = await User.findById(userId).select('createdAt usage subscription');
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -797,7 +797,7 @@ export class UserController {
         return;
     }
 
-    static async getUserActivities(req: any, res: Response, next: NextFunction) {
+    static async getUserActivities(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { page = 1, limit = 20, type, startDate, endDate } = req.query;
@@ -825,14 +825,14 @@ export class UserController {
         return;
     }
 
-    static async createDashboardApiKey(req: any, res: Response, next: NextFunction) {
+    static async createDashboardApiKey(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { name, permissions, expiresAt } = createApiKeySchema.parse(req.body);
 
-            const user = await User.findById(userId);
+            const user: any = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
@@ -840,23 +840,23 @@ export class UserController {
 
             // Check if user already has maximum number of API keys (limit to 10)
             if (user.dashboardApiKeys.length >= 10) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Maximum number of API keys reached (10)',
                 });
             }
 
             // Check for duplicate names
-            const existingKey = user.dashboardApiKeys.find(k => k.name === name);
+            const existingKey: any = user.dashboardApiKeys.find((k: any) => k.name === name);
             if (existingKey) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'API key with this name already exists',
                 });
             }
 
             // Generate new dashboard API key
-            const { keyId, apiKey, maskedKey } = AuthService.generateDashboardApiKey(user, name, permissions);
+            const { keyId, apiKey, maskedKey } = AuthService.generateDashboardApiKey(user as any, name, permissions);
 
             // Encrypt the API key for storage
             const { encrypted, iv, authTag } = encrypt(apiKey);
@@ -896,20 +896,20 @@ export class UserController {
         return;
     }
 
-    static async getDashboardApiKeys(req: any, res: Response, next: NextFunction) {
+    static async getDashboardApiKeys(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
-            const user = await User.findById(userId).select('dashboardApiKeys');
+            const user: any = await User.findById(userId).select('dashboardApiKeys');
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
             }
 
             // Return only safe information (no encrypted keys)
-            const apiKeys = user.dashboardApiKeys.map(k => ({
+            const apiKeys: any = user.dashboardApiKeys.map((k: any) => ({
                 keyId: k.keyId,
                 name: k.name,
                 maskedKey: k.maskedKey,
@@ -931,28 +931,28 @@ export class UserController {
         return;
     }
 
-    static async deleteDashboardApiKey(req: any, res: Response, next: NextFunction) {
+    static async deleteDashboardApiKey(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { keyId } = req.params;
 
-            const user = await User.findById(userId);
+            const user: any = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
             }
 
-            const keyIndex = user.dashboardApiKeys.findIndex(k => k.keyId === keyId);
+            const keyIndex: any = user.dashboardApiKeys.findIndex((k: any) => k.keyId === keyId);
             if (keyIndex === -1) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'API key not found',
                 });
             }
 
-            const deletedKey = user.dashboardApiKeys[keyIndex];
+            const deletedKey: any = user.dashboardApiKeys[keyIndex];
             user.dashboardApiKeys.splice(keyIndex, 1);
             await user.save();
 
@@ -971,23 +971,23 @@ export class UserController {
         return;
     }
 
-    static async updateDashboardApiKey(req: any, res: Response, next: NextFunction) {
+    static async updateDashboardApiKey(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { keyId } = req.params;
             const { name, permissions, expiresAt } = req.body;
 
-            const user = await User.findById(userId);
+            const user: any = await User.findById(userId);
             if (!user) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
             }
 
-            const apiKey = user.dashboardApiKeys.find(k => k.keyId === keyId);
+            const apiKey: any = user.dashboardApiKeys.find((k: any) => k.keyId === keyId);
             if (!apiKey) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'API key not found',
                 });
@@ -995,9 +995,9 @@ export class UserController {
 
             // Check for duplicate names (excluding current key)
             if (name && name !== apiKey.name) {
-                const existingKey = user.dashboardApiKeys.find(k => k.name === name && k.keyId !== keyId);
+                const existingKey: any = user.dashboardApiKeys.find((k: any) => k.name === name && k.keyId !== keyId);
                 if (existingKey) {
-                    return res.status(400).json({
+                    res.status(400).json({
                         success: false,
                         message: 'API key with this name already exists',
                     });

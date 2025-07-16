@@ -7,7 +7,7 @@ export class ProjectController {
     /**
      * Create a new project
      */
-    static async createProject(req: any, res: Response) {
+    static async createProject(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         logger.info('=== PROJECT CREATION REQUEST STARTED ===');
         logger.info('Request headers:', {
@@ -68,7 +68,7 @@ export class ProjectController {
     /**
      * Get all projects for the authenticated user
      */
-    static async getUserProjects(req: any, res: Response) {
+    static async getUserProjects(req: any, res: Response): Promise<void> {
         try {
             const userId = req.user!.id;
 
@@ -90,7 +90,7 @@ export class ProjectController {
     /**
      * Get project analytics
      */
-    static async getProjectAnalytics(req: any, res: Response) {
+    static async getProjectAnalytics(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const { period } = req.query;
@@ -116,7 +116,7 @@ export class ProjectController {
     /**
      * Update project settings
      */
-    static async updateProject(req: any, res: Response) {
+    static async updateProject(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const userId = req.user!.id;
@@ -145,7 +145,7 @@ export class ProjectController {
     /**
      * Add member to project
      */
-    static async addMember(req: any, res: Response) {
+    static async addMember(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const { memberId, email, role } = req.body;
@@ -178,7 +178,7 @@ export class ProjectController {
     /**
      * Remove member from project
      */
-    static async removeMember(req: any, res: Response) {
+    static async removeMember(req: any, res: Response): Promise<void> {
         try {
             const { projectId, memberId } = req.params;
             const removedBy = req.user!.id;
@@ -201,7 +201,7 @@ export class ProjectController {
     /**
      * Get pending approval requests for a project
      */
-    static async getApprovalRequests(req: any, res: Response) {
+    static async getApprovalRequests(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const { status } = req.query;
@@ -285,7 +285,7 @@ export class ProjectController {
     /**
      * Get cost allocation breakdown
      */
-    static async getCostAllocation(req: any, res: Response) {
+    static async getCostAllocation(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const { groupBy, startDate, endDate } = req.query;
@@ -315,7 +315,7 @@ export class ProjectController {
     /**
      * Get a specific project by ID
      */
-    static async getProject(req: any, res: Response) {
+    static async getProject(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const userId = req.user!.id;
@@ -346,7 +346,7 @@ export class ProjectController {
     /**
      * Delete a project
      */
-    static async deleteProject(req: any, res: Response) {
+    static async deleteProject(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const userId = req.user!.id;
@@ -418,7 +418,7 @@ export class ProjectController {
     /**
      * Export project data
      */
-    static async exportProjectData(req: any, res: Response) {
+    static async exportProjectData(req: any, res: Response): Promise<void> {
         try {
             const { projectId } = req.params;
             const { format, startDate, endDate } = req.query;

@@ -19,7 +19,7 @@ export function getUserIdFromToken(req: any): string | null {
 }
 
 export class UsageController {
-    static async trackUsage(req: any, res: Response, next: NextFunction) {
+    static async trackUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const validatedData = trackUsageSchema.parse(req.body);
@@ -45,7 +45,7 @@ export class UsageController {
         }
     }
 
-    static async trackUsageFromSDK(req: any, res: Response) {
+    static async trackUsageFromSDK(req: any, res: Response): Promise<void> {
         try {
             console.log('trackUsageFromSDK raw body:', req.body);
             // Normalize payload
@@ -79,7 +79,7 @@ export class UsageController {
             }
             if (!userId) {
                 logger.error('No user ID found in request or token');
-                return res.status(401).json({
+                res.status(401).json({
                     success: false,
                     error: 'User authentication required'
                 });
@@ -89,13 +89,13 @@ export class UsageController {
             const validationResult = sdkTrackUsageSchema.safeParse(body);
             if (!validationResult.success) {
                 logger.error('SDK usage validation failed:', validationResult.error.issues);
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     error: 'Invalid usage data',
                     details: validationResult.error.issues
                 });
             }
-            const data = validationResult.data;
+            const data: any = validationResult.data;
             // Extract projectId from multiple possible sources
             let projectId = (data as any).projectId || req.query.projectId;
 
@@ -139,7 +139,7 @@ export class UsageController {
                 throw new Error('Usage creation returned null');
             }
             console.log('Usage tracked successfully:', usage._id);
-            return res.status(201).json({
+            res.status(201).json({
                 success: true,
                 message: 'Usage tracked successfully from SDK',
                 data: {
@@ -152,7 +152,7 @@ export class UsageController {
             logger.error('Track usage from SDK error:', error);
             console.error('Full error:', error);
             // Always return a response
-            return res.status(500).json({
+            res.status(500).json({
                 success: false,
                 error: 'Failed to track usage',
                 message: error.message || 'Internal server error'
@@ -160,7 +160,7 @@ export class UsageController {
         }
     }
 
-    static async getUsage(req: any, res: Response, next: NextFunction) {
+    static async getUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
@@ -195,7 +195,7 @@ export class UsageController {
         }
     }
 
-    static async getUsageByProject(req: any, res: Response, next: NextFunction) {
+    static async getUsageByProject(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { projectId } = req.params;
@@ -231,7 +231,7 @@ export class UsageController {
         }
     }
 
-    static async getUsageStats(req: any, res: Response, next: NextFunction) {
+    static async getUsageStats(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const period = (req.query.period as 'daily' | 'weekly' | 'monthly') || 'monthly';
@@ -249,7 +249,7 @@ export class UsageController {
         }
     }
 
-    static async bulkUploadUsage(req: any, res: Response, next: NextFunction) {
+    static async bulkUploadUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { usageData } = req.body;
@@ -302,7 +302,7 @@ export class UsageController {
         }
     }
 
-    static async updateUsage(req: any, res: Response, next: NextFunction) {
+    static async updateUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { usageId } = req.params;
@@ -358,7 +358,7 @@ export class UsageController {
         }
     }
 
-    static async detectAnomalies(req: any, res: Response, next: NextFunction) {
+    static async detectAnomalies(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const projectId = req.query.projectId as string;
@@ -375,13 +375,13 @@ export class UsageController {
         }
     }
 
-    static async searchUsage(req: any, res: Response, next: NextFunction) {
+    static async searchUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { q, page, limit, projectId } = req.query;
 
             if (!q) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Search query is required',
                 });
@@ -407,7 +407,7 @@ export class UsageController {
         return;
     }
 
-    static async exportUsage(req: any, res: Response, next: NextFunction) {
+    static async exportUsage(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const format = (req.query.format as 'json' | 'csv') || 'json';

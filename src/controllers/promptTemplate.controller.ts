@@ -6,7 +6,7 @@ export class PromptTemplateController {
     /**
      * Create a new prompt template
      */
-    static async createTemplate(req: any, res: Response) {
+    static async createTemplate(req: any, res: Response): Promise<void> {
         try {
             const userId = req.user!.id;
             const templateData = req.body;
@@ -30,7 +30,7 @@ export class PromptTemplateController {
     /**
      * Get accessible prompt templates
      */
-    static async getTemplates(req: any, res: Response) {
+    static async getTemplates(req: any, res: Response): Promise<void> {
         try {
             logger.info('=== GET PROMPT TEMPLATES START ===');
             logger.info('Request headers:', req.headers);
@@ -101,7 +101,7 @@ export class PromptTemplateController {
     /**
      * Get a specific prompt template
      */
-    static async getTemplate(req: any, res: Response) {
+    static async getTemplate(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -124,7 +124,7 @@ export class PromptTemplateController {
     /**
      * Use a prompt template
      */
-    static async useTemplate(req: any, res: Response) {
+    static async useTemplate(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -152,7 +152,7 @@ export class PromptTemplateController {
     /**
      * Update a prompt template
      */
-    static async updateTemplate(req: any, res: Response) {
+    static async updateTemplate(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -181,7 +181,7 @@ export class PromptTemplateController {
     /**
      * Delete a prompt template
      */
-    static async deleteTemplate(req: any, res: Response) {
+    static async deleteTemplate(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -204,7 +204,7 @@ export class PromptTemplateController {
     /**
      * Fork a prompt template
      */
-    static async forkTemplate(req: any, res: Response) {
+    static async forkTemplate(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -233,7 +233,7 @@ export class PromptTemplateController {
     /**
      * Add feedback to a prompt template
      */
-    static async addFeedback(req: any, res: Response) {
+    static async addFeedback(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
             const userId = req.user!.id;
@@ -262,7 +262,7 @@ export class PromptTemplateController {
     /**
      * Get template analytics
      */
-    static async getTemplateAnalytics(req: any, res: Response) {
+    static async getTemplateAnalytics(req: any, res: Response): Promise<void> {
         try {
             const { templateId } = req.params;
 
@@ -284,7 +284,7 @@ export class PromptTemplateController {
     /**
      * Get popular templates
      */
-    static async getPopularTemplates(req: any, res: Response) {
+    static async getPopularTemplates(req: any, res: Response): Promise<void> {
         try {
             const { category, limit } = req.query;
 

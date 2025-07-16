@@ -51,7 +51,7 @@ export interface IUser {
 }
 
 export class AuthController {
-    static async register(req: any, res: Response, next: NextFunction) {
+    static async register(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             // Validate input
             const validatedData = registerSchema.parse(req.body);
@@ -84,7 +84,7 @@ export class AuthController {
             logger.error('Registration error:', error);
 
             if ((error as Error).message.includes('already exists')) {
-                return res.status(409).json({
+                res.status(409).json({
                     success: false,
                     message: 'User with this email already exists',
                 });
@@ -95,7 +95,7 @@ export class AuthController {
         return;
     }
 
-    static async login(req: any, res: Response, next: NextFunction) {
+    static async login(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             // Validate input
             const { email, password } = loginSchema.parse(req.body);
@@ -130,14 +130,14 @@ export class AuthController {
             logger.error('Login error:', error);
 
             if (error.message === 'Invalid credentials') {
-                return res.status(401).json({
+                res.status(401).json({
                     success: false,
                     message: 'Invalid email or password',
                 });
             }
 
             if (error.message === 'Account is deactivated') {
-                return res.status(403).json({
+                res.status(403).json({
                     success: false,
                     message: 'Your account has been deactivated',
                 });
@@ -148,12 +148,12 @@ export class AuthController {
         return;
     }
 
-    static async refreshTokens(req: any, res: Response) {
+    static async refreshTokens(req: any, res: Response): Promise<void> {
         try {
             const { refreshToken } = req.cookies;
 
             if (!refreshToken) {
-                return res.status(401).json({
+                res.status(401).json({
                     success: false,
                     message: 'Refresh token not provided',
                 });
@@ -190,25 +190,24 @@ export class AuthController {
         return;
     }
 
-    static async logout(req: any, res: Response) {
+    static async logout(req: any, res: Response): Promise<any> {
         const userId = req.user?.id || 'unknown';
         logger.info(`User logged out: ${userId}`);
 
         res.clearCookie('refreshToken');
 
-        res.json({
+        return res.json({
             success: true,
             message: 'Logout successful',
         });
-        return;
     }
 
-    static async verifyEmail(req: any, res: Response, next: NextFunction) {
+    static async verifyEmail(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { token } = req.params;
 
             if (!token) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Verification token is required',
                 });
@@ -224,7 +223,7 @@ export class AuthController {
             logger.error('Email verification error:', error);
 
             if (error.message === 'Invalid verification token') {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Invalid or expired verification token',
                 });
@@ -235,12 +234,12 @@ export class AuthController {
         return;
     }
 
-    static async forgotPassword(req: any, res: Response) {
+    static async forgotPassword(req: any, res: Response): Promise<void> {
         try {
             const { email } = req.body;
 
             if (!email) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Email is required',
                 });
@@ -269,20 +268,20 @@ export class AuthController {
         return;
     }
 
-    static async resetPassword(req: any, res: Response, next: NextFunction) {
+    static async resetPassword(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { token } = req.params;
             const { password } = req.body;
 
             if (!token || !password) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Token and password are required',
                 });
             }
 
             if (password.length < 8) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Password must be at least 8 characters',
                 });
@@ -298,7 +297,7 @@ export class AuthController {
             logger.error('Reset password error:', error);
 
             if (error.message === 'Invalid or expired reset token') {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Invalid or expired reset token',
                 });
@@ -309,20 +308,20 @@ export class AuthController {
         return;
     }
 
-    static async changePassword(req: any, res: Response, next: NextFunction) {
+    static async changePassword(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { oldPassword, newPassword } = req.body;
 
             if (!oldPassword || !newPassword) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Old password and new password are required',
                 });
             }
 
             if (newPassword.length < 8) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'New password must be at least 8 characters',
                 });
@@ -338,7 +337,7 @@ export class AuthController {
             logger.error('Change password error:', error);
 
             if (error.message === 'Invalid current password') {
-                return res.status(401).json({
+                res.status(401).json({
                     success: false,
                     message: 'Current password is incorrect',
                 });

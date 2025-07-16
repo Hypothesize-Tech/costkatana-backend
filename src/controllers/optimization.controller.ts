@@ -4,7 +4,7 @@ import { optimizationRequestSchema, paginationSchema } from '../utils/validators
 import { logger } from '../utils/logger';
 
 export class OptimizationController {
-    static async createOptimization(req: any, res: Response, next: NextFunction) {
+    static async createOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const validatedData = optimizationRequestSchema.parse(req.body);
@@ -41,7 +41,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimizations(req: any, res: Response, next: NextFunction) {
+    static async getOptimizations(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { page, limit, sort, order } = paginationSchema.parse(req.query);
@@ -73,7 +73,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimization(req: any, res: Response, next: NextFunction) {
+    static async getOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -86,7 +86,7 @@ export class OptimizationController {
             const optimization = result.data.find(o => o._id.toString() === id);
 
             if (!optimization) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Optimization not found',
                 });
@@ -103,7 +103,7 @@ export class OptimizationController {
         return;
     }
 
-    static async applyOptimization(req: any, res: Response, next: NextFunction) {
+    static async applyOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
@@ -118,7 +118,7 @@ export class OptimizationController {
             logger.error('Apply optimization error:', error);
 
             if (error.message === 'Optimization not found') {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Optimization not found',
                 });
@@ -129,21 +129,21 @@ export class OptimizationController {
         return;
     }
 
-    static async provideFeedback(req: any, res: Response, next: NextFunction) {
+    static async provideFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { id } = req.params;
             const { helpful, rating, comment } = req.body;
 
             if (helpful === undefined) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Feedback helpful status is required',
                 });
             }
 
             if (rating !== undefined && (rating < 1 || rating > 5)) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Rating must be between 1 and 5',
                 });
@@ -163,7 +163,7 @@ export class OptimizationController {
             logger.error('Provide feedback error:', error);
 
             if (error.message === 'Optimization not found') {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Optimization not found',
                 });
@@ -174,7 +174,7 @@ export class OptimizationController {
         return;
     }
 
-    static async analyzeOpportunities(req: any, res: Response, next: NextFunction) {
+    static async analyzeOpportunities(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
 
@@ -190,7 +190,7 @@ export class OptimizationController {
         }
     }
 
-    static async getPromptsForBulkOptimization(req: any, res: Response, next: NextFunction) {
+    static async getPromptsForBulkOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { service, minCalls, timeframe } = req.query;
@@ -211,20 +211,20 @@ export class OptimizationController {
         }
     }
 
-    static async bulkOptimize(req: any, res: Response, next: NextFunction) {
+    static async bulkOptimize(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { promptIds } = req.body;
 
             if (!Array.isArray(promptIds) || promptIds.length === 0) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Array of prompt IDs is required',
                 });
             }
 
             if (promptIds.length > 10) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Maximum 10 prompts can be optimized at once',
                 });
@@ -244,7 +244,7 @@ export class OptimizationController {
         return;
     }
 
-    static async getOptimizationSummary(req: any, res: Response, next: NextFunction) {
+    static async getOptimizationSummary(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const timeframe = (req.query.timeframe as string) || '30d';
@@ -272,7 +272,7 @@ export class OptimizationController {
             );
 
             if (!result) {
-                return res.status(404).json({
+                res.status(404).json({
                     success: false,
                     message: 'Optimization summary not found',
                 });
@@ -307,20 +307,20 @@ export class OptimizationController {
         }
     }
 
-    static async createBatchOptimization(req: any, res: Response, next: NextFunction) {
+    static async createBatchOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { requests } = req.body;
 
             if (!Array.isArray(requests) || requests.length < 2) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'At least 2 requests are required for batch optimization',
                 });
             }
 
             if (requests.length > 10) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Maximum 10 requests can be optimized in a batch',
                 });
@@ -335,7 +335,7 @@ export class OptimizationController {
             res.status(201).json({
                 success: true,
                 message: `Successfully created ${optimizations.length} batch optimizations`,
-                data: optimizations.map(opt => ({
+                data: optimizations.map((opt: any) => ({
                     id: opt._id,
                     improvementPercentage: opt.improvementPercentage,
                     costSaved: opt.costSaved,
@@ -350,26 +350,26 @@ export class OptimizationController {
         return;
     }
 
-    static async optimizeConversation(req: any, res: Response, next: NextFunction) {
+    static async optimizeConversation(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const { messages, model, service } = req.body;
 
             if (!Array.isArray(messages) || messages.length === 0) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Array of conversation messages is required',
                 });
             }
 
             // Validate message format
-            const isValidMessages = messages.every(msg =>
+            const isValidMessages = messages.every((msg: any) =>
                 msg.role && ['user', 'assistant', 'system'].includes(msg.role) &&
                 typeof msg.content === 'string'
             );
 
             if (!isValidMessages) {
-                return res.status(400).json({
+                res.status(400).json({
                     success: false,
                     message: 'Invalid message format. Each message must have role and content',
                 });
@@ -377,7 +377,7 @@ export class OptimizationController {
 
             const optimization = await OptimizationService.createOptimization({
                 userId,
-                prompt: messages.map(m => `${m.role}: ${m.content}`).join('\n'),
+                prompt: messages.map((m: any) => `${m.role}: ${m.content}`).join('\n'),
                 service,
                 model,
                 conversationHistory: messages,
@@ -451,7 +451,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimizationConfig(res: Response, next: NextFunction) {
+    static async getOptimizationConfig(res: Response, next: NextFunction): Promise<void> {
         try {
 
             // For now, return default configuration
@@ -498,7 +498,7 @@ export class OptimizationController {
         }
     }
 
-    static async updateOptimizationConfig(req: any, res: Response, next: NextFunction) {
+    static async updateOptimizationConfig(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const userId = req.user!.id;
             const config = req.body;
@@ -518,7 +518,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimizationTemplates(req: any, res: Response, next: NextFunction) {
+    static async getOptimizationTemplates(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { category } = req.query;
 
@@ -535,7 +535,7 @@ export class OptimizationController {
         }
     }
 
-    static async getOptimizationHistory(req: any, res: Response, next: NextFunction) {
+    static async getOptimizationHistory(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { promptHash } = req.params;
             const userId = req.user!.id;
@@ -553,7 +553,7 @@ export class OptimizationController {
         }
     }
 
-    static async revertOptimization(req: any, res: Response, next: NextFunction) {
+    static async revertOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { id } = req.params;
             const userId = req.user!.id;
