@@ -1,4 +1,4 @@
-import express, { Application, Request, Response, NextFunction } from 'express';
+import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -13,7 +13,7 @@ import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
 import { setupCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
-import { recordBlockedRequest, recordRateLimit, securityMonitor } from './utils/security-monitor';
+import { recordRateLimit, securityMonitor } from './utils/security-monitor';
 
 // Create Express app
 const app: Application = express();
@@ -40,85 +40,6 @@ app.use(helmet({
         preload: true
     }
 }));
-
-// Security middleware to block malicious requests
-const securityMiddleware = (req: Request, res: Response, next: NextFunction): any => {
-    const suspiciousPatterns = [
-        /wp-admin/i,
-        /wp-includes/i,
-        /wp-content/i,
-        /wordpress/i,
-        /\.php$/i,
-        /\.asp$/i,
-        /\.aspx$/i,
-        /admin/i,
-        /phpmyadmin/i,
-        /xmlrpc/i,
-        /\.env$/i,
-        /\.git/i,
-        /\.sql$/i,
-        /backup/i,
-        /dump/i,
-        /config/i,
-        /setup/i,
-        /install/i,
-        /cgi-bin/i,
-        /boaform/i,
-        /GponForm/i,
-        /sdk/i,
-        /manager/i,
-        /invoker/i,
-        /wlwmanifest\.xml$/i,
-        /license\.txt$/i
-    ];
-
-    const userAgent = req.get('User-Agent') || '';
-    const suspiciousAgents = [
-        /nmap/i,
-        /nikto/i,
-        /sqlmap/i,
-        /gobuster/i,
-        /dirb/i,
-        /masscan/i,
-        /ZmEu/i,
-        /libwww-perl/i,
-        /python-urllib/i,
-        /curl/i,
-        /wget/i
-    ];
-
-    // Check for suspicious paths
-    if (suspiciousPatterns.some(pattern => pattern.test(req.path))) {
-        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
-            reason: 'suspicious_path',
-            headers: req.headers
-        });
-        return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    // Check for suspicious user agents
-    if (suspiciousAgents.some(pattern => pattern.test(userAgent))) {
-        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
-            reason: 'suspicious_user_agent',
-            headers: req.headers
-        });
-        return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    // Block multiple consecutive slashes
-    if (req.path.includes('//')) {
-        recordBlockedRequest(req.ip || 'unknown', req.path, req.method, userAgent, {
-            reason: 'multiple_slashes',
-            headers: req.headers
-        });
-        return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    next();
-};
-
-// Apply security middleware early
-app.use(securityMiddleware);
 
 // Security logging middleware
 app.use(securityLogger);
