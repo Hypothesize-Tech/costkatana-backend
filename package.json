@@ -4,9 +4,9 @@
     "description": "Backend service for AI Cost Optimizer - Track, analyze and optimize AI API usage costs",
     "main": "dist/server.js",
     "scripts": {
-        "dev": "nodemon",
+        "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r ts-node/register src/server.ts\"",
         "build": "tsc",
-        "start": "node dist/server.js",
+        "start": "node --max-old-space-size=4096 --expose-gc dist/server.js",
         "test": "jest",
         "test:watch": "jest --watch",
         "lint": "eslint src/**/*.ts",

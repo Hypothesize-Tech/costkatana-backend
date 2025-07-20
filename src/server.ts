@@ -21,7 +21,17 @@ const app: Application = express();
 // Trust proxy
 app.set('trust proxy', 1);
 
-
+// Memory optimization settings
+if (process.env.NODE_ENV === 'production') {
+    // Force garbage collection more frequently
+    if (global.gc && typeof global.gc === 'function') {
+        setInterval(() => {
+            if (global.gc) {
+                global.gc();
+            }
+        }, 30000); // Every 30 seconds
+    }
+}
 
 // Enhanced security middleware
 app.use(helmet({
@@ -47,9 +57,22 @@ app.use(securityLogger);
 // CORS
 app.use(cors(config.cors));
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Body parsing with stricter limits to prevent memory issues
+app.use(express.json({ 
+    limit: '100mb', // Reduced from 10mb to prevent memory issues
+    verify: (_req: Request, res: Response, buf: Buffer) => {
+        // Stream large requests to prevent memory buildup
+        if (buf.length > 1024 * 1024 * 100) { // 100MB
+            res.status(413).json({ error: 'Request too large' });
+            return;
+        }
+    }
+}));
+app.use(express.urlencoded({ 
+    extended: true, 
+    limit: '100mb', // Reduced from 10mb
+    parameterLimit: 100 // Limit number of parameters
+}));
 
 // Cookie parsing
 app.use(cookieParser());
