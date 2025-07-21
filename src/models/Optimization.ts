@@ -51,7 +51,6 @@ const optimizationSchema = new Schema<IOptimization>({
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true,
-        index: true,
     },
     originalPrompt: {
         type: String,
@@ -139,7 +138,6 @@ const optimizationSchema = new Schema<IOptimization>({
     applied: {
         type: Boolean,
         default: false,
-        index: true,
     },
     appliedAt: Date,
     appliedCount: {

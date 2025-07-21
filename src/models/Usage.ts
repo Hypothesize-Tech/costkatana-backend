@@ -125,12 +125,10 @@ const usageSchema = new Schema<IUsage>({
 });
 
 // Compound indexes for efficient querying
-usageSchema.index({ userId: 1, createdAt: -1 });
 usageSchema.index({ projectId: 1, createdAt: -1 });
 usageSchema.index({ service: 1, createdAt: -1 });
 usageSchema.index({ model: 1, createdAt: -1 });
 usageSchema.index({ cost: -1 });
-usageSchema.index({ userId: 1, service: 1, model: 1, createdAt: -1 });
 usageSchema.index({ 'costAllocation.department': 1 });
 usageSchema.index({ 'costAllocation.team': 1 });
 usageSchema.index({ 'costAllocation.client': 1 });

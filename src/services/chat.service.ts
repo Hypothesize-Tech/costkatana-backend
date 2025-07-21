@@ -315,17 +315,28 @@ export class ChatService {
             // Use the experimentation service to get available models
             const models = await ExperimentationService.getAccessibleBedrockModels();
             
-            return models.map(model => ({
-                id: model.modelId,
-                name: this.getModelDisplayName(model.modelId),
-                provider: this.getModelProvider(model.modelId),
-                description: this.getModelDescription(model.modelId),
-                capabilities: ['text', 'chat'],
-                pricing: model.pricing || undefined
-            }));
+            // Filter out models with invalid modelIds and transform to expected format
+            return models
+                .filter(model => model && model.modelId && typeof model.modelId === 'string' && model.modelId.trim() !== '')
+                .map(model => ({
+                    id: model.modelId,
+                    name: this.getModelDisplayName(model.modelId),
+                    provider: this.getModelProvider(model.modelId),
+                    description: this.getModelDescription(model.modelId),
+                    capabilities: ['text', 'chat'],
+                    pricing: model.pricing || undefined
+                }));
 
         } catch (error) {
             logger.error('Error getting available models:', error);
+            
+            // Log additional context for debugging
+            if (error instanceof Error) {
+                logger.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack
+                });
+            }
             
             // Comprehensive fallback list of AWS Bedrock models
             return [
@@ -609,6 +620,11 @@ export class ChatService {
      * Get display name for model
      */
     private static getModelDisplayName(modelId: string): string {
+        // Handle null/undefined modelId
+        if (!modelId || typeof modelId !== 'string') {
+            return 'Unknown Model';
+        }
+
         const nameMap: Record<string, string> = {
             'amazon.nova-micro-v1:0': 'Nova Micro',
             'amazon.nova-lite-v1:0': 'Nova Lite', 
@@ -616,7 +632,25 @@ export class ChatService {
             'amazon.titan-text-lite-v1': 'Titan Text Lite',
             'anthropic.claude-3-5-haiku-20241022-v1:0': 'Claude 3.5 Haiku',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Claude 3.5 Sonnet',
+            'anthropic.claude-3-5-sonnet-20241022-v2:0': 'Claude 3.5 Sonnet',
+            'anthropic.claude-3-haiku-20240307-v1:0': 'Claude 3 Haiku',
+            'anthropic.claude-3-sonnet-20240229-v1:0': 'Claude 3 Sonnet',
+            'anthropic.claude-3-opus-20240229-v1:0': 'Claude 3 Opus',
             'meta.llama3-1-8b-instruct-v1:0': 'Llama 3.1 8B',
+            'meta.llama3-1-70b-instruct-v1:0': 'Llama 3.1 70B',
+            'meta.llama3-1-405b-instruct-v1:0': 'Llama 3.1 405B',
+            'meta.llama3-2-1b-instruct-v1:0': 'Llama 3.2 1B',
+            'meta.llama3-2-3b-instruct-v1:0': 'Llama 3.2 3B',
+            'mistral.mistral-7b-instruct-v0:2': 'Mistral 7B',
+            'mistral.mixtral-8x7b-instruct-v0:1': 'Mixtral 8x7B',
+            'mistral.mistral-large-2402-v1:0': 'Mistral Large',
+            'cohere.command-text-v14': 'Command',
+            'cohere.command-light-text-v14': 'Command Light',
+            'cohere.command-r-v1:0': 'Command R',
+            'cohere.command-r-plus-v1:0': 'Command R+',
+            'ai21.jamba-instruct-v1:0': 'Jamba Instruct',
+            'ai21.j2-ultra-v1': 'Jurassic-2 Ultra',
+            'ai21.j2-mid-v1': 'Jurassic-2 Mid',
         };
 
         return nameMap[modelId] || modelId.split('.').pop()?.split('-')[0] || modelId;
@@ -626,6 +660,11 @@ export class ChatService {
      * Get provider for model
      */
     private static getModelProvider(modelId: string): string {
+        // Handle null/undefined modelId
+        if (!modelId || typeof modelId !== 'string') {
+            return 'Unknown';
+        }
+
         if (modelId.startsWith('amazon.')) return 'Amazon';
         if (modelId.startsWith('anthropic.')) return 'Anthropic';
         if (modelId.startsWith('meta.')) return 'Meta';
@@ -639,14 +678,37 @@ export class ChatService {
      * Get description for model
      */
     private static getModelDescription(modelId: string): string {
+        // Handle null/undefined modelId
+        if (!modelId || typeof modelId !== 'string') {
+            return 'Unknown AI model';
+        }
+
         const descriptionMap: Record<string, string> = {
             'amazon.nova-micro-v1:0': 'Fast and cost-effective model for simple tasks',
             'amazon.nova-lite-v1:0': 'Balanced performance and cost for general use',
             'amazon.nova-pro-v1:0': 'High-performance model for complex tasks',
             'amazon.titan-text-lite-v1': 'Lightweight text generation model',
             'anthropic.claude-3-5-haiku-20241022-v1:0': 'Fast and intelligent for quick responses',
+            'anthropic.claude-3-5-sonnet-20241022-v2:0': 'Advanced reasoning and analysis capabilities',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Powerful model for complex reasoning',
-            'meta.llama3-1-8b-instruct-v1:0': 'Open-source instruction-following model',
+            'anthropic.claude-3-haiku-20240307-v1:0': 'Fast responses with good reasoning',
+            'anthropic.claude-3-sonnet-20240229-v1:0': 'Balanced performance for complex tasks',
+            'anthropic.claude-3-opus-20240229-v1:0': 'Most capable model for complex reasoning',
+            'meta.llama3-1-8b-instruct-v1:0': 'Good balance of performance and efficiency',
+            'meta.llama3-1-70b-instruct-v1:0': 'Large model for complex reasoning tasks',
+            'meta.llama3-1-405b-instruct-v1:0': 'Most capable Llama model for advanced tasks',
+            'meta.llama3-2-1b-instruct-v1:0': 'Compact, efficient model for basic tasks',
+            'meta.llama3-2-3b-instruct-v1:0': 'Efficient model for general tasks',
+            'mistral.mistral-7b-instruct-v0:2': 'Efficient open-source model',
+            'mistral.mixtral-8x7b-instruct-v0:1': 'High-quality mixture of experts model',
+            'mistral.mistral-large-2402-v1:0': 'Advanced reasoning and multilingual capabilities',
+            'cohere.command-text-v14': 'General purpose text generation model',
+            'cohere.command-light-text-v14': 'Lighter, faster version of Command',
+            'cohere.command-r-v1:0': 'Retrieval-augmented generation model',
+            'cohere.command-r-plus-v1:0': 'Enhanced RAG model with better reasoning',
+            'ai21.jamba-instruct-v1:0': 'Hybrid architecture for long context tasks',
+            'ai21.j2-ultra-v1': 'Large language model for complex tasks',
+            'ai21.j2-mid-v1': 'Mid-size model for balanced performance',
         };
 
         return descriptionMap[modelId] || 'Advanced AI model for text generation and chat';
