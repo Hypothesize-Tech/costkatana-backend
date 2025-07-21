@@ -13,11 +13,11 @@ const router = Router();
 
 /**
  * Chat Routes
- * All routes require authentication
+ * Most routes require authentication, except public informational endpoints
  */
 
-// Get available models for chat
-router.get('/models', authenticate, getAvailableModels);
+// Get available models for chat (PUBLIC - no auth required)
+router.get('/models', getAvailableModels);
 
 // Send a message to a model
 router.post('/message', authenticate, sendMessage);

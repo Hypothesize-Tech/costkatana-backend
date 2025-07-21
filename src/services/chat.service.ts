@@ -315,14 +315,14 @@ export class ChatService {
             // Use the experimentation service to get available models
             const models = await ExperimentationService.getAccessibleBedrockModels();
             
-            // Filter out models with invalid modelIds and transform to expected format
+            // Filter out models with invalid model IDs and transform to expected format
             return models
-                .filter(model => model && model.modelId && typeof model.modelId === 'string' && model.modelId.trim() !== '')
+                .filter(model => model && model.model && typeof model.model === 'string' && model.model.trim() !== '')
                 .map(model => ({
-                    id: model.modelId,
-                    name: this.getModelDisplayName(model.modelId),
-                    provider: this.getModelProvider(model.modelId),
-                    description: this.getModelDescription(model.modelId),
+                    id: model.model,
+                    name: this.getModelDisplayName(model.model),
+                    provider: this.getModelProvider(model.model),
+                    description: this.getModelDescription(model.model),
                     capabilities: ['text', 'chat'],
                     pricing: model.pricing || undefined
                 }));

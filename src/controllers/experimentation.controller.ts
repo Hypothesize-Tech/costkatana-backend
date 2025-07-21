@@ -12,10 +12,10 @@ export class ExperimentationController {
         try {
             // Get actually available models from AWS Bedrock
             const availableModels = await ExperimentationService.getAccessibleBedrockModels();
-
+            console.log("availableModels", availableModels)
             res.json({
                 success: true,
-                data: availableModels.slice(0, 50), // Limit for performance
+                data: availableModels,
                 metadata: {
                     totalModels: availableModels.length,
                     providers: [...new Set(availableModels.map(m => m.provider))],

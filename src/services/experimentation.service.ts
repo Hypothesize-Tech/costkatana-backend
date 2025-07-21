@@ -450,7 +450,169 @@ export class ExperimentationService {
 
         } catch (error) {
             logger.error('Error fetching accessible Bedrock models:', error);
-            throw error;
+            
+            // Log additional context for debugging
+            if (error instanceof Error) {
+                logger.error('Error details:', {
+                    message: error.message,
+                    stack: error.stack
+                });
+            }
+            
+            // Return fallback list of common AWS Bedrock models instead of throwing
+            logger.info('Returning fallback model list due to AWS API error');
+            return [
+                // Amazon Nova Models
+                {
+                    provider: 'Amazon',
+                    model: 'amazon.nova-micro-v1:0',
+                    modelName: 'Nova Micro',
+                    pricing: { input: 0.035, output: 0.14, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 300000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Fast and cost-effective model for simple tasks'
+                },
+                {
+                    provider: 'Amazon',
+                    model: 'amazon.nova-lite-v1:0',
+                    modelName: 'Nova Lite',
+                    pricing: { input: 0.6, output: 2.4, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 300000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Balanced performance and cost for general use'
+                },
+                {
+                    provider: 'Amazon',
+                    model: 'amazon.nova-pro-v1:0',
+                    modelName: 'Nova Pro',
+                    pricing: { input: 0.8, output: 3.2, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 300000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'High-performance model for complex tasks'
+                },
+                
+                // Anthropic Claude Models
+                {
+                    provider: 'Anthropic',
+                    model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                    modelName: 'Claude 3.5 Haiku',
+                    pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 200000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Fast and intelligent for quick responses'
+                },
+                {
+                    provider: 'Anthropic',
+                    model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                    modelName: 'Claude 3.5 Sonnet',
+                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 200000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Advanced reasoning and analysis capabilities'
+                },
+                {
+                    provider: 'Anthropic',
+                    model: 'anthropic.claude-3-haiku-20240307-v1:0',
+                    modelName: 'Claude 3 Haiku',
+                    pricing: { input: 0.25, output: 1.25, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 200000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Fast responses with good reasoning'
+                },
+                {
+                    provider: 'Anthropic',
+                    model: 'anthropic.claude-3-sonnet-20240229-v1:0',
+                    modelName: 'Claude 3 Sonnet',
+                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 200000,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Balanced performance for complex tasks'
+                },
+                
+                // Meta Llama Models  
+                {
+                    provider: 'Meta',
+                    model: 'meta.llama3-2-1b-instruct-v1:0',
+                    modelName: 'Llama 3.2 1B Instruct',
+                    pricing: { input: 0.1, output: 0.1, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Compact, efficient model for basic tasks'
+                },
+                {
+                    provider: 'Meta',
+                    model: 'meta.llama3-2-3b-instruct-v1:0',
+                    modelName: 'Llama 3.2 3B Instruct',
+                    pricing: { input: 0.15, output: 0.15, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Efficient model for general tasks'
+                },
+                {
+                    provider: 'Meta',
+                    model: 'meta.llama3-1-8b-instruct-v1:0',
+                    modelName: 'Llama 3.1 8B Instruct',
+                    pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Good balance of performance and efficiency'
+                },
+                {
+                    provider: 'Meta',
+                    model: 'meta.llama3-1-70b-instruct-v1:0',
+                    modelName: 'Llama 3.1 70B Instruct',
+                    pricing: { input: 2.65, output: 3.5, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Large model for complex reasoning tasks'
+                },
+                
+                // Mistral AI Models
+                {
+                    provider: 'Mistral AI',
+                    model: 'mistral.mistral-7b-instruct-v0:2',
+                    modelName: 'Mistral 7B Instruct',
+                    pricing: { input: 0.15, output: 0.2, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'Efficient open-source model'
+                },
+                {
+                    provider: 'Mistral AI',
+                    model: 'mistral.mixtral-8x7b-instruct-v0:1',
+                    modelName: 'Mixtral 8x7B Instruct',
+                    pricing: { input: 0.45, output: 0.7, unit: 'Per 1M tokens' },
+                    capabilities: ['text'],
+                    contextWindow: 8192,
+                    category: 'general',
+                    isLatest: true,
+                    notes: 'High-quality mixture of experts model'
+                }
+            ];
         }
     }
 
