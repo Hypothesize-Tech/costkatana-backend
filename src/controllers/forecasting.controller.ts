@@ -13,6 +13,7 @@ export class ForecastingController {
             const userId = req.user?.id;
             if (!userId) {
                 res.status(401).json({ message: 'Unauthorized' });
+                return;
             }
 
             const {
@@ -27,20 +28,29 @@ export class ForecastingController {
                 res.status(400).json({
                     message: 'Forecast type must be one of: daily, weekly, monthly'
                 });
+                return;
             }
 
             if (timeHorizon < 1 || timeHorizon > 365) {
                 res.status(400).json({
                     message: 'Time horizon must be between 1 and 365 days'
                 });
+                return;
             }
 
-            const forecast = await ForecastingService.generateCostForecast(userId, {
+            // Add timeout handling (20 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 20000);
+            });
+
+            const forecastPromise = ForecastingService.generateCostForecast(userId, {
                 forecastType,
                 timeHorizon,
                 tags,
                 budgetLimit
             });
+
+            const forecast = await Promise.race([forecastPromise, timeoutPromise]);
 
             res.json({
                 success: true,
@@ -51,9 +61,19 @@ export class ForecastingController {
                     dataQuality: forecast.dataQuality
                 }
             });
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error generating cost forecast:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            if (error.message === 'Request timeout') {
+                res.status(408).json({ 
+                    success: false,
+                    message: 'Request timeout - operation took too long. Please try again with a smaller time range.' 
+                });
+            } else {
+                res.status(500).json({ 
+                    success: false,
+                    message: 'Internal server error' 
+                });
+            }
         }
     }
 

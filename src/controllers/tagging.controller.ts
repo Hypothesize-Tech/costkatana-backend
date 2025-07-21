@@ -13,6 +13,7 @@ export class TaggingController {
             const userId: any = req.user?.id;
             if (!userId) {
                 res.status(401).json({ message: 'Unauthorized' });
+                return;
             }
 
             const {
@@ -31,7 +32,14 @@ export class TaggingController {
                 includeRealTime: includeRealTime === 'true'
             };
 
-            const analytics = await TaggingService.getTagAnalytics(userId, options);
+            // Add timeout handling (10 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 10000);
+            });
+
+            const analyticsPromise = TaggingService.getTagAnalytics(userId, options);
+
+            const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
 
             res.json({
                 success: true,
@@ -43,9 +51,19 @@ export class TaggingController {
                     generatedAt: new Date().toISOString()
                 }
             });
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error getting tag analytics:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            if (error.message === 'Request timeout') {
+                res.status(408).json({ 
+                    success: false,
+                    message: 'Request timeout - analysis took too long. Please try with fewer tags or a smaller date range.' 
+                });
+            } else {
+                res.status(500).json({ 
+                    success: false,
+                    message: 'Internal server error' 
+                });
+            }
         }
     }
 

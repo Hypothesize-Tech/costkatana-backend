@@ -112,22 +112,122 @@ export class PerformanceCostAnalysisService {
                 tags
             } = options;
 
-            // Get usage data
-            const usageData = await this.getUsageWithMetrics(userId, startDate, endDate, services, models, tags);
+            const matchStage: any = {
+                userId,
+                createdAt: { $gte: startDate, $lte: endDate }
+            };
 
-            // Group by service and model
-            const serviceModelGroups = this.groupByServiceAndModel(usageData);
-
-            // Calculate correlations for each group
-            const correlations: CostPerformanceCorrelation[] = [];
-
-            for (const [key, usages] of serviceModelGroups.entries()) {
-                const [service, model] = key.split(':::');
-                const correlation = await this.calculateCorrelation(service, model, usages);
-                correlations.push(correlation);
+            if (services && services.length > 0) {
+                matchStage.service = { $in: services };
             }
 
-            return correlations.sort((a, b) => b.efficiency.costEfficiencyScore - a.efficiency.costEfficiencyScore);
+            if (models && models.length > 0) {
+                matchStage.model = { $in: models };
+            }
+
+            if (tags && tags.length > 0) {
+                matchStage.tags = { $in: tags };
+            }
+
+            // Use aggregation pipeline for better performance
+            const correlationData = await Usage.aggregate([
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: {
+                            service: "$service",
+                            model: "$model"
+                        },
+                        totalCost: { $sum: "$cost" },
+                        totalRequests: { $sum: 1 },
+                        totalTokens: { $sum: "$totalTokens" },
+                        avgResponseTime: { 
+                            $avg: { 
+                                $ifNull: ["$metadata.responseTime", 1000] 
+                            } 
+                        },
+                        errorCount: {
+                            $sum: {
+                                $cond: [
+                                    { $ifNull: ["$metadata.error", false] },
+                                    1,
+                                    0
+                                ]
+                            }
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        service: "$_id.service",
+                        model: "$_id.model",
+                        totalCost: 1,
+                        totalRequests: 1,
+                        totalTokens: 1,
+                        costPerRequest: { $divide: ["$totalCost", "$totalRequests"] },
+                        costPerToken: { 
+                            $divide: [
+                                "$totalCost", 
+                                { $cond: [{ $gt: ["$totalTokens", 0] }, "$totalTokens", 1] }
+                            ] 
+                        },
+                        avgLatency: "$avgResponseTime",
+                        errorRate: { 
+                            $multiply: [
+                                { $divide: ["$errorCount", "$totalRequests"] }, 
+                                100
+                            ] 
+                        }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 20 } // Limit to prevent excessive data
+            ]);
+
+            // Calculate correlations in parallel with simplified metrics
+            const correlations: CostPerformanceCorrelation[] = correlationData.map((data) => {
+                // Calculate performance metrics
+                const performance: PerformanceMetrics = {
+                    latency: data.avgLatency,
+                    errorRate: data.errorRate,
+                    qualityScore: this.calculateQualityScore(data.avgLatency, data.errorRate),
+                    throughput: data.totalRequests / 24, // requests per hour
+                    successRate: 100 - data.errorRate,
+                    retryRate: 0 // Default for performance
+                };
+
+                // Calculate efficiency metrics
+                const costEfficiencyScore = this.calculateCostEfficiencyScore(
+                    data.costPerRequest,
+                    performance
+                );
+
+                const performanceRating = this.getPerformanceRating(performance);
+                const recommendation = this.generateRecommendation(data.service, data.model, performance, costEfficiencyScore);
+                const optimizationPotential = this.calculateOptimizationPotential(performance, costEfficiencyScore);
+
+                return {
+                    service: data.service,
+                    model: data.model,
+                    costPerRequest: data.costPerRequest,
+                    costPerToken: data.costPerToken,
+                    performance,
+                    efficiency: {
+                        costEfficiencyScore,
+                        performanceRating,
+                        recommendation,
+                        optimizationPotential
+                    },
+                    tradeoffs: {
+                        costVsLatency: this.calculateTradeoff(data.costPerRequest, performance.latency),
+                        costVsQuality: this.calculateTradeoff(data.costPerRequest, performance.qualityScore),
+                        costVsReliability: this.calculateTradeoff(data.costPerRequest, performance.successRate)
+                    }
+                };
+            });
+
+            return correlations;
         } catch (error) {
             logger.error('Error analyzing cost-performance correlation:', error);
             throw error;
@@ -401,90 +501,7 @@ export class PerformanceCostAnalysisService {
         return enhancedData;
     }
 
-    private static groupByServiceAndModel(
-        usageData: Array<IUsage & {
-            latency?: number;
-            errorRate?: number;
-            qualityScore?: number;
-        }>
-    ): Map<string, Array<IUsage & {
-        latency?: number;
-        errorRate?: number;
-        qualityScore?: number;
-    }>> {
-        const groups = new Map();
 
-        usageData.forEach(usage => {
-            const key = `${usage.service}:::${usage.model}`;
-            if (!groups.has(key)) {
-                groups.set(key, []);
-            }
-            groups.get(key).push(usage);
-        });
-
-        return groups;
-    }
-
-    private static async calculateCorrelation(
-        service: string,
-        model: string,
-        usages: Array<IUsage & {
-            latency?: number;
-            errorRate?: number;
-            qualityScore?: number;
-        }>
-    ): Promise<CostPerformanceCorrelation> {
-        const totalCost = usages.reduce((sum, usage) => sum + usage.cost, 0);
-        const totalTokens = usages.reduce((sum, usage) => sum + usage.totalTokens, 0);
-        const totalRequests = usages.length;
-
-        // Calculate performance metrics
-        const avgLatency = usages.reduce((sum, usage) => sum + (usage.latency || 0), 0) / totalRequests;
-        const avgErrorRate = usages.reduce((sum, usage) => sum + (usage.errorRate || 0), 0) / totalRequests;
-        const avgQualityScore = usages.reduce((sum, usage) => sum + (usage.qualityScore || 0), 0) / totalRequests;
-        const avgSuccessRate = usages.reduce((sum, _usage) => sum + 100, 0) / totalRequests; // Default to 100% success rate
-
-        const performance: PerformanceMetrics = {
-            latency: avgLatency,
-            errorRate: avgErrorRate,
-            qualityScore: avgQualityScore,
-            throughput: totalRequests / 24, // requests per hour (assuming 24 hour period)
-            successRate: avgSuccessRate,
-            retryRate: usages.reduce((sum, _usage) => sum + 0, 0) / totalRequests // Default to 0 retries
-        };
-
-        // Calculate efficiency metrics
-        const costEfficiencyScore = this.calculateCostEfficiencyScore(
-            totalCost / totalRequests,
-            performance
-        );
-
-        const performanceRating = this.getPerformanceRating(performance);
-        const recommendation = this.generateRecommendation(service, model, performance, costEfficiencyScore);
-        const optimizationPotential = this.calculateOptimizationPotential(performance, costEfficiencyScore);
-
-        // Calculate trade-offs
-        const tradeoffs = {
-            costVsLatency: this.calculateCostVsLatency(totalCost / totalRequests, avgLatency),
-            costVsQuality: this.calculateCostVsQuality(totalCost / totalRequests, avgQualityScore),
-            costVsReliability: this.calculateCostVsReliability(totalCost / totalRequests, avgSuccessRate)
-        };
-
-        return {
-            service,
-            model,
-            costPerRequest: totalCost / totalRequests,
-            costPerToken: totalCost / totalTokens,
-            performance,
-            efficiency: {
-                costEfficiencyScore,
-                performanceRating,
-                recommendation,
-                optimizationPotential
-            },
-            tradeoffs
-        };
-    }
 
     // Additional helper methods for simulating metrics and calculations
     private static simulateLatency(usage: IUsage): number {
@@ -565,18 +582,7 @@ export class PerformanceCostAnalysisService {
         return Math.max(0, (1 - adjustedScore) * 100);
     }
 
-    private static calculateCostVsLatency(costPerRequest: number, latency: number): number {
-        // Returns a score indicating cost vs latency trade-off
-        return (costPerRequest / 0.01) / (latency / 1000);
-    }
 
-    private static calculateCostVsQuality(costPerRequest: number, qualityScore: number): number {
-        return (costPerRequest / 0.01) / qualityScore;
-    }
-
-    private static calculateCostVsReliability(costPerRequest: number, successRate: number): number {
-        return (costPerRequest / 0.01) / (successRate / 100);
-    }
 
     private static findBestValue(correlations: CostPerformanceCorrelation[]): {
         service: string;
@@ -1001,5 +1007,23 @@ export class PerformanceCostAnalysisService {
         });
 
         return anomalies.sort((a, b) => b.deviation - a.deviation).slice(0, 20);
+    }
+
+    /**
+     * Calculate quality score based on latency and error rate
+     */
+    private static calculateQualityScore(latency: number, errorRate: number): number {
+        // Simple quality score calculation (0-100)
+        const latencyScore = Math.max(0, 100 - (latency / 10)); // Penalty for high latency
+        const errorScore = Math.max(0, 100 - (errorRate * 2)); // Penalty for errors
+        return (latencyScore + errorScore) / 2;
+    }
+
+    /**
+     * Calculate tradeoff score between cost and performance metric
+     */
+    private static calculateTradeoff(cost: number, performanceMetric: number): number {
+        // Simple tradeoff calculation (normalized 0-1)
+        return Math.min(1, cost / (performanceMetric + 0.01));
     }
 } 

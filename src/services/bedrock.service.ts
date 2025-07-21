@@ -42,7 +42,30 @@ interface UsageAnalysisResponse {
 }
 
 export class BedrockService {
-    private static extractJson(text: string): string {
+    
+    /**
+     * Convert model ID to inference profile ARN if needed
+     */
+    private static convertToInferenceProfile(modelId: string): string {
+        const region = process.env.AWS_BEDROCK_REGION || 'us-east-1';
+        const regionPrefix = region.split('-')[0]; // us, eu, ap, etc.
+        
+        // Map of model IDs that need inference profile conversion
+        const modelMappings: Record<string, string> = {
+            // Anthropic Claude 3.5 models require inference profiles
+            'anthropic.claude-3-5-haiku-20241022-v1:0': `${regionPrefix}.anthropic.claude-3-5-haiku-20241022-v1:0`,
+            'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
+            
+            // Some regions may require inference profiles for other Claude models
+            'anthropic.claude-3-opus-20240229-v1:0': `${regionPrefix}.anthropic.claude-3-opus-20240229-v1:0`,
+            'anthropic.claude-3-sonnet-20240229-v1:0': `${regionPrefix}.anthropic.claude-3-sonnet-20240229-v1:0`,
+            'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
+        };
+
+        return modelMappings[modelId] || modelId;
+    }
+
+    public static extractJson(text: string): string {
         if (!text) {
             return '';
         }
@@ -110,32 +133,98 @@ export class BedrockService {
         };
     }
 
-    private static async invokeModel(prompt: string, model: string): Promise<any> {
+    private static createLlamaPayload(prompt: string) {
+        return {
+            prompt: prompt,
+            max_gen_len: AWS_CONFIG.bedrock.maxTokens,
+            temperature: AWS_CONFIG.bedrock.temperature,
+            top_p: 0.9,
+        };
+    }
+
+    private static createCoherePayload(prompt: string) {
+        return {
+            message: prompt,
+            max_tokens: AWS_CONFIG.bedrock.maxTokens,
+            temperature: AWS_CONFIG.bedrock.temperature,
+            p: 0.9,
+            k: 0,
+            stop_sequences: [],
+            return_likelihoods: "NONE"
+        };
+    }
+
+    private static createAI21Payload(prompt: string) {
+        return {
+            prompt: prompt,
+            maxTokens: AWS_CONFIG.bedrock.maxTokens,
+            temperature: AWS_CONFIG.bedrock.temperature,
+            topP: 1,
+            stopSequences: [],
+            countPenalty: {
+                scale: 0
+            },
+            presencePenalty: {
+                scale: 0
+            },
+            frequencyPenalty: {
+                scale: 0
+            }
+        };
+    }
+
+    public static async invokeModel(prompt: string, model: string): Promise<any> {
         let payload: any;
         let responsePath: string;
 
         // Check model type and create appropriate payload
         if (model.includes('claude-3') || model.includes('claude-v3')) {
+            // Modern Claude models (3.x) use messages format
             payload = this.createMessagesPayload(prompt);
             responsePath = 'content';
         } else if (model.includes('nova')) {
+            // Amazon Nova models
             payload = this.createNovaPayload(prompt);
             responsePath = 'nova';
         } else if (model.includes('amazon.titan')) {
+            // Amazon Titan models
             payload = this.createTitanPayload(prompt);
             responsePath = 'titan';
+        } else if (model.includes('meta.llama')) {
+            // Meta Llama models use messages format
+            payload = this.createLlamaPayload(prompt);
+            responsePath = 'llama';
+        } else if (model.includes('mistral')) {
+            // Mistral models use messages format
+            payload = this.createMessagesPayload(prompt);
+            responsePath = 'content';
+        } else if (model.includes('cohere.command')) {
+            // Cohere Command models
+            payload = this.createCoherePayload(prompt);
+            responsePath = 'cohere';
+        } else if (model.includes('ai21')) {
+            // AI21 models (Jurassic, Jamba)
+            payload = this.createAI21Payload(prompt);
+            responsePath = 'ai21';
         } else if (model.includes('claude')) {
-            // For older Claude models
+            // Legacy Claude models
             payload = this.createLegacyPayload(prompt);
             responsePath = 'completion';
         } else {
             // Default to messages format for unknown models
-            payload = this.createNovaPayload(prompt);
-            responsePath = 'nova';
+            payload = this.createMessagesPayload(prompt);
+            responsePath = 'content';
         }
 
+        // Convert model ID to inference profile if needed
+        const actualModelId = this.convertToInferenceProfile(model);
+        
+        if (actualModelId !== model) {
+            logger.info(`Converting model ID: ${model} -> ${actualModelId}`);
+        }
+        
         const command = new InvokeModelCommand({
-            modelId: model,
+            modelId: actualModelId,
             contentType: 'application/json',
             accept: 'application/json',
             body: JSON.stringify(payload),
@@ -152,10 +241,20 @@ export class BedrockService {
                 return responseBody.output?.message?.content?.[0]?.text || responseBody.message?.content?.[0]?.text || '';
             } else if (responsePath === 'titan') {
                 return responseBody.results?.[0]?.outputText || '';
+            } else if (responsePath === 'llama') {
+                return responseBody.generation || responseBody.outputs?.[0]?.text || '';
+            } else if (responsePath === 'cohere') {
+                return responseBody.text || responseBody.generations?.[0]?.text || '';
+            } else if (responsePath === 'ai21') {
+                return responseBody.completions?.[0]?.data?.text || responseBody.outputs?.[0]?.text || '';
             }
-            return responseBody.completion || '';
+            return responseBody.completion || responseBody.text || '';
         } catch (error) {
-            logger.error('Error invoking Bedrock model:', { model, error });
+            logger.error('Error invoking Bedrock model:', { 
+                originalModel: model, 
+                actualModelId, 
+                error 
+            });
             throw error;
         }
     }

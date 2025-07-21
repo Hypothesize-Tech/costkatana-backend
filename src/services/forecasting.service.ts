@@ -281,39 +281,50 @@ export class ForecastingService {
             const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
             const endDate = new Date();
 
-            const query: any = {
+            const matchStage: any = {
                 userId,
                 createdAt: { $gte: startDate, $lte: endDate }
             };
 
             if (tags && tags.length > 0) {
-                query.tags = { $in: tags };
+                matchStage.tags = { $in: tags };
             }
 
-            const usageData = await Usage.find(query).lean();
+            // Use aggregation pipeline for better performance
+            const aggregatedData = await Usage.aggregate([
+                { $match: matchStage },
+                {
+                    $addFields: {
+                        dateKey: {
+                            $dateToString: {
+                                format: "%Y-%m-%d",
+                                date: "$createdAt"
+                            }
+                        }
+                    }
+                },
+                {
+                    $group: {
+                        _id: "$dateKey",
+                        cost: { $sum: "$cost" },
+                        calls: { $sum: 1 },
+                        tokens: { $sum: "$totalTokens" },
+                        date: { $first: { $dateFromString: { dateString: "$dateKey" } } }
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        date: "$date",
+                        cost: 1,
+                        calls: 1,
+                        tokens: 1
+                    }
+                },
+                { $sort: { date: 1 } }
+            ]);
 
-            // Group by date
-            const dateGroups = new Map<string, { cost: number; calls: number; tokens: number }>();
-
-            usageData.forEach(usage => {
-                const dateKey = usage.createdAt.toISOString().split('T')[0];
-                if (!dateGroups.has(dateKey)) {
-                    dateGroups.set(dateKey, { cost: 0, calls: 0, tokens: 0 });
-                }
-                const group = dateGroups.get(dateKey)!;
-                group.cost += usage.cost;
-                group.calls += 1;
-                group.tokens += usage.totalTokens;
-            });
-
-            return Array.from(dateGroups.entries())
-                .map(([dateStr, data]) => ({
-                    date: new Date(dateStr),
-                    cost: data.cost,
-                    calls: data.calls,
-                    tokens: data.tokens
-                }))
-                .sort((a, b) => a.date.getTime() - b.date.getTime());
+            return aggregatedData;
         } catch (error) {
             logger.error('Error getting historical data:', error);
             throw error;

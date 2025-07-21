@@ -131,7 +131,6 @@ usageSchema.index({ service: 1, createdAt: -1 });
 usageSchema.index({ model: 1, createdAt: -1 });
 usageSchema.index({ cost: -1 });
 usageSchema.index({ userId: 1, service: 1, model: 1, createdAt: -1 });
-usageSchema.index({ tags: 1 });
 usageSchema.index({ 'costAllocation.department': 1 });
 usageSchema.index({ 'costAllocation.team': 1 });
 usageSchema.index({ 'costAllocation.client': 1 });
@@ -169,5 +168,13 @@ usageSchema.statics.getUserSummary = async function (userId: string, startDate?:
         }
     ]);
 };
+
+// Create indexes for better query performance
+usageSchema.index({ userId: 1, createdAt: -1 }); // For user-based time range queries
+usageSchema.index({ userId: 1, tags: 1, createdAt: -1 }); // For tag-based analytics
+usageSchema.index({ userId: 1, service: 1, model: 1, createdAt: -1 }); // For service/model analysis
+usageSchema.index({ createdAt: -1 }); // For time-based operations
+usageSchema.index({ tags: 1 }); // For tag operations
+usageSchema.index({ userId: 1, cost: -1 }); // For cost-based sorting
 
 export const Usage = mongoose.model<IUsage>('Usage', usageSchema);

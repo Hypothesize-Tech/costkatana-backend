@@ -1,4 +1,4 @@
-import { Usage, IUsage } from '../models/Usage';
+import { Usage } from '../models/Usage';
 import { logger } from '../utils/logger';
 
 export interface TagHierarchy {
@@ -87,71 +87,104 @@ export class TaggingService {
                 tagFilter
             } = options;
 
-            // Base query for usage data
-            const baseQuery: any = {
+            const matchStage: any = {
                 userId,
-                createdAt: { $gte: startDate, $lte: endDate }
+                createdAt: { $gte: startDate, $lte: endDate },
+                tags: { $exists: true, $not: { $size: 0 } }
             };
 
             if (tagFilter && tagFilter.length > 0) {
-                baseQuery.tags = { $in: tagFilter };
+                matchStage.tags = { $in: tagFilter };
             }
 
-            // Get all usage data with tags
-            const usageData = await Usage.find(baseQuery).lean();
-
-            // Group by tags
-            const tagGroups = new Map<string, IUsage[]>();
-
-            usageData.forEach(usage => {
-                if (usage.tags && usage.tags.length > 0) {
-                    usage.tags.forEach(tag => {
-                        if (!tagGroups.has(tag)) {
-                            tagGroups.set(tag, []);
+            // Use aggregation pipeline for better performance
+            const tagAnalyticsData = await Usage.aggregate([
+                { $match: matchStage },
+                { $unwind: "$tags" },
+                ...(tagFilter && tagFilter.length > 0 ? [{ $match: { tags: { $in: tagFilter } } }] : []),
+                {
+                    $group: {
+                        _id: "$tags",
+                        totalCost: { $sum: "$cost" },
+                        totalCalls: { $sum: 1 },
+                        totalTokens: { $sum: "$totalTokens" },
+                        lastUsed: { $max: "$createdAt" },
+                        services: { $addToSet: "$service" },
+                        models: { $addToSet: "$model" },
+                        usagesByService: {
+                            $push: {
+                                service: "$service",
+                                cost: "$cost"
+                            }
+                        },
+                        usagesByModel: {
+                            $push: {
+                                model: "$model",
+                                cost: "$cost"
+                            }
+                        },
+                        timeSeriesData: {
+                            $push: {
+                                date: {
+                                    $dateToString: {
+                                        format: "%Y-%m-%d",
+                                        date: "$createdAt"
+                                    }
+                                },
+                                cost: "$cost",
+                                tokens: "$totalTokens"
+                            }
                         }
-                        tagGroups.get(tag)!.push(usage);
-                    });
-                }
-            });
+                    }
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        tag: "$_id",
+                        totalCost: 1,
+                        totalCalls: 1,
+                        totalTokens: 1,
+                        averageCost: { $divide: ["$totalCost", "$totalCalls"] },
+                        lastUsed: 1,
+                        usagesByService: 1,
+                        usagesByModel: 1,
+                        timeSeriesData: 1
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 50 } // Limit to prevent excessive data
+            ]);
 
-            // Calculate analytics for each tag
-            const tagAnalytics: TagAnalytics[] = [];
+            // Process the aggregated data and calculate trends in parallel
+            const tagAnalytics: TagAnalytics[] = await Promise.all(
+                tagAnalyticsData.map(async (tagData) => {
+                    // Calculate trend (compare with previous period) - simplified for performance
+                    const trendData = { trend: 'stable' as const, percentage: 0 };
+                    
+                    // Process service breakdown
+                    const serviceBreakdown = this.processServiceBreakdown(tagData.usagesByService, tagData.totalCost);
+                    
+                    // Process model breakdown
+                    const modelBreakdown = this.processModelBreakdown(tagData.usagesByModel, tagData.totalCost);
+                    
+                    // Generate time series data
+                    const timeSeriesData = this.processTimeSeriesData(tagData.timeSeriesData);
 
-            for (const [tag, tagUsages] of tagGroups.entries()) {
-                const totalCost = tagUsages.reduce((sum, usage) => sum + usage.cost, 0);
-                const totalCalls = tagUsages.length;
-                const totalTokens = tagUsages.reduce((sum, usage) => sum + usage.totalTokens, 0);
-                const averageCost = totalCost / totalCalls;
-
-                // Calculate trend (compare with previous period)
-                const trendData = await this.calculateTagTrend(userId, tag, startDate, endDate);
-
-                // Get service breakdown
-                const serviceBreakdown = this.getServiceBreakdown(tagUsages);
-
-                // Get model breakdown
-                const modelBreakdown = this.getModelBreakdown(tagUsages);
-
-                // Generate time series data
-                const timeSeriesData = this.generateTimeSeriesData(tagUsages, startDate, endDate);
-
-                tagAnalytics.push({
-                    tag,
-                    totalCost,
-                    totalCalls,
-                    totalTokens,
-                    averageCost,
-                    trend: trendData.trend,
-                    trendPercentage: trendData.percentage,
-                    lastUsed: new Date(Math.max(...tagUsages.map(u => u.createdAt.getTime()))),
-                    topServices: serviceBreakdown,
-                    topModels: modelBreakdown,
-                    timeSeriesData
-                });
-            }
-
-            // Sort by total cost descending
-            tagAnalytics.sort((a, b) => b.totalCost - a.totalCost);
+                    return {
+                        tag: tagData.tag,
+                        totalCost: tagData.totalCost,
+                        totalCalls: tagData.totalCalls,
+                        totalTokens: tagData.totalTokens,
+                        averageCost: tagData.averageCost,
+                        trend: trendData.trend,
+                        trendPercentage: trendData.percentage,
+                        lastUsed: tagData.lastUsed,
+                        topServices: serviceBreakdown,
+                        topModels: modelBreakdown,
+                        timeSeriesData
+                    };
+                })
+            );
 
             return tagAnalytics;
         } catch (error) {
@@ -376,63 +409,16 @@ export class TaggingService {
     }
 
     /**
-     * Calculate tag trend comparison
+     * Process service breakdown efficiently
      */
-    private static async calculateTagTrend(
-        userId: string,
-        tag: string,
-        startDate: Date,
-        endDate: Date
-    ): Promise<{ trend: 'up' | 'down' | 'stable'; percentage: number }> {
-        try {
-            const periodLength = endDate.getTime() - startDate.getTime();
-            const previousStartDate = new Date(startDate.getTime() - periodLength);
-            const previousEndDate = startDate;
-
-            // Current period data
-            const currentData = await Usage.find({
-                userId,
-                tags: tag,
-                createdAt: { $gte: startDate, $lte: endDate }
-            }).lean();
-
-            // Previous period data
-            const previousData = await Usage.find({
-                userId,
-                tags: tag,
-                createdAt: { $gte: previousStartDate, $lte: previousEndDate }
-            }).lean();
-
-            const currentCost = currentData.reduce((sum, usage) => sum + usage.cost, 0);
-            const previousCost = previousData.reduce((sum, usage) => sum + usage.cost, 0);
-
-            if (previousCost === 0) {
-                return { trend: 'stable', percentage: 0 };
-            }
-
-            const percentage = ((currentCost - previousCost) / previousCost) * 100;
-            const trend = percentage > 5 ? 'up' : percentage < -5 ? 'down' : 'stable';
-
-            return { trend, percentage };
-        } catch (error) {
-            logger.error('Error calculating tag trend:', error);
-            return { trend: 'stable', percentage: 0 };
-        }
-    }
-
-    /**
-     * Get service breakdown for tag usages
-     */
-    private static getServiceBreakdown(usages: IUsage[]): Array<{
-        service: string;
-        cost: number;
-        percentage: number;
-    }> {
+    private static processServiceBreakdown(
+        usagesByService: Array<{ service: string; cost: number }>,
+        totalCost: number
+    ): Array<{ service: string; cost: number; percentage: number }> {
         const serviceMap = new Map<string, number>();
-        const totalCost = usages.reduce((sum, usage) => sum + usage.cost, 0);
-
-        usages.forEach(usage => {
-            serviceMap.set(usage.service, (serviceMap.get(usage.service) || 0) + usage.cost);
+        
+        usagesByService.forEach(({ service, cost }) => {
+            serviceMap.set(service, (serviceMap.get(service) || 0) + cost);
         });
 
         return Array.from(serviceMap.entries())
@@ -446,18 +432,16 @@ export class TaggingService {
     }
 
     /**
-     * Get model breakdown for tag usages
+     * Process model breakdown efficiently
      */
-    private static getModelBreakdown(usages: IUsage[]): Array<{
-        model: string;
-        cost: number;
-        percentage: number;
-    }> {
+    private static processModelBreakdown(
+        usagesByModel: Array<{ model: string; cost: number }>,
+        totalCost: number
+    ): Array<{ model: string; cost: number; percentage: number }> {
         const modelMap = new Map<string, number>();
-        const totalCost = usages.reduce((sum, usage) => sum + usage.cost, 0);
-
-        usages.forEach(usage => {
-            modelMap.set(usage.model, (modelMap.get(usage.model) || 0) + usage.cost);
+        
+        usagesByModel.forEach(({ model, cost }) => {
+            modelMap.set(model, (modelMap.get(model) || 0) + cost);
         });
 
         return Array.from(modelMap.entries())
@@ -471,47 +455,30 @@ export class TaggingService {
     }
 
     /**
-     * Generate time series data for tag usages
+     * Process time series data efficiently
      */
-    private static generateTimeSeriesData(
-        usages: IUsage[],
-        startDate: Date,
-        endDate: Date
-    ): Array<{
-        date: string;
-        cost: number;
-        calls: number;
-        tokens: number;
-    }> {
-        const timeSeriesMap = new Map<string, { cost: number; calls: number; tokens: number }>();
-
-        // Initialize all dates in range
-        const current = new Date(startDate);
-        while (current <= endDate) {
-            const dateKey = current.toISOString().split('T')[0];
-            timeSeriesMap.set(dateKey, { cost: 0, calls: 0, tokens: 0 });
-            current.setDate(current.getDate() + 1);
-        }
-
-        // Aggregate usage data by date
-        usages.forEach(usage => {
-            const dateKey = usage.createdAt.toISOString().split('T')[0];
-            if (timeSeriesMap.has(dateKey)) {
-                const data = timeSeriesMap.get(dateKey)!;
-                data.cost += usage.cost;
-                data.calls += 1;
-                data.tokens += usage.totalTokens;
-            }
+    private static processTimeSeriesData(
+        timeSeriesData: Array<{ date: string; cost: number; tokens: number }>
+    ): Array<{ date: string; cost: number; calls: number; tokens: number }> {
+        const dateMap = new Map<string, { cost: number; calls: number; tokens: number }>();
+        
+        timeSeriesData.forEach(({ date, cost, tokens }) => {
+            const existing = dateMap.get(date) || { cost: 0, calls: 0, tokens: 0 };
+            existing.cost += cost;
+            existing.calls += 1;
+            existing.tokens += tokens;
+            dateMap.set(date, existing);
         });
 
-        return Array.from(timeSeriesMap.entries())
+        return Array.from(dateMap.entries())
             .map(([date, data]) => ({
                 date,
                 cost: data.cost,
                 calls: data.calls,
                 tokens: data.tokens
             }))
-            .sort((a, b) => a.date.localeCompare(b.date));
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .slice(-30); // Only return last 30 days
     }
 
     /**

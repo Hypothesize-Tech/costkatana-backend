@@ -13,6 +13,7 @@ export class PerformanceCostAnalysisController {
             const userId = req.user?.id;
             if (!userId) {
                 res.status(401).json({ message: 'Unauthorized' });
+                return;
             }
 
             const {
@@ -31,7 +32,14 @@ export class PerformanceCostAnalysisController {
                 tags
             };
 
-            const correlations = await PerformanceCostAnalysisService.analyzeCostPerformanceCorrelation(userId, options);
+            // Add timeout handling (15 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 15000);
+            });
+
+            const correlationsPromise = PerformanceCostAnalysisService.analyzeCostPerformanceCorrelation(userId, options);
+
+            const correlations = await Promise.race([correlationsPromise, timeoutPromise]);
 
             // Calculate summary metrics
             const summary = {
@@ -55,9 +63,19 @@ export class PerformanceCostAnalysisController {
                     generatedAt: new Date().toISOString()
                 }
             });
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error analyzing cost-performance correlation:', error);
-            res.status(500).json({ message: 'Internal server error' });
+            if (error.message === 'Request timeout') {
+                res.status(408).json({ 
+                    success: false,
+                    message: 'Request timeout - analysis took too long. Please try again with a smaller date range.' 
+                });
+            } else {
+                res.status(500).json({ 
+                    success: false,
+                    message: 'Internal server error' 
+                });
+            }
         }
     }
 
