@@ -60,7 +60,7 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>Welcome to AI Cost Optimizer!</h1>
+              <h1>Welcome to Cost Katana!</h1>
             </div>
             <div class="content">
               <h2>Hi ${user.name},</h2>
@@ -73,7 +73,7 @@ export class EmailService {
               <p>This link will expire in 24 hours.</p>
             </div>
             <div class="footer">
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -82,7 +82,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: user.email,
-      subject: 'Verify your AI Cost Optimizer account',
+      subject: 'Verify your Cost Katana account',
       html,
     });
   }
@@ -118,7 +118,7 @@ export class EmailService {
               <p><strong>If you didn't request this password reset, please ignore this email.</strong></p>
             </div>
             <div class="footer">
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -127,7 +127,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: user.email,
-      subject: 'Password Reset - AI Cost Optimizer',
+      subject: 'Password Reset - Cost Katana',
       html,
     });
   }
@@ -189,7 +189,7 @@ export class EmailService {
             </div>
             <div class="footer">
               <p>You can update your alert preferences in your account settings.</p>
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -243,7 +243,7 @@ export class EmailService {
               </p>
             </div>
             <div class="footer">
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -327,7 +327,7 @@ export class EmailService {
             </div>
             <div class="footer">
               <p>You're receiving this because weekly reports are enabled in your settings.</p>
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -382,7 +382,7 @@ export class EmailService {
               ` : ''}
             </div>
             <div class="footer">
-              <p>© 2024 AI Cost Optimizer. All rights reserved.</p>
+              <p>© 2024 Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>

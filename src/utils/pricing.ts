@@ -1,4 +1,4 @@
-// AI Cost Optimizer Backend - Fresh Pricing Data (July 2025, Google AI & Mistral AI Updated July 2025)
+// Cost Katana Backend - Fresh Pricing Data (July 2025, Google AI & Mistral AI Updated July 2025)
 // Source: WebScraperService - Comprehensive pricing from all major providers
 
 export enum PricingUnit {

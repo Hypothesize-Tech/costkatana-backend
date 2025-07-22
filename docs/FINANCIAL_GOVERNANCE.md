@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Financial Governance & Team Collaboration feature transforms the AI Cost Optimizer from an individual usage tracker to an enterprise-ready platform for managing AI spending across teams and projects. This feature provides centralized control, budget management, approval workflows, and shared resources.
+The Financial Governance & Team Collaboration feature transforms the Cost Katana from an individual usage tracker to an enterprise-ready platform for managing AI spending across teams and projects. This feature provides centralized control, budget management, approval workflows, and shared resources.
 
 ## Key Features
 
@@ -133,7 +133,7 @@ GET /api/prompt-templates?category=business&projectId=proj123
 POST /api/prompt-templates/:templateId/use
 {
   "variables": {
-    "productName": "AI Cost Optimizer Pro"
+    "productName": "Cost Katana Pro"
   }
 }
 
@@ -318,7 +318,7 @@ if (estimatedCost > project.settings.requireApprovalAbove) {
 // Get and use a template
 const template = await PromptTemplateService.getTemplate(templateId);
 const result = await PromptTemplateService.useTemplate(templateId, userId, {
-  productName: 'AI Cost Optimizer',
+  productName: 'Cost Katana',
   features: 'Cost tracking, optimization, analytics'
 });
 

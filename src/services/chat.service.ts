@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { ExperimentationService } from './experimentation.service';
 import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
+import { agentService } from './agent.service';
 
 export interface ChatMessageResponse {
     id: string;
@@ -49,6 +50,16 @@ export interface ChatSendMessageResponse {
     latency: number;
     tokenCount: number;
     model: string;
+    thinking?: {
+        title: string;
+        steps: Array<{
+            step: number;
+            description: string;
+            reasoning: string;
+            outcome?: string;
+        }>;
+        summary?: string;
+    };
 }
 
 export class ChatService {
@@ -100,11 +111,38 @@ export class ChatService {
             // Build context from conversation history
             const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
 
-            // Send to Bedrock
-            const response = await BedrockService.invokeModel(
-                contextualPrompt, 
-                request.modelId
-            );
+            // Use intelligent agent service for data-aware responses
+            let response: string;
+            let agentThinking: any = undefined;
+            
+            try {
+                // Try agent service first for intelligent, data-aware responses
+                const agentResponse = await agentService.query({
+                    userId: request.userId,
+                    query: request.message,
+                    context: {
+                        conversationId: conversation._id.toString(),
+                        previousMessages: recentMessages.map(msg => ({
+                            role: msg.role,
+                            content: msg.content
+                        })),
+                        selectedModel: request.modelId
+                    }
+                });
+
+                if (agentResponse.success && agentResponse.response) {
+                    response = agentResponse.response;
+                    agentThinking = agentResponse.thinking;
+                } else {
+                    // Fallback to direct Bedrock call if agent fails
+                    logger.warn('Agent service failed, falling back to Bedrock:', agentResponse.error);
+                    response = await BedrockService.invokeModel(contextualPrompt, request.modelId);
+                }
+            } catch (error) {
+                // Fallback to direct Bedrock call if agent service is unavailable
+                logger.warn('Agent service unavailable, falling back to Bedrock:', error);
+                response = await BedrockService.invokeModel(contextualPrompt, request.modelId);
+            }
 
             const latency = Date.now() - startTime;
             
@@ -149,7 +187,8 @@ export class ChatService {
                 cost,
                 latency,
                 tokenCount: outputTokens,
-                model: request.modelId
+                model: request.modelId,
+                thinking: agentThinking
             };
 
         } catch (error) {

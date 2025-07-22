@@ -1,6 +1,6 @@
 # Email Configuration
 
-The AI Cost Optimizer backend uses SMTP for sending emails. This guide explains how to configure email functionality.
+The Cost Katana backend uses SMTP for sending emails. This guide explains how to configure email functionality.
 
 ## Required Environment Variables
 

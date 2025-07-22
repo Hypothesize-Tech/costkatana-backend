@@ -1,4 +1,4 @@
-# AI Cost Optimizer Backend
+# Cost Katana Backend
 
 A comprehensive TypeScript backend service for tracking, analyzing, and optimizing AI API usage costs across multiple providers.
 
@@ -62,7 +62,7 @@ Transform your cost optimization with intelligent guidance:
 - MongoDB 5.0+
 - AWS Account with Bedrock access
 - Gmail account with OAuth2 credentials
-- AI Cost Optimizer Core package installed
+- Cost Katana Core package installed
 
 ## Installation
 

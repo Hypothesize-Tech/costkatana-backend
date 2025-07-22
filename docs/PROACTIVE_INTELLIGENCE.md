@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Proactive Intelligence & Quality Assurance feature transforms the AI Cost Optimizer from a passive monitoring tool into an active, intelligent advisor that guides users toward better, more cost-effective practices while ensuring quality.
+The Proactive Intelligence & Quality Assurance feature transforms the Cost Katana from a passive monitoring tool into an active, intelligent advisor that guides users toward better, more cost-effective practices while ensuring quality.
 
 ## Features
 

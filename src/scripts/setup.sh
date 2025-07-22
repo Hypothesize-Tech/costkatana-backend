@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🚀 Setting up AI Cost Optimizer Backend..."
+echo "🚀 Setting up Cost Katana Backend..."
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then

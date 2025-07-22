@@ -1,7 +1,6 @@
 import express, { Application, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import morgan from 'morgan';
 import { config } from './config';
@@ -13,7 +12,7 @@ import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
 import { setupCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
-import { recordRateLimit, securityMonitor } from './utils/security-monitor';
+import { agentService } from './services/agent.service';
 
 // Create Express app
 const app: Application = express();
@@ -101,64 +100,6 @@ const customLogger = morgan('combined', {
 // Apply custom logging
 app.use(customLogger);
 
-// Enhanced rate limiting
-const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // 100 requests per window per IP
-    message: {
-        error: 'Too many requests from this IP, please try again later.',
-        retryAfter: 15 * 60 // seconds
-    },
-    standardHeaders: true,
-    legacyHeaders: false,
-    keyGenerator: (req: Request) => {
-        // Use forwarded IP for rate limiting in case of proxy
-        return req.ip || 'unknown';
-    },
-    handler: (req: Request, res: Response) => {
-        recordRateLimit(req.ip || 'unknown', req.path, req.method, req.get('User-Agent') || 'unknown', {
-            type: 'global_rate_limit',
-            windowMs: 15 * 60 * 1000,
-            max: 100
-        });
-        res.status(429).json({
-            error: 'Too many requests from this IP, please try again later.',
-            retryAfter: 15 * 60
-        });
-    }
-});
-
-// Apply global rate limiting to all routes
-app.use('/api/', globalLimiter);
-
-// Stricter rate limiting for auth routes
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // 5 requests per window
-    message: {
-        error: 'Too many authentication attempts, please try again later.',
-        retryAfter: 15 * 60
-    },
-    skipSuccessfulRequests: true,
-    keyGenerator: (req: Request) => {
-        return req.ip || 'unknown';
-    },
-    handler: (req: Request, res: Response) => {
-        recordRateLimit(req.ip || 'unknown', req.path, req.method, req.get('User-Agent') || 'unknown', {
-            type: 'auth_rate_limit',
-            windowMs: 15 * 60 * 1000,
-            max: 5
-        });
-        res.status(429).json({
-            error: 'Too many authentication attempts, please try again later.',
-            retryAfter: 15 * 60
-        });
-    }
-});
-
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-
 // Sanitize input
 app.use(sanitizeInput);
 
@@ -178,7 +119,7 @@ app.get('/', (req, res) => {
 
     res.json({
         success: true,
-        message: 'AI Cost Optimizer Backend API',
+        message: 'Cost Katana Backend API',
         version: '1.0.0',
         docs: '/api-docs',
         timestamp: new Date().toISOString()
@@ -215,10 +156,9 @@ app.get('/security-dashboard', (req, res): any => {
         }
     }
 
-    const report = securityMonitor.generateSecurityReport();
     res.json({
         success: true,
-        data: report,
+        data: {},
         timestamp: new Date().toISOString()
     });
 });
@@ -240,6 +180,15 @@ export const startServer = async () => {
         // Initialize default tips
         await intelligenceService.initializeDefaultTips();
         // logger.info('Default tips initialized');
+        
+        // Initialize AIOps Agent
+        try {
+            await agentService.initialize();
+            logger.info('🤖 AIOps Agent initialized successfully');
+        } catch (error) {
+            logger.warn('⚠️  AIOps Agent initialization failed, will initialize on first request:', error);
+        }
+        
         setupCronJobs();
 
         app.listen(PORT, () => {

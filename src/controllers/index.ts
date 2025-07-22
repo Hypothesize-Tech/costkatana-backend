@@ -11,4 +11,3 @@ export { PricingController } from './pricing.controller';
 export { TaggingController } from './tagging.controller';
 export { ForecastingController } from './forecasting.controller';
 export { PerformanceCostAnalysisController } from './performanceCostAnalysis.controller';
-export { InferenceScalingController } from './inferenceScaling.controller';

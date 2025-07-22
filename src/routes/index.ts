@@ -12,15 +12,15 @@ import { pricingRoutes } from './pricing.routes';
 import taggingRoutes from './tagging.routes';
 import forecastingRoutes from './forecasting.routes';
 import performanceCostAnalysisRoutes from './performanceCostAnalysis.routes';
-import { inferenceScalingRoutes } from './inferenceScaling.routes';
 import experimentationRoutes from './experimentation.routes';
 import chatRoutes from './chat.routes';
+import agentRoutes from './agent.routes';
 
 const router = Router();
 
 // Health check
 router.get('/health', (_, res) => {
-    res.status(200).json({ status: 'AI Cost Optimizer Backend API' });
+    res.status(200).json({ status: 'Cost Katana Backend API' });
 });
 
 // API version
@@ -42,8 +42,8 @@ router.use('/pricing', pricingRoutes);
 router.use('/tags', taggingRoutes);
 router.use('/forecasting', forecastingRoutes);
 router.use('/performance-cost', performanceCostAnalysisRoutes);
-router.use('/inference-scaling', inferenceScalingRoutes);
 router.use('/experimentation', experimentationRoutes);
 router.use('/chat', chatRoutes);
+router.use('/agent', agentRoutes);
 
 export const apiRouter = router;
