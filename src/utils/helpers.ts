@@ -159,19 +159,58 @@ export const calculateTokenCost = (
   return (tokens / 1000) * pricePerToken;
 };
 
-// Retry function for external API calls
+// Enhanced retry function for external API calls with better throttling handling
 export const retry = async <T>(
   fn: () => Promise<T>,
-  retries: number = 3,
-  delay: number = 1000
+  maxRetries: number = 5,
+  baseDelay: number = 1000,
+  maxDelay: number = 30000
 ): Promise<T> => {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries === 0) throw error;
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return retry(fn, retries - 1, delay * 2);
+  let lastError: any;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      
+      // Don't retry on certain errors
+      if (error.name === 'ValidationException' || 
+          error.name === 'AccessDeniedException' ||
+          error.name === 'ResourceNotFoundException' ||
+          error.statusCode === 400) {
+        throw error;
+      }
+      
+      // If this is the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      
+      // Calculate delay with exponential backoff and jitter
+      let delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+      
+      // Special handling for throttling errors
+      if (error.name === 'ThrottlingException' || 
+          error.statusCode === 429 ||
+          error.message?.includes('throttle') ||
+          error.message?.includes('rate limit')) {
+        // Use longer delays for throttling
+        delay = Math.min(baseDelay * Math.pow(3, attempt), maxDelay);
+      }
+      
+      // Add jitter (±25% randomness) to avoid thundering herd
+      const jitter = delay * 0.25 * (Math.random() - 0.5);
+      delay = Math.max(0, delay + jitter);
+      
+      console.log(`Retry attempt ${attempt + 1}/${maxRetries + 1} after ${Math.round(delay)}ms for error: ${error.name || 'Unknown'}`);
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
   }
+  
+  throw lastError;
 };
 
 // Format bytes to human readable

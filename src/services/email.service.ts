@@ -17,6 +17,10 @@ interface EmailOptions {
 }
 
 export class EmailService {
+  private static getCurrentYear(): number {
+    return new Date().getFullYear();
+  }
+
   private static async sendEmail(options: EmailOptions): Promise<void> {
     try {
       const transporter = await emailTransporter;
@@ -44,6 +48,7 @@ export class EmailService {
   }
 
   static async sendVerificationEmail(user: IUser, verificationUrl: string): Promise<void> {
+    const year = this.getCurrentYear();
     const html = `
       <!DOCTYPE html>
       <html>
@@ -73,7 +78,7 @@ export class EmailService {
               <p>This link will expire in 24 hours.</p>
             </div>
             <div class="footer">
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -88,6 +93,7 @@ export class EmailService {
   }
 
   static async sendPasswordResetEmail(user: IUser, resetUrl: string): Promise<void> {
+    const year = this.getCurrentYear();
     const html = `
       <!DOCTYPE html>
       <html>
@@ -118,7 +124,7 @@ export class EmailService {
               <p><strong>If you didn't request this password reset, please ignore this email.</strong></p>
             </div>
             <div class="footer">
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -133,6 +139,7 @@ export class EmailService {
   }
 
   static async sendCostAlert(user: IUser, currentCost: number, threshold: number): Promise<void> {
+    const year = this.getCurrentYear();
     const percentage = ((currentCost / threshold) * 100).toFixed(1);
 
     const html = `
@@ -189,7 +196,7 @@ export class EmailService {
             </div>
             <div class="footer">
               <p>You can update your alert preferences in your account settings.</p>
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -204,6 +211,7 @@ export class EmailService {
   }
 
   static async sendOptimizationAlert(user: IUser, optimization: any): Promise<void> {
+    const year = this.getCurrentYear();
     const html = `
       <!DOCTYPE html>
       <html>
@@ -243,7 +251,7 @@ export class EmailService {
               </p>
             </div>
             <div class="footer">
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -258,6 +266,7 @@ export class EmailService {
   }
 
   static async sendWeeklyReport(user: IUser, reportData: any): Promise<void> {
+    const year = this.getCurrentYear();
     const html = `
       <!DOCTYPE html>
       <html>
@@ -327,7 +336,7 @@ export class EmailService {
             </div>
             <div class="footer">
               <p>You're receiving this because weekly reports are enabled in your settings.</p>
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -342,6 +351,7 @@ export class EmailService {
   }
 
   static async sendAlertNotification(user: IUser, alert: IAlert): Promise<void> {
+    const year = this.getCurrentYear();
     const severityColors = {
       low: '#3498db',
       medium: '#f39c12',
@@ -382,7 +392,7 @@ export class EmailService {
               ` : ''}
             </div>
             <div class="footer">
-              <p>© 2024 Cost Katana. All rights reserved.</p>
+              <p>© ${year} Cost Katana. All rights reserved.</p>
             </div>
           </div>
         </body>

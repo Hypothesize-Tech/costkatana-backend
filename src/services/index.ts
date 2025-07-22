@@ -15,6 +15,4 @@ export { RealtimePricingService } from './realtime-pricing.service';
 export { TaggingService } from './tagging.service';
 export { ForecastingService } from './forecasting.service';
 export { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
-export { DemandPredictorService } from './demandPredictor.service';
-export { CostPerformanceProfilerService } from './costPerformanceProfiler.service';
 export { RecommendationEngineService } from './recommendationEngine.service';

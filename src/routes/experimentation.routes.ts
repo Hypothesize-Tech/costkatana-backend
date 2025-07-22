@@ -34,12 +34,6 @@ router.post('/what-if-scenarios', ExperimentationController.createWhatIfScenario
 router.post('/what-if-scenarios/:scenarioName/analyze', ExperimentationController.runWhatIfAnalysis);
 router.delete('/what-if-scenarios/:scenarioName', ExperimentationController.deleteWhatIfScenario);
 
-// Fine-Tuning Projects routes
-router.get('/fine-tuning-projects', ExperimentationController.getFineTuningProjects);
-router.post('/fine-tuning-projects', ExperimentationController.createFineTuningProject);
-router.get('/fine-tuning-projects/:projectId/analysis', ExperimentationController.getFineTuningAnalysis);
-router.delete('/fine-tuning-projects/:projectId', ExperimentationController.deleteFineTuningProject);
-
 // Individual experiment operations (keep these last to avoid route conflicts)
 router.get('/:experimentId', ExperimentationController.getExperimentById);
 router.delete('/:experimentId', ExperimentationController.deleteExperiment);
