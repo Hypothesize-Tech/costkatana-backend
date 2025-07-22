@@ -1640,17 +1640,17 @@ export class ExperimentationService {
             const usageAnalysis = await this.analyzeUserUsagePatterns(userId);
             
             if (usageAnalysis.hasData) {
-                const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
-                if (modelOptimizationScenario) scenarios.push(modelOptimizationScenario);
+            const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
+            if (modelOptimizationScenario) scenarios.push(modelOptimizationScenario);
 
-                const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
-                if (volumeScenario) scenarios.push(volumeScenario);
+            const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
+            if (volumeScenario) scenarios.push(volumeScenario);
 
-                const cachingScenario = await this.generateCachingScenario(usageAnalysis);
-                if (cachingScenario) scenarios.push(cachingScenario);
+            const cachingScenario = await this.generateCachingScenario(usageAnalysis);
+            if (cachingScenario) scenarios.push(cachingScenario);
 
-                const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
-                if (batchingScenario) scenarios.push(batchingScenario);
+            const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
+            if (batchingScenario) scenarios.push(batchingScenario);
             }
 
             return scenarios;
@@ -2375,88 +2375,88 @@ Base your analysis on real-world AI cost optimization patterns and industry best
 
     private static async analyzeUserUsagePatterns(userId: string) {
         try {
-            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-            const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
 
-            // Current period analysis
-            const currentUsage = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: thirtyDaysAgo }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalCost: { $sum: "$cost" },
-                        totalCalls: { $sum: 1 },
-                        totalTokens: { $sum: "$totalTokens" },
-                        avgResponseTime: { $avg: "$responseTime" },
-                        models: { $addToSet: "$modelName" },
-                        providers: { $addToSet: "$provider" },
-                        modelUsage: {
-                            $push: {
-                                model: "$modelName",
-                                cost: "$cost",
-                                tokens: "$totalTokens",
-                                responseTime: "$responseTime"
-                            }
-                        },
-                        errorCount: {
-                            $sum: { $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0] }
+        // Current period analysis
+        const currentUsage = await Usage.aggregate([
+            {
+                $match: {
+                    userId: new mongoose.Types.ObjectId(userId),
+                    createdAt: { $gte: thirtyDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalCost: { $sum: "$cost" },
+                    totalCalls: { $sum: 1 },
+                    totalTokens: { $sum: "$totalTokens" },
+                    avgResponseTime: { $avg: "$responseTime" },
+                    models: { $addToSet: "$modelName" },
+                    providers: { $addToSet: "$provider" },
+                    modelUsage: {
+                        $push: {
+                            model: "$modelName",
+                            cost: "$cost",
+                            tokens: "$totalTokens",
+                            responseTime: "$responseTime"
                         }
+                    },
+                    errorCount: {
+                        $sum: { $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0] }
                     }
                 }
-            ]);
-
-            // Previous period for trend analysis
-            const previousUsage = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalCost: { $sum: "$cost" },
-                        totalCalls: { $sum: 1 }
-                    }
-                }
-            ]);
-
-            if (!currentUsage.length) {
-                return { hasData: false };
             }
+        ]);
 
-            const current = currentUsage[0];
-            const previous = previousUsage[0] || { totalCost: 0, totalCalls: 0 };
+        // Previous period for trend analysis
+        const previousUsage = await Usage.aggregate([
+            {
+                $match: {
+                    userId: new mongoose.Types.ObjectId(userId),
+                    createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalCost: { $sum: "$cost" },
+                    totalCalls: { $sum: 1 }
+                }
+            }
+        ]);
 
-            // Calculate trends and patterns
-            const costTrend = previous.totalCost > 0 ? (current.totalCost - previous.totalCost) / previous.totalCost : 0;
-            const volumeTrend = previous.totalCalls > 0 ? (current.totalCalls - previous.totalCalls) / previous.totalCalls : 0;
-            
-            // Model efficiency analysis
-            const modelEfficiency = this.calculateModelEfficiency(current.modelUsage);
-            const costDistribution = this.analyzeCostDistribution(current.modelUsage);
-            
-            // Usage pattern classification
-            const usagePattern = this.classifyUsagePattern(current);
-            
-                        return {
-                hasData: true,
-                current,
-                previous,
-                trends: { cost: costTrend, volume: volumeTrend },
-                modelEfficiency,
-                costDistribution,
-                usagePattern,
-                avgCostPerCall: current.totalCost / current.totalCalls,
-                avgTokensPerCall: current.totalTokens / current.totalCalls,
-                errorRate: current.errorCount / current.totalCalls
-            };
+        if (!currentUsage.length) {
+            return { hasData: false };
+        }
+
+        const current = currentUsage[0];
+        const previous = previousUsage[0] || { totalCost: 0, totalCalls: 0 };
+
+        // Calculate trends and patterns
+        const costTrend = previous.totalCost > 0 ? (current.totalCost - previous.totalCost) / previous.totalCost : 0;
+        const volumeTrend = previous.totalCalls > 0 ? (current.totalCalls - previous.totalCalls) / previous.totalCalls : 0;
+        
+        // Model efficiency analysis
+        const modelEfficiency = this.calculateModelEfficiency(current.modelUsage);
+        const costDistribution = this.analyzeCostDistribution(current.modelUsage);
+        
+        // Usage pattern classification
+        const usagePattern = this.classifyUsagePattern(current);
+        
+        return {
+            hasData: true,
+            current,
+            previous,
+            trends: { cost: costTrend, volume: volumeTrend },
+            modelEfficiency,
+            costDistribution,
+            usagePattern,
+            avgCostPerCall: current.totalCost / current.totalCalls,
+            avgTokensPerCall: current.totalTokens / current.totalCalls,
+            errorRate: current.errorCount / current.totalCalls
+        };
         } catch (error: any) {
             // If database connection fails or no usage data, return default analysis
             logger.warn(`Database connection failed for user ${userId}, using default analysis:`, error.message);
