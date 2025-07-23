@@ -40,6 +40,12 @@ router.post('/tools/list', mcpController.listTools);
 router.options('/tools/call', (_req, res) => res.sendStatus(200));
 router.post('/tools/call', mcpController.callTool);
 
+router.options('/resources/list', (_req, res) => res.sendStatus(200));
+router.post('/resources/list', mcpController.listResources);
+
+router.options('/prompts/list', (_req, res) => res.sendStatus(200));
+router.post('/prompts/list', mcpController.listPrompts);
+
 // Auto-tracking endpoint
 router.post('/auto-track', mcpController.autoTrack);
 
@@ -77,14 +83,38 @@ router.get('/config', (_req, res) => {
             tools: [
                 "track_claude_usage",
                 "get_cost_analytics", 
-                "create_project"
+                "create_project",
+                "optimize_costs",
+                "compare_models",
+                "setup_budget_alerts",
+                "forecast_costs",
+                "audit_project_costs"
+            ],
+            resources: [
+                "AI Model Pricing Database",
+                "Cost Analytics Dashboard", 
+                "Active Projects",
+                "Cost Optimization Recommendations",
+                "Budget Alerts & Notifications",
+                "Model Performance Comparison"
+            ],
+            prompts: [
+                "Analyze Spending Patterns",
+                "Suggest Model Alternatives",
+                "Create Budget Plans",
+                "Optimize Prompt Efficiency",
+                "Setup Cost Alerts",
+                "Project Cost Analysis"
             ],
             features: [
-                "Real-time cost tracking",
-                "Project-level cost monitoring", 
-                "AI-powered optimization recommendations",
-                "Budget alerts and notifications",
-                "Integration with Claude projects"
+                "Real-time cost tracking & analytics",
+                "AI-powered optimization recommendations", 
+                "Comprehensive model comparison",
+                "Budget alerts & forecasting",
+                "Project-level cost auditing",
+                "Usage pattern analysis",
+                "Cross-provider cost comparison",
+                "Automated prompt optimization"
             ]
         },
         setup_instructions: {
