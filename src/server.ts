@@ -194,15 +194,15 @@ export const startServer = async () => {
         initializeCronJobs();
 
         const server = app.listen(PORT, () => {
-            logger.info(`Server is running on port ${PORT}`);
-            logger.info('Security middleware enabled');
-            logger.info('Rate limiting enabled');
-            logger.info('Health check logging filtered');
+            logger.info(`🚀 AI Cost Optimizer Backend running on port ${PORT}`);
+            logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
+            logger.info(`🔗 Database: ${process.env.MONGODB_URI ? 'Connected' : 'Not configured'}`);
+            logger.info(`🎯 MCP Server: Ready for Claude integration`);
         });
 
-        // Increase keep-alive timeout for ELB
-        server.keepAliveTimeout = 61 * 1000;
-        server.headersTimeout = 65 * 1000;
+        // Configure server timeouts for ALB compatibility
+        server.keepAliveTimeout = 310000; // 310 seconds (longer than ALB timeout)
+        server.headersTimeout = 320000; // 320 seconds (longer than keepAliveTimeout)
 
     } catch (error) {
         logger.error('Failed to start server:', error);
