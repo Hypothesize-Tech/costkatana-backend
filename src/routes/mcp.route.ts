@@ -18,7 +18,7 @@ mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
-// Server capabilities - Basic HTTP-only MCP server
+// Server capabilities - Empty objects as per official MCP specification
 const SERVER_CAPABILITIES = {
     prompts: {},
     resources: {},
@@ -49,18 +49,45 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
     // Handle GET requests (capability discovery)
     if (method === 'GET') {
-        res.json({
-            jsonrpc: '2.0',
-            result: {
-                protocolVersion: PROTOCOL_VERSION,
-                capabilities: SERVER_CAPABILITIES,
-                serverInfo: SERVER_INFO,
-                transport: 'http',
-                endpoints: {
-                    rpc: `${req.protocol}://${req.get('host')}/api/mcp`
+        // Check if Claude is requesting SSE format
+        const acceptsSSE = req.get('Accept')?.includes('text/event-stream');
+        
+        if (acceptsSSE) {
+            // Claude expects SSE format even for HTTP transport
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+            });
+            
+            // Send server info as SSE event
+            res.write(`data: ${JSON.stringify({
+                jsonrpc: '2.0',
+                result: {
+                    protocolVersion: PROTOCOL_VERSION,
+                    capabilities: SERVER_CAPABILITIES,
+                    serverInfo: SERVER_INFO
                 }
-            }
-        });
+            })}\n\n`);
+            
+            // End the connection immediately (no persistent SSE)
+            res.end();
+        } else {
+            // Regular JSON response for non-SSE clients
+            res.json({
+                jsonrpc: '2.0',
+                result: {
+                    protocolVersion: PROTOCOL_VERSION,
+                    capabilities: SERVER_CAPABILITIES,
+                    serverInfo: SERVER_INFO,
+                    transport: 'http',
+                    endpoints: {
+                        rpc: `${req.protocol}://${req.get('host')}/api/mcp`
+                    }
+                }
+            });
+        }
         return;
     }
 
@@ -75,6 +102,11 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
     // Handle POST requests (JSON-RPC calls)
     if (method === 'POST') {
+        // Add CORS headers for Claude compatibility
+        res.header('Access-Control-Allow-Origin', '*');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, User-Agent, Accept');
+        
         try {
             // Validate JSON-RPC format
             if (!rpcMethod || !req.body.jsonrpc) {
@@ -105,9 +137,15 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
                 case 'notifications/initialized':
                     logger.info('MCP Initialized notification received');
+                    
+                    // Send acknowledgment
                     res.status(200).json({
                         jsonrpc: '2.0'
                     });
+                    
+                    // After successful initialization, we should trigger Claude to request capabilities
+                    // This is done by ensuring our capabilities are non-empty
+                    logger.info('MCP handshake completed - server ready for capability requests');
                     break;
 
                 case 'tools/list':
