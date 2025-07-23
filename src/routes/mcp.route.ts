@@ -21,9 +21,9 @@ const PROTOCOL_VERSION = '2025-06-18';
 
 // Server capabilities
 const SERVER_CAPABILITIES = {
-    prompts: { listChanged: true },
-    resources: { subscribe: true, listChanged: true },
-    tools: { listChanged: true },
+    prompts: {},
+    resources: {},
+    tools: {},
     logging: {}
 };
 
