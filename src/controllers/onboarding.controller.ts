@@ -129,24 +129,34 @@ export class OnboardingController {
                 logger.info('New user created via magic link', { email, userId: user._id });
             }
 
-            // Generate API key for ChatGPT integration
-            const randomSuffix = crypto.randomBytes(16).toString('hex');
-            const apiKey = `ck_user_${user._id}_${randomSuffix}`;
+            // Generate API key for ChatGPT integration using AuthService
+            const { AuthService } = await import('../services/auth.service');
+            const { keyId, apiKey, maskedKey } = AuthService.generateDashboardApiKey(
+                user as any, 
+                `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                ['read', 'write']
+            );
 
-            // Initialize apiKeys array if it doesn't exist
-            if (!user.apiKeys) {
-                user.apiKeys = [];
+            // Encrypt the API key for storage
+            const { encrypt } = await import('../utils/helpers');
+            const { encrypted, iv, authTag } = encrypt(apiKey);
+            const encryptedKey = `${iv}:${authTag}:${encrypted}`;
+
+            // Initialize dashboardApiKeys array if it doesn't exist
+            if (!user.dashboardApiKeys) {
+                user.dashboardApiKeys = [];
             }
 
             const newApiKey = {
-                id: crypto.randomBytes(8).toString('hex'),
                 name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                key: apiKey,
-                created: new Date(),
-                isActive: true
+                keyId,
+                encryptedKey,
+                maskedKey,
+                permissions: ['read', 'write'],
+                createdAt: new Date(),
             };
 
-            user.apiKeys.push(newApiKey);
+            user.dashboardApiKeys.push(newApiKey);
 
             // Create default project
             const defaultProject = await ProjectService.createProject(user._id.toString(), {
