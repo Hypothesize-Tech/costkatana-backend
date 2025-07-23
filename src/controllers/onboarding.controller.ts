@@ -21,18 +21,18 @@ export class OnboardingController {
                 return;
             }
 
-            // Generate session ID and tokens
-            const sessionId = crypto.randomBytes(16).toString('hex');
+            // Generate session ID and tokens (shorter for URL compatibility)
+            const sessionId = crypto.randomBytes(8).toString('hex'); // Reduced from 16 to 8 bytes
             const token = crypto.randomBytes(32).toString('hex');
 
-            // Create magic link data
+            // Create magic link data with shorter field names
             const magicLinkData = {
-                email,
-                name,
-                source,
-                sessionId,
-                createdAt: new Date().toISOString(),
-                expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() // 15 minutes
+                e: email,           // email -> e
+                n: name,            // name -> n  
+                s: source,          // source -> s
+                sid: sessionId,     // sessionId -> sid
+                c: Math.floor(Date.now() / 1000),  // createdAt -> c (Unix timestamp)
+                x: Math.floor((Date.now() + 15 * 60 * 1000) / 1000) // expiresAt -> x (Unix timestamp)
             };
 
             // Encode the data
@@ -96,8 +96,17 @@ export class OnboardingController {
                 return;
             }
 
-            // Check if expired
-            if (new Date() > new Date(magicLinkData.expiresAt)) {
+            // Check if expired (handle both old and new format)
+            let isExpired = false;
+            if (magicLinkData.x) {
+                // New format with Unix timestamp
+                isExpired = Date.now() / 1000 > magicLinkData.x;
+            } else if (magicLinkData.expiresAt) {
+                // Old format with ISO string
+                isExpired = new Date() > new Date(magicLinkData.expiresAt);
+            }
+            
+            if (isExpired) {
                 res.status(400).json({
                     success: false,
                     error: 'Magic link has expired. Please generate a new one.'
@@ -105,7 +114,10 @@ export class OnboardingController {
                 return;
             }
 
-            const { email, name, source } = magicLinkData;
+            // Extract data (handle both old and new field names)
+            const email = magicLinkData.e || magicLinkData.email;
+            const name = magicLinkData.n || magicLinkData.name;
+            const source = magicLinkData.s || magicLinkData.source;
             logger.info('Processing onboarding completion', { token: token.toString().substring(0, 10) + '...', email });
 
             // Find existing user and clean up any corrupted data
@@ -345,7 +357,7 @@ export class OnboardingController {
                 { 
                     userId: user._id, 
                     email: user.email,
-                    sessionId: magicLinkData.sessionId
+                    sessionId: magicLinkData.sid || magicLinkData.sessionId
                 },
                 JWT_SECRET,
                 { expiresIn: '7d' }
