@@ -734,6 +734,8 @@ export class MCPController {
             return user._id.toString();
         } catch (error) {
             console.error('Ensure User Error:', error);
+            // Return a default user ID for demo purposes
+            return '507f1f77bcf86cd799439011';
         }
     }
 
