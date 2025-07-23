@@ -41,6 +41,10 @@ router.options('/', (_req, res) => {
 
 // Handle GET requests for Server-Sent Events (SSE) that Claude expects
 router.get('/', (req, res) => {
+    // Disable compression for SSE
+    req.socket.setNoDelay(true);
+    req.socket.setKeepAlive(true);
+
     console.log('MCP GET request - Setting up SSE connection');
     
     // Set SSE headers
@@ -48,34 +52,38 @@ router.get('/', (req, res) => {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no', // Disable buffering in Nginx proxies
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Cache-Control'
     });
+
+    // Immediately flush headers
+    res.flushHeaders();
     
     // Send initial connection confirmation
     res.write('event: connected\n');
-    res.write('data: {"status": "MCP connection established", "server": "cost-katana-mcp", "version": "1.0.0"}\n\n');
+    res.write('data: {"status":"MCP connection established","server":"cost-katana-mcp"}\n\n');
     
     // Keep connection alive with periodic heartbeat
     const heartbeat = setInterval(() => {
-        if (!res.destroyed) {
-            res.write('event: heartbeat\n');
-            res.write(`data: {"timestamp": "${new Date().toISOString()}", "status": "alive"}\n\n`);
+        if (!res.writableEnded) {
+            // Use a standard comment ping which is often used for keep-alive
+            res.write(': ping\n\n');
         } else {
             clearInterval(heartbeat);
         }
-    }, 30000); // 30 second heartbeat
+    }, 20000); // 20 second heartbeat, more aggressive for ALBs
     
     // Handle client disconnect
     req.on('close', () => {
         console.log('MCP SSE connection closed by client');
         clearInterval(heartbeat);
+        res.end();
     });
     
     req.on('aborted', () => {
         console.log('MCP SSE connection aborted');
         clearInterval(heartbeat);
+        res.end();
     });
 });
 
