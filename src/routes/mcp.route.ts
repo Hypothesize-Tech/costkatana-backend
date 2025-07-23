@@ -19,7 +19,7 @@ mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
-// Server capabilities
+// Server capabilities - MUST be empty objects for basic servers
 const SERVER_CAPABILITIES = {
     prompts: {},
     resources: {},
@@ -27,7 +27,7 @@ const SERVER_CAPABILITIES = {
     logging: {}
 };
 
-// SSE Endpoint (GET) - For server-to-client messages
+// SSE Endpoint - For server-to-client messages (OFFICIAL MCP PATTERN)
 mcpRoute.get('/', (req: Request, res: Response) => {
     logger.info('MCP SSE connection initiated', {
         ip: req.ip,
@@ -47,64 +47,61 @@ mcpRoute.get('/', (req: Request, res: Response) => {
             'Access-Control-Allow-Origin': '*'
         });
         
-        // Send ready event (Claude expects this immediately)
-        res.write(`event: ready\ndata: ${JSON.stringify({
-            status: 'ready',
-            protocol: PROTOCOL_VERSION,
-            capabilities: SERVER_CAPABILITIES,
-            message: 'Server ready for JSON-RPC calls'
+        // Send endpoint event FIRST (REQUIRED by MCP SSE spec)
+        const postEndpoint = `${req.protocol}://${req.get('host')}/api/mcp`;
+        res.write(`event: endpoint\ndata: ${JSON.stringify({
+            uri: postEndpoint
         })}\n\n`);
         
-        // Keep connection alive with heartbeat for 60 seconds
-        let heartbeatCount = 0;
-        const maxHeartbeats = 12; // 60 seconds / 5 seconds
-        
-        const heartbeatInterval = setInterval(() => {
-            heartbeatCount++;
-            
-            if (heartbeatCount >= maxHeartbeats || res.writableEnded) {
-                clearInterval(heartbeatInterval);
-                if (!res.writableEnded) {
-                    res.end();
-                }
-                return;
+        // Send ready event with capabilities (REQUIRED by MCP spec)
+        res.write(`event: ready\ndata: ${JSON.stringify({
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: SERVER_CAPABILITIES,
+            serverInfo: {
+                name: 'ai-cost-optimizer-mcp',
+                version: '1.0.0'
             }
-            
-            try {
-                res.write(`event: heartbeat\ndata: {"timestamp":"${new Date().toISOString()}"}\n\n`);
-            } catch (error) {
-                logger.error('SSE heartbeat error', { error });
-                clearInterval(heartbeatInterval);
-                res.end();
-            }
-        }, 5000); // Every 5 seconds
+        })}\n\n`);
         
-        // Handle client disconnect
+        // Keep connection alive with heartbeat
+        const heartbeat = setInterval(() => {
+            res.write(`event: heartbeat\ndata: {"timestamp":"${new Date().toISOString()}"}\n\n`);
+        }, 30000); // Every 30 seconds
+        
+        // Track connection
+        const connectionId = Date.now().toString();
+        MCPConnectionMonitor.trackConnection(connectionId);
+        
+        // Handle connection close
         req.on('close', () => {
+            clearInterval(heartbeat);
+            MCPConnectionMonitor.removeConnection(connectionId);
             logger.info('MCP SSE connection closed by client');
-            clearInterval(heartbeatInterval);
-            res.end();
         });
         
         req.on('error', (error) => {
+            clearInterval(heartbeat);
+            MCPConnectionMonitor.removeConnection(connectionId);
             logger.error('MCP SSE connection error', { error });
-            clearInterval(heartbeatInterval);
-            res.end();
         });
         
+        // Keep connection open for 5 minutes
+        setTimeout(() => {
+            clearInterval(heartbeat);
+            MCPConnectionMonitor.removeConnection(connectionId);
+            res.end();
+        }, 300000);
+        
     } else {
-        // Return simple JSON for non-SSE clients
+        // Non-SSE request - return JSON status
         res.json({
             status: 'ready',
             protocol: PROTOCOL_VERSION,
             capabilities: SERVER_CAPABILITIES,
             serverInfo: {
                 name: 'ai-cost-optimizer-mcp',
-                version: '1.0.0',
-                description: "AI Cost Intelligence & Optimization Platform"
-            },
-            message: 'MCP server is ready. Use POST requests for JSON-RPC calls.',
-            timestamp: new Date().toISOString()
+                version: '1.0.0'
+            }
         });
     }
 });
@@ -117,8 +114,7 @@ mcpRoute.post('/', async (req: Request, res: Response) => {
         method,
         params,
         id,
-        headers: req.headers,
-        body: req.body
+        headers: req.headers
     });
 
     try {
@@ -132,47 +128,72 @@ mcpRoute.post('/', async (req: Request, res: Response) => {
                         capabilities: SERVER_CAPABILITIES,
                         serverInfo: {
                             name: 'ai-cost-optimizer-mcp',
-                            version: '1.0.0',
-                            description: "AI Cost Intelligence & Optimization Platform - Your Complete AI Cost Management Solution"
+                            version: '1.0.0'
                         }
                     }
                 });
                 break;
-                
+
             case 'notifications/initialized':
-                res.status(200).end();
+                // Acknowledge initialization complete
+                res.json({
+                    jsonrpc: '2.0'
+                });
                 break;
 
-            case 'prompts/list':
-                mcpController.listPrompts(req, res);
+            case 'tools/list':
+                await mcpController.listTools(req, res);
+                break;
+
+            case 'tools/call':
+                await mcpController.callTool(req, res);
                 break;
 
             case 'resources/list':
-                mcpController.listResources(req, res);
-                break;
-                
-            case 'tools/list':
-                mcpController.listTools(req, res);
-                break;
-                
-            case 'tools/call':
-                mcpController.callTool(req, res);
+                await mcpController.listResources(req, res);
                 break;
 
-            default:
-                logger.warn('Unknown MCP method requested', { method, id });
-                res.json({
+            case 'resources/read':
+                // This method doesn't exist in the controller, return error
+                res.status(501).json({
                     jsonrpc: '2.0',
                     id,
                     error: {
                         code: -32601,
-                        message: `Method '${method}' not found`
+                        message: 'resources/read not implemented'
+                    }
+                });
+                break;
+
+            case 'prompts/list':
+                await mcpController.listPrompts(req, res);
+                break;
+
+            case 'prompts/get':
+                // This method doesn't exist in the controller, return error
+                res.status(501).json({
+                    jsonrpc: '2.0',
+                    id,
+                    error: {
+                        code: -32601,
+                        message: 'prompts/get not implemented'
+                    }
+                });
+                break;
+
+            default:
+                res.status(400).json({
+                    jsonrpc: '2.0',
+                    id,
+                    error: {
+                        code: -32601,
+                        message: `Method not found: ${method}`
                     }
                 });
         }
     } catch (error) {
-        logger.error('MCP JSON-RPC request error', { error, method, id });
-        res.json({
+        logger.error('MCP request error', { method, error });
+        res.status(500).json({
             jsonrpc: '2.0',
             id,
             error: {
@@ -184,60 +205,7 @@ mcpRoute.post('/', async (req: Request, res: Response) => {
     }
 });
 
-// Test endpoint to verify connectivity
-mcpRoute.get('/test', (req: Request, res: Response) => {
-    logger.info('MCP Test endpoint accessed', {
-        ip: req.ip,
-        userAgent: req.get('User-Agent'),
-        headers: req.headers
-    });
-
-    res.json({
-        status: 'success',
-        message: 'MCP server is reachable',
-        timestamp: new Date().toISOString(),
-        headers: req.headers
-    });
-});
-
-// Test POST endpoint 
-mcpRoute.post('/test', (req: Request, res: Response) => {
-    logger.info('MCP Test POST endpoint accessed', {
-        ip: req.ip,
-        userAgent: req.get('User-Agent'),
-        headers: req.headers,
-        body: req.body
-    });
-
-    res.json({
-        status: 'success',
-        message: 'MCP POST is working',
-        receivedBody: req.body,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Status endpoint for MCP health checks
-mcpRoute.get('/status', (req: Request, res: Response) => {
-    logger.info('MCP Status check', {
-        ip: req.ip,
-        userAgent: req.get('User-Agent')
-    });
-
-    res.json({
-        status: 'ready',
-        protocol: PROTOCOL_VERSION,
-        capabilities: SERVER_CAPABILITIES,
-        serverInfo: {
-            name: 'ai-cost-optimizer-mcp',
-            version: '1.0.0',
-            uptime: process.uptime()
-        },
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Health check endpoint for monitoring
+// Health check endpoint
 mcpRoute.get('/health', (_req: Request, res: Response) => {
     const connections = MCPConnectionMonitor.getActiveConnections();
     res.json({
