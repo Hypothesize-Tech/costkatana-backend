@@ -4,13 +4,44 @@ import { MCPController } from '../controllers/mcp.controller';
 const router = Router();
 const mcpController = new MCPController();
 
-// MCP Server endpoints for Claude to discover and interact with
-router.post('/server-info', mcpController.getServerInfo);
-router.post('/list-tools', mcpController.listTools);
-router.post('/execute-tool', mcpController.executeTool);
+// Add CORS headers for Claude MCP requests
+router.use((req, res, next) => {
+    console.log(`MCP Request: ${req.method} ${req.url} from ${req.get('Origin') || 'unknown origin'}`);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    if (req.body && Object.keys(req.body).length > 0) {
+        console.log('Body:', JSON.stringify(req.body, null, 2));
+    }
+    
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-email');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(200);
+        return;
+    }
+    
+    next();
+});
 
-// Auto-tracking endpoint for monitoring Claude usage
-router.post('/auto-track', mcpController.autoTrackUsage);
+// Main MCP endpoint - handles all MCP protocol messages
+router.options('/', (_req, res) => res.sendStatus(200));
+router.post('/', mcpController.handleMCP);
+
+// Legacy endpoints for backwards compatibility
+router.options('/initialize', (_req, res) => res.sendStatus(200));
+router.post('/initialize', mcpController.initialize);
+
+router.options('/tools/list', (_req, res) => res.sendStatus(200));
+router.post('/tools/list', mcpController.listTools);
+
+router.options('/tools/call', (_req, res) => res.sendStatus(200));
+router.post('/tools/call', mcpController.callTool);
+
+// Auto-tracking endpoint
+router.post('/auto-track', mcpController.autoTrack);
 
 // Health check for MCP server
 router.get('/health', (_req, res) => {
@@ -46,10 +77,7 @@ router.get('/config', (_req, res) => {
             tools: [
                 "track_claude_usage",
                 "get_cost_analytics", 
-                "create_cost_project",
-                "get_project_costs",
-                "optimize_costs",
-                "setup_cost_alerts"
+                "create_project"
             ],
             features: [
                 "Real-time cost tracking",

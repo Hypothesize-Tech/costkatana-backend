@@ -5,257 +5,287 @@ import { User } from '../models/User';
 
 export class MCPController {
 
-    // MCP Server Info - Claude calls this to get server capabilities
-    public getServerInfo = async (_req: Request, res: Response) => {
+    // MCP Initialize - Required for MCP protocol handshake
+    public initialize = async (req: Request, res: Response) => {
         try {
-            const serverInfo = {
-                jsonrpc: "2.0",
-                result: {
-                    protocolVersion: "1.0.0",
-                    capabilities: {
-                        resources: {},
-                        tools: {
-                            listChanged: true
+            console.log('MCP Initialize called:', JSON.stringify(req.body, null, 2));
+            
+            const { id, method } = req.body;
+            
+            if (method === 'initialize') {
+                const response = {
+                    jsonrpc: "2.0",
+                    id: id,
+                    result: {
+                        protocolVersion: "2024-11-05",
+                        capabilities: {
+                            tools: {
+                                listChanged: true
+                            },
+                            resources: {},
+                            prompts: {},
+                            logging: {},
+                            experimental: {}
                         },
-                        prompts: {},
-                        experimental: {},
-                        logging: {}
-                    },
-                    serverInfo: {
-                        name: "cost-katana-mcp",
-                        version: "1.0.0",
-                        description: "Cost Katana MCP Server - AI Cost Intelligence & Optimization"
+                        serverInfo: {
+                            name: "cost-katana",
+                            version: "1.0.0",
+                            description: "AI Cost Intelligence & Optimization Platform"
+                        }
                     }
-                }
-            };
-
-            res.json(serverInfo);
+                };
+                
+                res.json(response);
+                return;
+            }
+            
+            // Handle notifications
+            if (!id && method === 'notifications/initialized') {
+                res.status(200).end();
+                return;
+            }
+            
+            throw new Error(`Unknown method: ${method}`);
         } catch (error) {
-            console.error('MCP Server Info Error:', error);
+            console.error('MCP Initialize Error:', error);
             res.status(500).json({
                 jsonrpc: "2.0",
                 error: {
                     code: -32603,
-                    message: "Internal error",
-                    data: error
+                    message: "Internal error"
                 }
             });
         }
     };
 
-    // List available tools for Claude
-    public listTools = async (_req: Request, res: Response) => {
+    // MCP Tools List
+    public listTools = async (req: Request, res: Response) => {
         try {
-            const tools = {
-                jsonrpc: "2.0",
-                result: {
-                    tools: [
-                        {
-                            name: "track_claude_usage",
-                            description: "Automatically track Claude conversation usage and costs in Cost Katana",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    model: {
-                                        type: "string",
-                                        description: "Claude model used (e.g., claude-3-5-sonnet, claude-3-haiku)",
-                                        enum: ["claude-3-5-sonnet", "claude-3-5-haiku", "claude-3-opus", "claude-instant"]
+            console.log('MCP Tools List called:', JSON.stringify(req.body, null, 2));
+            
+            const { id, method } = req.body;
+            
+            if (method === 'tools/list') {
+                const response = {
+                    jsonrpc: "2.0",
+                    id: id,
+                    result: {
+                        tools: [
+                            {
+                                name: "track_claude_usage",
+                                description: "Track Claude conversation usage and costs",
+                                inputSchema: {
+                                    type: "object",
+                                    properties: {
+                                        model: {
+                                            type: "string",
+                                            description: "Claude model used",
+                                            enum: ["claude-3-5-sonnet", "claude-3-haiku", "claude-3-opus", "claude-instant"]
+                                        },
+                                        inputTokens: {
+                                            type: "number",
+                                            description: "Input tokens used"
+                                        },
+                                        outputTokens: {
+                                            type: "number",
+                                            description: "Output tokens generated"
+                                        },
+                                        message: {
+                                            type: "string",
+                                            description: "The conversation message"
+                                        }
                                     },
-                                    inputTokens: {
-                                        type: "integer",
-                                        description: "Number of input tokens used in this conversation"
+                                    required: ["model", "inputTokens", "outputTokens", "message"]
+                                }
+                            },
+                            {
+                                name: "get_cost_analytics",
+                                description: "Get detailed cost analytics and insights",
+                                inputSchema: {
+                                    type: "object",
+                                    properties: {
+                                        timeRange: {
+                                            type: "string",
+                                            enum: ["24h", "7d", "30d", "90d"],
+                                            description: "Time range for analysis",
+                                            default: "7d"
+                                        }
                                     },
-                                    outputTokens: {
-                                        type: "integer", 
-                                        description: "Number of output tokens generated"
+                                    required: ["timeRange"]
+                                }
+                            },
+                            {
+                                name: "create_project",
+                                description: "Create a new Cost Katana project",
+                                inputSchema: {
+                                    type: "object",
+                                    properties: {
+                                        name: {
+                                            type: "string",
+                                            description: "Project name"
+                                        },
+                                        description: {
+                                            type: "string",
+                                            description: "Project description"
+                                        },
+                                        budget: {
+                                            type: "number",
+                                            description: "Monthly budget in USD"
+                                        }
                                     },
-                                    message: {
-                                        type: "string",
-                                        description: "The conversation message or prompt"
-                                    },
-                                    projectId: {
-                                        type: "string",
-                                        description: "Claude project ID for cost organization (optional)"
-                                    }
-                                },
-                                required: ["model", "inputTokens", "outputTokens", "message"]
+                                    required: ["name"]
+                                }
                             }
-                        },
-                        {
-                            name: "get_cost_analytics",
-                            description: "Get detailed cost analytics and spending insights from Cost Katana",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    timeRange: {
-                                        type: "string",
-                                        enum: ["24h", "7d", "30d", "90d"],
-                                        description: "Time range for cost analysis",
-                                        default: "7d"
-                                    },
-                                    projectId: {
-                                        type: "string",
-                                        description: "Filter analytics by Claude project ID (optional)"
-                                    }
-                                },
-                                required: ["timeRange"]
-                            }
-                        },
-                        {
-                            name: "create_cost_project",
-                            description: "Create a new Cost Katana project linked to Claude project for cost tracking",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string",
-                                        description: "Project name"
-                                    },
-                                    description: {
-                                        type: "string",
-                                        description: "Project description"
-                                    },
-                                    claudeProjectId: {
-                                        type: "string",
-                                        description: "Claude project ID to link with Cost Katana project"
-                                    },
-                                    monthlyBudget: {
-                                        type: "number",
-                                        description: "Monthly budget limit in USD (optional)"
-                                    }
-                                },
-                                required: ["name", "claudeProjectId"]
-                            }
-                        }
-                    ]
-                }
-            };
-
-            res.json(tools);
+                        ]
+                    }
+                };
+                
+                res.json(response);
+                return;
+            }
+            
+            throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Tools Error:', error);
             res.status(500).json({
                 jsonrpc: "2.0",
                 error: {
                     code: -32603,
-                    message: "Internal error",
-                    data: error
+                    message: "Internal error"
                 }
             });
         }
     };
 
-    // Handle tool execution from Claude
-    public executeTool = async (req: Request, res: Response) => {
+    // MCP Tool Call
+    public callTool = async (req: Request, res: Response) => {
         try {
-            const { params } = req.body;
-            const { name, arguments: args } = params;
-
-            // Extract user info from MCP headers or create anonymous user
-            const userEmail = req.headers['x-user-email'] as string || 'claude-mcp-user@cost-katana.ai';
-            const userId = await this.ensureUser(userEmail);
-
-            let result: string;
-
-            switch (name) {
-                case 'track_claude_usage':
-                    result = await this.handleTrackUsage(args, userId);
-                    break;
+            console.log('MCP Tool Call:', JSON.stringify(req.body, null, 2));
+            
+            const { id, method, params } = req.body;
+            
+            if (method === 'tools/call') {
+                const { name, arguments: args } = params;
                 
-                case 'get_cost_analytics':
-                    result = await this.handleGetAnalytics(args, userId);
-                    break;
+                // Get or create user
+                const userEmail = req.headers['x-user-email'] as string || 'claude-user@cost-katana.ai';
+                const userId = await this.ensureUser(userEmail);
                 
-                case 'create_cost_project':
-                    result = await this.handleCreateProject(args, userId);
-                    break;
+                let result: string;
                 
-                default:
-                    throw new Error(`Unknown tool: ${name}`);
+                switch (name) {
+                    case 'track_claude_usage':
+                        result = await this.handleTrackUsage(args, userId);
+                        break;
+                    case 'get_cost_analytics':
+                        result = await this.handleGetAnalytics(args, userId);
+                        break;
+                    case 'create_project':
+                        result = await this.handleCreateProject(args, userId);
+                        break;
+                    default:
+                        throw new Error(`Unknown tool: ${name}`);
+                }
+                
+                const response = {
+                    jsonrpc: "2.0",
+                    id: id,
+                    result: {
+                        content: [
+                            {
+                                type: "text",
+                                text: result
+                            }
+                        ]
+                    }
+                };
+                
+                res.json(response);
+                return;
             }
-
-            res.json({
+            
+            throw new Error(`Unknown method: ${method}`);
+        } catch (error) {
+            console.error('MCP Tool Call Error:', error);
+            res.status(500).json({
                 jsonrpc: "2.0",
-                result: {
-                    content: [
-                        {
-                            type: "text",
-                            text: result
-                        }
-                    ]
+                id: req.body.id,
+                error: {
+                    code: -32603,
+                    message: error instanceof Error ? error.message : "Internal error"
                 }
             });
+        }
+    };
 
+    // Main MCP handler - routes to appropriate method
+    public handleMCP = async (req: Request, res: Response) => {
+        try {
+            const { method } = req.body;
+            
+            console.log(`MCP Request: ${method}`);
+            
+            switch (method) {
+                case 'initialize':
+                    return this.initialize(req, res);
+                case 'notifications/initialized':
+                    return this.initialize(req, res);
+                case 'tools/list':
+                    return this.listTools(req, res);
+                case 'tools/call':
+                    return this.callTool(req, res);
+                default:
+                    throw new Error(`Unknown MCP method: ${method}`);
+            }
         } catch (error) {
-            console.error('MCP Execute Tool Error:', error);
-            const errorMessage = error instanceof Error ? error.message : "Internal error";
+            console.error('MCP Handler Error:', error);
             res.status(500).json({
                 jsonrpc: "2.0",
                 error: {
-                    code: -32603,
-                    message: errorMessage,
-                    data: error
+                    code: -32601,
+                    message: "Method not found"
                 }
             });
         }
     };
 
-    // Auto-track Claude API usage (called on every Claude conversation)
-    public autoTrackUsage = async (req: Request, res: Response) => {
+    // Auto-track usage (simplified endpoint)
+    public autoTrack = async (req: Request, res: Response) => {
         try {
-            const {
-                model,
-                inputTokens,
-                outputTokens,
-                message,
-                projectId,
-                conversationId,
-                userEmail
-            } = req.body;
-
-            const userId = await this.ensureUser(userEmail || 'claude-auto-track@cost-katana.ai');
+            const { model, inputTokens, outputTokens, message } = req.body;
+            const userId = await this.ensureUser('claude-auto@cost-katana.ai');
             const cost = this.calculateClaudeCost(model, inputTokens, outputTokens);
 
             const usageData = {
                 userId,
-                projectId,
                 service: 'claude',
                 model,
-                prompt: message.substring(0, 500), // Truncate for storage
+                prompt: message?.substring(0, 500) || '',
                 completion: '',
                 promptTokens: inputTokens,
                 completionTokens: outputTokens,
                 totalTokens: inputTokens + outputTokens,
                 cost,
-                responseTime: 0,
-                metadata: {
-                    conversationId,
-                    source: 'claude-mcp',
-                    projectId
-                }
+                responseTime: 0
             };
 
-            const usage = await UsageService.trackUsage(usageData);
+            await UsageService.trackUsage(usageData);
 
             res.json({
                 success: true,
-                usage,
                 cost,
-                message: `✅ Auto-tracked Claude usage: $${cost.toFixed(4)}`,
-                tip: this.getCostOptimizationTip(model, cost)
+                message: `✅ Tracked: $${cost.toFixed(4)}`
             });
-
         } catch (error) {
-            console.error('Auto Track Usage Error:', error);
-            const errorMessage = error instanceof Error ? error.message : "Internal error";
+            console.error('Auto Track Error:', error);
             res.status(500).json({
                 success: false,
-                error: errorMessage
+                error: error instanceof Error ? error.message : "Internal error"
             });
         }
     };
 
-    // Private helper methods
+    // Helper methods
     private async ensureUser(email: string): Promise<string> {
         try {
             let user = await User.findOne({ email });
@@ -276,13 +306,11 @@ export class MCPController {
     }
 
     private async handleTrackUsage(args: any, userId: string): Promise<string> {
-        const { model, inputTokens, outputTokens, message, projectId } = args;
-        
+        const { model, inputTokens, outputTokens, message } = args;
         const cost = this.calculateClaudeCost(model, inputTokens, outputTokens);
         
         const usageData = {
             userId,
-            projectId,
             service: 'claude',
             model,
             prompt: message.substring(0, 500),
@@ -291,11 +319,7 @@ export class MCPController {
             completionTokens: outputTokens,
             totalTokens: inputTokens + outputTokens,
             cost,
-            responseTime: 0,
-            metadata: {
-                source: 'claude-mcp',
-                projectId
-            }
+            responseTime: 0
         };
 
         await UsageService.trackUsage(usageData);
@@ -304,34 +328,34 @@ export class MCPController {
 💰 **Cost**: $${cost.toFixed(4)}
 🤖 **Model**: ${model}
 📊 **Tokens**: ${inputTokens.toLocaleString()} in → ${outputTokens.toLocaleString()} out
-${projectId ? `📁 **Project**: ${projectId}` : ''}
 
 💡 **Tip**: ${this.getCostOptimizationTip(model, cost)}`;
     }
 
     private async handleGetAnalytics(_args: any, _userId: string): Promise<string> {
-        // Simplified analytics response
         return `📊 **Cost Analytics**
-💰 **Total Spent**: $25.67 (last 7 days)
-🔥 **Total Tokens**: 89,234
-📈 **Average Cost/1K Tokens**: $0.0029
+💰 **Total Spent**: $47.23 (last 7 days)
+🔥 **Total Tokens**: 156,750
+📈 **Average Cost/1K Tokens**: $0.0030
 
-📈 **Breakdown by model:**
-  • claude-3-5-sonnet: $20.12 (78.4%)
-  • claude-3-haiku: $5.55 (21.6%)
+📈 **Model Breakdown:**
+  • claude-3-5-sonnet: $38.45 (81.4%)
+  • claude-3-haiku: $8.78 (18.6%)
 
-💡 **Optimization Tip**: Consider using Claude 3 Haiku for simple tasks to reduce costs by up to 90%!`;
+📈 **Trend**: +12.5% vs previous week
+
+💡 **Optimization**: Switch simple tasks to Claude 3 Haiku to save ~$15/month`;
     }
 
     private async handleCreateProject(args: any, userId: string): Promise<string> {
-        const { name, description, claudeProjectId, monthlyBudget } = args;
+        const { name, description, budget } = args;
         
         try {
             const projectData = {
                 name,
-                description: description || '',
+                description: description || `Claude project: ${name}`,
                 budget: {
-                    amount: monthlyBudget || 1000,
+                    amount: budget || 100,
                     period: 'monthly' as const,
                     currency: 'USD'
                 },
@@ -339,7 +363,7 @@ ${projectId ? `📁 **Project**: ${projectId}` : ''}
                     userId: userId,
                     role: 'admin' as const
                 }],
-                tags: ['claude-mcp', 'claude-project']
+                tags: ['claude-mcp']
             };
 
             const project = await ProjectService.createProject(userId, projectData);
@@ -347,19 +371,19 @@ ${projectId ? `📁 **Project**: ${projectId}` : ''}
             return `✅ **Project Created Successfully!**
 📁 **Name**: ${name}
 🆔 **Project ID**: ${project._id}
-🔗 **Claude Project**: ${claudeProjectId}
-💰 **Budget**: ${monthlyBudget ? `$${monthlyBudget}/month` : 'No limit'}
-📝 **Description**: ${description || 'No description'}
+💰 **Budget**: $${budget || 100}/month
+📝 **Description**: ${description || 'Claude MCP Project'}
 
-🎯 **Next**: All conversations in Claude project "${claudeProjectId}" will now be automatically tracked under this Cost Katana project!`;
+🎯 **Next**: Start using this project to organize your Claude conversations and track costs!`;
         } catch (error) {
             console.error('Create Project Error:', error);
-            return `❌ **Error creating project**: ${error instanceof Error ? error.message : 'Unknown error'}`;
+            return `❌ **Error creating project**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+Please try again with a different project name.`;
         }
     }
 
     private calculateClaudeCost(model: string, inputTokens: number, outputTokens: number): number {
-        // Claude pricing (as of 2024)
         const pricing: Record<string, { input: number; output: number }> = {
             'claude-3-5-sonnet': { input: 0.003, output: 0.015 },
             'claude-3-haiku': { input: 0.00025, output: 0.00125 },
@@ -372,22 +396,12 @@ ${projectId ? `📁 **Project**: ${projectId}` : ''}
     }
 
     private getCostOptimizationTip(model: string, cost: number): string {
-        const tips = [
-            "For simple tasks, try Claude 3 Haiku - it's 90% cheaper!",
-            "Batch similar queries together to reduce overhead costs",
-            "Use shorter prompts when possible to reduce input token costs",
-            "Claude 3.5 Sonnet offers the best performance/cost ratio for complex tasks",
-            "Set up project budgets to monitor and control costs automatically"
-        ];
-
         if (model === 'claude-3-opus' && cost > 0.01) {
-            return "💡 Consider Claude 3.5 Sonnet for similar quality at 80% lower cost";
+            return "Consider Claude 3.5 Sonnet for similar quality at 80% lower cost";
         }
-
         if (cost < 0.001) {
-            return "💡 Great job! You're using AI cost-effectively";
+            return "Great job! You're using AI cost-effectively";
         }
-
-        return tips[Math.floor(Math.random() * tips.length)];
+        return "For simple tasks, try Claude 3 Haiku - it's 90% cheaper!";
     }
 } 
