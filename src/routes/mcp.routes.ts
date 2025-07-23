@@ -39,6 +39,46 @@ router.options('/', (_req, res) => {
     res.status(200).end();
 });
 
+// Handle GET requests for Server-Sent Events (SSE) that Claude expects
+router.get('/', (req, res) => {
+    console.log('MCP GET request - Setting up SSE connection');
+    
+    // Set SSE headers
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Cache-Control'
+    });
+    
+    // Send initial connection confirmation
+    res.write('event: connected\n');
+    res.write('data: {"status": "MCP connection established", "server": "cost-katana-mcp", "version": "1.0.0"}\n\n');
+    
+    // Keep connection alive with periodic heartbeat
+    const heartbeat = setInterval(() => {
+        if (!res.destroyed) {
+            res.write('event: heartbeat\n');
+            res.write(`data: {"timestamp": "${new Date().toISOString()}", "status": "alive"}\n\n`);
+        } else {
+            clearInterval(heartbeat);
+        }
+    }, 30000); // 30 second heartbeat
+    
+    // Handle client disconnect
+    req.on('close', () => {
+        console.log('MCP SSE connection closed by client');
+        clearInterval(heartbeat);
+    });
+    
+    req.on('aborted', () => {
+        console.log('MCP SSE connection aborted');
+        clearInterval(heartbeat);
+    });
+});
+
 // Wrap MCP controller with enhanced error handling
 router.post('/', async (req, res) => {
     try {
