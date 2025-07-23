@@ -173,7 +173,35 @@ mcpRoute.get('/', (req: Request, res: Response) => {
         MCPConnectionMonitor.removeConnection(connectionId);
         res.end();
     });
+
+    // Send initial ready event almost immediately
+    setTimeout(() => {
+        sendSSEEvent(connectionId, 'ready', {
+            message: 'MCP server ready',
+            capabilities: SERVER_CAPABILITIES
+        });
+    }, 100);
 });
+
+// Helper function to send events to specific connections
+function sendSSEEvent(connectionId: string, event: string, data: any) {
+    const connection = sseConnections.get(connectionId);
+    if (connection && !connection.destroyed) {
+        try {
+            connection.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        } catch (error) {
+            logger.error('Failed to send SSE event', { connectionId, event, error });
+            sseConnections.delete(connectionId);
+        }
+    }
+}
+
+// Broadcast events to all connected clients
+export function broadcastMCPEvent(event: string, data: any) {
+    sseConnections.forEach((_connection, connectionId) => {
+        sendSSEEvent(connectionId, event, data);
+    });
+}
 
 // Health check endpoint for monitoring
 mcpRoute.get('/health', (_req: Request, res: Response) => {
