@@ -112,7 +112,7 @@ mcpRoute.get('/', (req: Request, res: Response) => {
     const acceptsSSE = req.get('Accept')?.includes('text/event-stream');
     
     if (acceptsSSE) {
-        // Provide minimal SSE response to satisfy Claude's expectations
+        // Provide SSE response that stays open longer for Claude
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -120,7 +120,7 @@ mcpRoute.get('/', (req: Request, res: Response) => {
             'Access-Control-Allow-Origin': '*'
         });
         
-        // Send immediate ready event and close
+        // Send immediate ready event
         res.write(`event: ready\ndata: ${JSON.stringify({
             status: 'ready',
             protocol: PROTOCOL_VERSION,
@@ -128,10 +128,42 @@ mcpRoute.get('/', (req: Request, res: Response) => {
             message: 'Server ready for JSON-RPC calls'
         })}\n\n`);
         
-        // Close the connection immediately - no long-lived SSE
-        setTimeout(() => {
+        // Keep connection alive with heartbeat for 30 seconds
+        let heartbeatCount = 0;
+        const maxHeartbeats = 6; // 30 seconds / 5 seconds
+        
+        const heartbeatInterval = setInterval(() => {
+            heartbeatCount++;
+            
+            if (heartbeatCount >= maxHeartbeats || res.writableEnded) {
+                clearInterval(heartbeatInterval);
+                if (!res.writableEnded) {
+                    res.end();
+                }
+                return;
+            }
+            
+            try {
+                res.write(`event: heartbeat\ndata: {"timestamp":"${new Date().toISOString()}"}\n\n`);
+            } catch (error) {
+                logger.error('SSE heartbeat error', { error });
+                clearInterval(heartbeatInterval);
+                res.end();
+            }
+        }, 5000); // Every 5 seconds
+        
+        // Handle client disconnect
+        req.on('close', () => {
+            logger.info('MCP SSE connection closed by client');
+            clearInterval(heartbeatInterval);
             res.end();
-        }, 100);
+        });
+        
+        req.on('error', (error) => {
+            logger.error('MCP SSE connection error', { error });
+            clearInterval(heartbeatInterval);
+            res.end();
+        });
         
     } else {
         // Return simple JSON for non-SSE clients
