@@ -68,7 +68,25 @@ export class ChatGPTController {
             // Authenticate user for other actions
             let userId: string;
             if (user_id) {
-                userId = user_id;
+                // Check if user_id is an email or ObjectId
+                if (user_id.includes('@')) {
+                    // It's an email, look up the actual user ObjectId
+                    const { User } = await import('../models/User');
+                    const user = await User.findOne({ email: user_id });
+                    if (!user) {
+                        res.status(404).json({
+                            success: false,
+                            error: 'User not found',
+                            message: `No account found for email: ${user_id}. Please complete the magic link setup first.`,
+                            onboarding_required: true
+                        });
+                        return;
+                    }
+                    userId = user._id.toString();
+                    logger.info('Resolved email to userId:', { email: user_id, userId });
+                } else {
+                    userId = user_id;
+                }
             } else if (api_key) {
                 // Validate API key using the ApiKeyController
                 const { ApiKeyController } = await import('./apiKey.controller');
