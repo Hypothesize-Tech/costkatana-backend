@@ -66,8 +66,9 @@ router.get('/', (req, res) => {
     // Keep connection alive with periodic heartbeat
     const heartbeat = setInterval(() => {
         if (!res.writableEnded) {
-            // Use a standard comment ping which is often used for keep-alive
-            res.write(': ping\n\n');
+            // Use a formal SSE event for the heartbeat
+            res.write('event: heartbeat\n');
+            res.write(`data: {"timestamp":"${new Date().toISOString()}"}\n\n`);
         } else {
             clearInterval(heartbeat);
         }
@@ -111,22 +112,6 @@ router.post('/', async (req, res) => {
         }
     }
 });
-
-// Legacy endpoints for backwards compatibility
-router.options('/initialize', (_req, res) => res.sendStatus(200));
-router.post('/initialize', mcpController.initialize);
-
-router.options('/tools/list', (_req, res) => res.sendStatus(200));
-router.post('/tools/list', mcpController.listTools);
-
-router.options('/tools/call', (_req, res) => res.sendStatus(200));
-router.post('/tools/call', mcpController.callTool);
-
-router.options('/resources/list', (_req, res) => res.sendStatus(200));
-router.post('/resources/list', mcpController.listResources);
-
-router.options('/prompts/list', (_req, res) => res.sendStatus(200));
-router.post('/prompts/list', mcpController.listPrompts);
 
 // Auto-tracking endpoint
 router.post('/auto-track', mcpController.autoTrack);
