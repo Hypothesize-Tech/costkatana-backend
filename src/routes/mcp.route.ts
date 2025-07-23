@@ -27,82 +27,9 @@ const SERVER_CAPABILITIES = {
     logging: {}
 };
 
-// Handle POST requests (JSON-RPC) - This works perfectly
-mcpRoute.post('/', async (req: Request, res: Response) => {
-    const { method, params, id } = req.body;
-    
-    logger.info('MCP Request received', {
-        method,
-        params,
-        id,
-        headers: req.headers
-    });
-
-    try {
-        switch (method) {
-            case 'initialize':
-                res.json({
-                    jsonrpc: '2.0',
-                    id,
-                    result: {
-                        protocolVersion: PROTOCOL_VERSION,
-                        capabilities: SERVER_CAPABILITIES,
-                        serverInfo: {
-                            name: 'ai-cost-optimizer-mcp',
-                            version: '1.0.0',
-                            description: "AI Cost Intelligence & Optimization Platform - Your Complete AI Cost Management Solution"
-                        }
-                    }
-                });
-                break;
-                
-            case 'notifications/initialized':
-                res.status(200).end();
-                break;
-
-            case 'prompts/list':
-                mcpController.listPrompts(req, res);
-                break;
-
-            case 'resources/list':
-                mcpController.listResources(req, res);
-                break;
-                
-            case 'tools/list':
-                mcpController.listTools(req, res);
-                break;
-                
-            case 'tools/call':
-                mcpController.callTool(req, res);
-                break;
-
-            default:
-                res.status(404).json({
-                    jsonrpc: '2.0',
-                    id,
-                    error: {
-                        code: -32601,
-                        message: 'Method not found'
-                    }
-                });
-        }
-    } catch (error) {
-        logger.error('MCP request error', { error, method });
-        res.status(500).json({
-            jsonrpc: '2.0',
-            id,
-            error: {
-                code: -32603,
-                message: 'Internal error',
-                data: error instanceof Error ? error.message : 'Unknown error'
-            }
-        });
-    }
-});
-
-// Handle GET requests - Simple status response (replaces SSE)
+// SSE Endpoint - For server-to-client messages
 mcpRoute.get('/', (req: Request, res: Response) => {
-    logger.info('MCP GET request received', {
+    logger.info('MCP SSE connection initiated', {
         ip: req.ip,
         userAgent: req.get('User-Agent'),
         headers: req.headers
@@ -112,7 +39,7 @@ mcpRoute.get('/', (req: Request, res: Response) => {
     const acceptsSSE = req.get('Accept')?.includes('text/event-stream');
     
     if (acceptsSSE) {
-        // Provide SSE response that stays open longer for Claude
+        // Set SSE headers
         res.writeHead(200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
@@ -120,7 +47,13 @@ mcpRoute.get('/', (req: Request, res: Response) => {
             'Access-Control-Allow-Origin': '*'
         });
         
-        // Send immediate ready event
+        // Send endpoint event with POST URL (REQUIRED by MCP spec)
+        const postEndpoint = `${req.protocol}://${req.get('host')}/api/mcp/message`;
+        res.write(`event: endpoint\ndata: ${JSON.stringify({
+            uri: postEndpoint
+        })}\n\n`);
+        
+        // Send ready event
         res.write(`event: ready\ndata: ${JSON.stringify({
             status: 'ready',
             protocol: PROTOCOL_VERSION,
@@ -128,9 +61,9 @@ mcpRoute.get('/', (req: Request, res: Response) => {
             message: 'Server ready for JSON-RPC calls'
         })}\n\n`);
         
-        // Keep connection alive with heartbeat for 30 seconds
+        // Keep connection alive with heartbeat for 60 seconds
         let heartbeatCount = 0;
-        const maxHeartbeats = 6; // 30 seconds / 5 seconds
+        const maxHeartbeats = 12; // 60 seconds / 5 seconds
         
         const heartbeatInterval = setInterval(() => {
             heartbeatCount++;
@@ -182,7 +115,154 @@ mcpRoute.get('/', (req: Request, res: Response) => {
     }
 });
 
-// Simple status endpoint for MCP health checks (replaces problematic SSE)
+// HTTP POST Endpoint - For client-to-server JSON-RPC messages (REQUIRED by MCP spec)
+mcpRoute.post('/message', async (req: Request, res: Response) => {
+    const { method, params, id } = req.body;
+    
+    logger.info('MCP JSON-RPC Request received', {
+        method,
+        params,
+        id,
+        headers: req.headers
+    });
+
+    try {
+        switch (method) {
+            case 'initialize':
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    result: {
+                        protocolVersion: PROTOCOL_VERSION,
+                        capabilities: SERVER_CAPABILITIES,
+                        serverInfo: {
+                            name: 'ai-cost-optimizer-mcp',
+                            version: '1.0.0',
+                            description: "AI Cost Intelligence & Optimization Platform - Your Complete AI Cost Management Solution"
+                        }
+                    }
+                });
+                break;
+                
+            case 'notifications/initialized':
+                res.status(200).end();
+                break;
+
+            case 'prompts/list':
+                mcpController.listPrompts(req, res);
+                break;
+
+            case 'resources/list':
+                mcpController.listResources(req, res);
+                break;
+                
+            case 'tools/list':
+                mcpController.listTools(req, res);
+                break;
+                
+            case 'tools/call':
+                mcpController.callTool(req, res);
+                break;
+
+            default:
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    error: {
+                        code: -32601,
+                        message: 'Method not found'
+                    }
+                });
+        }
+    } catch (error) {
+        logger.error('MCP JSON-RPC request error', { error, method });
+        res.json({
+            jsonrpc: '2.0',
+            id,
+            error: {
+                code: -32603,
+                message: 'Internal error',
+                data: error instanceof Error ? error.message : 'Unknown error'
+            }
+        });
+    }
+});
+
+// Legacy POST endpoint for backwards compatibility
+mcpRoute.post('/', async (req: Request, res: Response) => {
+    // Forward to the new message endpoint by calling the same handler
+    const { method, params, id } = req.body;
+    
+    logger.info('MCP JSON-RPC Request received (legacy endpoint)', {
+        method,
+        params,
+        id,
+        headers: req.headers
+    });
+
+    try {
+        switch (method) {
+            case 'initialize':
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    result: {
+                        protocolVersion: PROTOCOL_VERSION,
+                        capabilities: SERVER_CAPABILITIES,
+                        serverInfo: {
+                            name: 'ai-cost-optimizer-mcp',
+                            version: '1.0.0',
+                            description: "AI Cost Intelligence & Optimization Platform - Your Complete AI Cost Management Solution"
+                        }
+                    }
+                });
+                break;
+                
+            case 'notifications/initialized':
+                res.status(200).end();
+                break;
+
+            case 'prompts/list':
+                mcpController.listPrompts(req, res);
+                break;
+
+            case 'resources/list':
+                mcpController.listResources(req, res);
+                break;
+                
+            case 'tools/list':
+                mcpController.listTools(req, res);
+                break;
+                
+            case 'tools/call':
+                mcpController.callTool(req, res);
+                break;
+
+            default:
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    error: {
+                        code: -32601,
+                        message: 'Method not found'
+                    }
+                });
+        }
+    } catch (error) {
+        logger.error('MCP JSON-RPC request error (legacy endpoint)', { error, method });
+        res.json({
+            jsonrpc: '2.0',
+            id,
+            error: {
+                code: -32603,
+                message: 'Internal error',
+                data: error instanceof Error ? error.message : 'Unknown error'
+            }
+        });
+    }
+});
+
+// Simple status endpoint for MCP health checks
 mcpRoute.get('/status', (req: Request, res: Response) => {
     logger.info('MCP Status check', {
         ip: req.ip,
