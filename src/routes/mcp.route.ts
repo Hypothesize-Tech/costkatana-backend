@@ -100,6 +100,29 @@ mcpRoute.post('/', async (req: Request, res: Response) => {
     }
 });
 
+// Handle GET requests - Simple status response (replaces SSE)
+mcpRoute.get('/', (req: Request, res: Response) => {
+    logger.info('MCP GET request received', {
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+        headers: req.headers
+    });
+
+    // Return simple JSON instead of SSE
+    res.json({
+        status: 'ready',
+        protocol: PROTOCOL_VERSION,
+        capabilities: SERVER_CAPABILITIES,
+        serverInfo: {
+            name: 'ai-cost-optimizer-mcp',
+            version: '1.0.0',
+            description: "AI Cost Intelligence & Optimization Platform"
+        },
+        message: 'MCP server is ready. Use POST requests for JSON-RPC calls.',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Simple status endpoint for MCP health checks (replaces problematic SSE)
 mcpRoute.get('/status', (req: Request, res: Response) => {
     logger.info('MCP Status check', {
