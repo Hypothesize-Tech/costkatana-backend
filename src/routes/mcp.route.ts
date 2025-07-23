@@ -16,9 +16,6 @@ mcpRoute.use(validateMCPRequest);
 mcpRoute.use(mcpResponseTimer);
 mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 
-// Store active SSE connections
-const sseConnections = new Map<string, Response>();
-
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -26,11 +23,11 @@ const PROTOCOL_VERSION = '2025-06-18';
 const SERVER_CAPABILITIES = {
     prompts: { listChanged: true },
     resources: { subscribe: true, listChanged: true },
-    tools: { listChanged: true }, // Added from old controller
+    tools: { listChanged: true },
     logging: {}
 };
 
-// Handle POST requests (JSON-RPC)
+// Handle POST requests (JSON-RPC) - This works perfectly
 mcpRoute.post('/', async (req: Request, res: Response) => {
     const { method, params, id } = req.body;
     
@@ -103,105 +100,25 @@ mcpRoute.post('/', async (req: Request, res: Response) => {
     }
 });
 
-// Handle GET requests (SSE)
-mcpRoute.get('/', (req: Request, res: Response) => {
-    logger.info('MCP SSE connection initiated', {
-        headers: req.headers,
-        ip: req.ip
-    });
-    
-    // Disable all server-side timeouts for this connection
-    req.socket.setTimeout(0);
-    req.socket.setNoDelay(true);
-    req.socket.setKeepAlive(true, 60000);
-
-    // Generate unique connection ID
-    const connectionId = `mcp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-    // Set SSE headers
-    res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no', // Disable Nginx buffering
-        'Access-Control-Allow-Origin': '*'
-    });
-    
-    res.flushHeaders();
-
-    // Send initial connection event
-    res.write(`event: connection\ndata: ${JSON.stringify({ 
-        status: 'connected', 
-        connectionId,
-        protocol: PROTOCOL_VERSION 
-    })}\n\n`);
-
-    // Store connection
-    sseConnections.set(connectionId, res);
-    MCPConnectionMonitor.trackConnection(connectionId);
-
-    // Set up heartbeat to keep connection alive
-    const heartbeatInterval = setInterval(() => {
-        try {
-            if (!res.writableEnded) {
-                res.write('event: heartbeat\n');
-                res.write(`data: {"timestamp":"${new Date().toISOString()}"}\n\n`);
-            } else {
-                clearInterval(heartbeatInterval);
-            }
-        } catch (error) {
-            logger.error('Heartbeat error', { connectionId, error });
-            MCPConnectionMonitor.recordError(connectionId);
-            clearInterval(heartbeatInterval);
-        }
-    }, 15000); // 15 seconds
-
-    // Handle client disconnect
-    req.on('close', () => {
-        logger.info('MCP SSE connection closed', { connectionId });
-        clearInterval(heartbeatInterval);
-        sseConnections.delete(connectionId);
-        MCPConnectionMonitor.removeConnection(connectionId);
-        res.end();
+// Simple status endpoint for MCP health checks (replaces problematic SSE)
+mcpRoute.get('/status', (req: Request, res: Response) => {
+    logger.info('MCP Status check', {
+        ip: req.ip,
+        userAgent: req.get('User-Agent')
     });
 
-    req.on('error', (error) => {
-        logger.error('MCP SSE connection error', { connectionId, error });
-        MCPConnectionMonitor.recordError(connectionId);
-        clearInterval(heartbeatInterval);
-        sseConnections.delete(connectionId);
-        MCPConnectionMonitor.removeConnection(connectionId);
-        res.end();
+    res.json({
+        status: 'ready',
+        protocol: PROTOCOL_VERSION,
+        capabilities: SERVER_CAPABILITIES,
+        serverInfo: {
+            name: 'ai-cost-optimizer-mcp',
+            version: '1.0.0',
+            uptime: process.uptime()
+        },
+        timestamp: new Date().toISOString()
     });
-
-    // Send initial ready event almost immediately
-    setTimeout(() => {
-        sendSSEEvent(connectionId, 'ready', {
-            message: 'MCP server ready',
-            capabilities: SERVER_CAPABILITIES
-        });
-    }, 100);
 });
-
-// Helper function to send events to specific connections
-function sendSSEEvent(connectionId: string, event: string, data: any) {
-    const connection = sseConnections.get(connectionId);
-    if (connection && !connection.destroyed) {
-        try {
-            connection.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-        } catch (error) {
-            logger.error('Failed to send SSE event', { connectionId, event, error });
-            sseConnections.delete(connectionId);
-        }
-    }
-}
-
-// Broadcast events to all connected clients
-export function broadcastMCPEvent(event: string, data: any) {
-    sseConnections.forEach((_connection, connectionId) => {
-        sendSSEEvent(connectionId, event, data);
-    });
-}
 
 // Health check endpoint for monitoring
 mcpRoute.get('/health', (_req: Request, res: Response) => {
@@ -210,7 +127,6 @@ mcpRoute.get('/health', (_req: Request, res: Response) => {
         status: 'healthy',
         protocol: PROTOCOL_VERSION,
         connections: {
-            total: sseConnections.size,
             active: connections.filter(c => c.active).length,
             details: connections
         },
