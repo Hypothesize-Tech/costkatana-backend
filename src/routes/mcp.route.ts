@@ -49,45 +49,19 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
     // Handle GET requests (capability discovery)
     if (method === 'GET') {
-        // Check if Claude is requesting SSE format
-        const acceptsSSE = req.get('Accept')?.includes('text/event-stream');
+        // For HTTP-only transport, always return JSON regardless of Accept header
+        // The Accept: text/event-stream is likely a legacy header from old implementations
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Content-Type', 'application/json');
         
-        if (acceptsSSE) {
-            // Claude expects SSE format even for HTTP transport
-            res.writeHead(200, {
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*'
-            });
-            
-            // Send server info as SSE event
-            res.write(`data: ${JSON.stringify({
-                jsonrpc: '2.0',
-                result: {
-                    protocolVersion: PROTOCOL_VERSION,
-                    capabilities: SERVER_CAPABILITIES,
-                    serverInfo: SERVER_INFO
-                }
-            })}\n\n`);
-            
-            // End the connection immediately (no persistent SSE)
-            res.end();
-        } else {
-            // Regular JSON response for non-SSE clients
-            res.json({
-                jsonrpc: '2.0',
-                result: {
-                    protocolVersion: PROTOCOL_VERSION,
-                    capabilities: SERVER_CAPABILITIES,
-                    serverInfo: SERVER_INFO,
-                    transport: 'http',
-                    endpoints: {
-                        rpc: `${req.protocol}://${req.get('host')}/api/mcp`
-                    }
-                }
-            });
-        }
+        res.json({
+            jsonrpc: '2.0',
+            result: {
+                protocolVersion: PROTOCOL_VERSION,
+                capabilities: SERVER_CAPABILITIES,
+                serverInfo: SERVER_INFO
+            }
+        });
         return;
     }
 
