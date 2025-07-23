@@ -18,18 +18,11 @@ mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
-// Server capabilities - Indicate what features are available
+// Server capabilities - Empty objects indicate features are available (per MCP specification)
 const SERVER_CAPABILITIES = {
-    prompts: {
-        listChanged: true
-    },
-    resources: {
-        subscribe: true,
-        listChanged: true
-    },
-    tools: {
-        listChanged: true
-    },
+    prompts: {},
+    resources: {},
+    tools: {},
     logging: {}
 };
 
