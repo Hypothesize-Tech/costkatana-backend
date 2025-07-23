@@ -10,7 +10,7 @@ import { sanitizeInput } from './middleware/validation.middleware';
 import { logger, stream } from './utils/logger';
 import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
-import { setupCronJobs } from './utils/cronJobs';
+import { initializeCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
 
@@ -189,7 +189,7 @@ export const startServer = async () => {
             logger.warn('⚠️  AIOps Agent initialization failed, will initialize on first request:', error);
         }
         
-        setupCronJobs();
+        initializeCronJobs();
 
         app.listen(PORT, () => {
             logger.info(`Server is running on port ${PORT}`);

@@ -15,6 +15,10 @@ import performanceCostAnalysisRoutes from './performanceCostAnalysis.routes';
 import experimentationRoutes from './experimentation.routes';
 import chatRoutes from './chat.routes';
 import agentRoutes from './agent.routes';
+import { chatgptRoutes } from './chatgpt.routes';
+import { apiKeyRoutes } from './apiKey.routes';
+import { onboardingRoutes } from './onboarding.routes';
+import { monitoringRoutes } from './monitoring.routes';
 
 const router = Router();
 
@@ -45,5 +49,9 @@ router.use('/performance-cost', performanceCostAnalysisRoutes);
 router.use('/experimentation', experimentationRoutes);
 router.use('/chat', chatRoutes);
 router.use('/agent', agentRoutes);
+router.use('/chatgpt', chatgptRoutes);
+router.use('/api-keys', apiKeyRoutes);
+router.use('/onboarding', onboardingRoutes);
+router.use('/monitoring', monitoringRoutes);
 
 export const apiRouter = router;

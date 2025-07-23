@@ -1,53 +1,72 @@
 import cron from 'node-cron';
-import { User } from '../models/User';
 import { logger } from './logger';
+import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 
-export function setupCronJobs() {
-    // Reset monthly usage on the 1st of each month at midnight
-    cron.schedule('0 0 1 * *', async () => {
+export const initializeCronJobs = () => {
+    logger.info('Initializing cron jobs...');
+
+    // Daily intelligent monitoring - runs at 9 AM every day
+    cron.schedule('0 9 * * *', async () => {
+        logger.info('Running daily intelligent monitoring...');
         try {
-            logger.info('Starting monthly usage reset');
-            await (User as any).resetAllMonthlyUsage();
+            await IntelligentMonitoringService.runDailyMonitoring();
+            logger.info('Daily intelligent monitoring completed');
+        } catch (error) {
+            logger.error('Daily intelligent monitoring failed:', error);
+        }
+    });
+
+    // Weekly digest check - runs at 10 AM on Mondays
+    cron.schedule('0 10 * * 1', async () => {
+        logger.info('Running weekly digest check...');
+        try {
+            await IntelligentMonitoringService.runDailyMonitoring(); // This handles weekly digests too
+            logger.info('Weekly digest check completed');
+        } catch (error) {
+            logger.error('Weekly digest check failed:', error);
+        }
+    });
+
+    // Urgent alerts check - runs every 2 hours during business hours
+    cron.schedule('0 */2 8-20 * * *', async () => {
+        logger.info('Running urgent alerts check...');
+        try {
+            // Get users who might need urgent alerts
+            const { User } = await import('../models/User');
+            const activeUsers = await User.find({
+                isActive: true,
+                'preferences.emailAlerts': true
+            }).select('_id').limit(100); // Process in batches
+
+            const promises = activeUsers.map(user =>
+                IntelligentMonitoringService.monitorUserUsage(user._id.toString())
+                    .catch(error => logger.error(`Failed urgent check for user ${user._id}:`, error))
+            );
+
+            await Promise.all(promises);
+            logger.info(`Urgent alerts check completed for ${activeUsers.length} users`);
+        } catch (error) {
+            logger.error('Urgent alerts check failed:', error);
+        }
+    });
+
+    // Monthly usage reset - runs at midnight on the 1st of every month
+    cron.schedule('0 0 1 * *', async () => {
+        logger.info('Running monthly usage reset...');
+        try {
+            const { User } = await import('../models/User');
+            // Reset monthly usage for all users
+            await User.updateMany({}, { 
+                $set: { 
+                    'monthlyUsage.current': 0,
+                    'monthlyUsage.lastReset': new Date()
+                }
+            });
             logger.info('Monthly usage reset completed');
         } catch (error) {
-            logger.error('Error resetting monthly usage:', error);
+            logger.error('Monthly usage reset failed:', error);
         }
     });
 
-    // Automatically update pricing data every 6 hours
-    cron.schedule('0 */6 * * *', async () => {
-        try {
-            logger.info('🔄 Starting automatic pricing data update via cron job');
-
-            // Use RealtimePricingService for consistent pricing updates
-            const { RealtimePricingService } = await import('../services/realtime-pricing.service');
-            await RealtimePricingService.updateAllPricing();
-
-            logger.info('✅ Automatic pricing update completed via cron job');
-
-        } catch (error) {
-            logger.error('❌ Error in automatic pricing update:', error);
-        }
-    });
-
-    // Initial pricing data update on startup (after 30 seconds delay)
-    setTimeout(async () => {
-        try {
-            logger.info('🚀 Starting initial pricing data update on startup');
-
-            const { RealtimePricingService } = await import('../services/realtime-pricing.service');
-
-            // Trigger update but don't block startup if it fails
-            RealtimePricingService.updateAllPricing().catch(error => {
-                logger.error('❌ Initial pricing update failed:', error);
-            });
-
-            logger.info('✅ Initial pricing update initiated (running in background)');
-
-        } catch (error) {
-            logger.error('❌ Error initiating initial pricing update:', error);
-        }
-    }, 30000); // 30 seconds delay
-
-    logger.info('🕐 Cron jobs scheduled: monthly usage reset, automatic pricing updates every 6 hours');
-} 
+    logger.info('Cron jobs initialized successfully');
+}; 

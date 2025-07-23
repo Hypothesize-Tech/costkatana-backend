@@ -17,11 +17,20 @@ export interface IUser {
         createdAt: Date;
         expiresAt?: Date;
     }>;
+    apiKeys: Array<{
+        id: string;
+        name: string;
+        key: string;
+        created: Date;
+        lastUsed?: Date;
+        isActive: boolean;
+    }>;
     preferences: {
         emailAlerts: boolean;
         alertThreshold: number;
         weeklyReports: boolean;
         optimizationSuggestions: boolean;
+        lastDigestSent?: Date;
     };
     subscription: {
         plan: 'free' | 'pro' | 'enterprise';
@@ -108,6 +117,30 @@ const userSchema = new Schema<IUser>({
         },
         expiresAt: Date,
     }],
+    apiKeys: [{
+        id: {
+            type: String,
+            required: true,
+        },
+        name: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+        key: {
+            type: String,
+            required: true,
+        },
+        created: {
+            type: Date,
+            default: Date.now,
+        },
+        lastUsed: Date,
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
+    }],
     preferences: {
         emailAlerts: {
             type: Boolean,
@@ -125,6 +158,7 @@ const userSchema = new Schema<IUser>({
             type: Boolean,
             default: true,
         },
+        lastDigestSent: Date,
     },
     subscription: {
         plan: {

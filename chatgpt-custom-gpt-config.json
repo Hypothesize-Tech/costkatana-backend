@@ -1,0 +1,434 @@
+{
+  "custom_gpt_config": {
+    "name": "Cost Katana - AI Cost Intelligence",
+    "description": "Your AI-powered cost optimization coach! Get personalized recommendations, automatic usage tracking, intelligent limit monitoring, and AI-generated tips to optimize your ChatGPT spending. Seamlessly integrates with Cost Katana's intelligent monitoring system.",
+    "instructions": "You are Cost Katana's AI Cost Intelligence system - the world's first AI-powered cost optimization coach integrated directly into ChatGPT.\n\n## 🤖 AI-Powered Core Functions:\n1. **Intelligent Usage Tracking**: Automatically track conversations with AI-generated personalized tips\n2. **Smart Project Management**: Create and manage projects with AI cost forecasting\n3. **AI Cost Analytics**: Provide personalized spending insights using machine learning\n4. **Proactive Limit Monitoring**: AI predicts and prevents ChatGPT limit overruns\n5. **Magic Link Onboarding**: Seamless 1-click setup for new users\n6. **Personalized Coaching**: AI analyzes your usage patterns and provides custom optimization advice\n\n## 🧬 AI Personalization Features:\n- **User Profile Analysis**: AI creates detailed profiles based on your usage patterns\n- **Context-Aware Tips**: Personalized recommendations for your specific use cases (coding, writing, business, etc.)\n- **Predictive Alerts**: AI forecasts when you'll hit limits and suggests alternatives\n- **Cost Optimization Coaching**: Real-time AI tips to reduce spending while maintaining quality\n- **Pattern Recognition**: AI identifies inefficient prompting patterns and suggests improvements\n\n## 🎯 Intelligent Behavior Guidelines:\n- **Proactive Intelligence**: Always provide AI-generated tips after meaningful conversations\n- **Personalized Responses**: Tailor advice based on detected user profile (technical level, use cases, cost sensitivity)\n- **Smart Onboarding**: For new users, offer magic link setup for instant Cost Katana integration\n- **Predictive Monitoring**: Alert users about approaching limits before they hit them\n- **Context-Aware Coaching**: Provide specific optimization tips based on conversation content\n- **Efficiency Focus**: Suggest prompt improvements that maintain quality while reducing costs\n\n## 🚀 Enhanced Conversation Flow:\n1. **New User Experience**: \n   - Explain AI-powered cost intelligence capabilities\n   - Offer magic link onboarding for instant setup\n   - Create personalized user profile based on initial conversations\n\n2. **Returning User Experience**:\n   - Automatically track high-value conversations\n   - Provide AI-generated personalized tips after each interaction\n   - Share proactive limit warnings and cost forecasts\n   - Offer context-specific optimization suggestions\n\n3. **Ongoing AI Coaching**:\n   - Monitor usage patterns and provide weekly AI insights\n   - Suggest model alternatives based on use case analysis\n   - Recommend prompt optimizations for user's specific style\n   - Predict and prevent costly usage spikes\n\n## 💡 AI-Enhanced Response Format:\n- **Personalized Insights**: Include user-specific cost patterns and AI recommendations\n- **Confidence Scores**: Show AI confidence levels for recommendations (e.g., \"87% confidence this will save 23% on your debugging prompts\")\n- **Context Awareness**: Reference user's typical usage patterns and preferences\n- **Actionable Intelligence**: Provide specific, measurable optimization suggestions\n- **Predictive Analytics**: Include forecasts and trend analysis\n\n## 🔮 Proactive Intelligence Examples:\n- \"🤖 AI Tip: Based on your React development pattern, starting prompts with specific error messages saves an average of 23% tokens.\"\n- \"📊 Prediction: At your current pace, you'll reach 85% of your ChatGPT Plus limit in 12 days. Consider Cost Katana's API access.\"\n- \"🎯 Personalized: Your learning-focused conversations work best with examples. This matches your 'learn by example' profile.\"\n- \"💰 Smart Saving: For your business planning questions, GPT-3.5 provides 89% similar quality at 75% lower cost.\"\n\nRemember: You're not just tracking costs - you're an AI coach helping users optimize their AI spending through intelligent, personalized guidance based on their unique patterns and needs.",
+    "conversation_starters": [
+      "🤖 Track this conversation and give me AI-powered optimization tips",
+      "🎯 Set up intelligent cost monitoring for my ChatGPT usage", 
+      "📊 Show me my AI-analyzed spending patterns and personalized insights",
+      "🚀 Create a smart project with AI cost forecasting",
+      "💡 What AI recommendations do you have to optimize my prompts?",
+      "🔮 Predict when I'll hit my ChatGPT limits and suggest alternatives"
+    ],
+    "knowledge_files": [],
+    "capabilities": {
+      "web_browsing": false,
+      "dalle_image_generation": false,
+      "code_interpreter": false
+    },
+    "actions_schema": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "Cost Katana AI Intelligence ChatGPT Integration API",
+        "description": "AI-powered cost optimization API for tracking ChatGPT usage, intelligent monitoring, personalized recommendations, and seamless onboarding through Cost Katana platform",
+        "version": "2.0.0"
+      },
+      "servers": [
+        {
+          "url": "https://cost-katana-backend.store/api/chatgpt",
+          "description": "Cost Katana AI Intelligence ChatGPT Integration API"
+        }
+      ],
+      "paths": {
+        "/action": {
+          "post": {
+            "operationId": "handleChatGPTAction",
+            "summary": "Handle AI-powered ChatGPT Custom GPT actions",
+            "description": "Main endpoint for all ChatGPT integration actions including intelligent usage tracking, AI recommendations, project management, analytics, and magic link onboarding",
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "type": "object",
+                    "required": ["action"],
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": ["track_usage", "create_project", "get_projects", "get_analytics", "generate_magic_link"],
+                        "description": "The AI-powered action to perform"
+                      },
+                      "user_id": {
+                        "type": "string",
+                        "description": "Cost Katana user ID (if known)"
+                      },
+                      "api_key": {
+                        "type": "string",
+                        "description": "Cost Katana API key in format: ck_user_{userId}_{random}"
+                      },
+                      "conversation_data": {
+                        "type": "object",
+                        "description": "Required for track_usage action - enables AI-powered analysis and personalized tips",
+                        "properties": {
+                          "prompt": {
+                            "type": "string",
+                            "description": "User's prompt/input to ChatGPT (used for AI pattern analysis)"
+                          },
+                          "response": {
+                            "type": "string",
+                            "description": "ChatGPT's response (used for AI quality and efficiency analysis)"
+                          },
+                          "model": {
+                            "type": "string",
+                            "description": "ChatGPT model used (e.g., gpt-4, gpt-3.5-turbo, gpt-4-turbo)",
+                            "default": "gpt-4"
+                          },
+                          "tokens_used": {
+                            "type": "object",
+                            "description": "Token usage for precise cost calculation and AI optimization analysis",
+                            "properties": {
+                              "prompt_tokens": {"type": "integer"},
+                              "completion_tokens": {"type": "integer"},
+                              "total_tokens": {"type": "integer"}
+                            }
+                          },
+                          "conversation_id": {
+                            "type": "string",
+                            "description": "Unique conversation identifier for AI pattern tracking"
+                          },
+                          "timestamp": {
+                            "type": "string",
+                            "description": "ISO timestamp of the conversation for usage pattern analysis"
+                          },
+                          "user_context": {
+                            "type": "object",
+                            "description": "Additional context for AI personalization",
+                            "properties": {
+                              "use_case": {
+                                "type": "string",
+                                "enum": ["coding", "writing", "analysis", "learning", "business", "creative", "general"],
+                                "description": "Primary use case for AI optimization recommendations"
+                              },
+                              "technical_level": {
+                                "type": "string", 
+                                "enum": ["beginner", "intermediate", "advanced"],
+                                "description": "User's technical level for personalized coaching"
+                              },
+                              "cost_sensitivity": {
+                                "type": "string",
+                                "enum": ["low", "medium", "high"],
+                                "description": "User's cost sensitivity for optimization priorities"
+                              }
+                            }
+                          }
+                        },
+                        "required": ["prompt", "response"]
+                      },
+                      "project": {
+                        "type": "object",
+                        "description": "Required for create_project action - enables AI cost forecasting",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "Project name"
+                          },
+                          "description": {
+                            "type": "string",
+                            "description": "Project description for AI context analysis"
+                          },
+                          "budget_amount": {
+                            "type": "number",
+                            "description": "Monthly budget amount in USD for AI monitoring",
+                            "default": 100
+                          },
+                          "budget_period": {
+                            "type": "string",
+                            "enum": ["monthly", "quarterly", "yearly"],
+                            "description": "Budget period for AI forecasting",
+                            "default": "monthly"
+                          },
+                          "use_case": {
+                            "type": "string",
+                            "enum": ["coding", "writing", "analysis", "learning", "business", "creative", "general"],
+                            "description": "Primary use case for AI optimization recommendations"
+                          },
+                          "ai_features": {
+                            "type": "object",
+                            "description": "AI-powered project features",
+                            "properties": {
+                              "intelligent_monitoring": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "Enable AI usage pattern monitoring"
+                              },
+                              "predictive_alerts": {
+                                "type": "boolean", 
+                                "default": true,
+                                "description": "Enable AI limit prediction and alerts"
+                              },
+                              "personalized_tips": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "Enable AI-generated personalized optimization tips"
+                              }
+                            }
+                          }
+                        },
+                        "required": ["name"]
+                      },
+                      "onboarding": {
+                        "type": "object",
+                        "description": "Required for generate_magic_link action - seamless user onboarding",
+                        "properties": {
+                          "email": {
+                            "type": "string",
+                            "format": "email",
+                            "description": "User's email for magic link onboarding"
+                          },
+                          "name": {
+                            "type": "string",
+                            "description": "User's name for personalization"
+                          },
+                          "source": {
+                            "type": "string",
+                            "default": "chatgpt-custom-gpt",
+                            "description": "Source of the onboarding request"
+                          },
+                          "preferences": {
+                            "type": "object",
+                            "description": "Initial AI personalization preferences",
+                            "properties": {
+                              "use_case": {
+                                "type": "string",
+                                "enum": ["coding", "writing", "analysis", "learning", "business", "creative", "general"]
+                              },
+                              "ai_coaching": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "Enable AI-powered coaching and tips"
+                              },
+                              "email_insights": {
+                                "type": "boolean", 
+                                "default": true,
+                                "description": "Enable AI-powered weekly insight emails"
+                              }
+                            }
+                          }
+                        },
+                        "required": ["email"]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "AI-powered action completed successfully",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "success": {"type": "boolean"},
+                        "message": {"type": "string"},
+                        "data": {
+                          "type": "object",
+                          "description": "Response data specific to the action performed"
+                        },
+                        "ai_insights": {
+                          "type": "object",
+                          "description": "AI-generated insights and recommendations",
+                          "properties": {
+                            "smart_tip": {
+                              "type": "string",
+                              "description": "Personalized AI-generated optimization tip"
+                            },
+                            "confidence": {
+                              "type": "number",
+                              "description": "AI confidence score (0-100) for the recommendation"
+                            },
+                            "personalized": {
+                              "type": "boolean",
+                              "description": "Whether this insight is personalized for the user"
+                            },
+                            "user_profile": {
+                              "type": "string",
+                              "description": "Detected user profile for personalization"
+                            },
+                            "predicted_savings": {
+                              "type": "object",
+                              "properties": {
+                                "tokens": {"type": "integer"},
+                                "cost_per_request": {"type": "number"},
+                                "percentage": {"type": "number"}
+                              }
+                            },
+                            "limit_warning": {
+                              "type": "object",
+                              "properties": {
+                                "current_usage_percentage": {"type": "number"},
+                                "predicted_limit_date": {"type": "string"},
+                                "recommendation": {"type": "string"}
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "400": {
+                "description": "Bad request - invalid action or missing data"
+              },
+              "401": {
+                "description": "Authentication required - try magic link onboarding"
+              },
+              "500": {
+                "description": "Internal server error"
+              }
+            }
+          }
+        },
+        "/health": {
+          "get": {
+            "operationId": "healthCheck",
+            "summary": "Check AI Intelligence API health status",
+            "description": "Health check to verify the AI-powered ChatGPT integration is working with all intelligent features",
+            "responses": {
+              "200": {
+                "description": "AI Intelligence API is healthy",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "success": {"type": "boolean"},
+                        "message": {"type": "string"},
+                        "version": {"type": "string"},
+                        "timestamp": {"type": "string"},
+                        "ai_features": {
+                          "type": "array",
+                          "items": {"type": "string"},
+                          "description": "List of available AI-powered features"
+                        },
+                        "bedrock_status": {
+                          "type": "string",
+                          "enum": ["available", "limited", "unavailable"],
+                          "description": "AWS Bedrock AI service status"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "securitySchemes": {
+          "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Cost Katana API key (or use magic link onboarding for instant setup)"
+          }
+        }
+      }
+    }
+  },
+  "setup_instructions": {
+    "title": "How to Create the AI-Powered Cost Katana Custom GPT",
+    "overview": "This Custom GPT now includes revolutionary AI-powered cost intelligence features including personalized recommendations, predictive monitoring, and seamless onboarding.",
+    "steps": [
+      {
+        "step": 1,
+        "action": "Go to ChatGPT and click 'Explore GPTs'",
+        "description": "Navigate to the GPT creation area"
+      },
+      {
+        "step": 2,
+        "action": "Click 'Create a GPT' then 'Configure'",
+        "description": "Start creating a new Custom GPT with AI intelligence"
+      },
+      {
+        "step": 3,
+        "action": "Fill in the AI-enhanced information",
+        "details": {
+          "name": "Cost Katana - AI Cost Intelligence",
+          "description": "Your AI-powered cost optimization coach! Get personalized recommendations, automatic usage tracking, intelligent limit monitoring, and AI-generated tips.",
+          "instructions": "Copy the enhanced AI instructions from the custom_gpt_config.instructions field above",
+          "note": "The instructions now include AI personalization, intelligent monitoring, and proactive coaching capabilities"
+        }
+      },
+      {
+        "step": 4,
+        "action": "Add AI-powered conversation starters",
+        "details": "Copy the updated conversation_starters that showcase AI intelligence features"
+      },
+      {
+        "step": 5,
+        "action": "Configure Enhanced Actions",
+        "details": {
+          "description": "In the Actions section, click 'Create new action'",
+          "schema": "Copy the updated openapi schema that includes AI features, magic link onboarding, and enhanced tracking",
+          "authentication": "Set up API key authentication (or users can use magic link onboarding)",
+          "new_features": [
+            "generate_magic_link action for seamless onboarding",
+            "Enhanced track_usage with AI analysis",
+            "AI-powered insights in all responses",
+            "Personalized user context tracking"
+          ]
+        }
+      },
+      {
+        "step": 6,
+        "action": "Test the AI intelligence features",
+        "description": "Use the conversation starters to test AI-powered recommendations, magic link onboarding, and intelligent monitoring"
+      }
+    ],
+    "authentication_setup": {
+      "method": "API Key or Magic Link Onboarding",
+      "options": [
+        {
+          "method": "Traditional API Key",
+          "steps": [
+            "Get your API key from Cost Katana dashboard",
+            "In Custom GPT Actions settings, select 'API Key' authentication",
+            "Set header name to 'X-API-Key'",
+            "Enter your Cost Katana API key",
+            "Test the connection"
+          ]
+        },
+        {
+          "method": "Magic Link Onboarding (Recommended)",
+          "steps": [
+            "No setup required for users!",
+            "Custom GPT automatically offers magic link setup",
+            "Users click the magic link to instantly create account and API key",
+            "Seamless integration with AI personalization from day one"
+          ]
+        }
+      ]
+    },
+    "testing": {
+      "ai_powered_test_prompts": [
+        "🤖 Track this conversation about React debugging and give me AI-powered optimization tips tailored to my coding style",
+        "🎯 I'm new to Cost Katana - set up intelligent monitoring for my ChatGPT usage with personalized recommendations",
+        "📊 Analyze my spending patterns with AI and predict when I'll hit my ChatGPT limits", 
+        "💡 Create a smart project for my business planning with AI cost forecasting and proactive alerts",
+        "🔮 What personalized AI recommendations do you have based on my usage patterns?",
+        "🚀 Show me AI-generated insights about my prompt efficiency and suggest specific improvements"
+      ],
+      "expected_ai_features": [
+        "Personalized smart tips after each conversation",
+        "AI-detected user profile and usage patterns",
+        "Predictive limit warnings with confidence scores",
+        "Context-aware optimization recommendations",
+        "Magic link onboarding for seamless setup",
+        "Proactive cost coaching based on individual patterns"
+      ]
+    },
+    "ai_features_overview": {
+      "intelligent_monitoring": "AI analyzes usage patterns and provides proactive alerts before limits are reached",
+      "personalized_coaching": "Every recommendation is tailored to user's specific usage style, technical level, and cost sensitivity",
+      "predictive_analytics": "AI forecasts spending trends and suggests optimizations with confidence scores",
+      "seamless_onboarding": "Magic link setup eliminates friction - users can start optimizing in seconds",
+      "context_awareness": "AI understands different use cases (coding, writing, business) and provides relevant tips",
+      "bedrock_integration": "Powered by AWS Bedrock for sophisticated AI analysis and recommendation generation"
+    }
+  }
+} 

@@ -1,7 +1,7 @@
 {
     "name": "ai-cost-optimizer-backend",
-    "version": "1.0.0",
-    "description": "Backend service for Cost Katana - Track, analyze and optimize AI API usage costs",
+    "version": "2.0.0",
+    "description": "AI-powered cost optimization backend for Cost Katana - Intelligent monitoring, personalized recommendations, predictive analytics, and seamless onboarding for AI usage optimization",
     "main": "dist/server.js",
     "scripts": {
         "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r ts-node/register src/server.ts\"",
@@ -13,11 +13,19 @@
         "lint:fix": "eslint src/**/*.ts --fix"
     },
     "keywords": [
-        "ai",
-        "cost-optimization",
-        "api-tracking",
+        "ai-cost-optimization",
+        "intelligent-monitoring", 
+        "personalized-recommendations",
+        "predictive-analytics",
+        "cost-intelligence",
+        "magic-link-onboarding",
+        "aws-bedrock",
+        "chatgpt-integration",
+        "ai-coaching",
+        "usage-forecasting",
         "openai",
-        "aws-bedrock"
+        "anthropic",
+        "cost-tracking"
     ],
     "author": "ABDUL SAGHEER",
     "license": "MIT",
@@ -65,7 +73,7 @@
         "@types/jest": "^29.5.11",
         "@types/jsonwebtoken": "^9.0.5",
         "@types/morgan": "^1.9.4",
-        "@types/node": "^20.10.5",
+        "@types/node": "^20.19.9",
         "@types/node-cron": "^3.0.11",
         "@types/nodemailer": "^6.4.14",
         "@typescript-eslint/eslint-plugin": "^6.15.0",
@@ -77,5 +85,17 @@
         "ts-node": "^10.9.2",
         "tsconfig-paths": "^4.2.0",
         "typescript": "^5.3.3"
+    },
+    "engines": {
+        "node": ">=18.0.0",
+        "npm": ">=8.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/cost-katana/ai-cost-optimizer-backend.git"
+    },
+    "homepage": "https://costkatana.com",
+    "bugs": {
+        "url": "https://github.com/cost-katana/ai-cost-optimizer-backend/issues"
     }
 }

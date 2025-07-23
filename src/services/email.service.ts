@@ -21,7 +21,7 @@ export class EmailService {
     return new Date().getFullYear();
   }
 
-  private static async sendEmail(options: EmailOptions): Promise<void> {
+  static async sendEmail(options: EmailOptions): Promise<void> {
     try {
       const transporter = await emailTransporter;
 
