@@ -54,11 +54,12 @@ export class MCPController {
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP Initialize Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 jsonrpc: "2.0",
+                id: req.body?.id || null,
                 error: {
                     code: -32603,
-                    message: "Internal error"
+                    message: error instanceof Error ? error.message : "Internal error"
                 }
             });
         }
@@ -124,11 +125,12 @@ export class MCPController {
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Resources Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 jsonrpc: "2.0",
+                id: req.body?.id || null,
                 error: {
                     code: -32603,
-                    message: "Internal error"
+                    message: error instanceof Error ? error.message : "Internal error"
                 }
             });
         }
@@ -254,11 +256,12 @@ export class MCPController {
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Prompts Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 jsonrpc: "2.0",
+                id: req.body?.id || null,
                 error: {
                     code: -32603,
-                    message: "Internal error"
+                    message: error instanceof Error ? error.message : "Internal error"
                 }
             });
         }
@@ -513,11 +516,12 @@ export class MCPController {
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Tools Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 jsonrpc: "2.0",
+                id: req.body?.id || null,
                 error: {
                     code: -32603,
-                    message: "Internal error"
+                    message: error instanceof Error ? error.message : "Internal error"
                 }
             });
         }
@@ -588,9 +592,9 @@ export class MCPController {
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP Tool Call Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 jsonrpc: "2.0",
-                id: req.body.id,
+                id: req.body?.id || null,
                 error: {
                     code: -32603,
                     message: error instanceof Error ? error.message : "Internal error"
@@ -624,11 +628,15 @@ export class MCPController {
             }
         } catch (error) {
             console.error('MCP Handler Error:', error);
-            res.status(500).json({
+            
+            // MCP JSON-RPC requires 200 status even for errors
+            res.status(200).json({
                 jsonrpc: "2.0",
+                id: req.body?.id || null,
                 error: {
                     code: -32601,
-                    message: "Method not found"
+                    message: error instanceof Error ? error.message : "Method not found",
+                    data: error instanceof Error ? error.stack : undefined
                 }
             });
         }
@@ -663,7 +671,7 @@ export class MCPController {
             });
         } catch (error) {
             console.error('Auto Track Error:', error);
-            res.status(500).json({
+            res.status(200).json({
                 success: false,
                 error: error instanceof Error ? error.message : "Internal error"
             });

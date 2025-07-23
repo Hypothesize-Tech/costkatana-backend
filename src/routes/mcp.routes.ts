@@ -12,14 +12,21 @@ router.use((req, res, next) => {
         console.log('Body:', JSON.stringify(req.body, null, 2));
     }
     
+    // Enhanced CORS headers for Claude compatibility
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-email');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-email, User-Agent, Cache-Control, Pragma');
     res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Max-Age', '86400'); // Cache preflight for 24 hours
     
-    // Handle preflight requests
+    // Set connection headers to prevent premature closing
+    res.header('Connection', 'keep-alive');
+    res.header('Keep-Alive', 'timeout=30, max=1000');
+    
+    // Handle preflight requests immediately
     if (req.method === 'OPTIONS') {
-        res.sendStatus(200);
+        console.log('Handling OPTIONS preflight request');
+        res.status(200).end();
         return;
     }
     
@@ -27,8 +34,35 @@ router.use((req, res, next) => {
 });
 
 // Main MCP endpoint - handles all MCP protocol messages
-router.options('/', (_req, res) => res.sendStatus(200));
-router.post('/', mcpController.handleMCP);
+router.options('/', (_req, res) => {
+    console.log('Direct OPTIONS request to MCP root');
+    res.status(200).end();
+});
+
+// Wrap MCP controller with enhanced error handling
+router.post('/', async (req, res) => {
+    try {
+        console.log(`Processing MCP request: ${req.body?.method || 'unknown method'}`);
+        // Ensure we don't close the connection prematurely
+        req.setTimeout(30000); // 30 second timeout
+        await mcpController.handleMCP(req, res);
+    } catch (error) {
+        console.error('MCP Request Error:', error);
+        
+        // Ensure we send a proper JSON-RPC error response
+        if (!res.headersSent) {
+            res.status(200).json({
+                jsonrpc: '2.0',
+                id: req.body?.id || null,
+                error: {
+                    code: -32603,
+                    message: 'Internal server error',
+                    data: error instanceof Error ? error.message : 'Unknown error'
+                }
+            });
+        }
+    }
+});
 
 // Legacy endpoints for backwards compatibility
 router.options('/initialize', (_req, res) => res.sendStatus(200));
