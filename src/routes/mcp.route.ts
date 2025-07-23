@@ -18,11 +18,18 @@ mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
-// Server capabilities - Empty objects as per official MCP specification
+// Server capabilities - Indicate what features are available
 const SERVER_CAPABILITIES = {
-    prompts: {},
-    resources: {},
-    tools: {},
+    prompts: {
+        listChanged: true
+    },
+    resources: {
+        subscribe: true,
+        listChanged: true
+    },
+    tools: {
+        listChanged: true
+    },
     logging: {}
 };
 
@@ -149,7 +156,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                     break;
 
                 case 'tools/list':
-                    logger.info('MCP Tools list requested');
+                    logger.info('MCP Tools list requested - returning 8 cost optimization tools');
                     await mcpController.listTools(req, res);
                     break;
 
@@ -159,7 +166,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                     break;
 
                 case 'resources/list':
-                    logger.info('MCP Resources list requested');
+                    logger.info('MCP Resources list requested - returning 6 cost analytics resources');
                     await mcpController.listResources(req, res);
                     break;
 
@@ -176,7 +183,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                     break;
 
                 case 'prompts/list':
-                    logger.info('MCP Prompts list requested');
+                    logger.info('MCP Prompts list requested - returning 6 optimization workflow prompts');
                     await mcpController.listPrompts(req, res);
                     break;
 

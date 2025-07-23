@@ -6,64 +6,7 @@ import { EmailService } from '../services/email.service';
 
 export class MCPController {
 
-    // MCP Initialize - Required for MCP protocol handshake
-    public initialize = async (req: Request, res: Response) => {
-        try {
-            console.log('MCP Initialize called:', JSON.stringify(req.body, null, 2));
-            
-            const { id, method } = req.body;
-            
-            if (method === 'initialize') {
-                const response = {
-                    jsonrpc: "2.0",
-                    id: id,
-                    result: {
-                        protocolVersion: "2024-11-05",
-                        capabilities: {
-                            tools: {
-                                listChanged: true
-                            },
-                            resources: {
-                                subscribe: true,
-                                listChanged: true
-                            },
-                            prompts: {
-                                listChanged: true
-                            },
-                            logging: {},
-                            experimental: {}
-                        },
-                        serverInfo: {
-                            name: "cost-katana",
-                            version: "1.0.0",
-                            description: "AI Cost Intelligence & Optimization Platform - Your Complete AI Cost Management Solution"
-                        }
-                    }
-                };
-                
-                res.json(response);
-                return;
-            }
-            
-            // Handle notifications
-            if (!id && method === 'notifications/initialized') {
-                res.status(200).end();
-                return;
-            }
-            
-            throw new Error(`Unknown method: ${method}`);
-        } catch (error) {
-            console.error('MCP Initialize Error:', error);
-            res.status(200).json({
-                jsonrpc: "2.0",
-                id: req.body?.id || null,
-                error: {
-                    code: -32603,
-                    message: error instanceof Error ? error.message : "Internal error"
-                }
-            });
-        }
-    };
+    // Note: Initialize method removed - handled by route directly
 
     // MCP Resources List
     public listResources = async (req: Request, res: Response) => {
@@ -603,7 +546,7 @@ export class MCPController {
         }
     };
 
-    // Main MCP handler - routes to appropriate method
+    // Main MCP handler - routes to appropriate method (deprecated - use route directly)
     public handleMCP = async (req: Request, res: Response) => {
         try {
             const { method } = req.body;
@@ -611,10 +554,6 @@ export class MCPController {
             console.log(`MCP Request: ${method}`);
             
             switch (method) {
-                case 'initialize':
-                    return this.initialize(req, res);
-                case 'notifications/initialized':
-                    return this.initialize(req, res);
                 case 'tools/list':
                     return this.listTools(req, res);
                 case 'tools/call':
@@ -624,7 +563,7 @@ export class MCPController {
                 case 'prompts/list':
                     return this.listPrompts(req, res);
                 default:
-                    throw new Error(`Unknown MCP method: ${method}`);
+                    throw new Error(`Unknown MCP method: ${method} - initialize and notifications are handled by route`);
             }
         } catch (error) {
             console.error('MCP Handler Error:', error);
