@@ -122,41 +122,123 @@ export class OnboardingController {
                         alertThreshold: 80,
                         weeklyReports: true,
                         optimizationSuggestions: true
-                    }
+                    },
+                    dashboardApiKeys: [] // Initialize empty array
                 });
                 await user.save();
                 isNewUser = true;
                 logger.info('New user created via magic link', { email, userId: user._id });
+            } else {
+                // User exists, check if they already have a ChatGPT integration API key
+                const existingChatGPTKey = user.dashboardApiKeys?.find(key => 
+                    key.name && key.name.toLowerCase().includes('chatgpt')
+                );
+                
+                if (existingChatGPTKey) {
+                    logger.info('User already has ChatGPT API key', { email, userId: user._id });
+                    // Return existing setup instead of creating duplicate
+                    const successHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Cost Katana - Already Connected!</title>
+                        <meta charset="utf-8">
+                        <meta name="viewport" content="width=device-width, initial-scale=1">
+                        <style>
+                            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8fafc; }
+                            .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; }
+                            .success-icon { font-size: 48px; margin-bottom: 20px; }
+                            h1 { color: #059669; margin: 0 0 10px 0; }
+                            .subtitle { color: #6b7280; margin-bottom: 30px; }
+                            .api-key { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; padding: 15px; font-family: 'Monaco', monospace; font-size: 12px; word-break: break-all; margin: 20px 0; }
+                            .auto-return { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 14px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="success-card">
+                            <div class="success-icon">✅</div>
+                            <h1>Already Connected to Cost Katana!</h1>
+                            <p class="subtitle">Welcome back ${user.name}! Your ChatGPT integration is already active.</p>
+                            
+                            <div class="auto-return">
+                                <strong>🔄 Returning to ChatGPT...</strong><br>
+                                Your account is ready to track AI costs! This window will close automatically.
+                            </div>
+                        </div>
+                        
+                        <script>
+                            setTimeout(() => {
+                                if (window.opener) {
+                                    window.close();
+                                }
+                            }, 3000);
+                        </script>
+                    </body>
+                    </html>
+                    `;
+
+                    res.setHeader('Content-Type', 'text/html');
+                    res.send(successHtml);
+                    return;
+                }
             }
 
             // Generate API key for ChatGPT integration using AuthService
-            const { AuthService } = await import('../services/auth.service');
-            const { keyId, apiKey, maskedKey } = AuthService.generateDashboardApiKey(
-                user as any, 
-                `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                ['read', 'write']
-            );
+            let apiKey, keyId, maskedKey;
+            try {
+                const { AuthService } = await import('../services/auth.service');
+                const result = AuthService.generateDashboardApiKey(
+                    user as any, 
+                    `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                    ['read', 'write']
+                );
+                apiKey = result.apiKey;
+                keyId = result.keyId;
+                maskedKey = result.maskedKey;
 
-            // Encrypt the API key for storage
-            const { encrypt } = await import('../utils/helpers');
-            const { encrypted, iv, authTag } = encrypt(apiKey);
-            const encryptedKey = `${iv}:${authTag}:${encrypted}`;
+                // Encrypt the API key for storage
+                const { encrypt } = await import('../utils/helpers');
+                const { encrypted, iv, authTag } = encrypt(apiKey);
+                const encryptedKey = `${iv}:${authTag}:${encrypted}`;
 
-            // Initialize dashboardApiKeys array if it doesn't exist
-            if (!user.dashboardApiKeys) {
-                user.dashboardApiKeys = [];
+                // Initialize dashboardApiKeys array if it doesn't exist
+                if (!user.dashboardApiKeys) {
+                    user.dashboardApiKeys = [];
+                }
+
+                const newApiKey = {
+                    name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                    keyId,
+                    encryptedKey,
+                    maskedKey,
+                    permissions: ['read', 'write'],
+                    createdAt: new Date(),
+                };
+
+                user.dashboardApiKeys.push(newApiKey);
+            } catch (keyGenError) {
+                logger.error('Error generating API key:', keyGenError);
+                // Fallback to simple API key generation
+                keyId = crypto.randomBytes(16).toString('hex');
+                apiKey = `ck_user_${user._id}_${crypto.randomBytes(16).toString('hex')}`;
+                maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
+
+                // Initialize dashboardApiKeys array if it doesn't exist
+                if (!user.dashboardApiKeys) {
+                    user.dashboardApiKeys = [];
+                }
+
+                const newApiKey = {
+                    name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                    keyId,
+                    encryptedKey: apiKey, // Store unencrypted as fallback
+                    maskedKey,
+                    permissions: ['read', 'write'],
+                    createdAt: new Date(),
+                };
+
+                user.dashboardApiKeys.push(newApiKey);
             }
-
-            const newApiKey = {
-                name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                keyId,
-                encryptedKey,
-                maskedKey,
-                permissions: ['read', 'write'],
-                createdAt: new Date(),
-            };
-
-            user.dashboardApiKeys.push(newApiKey);
 
             // Create default project
             const defaultProject = await ProjectService.createProject(user._id.toString(), {
