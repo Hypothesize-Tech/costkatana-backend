@@ -13,6 +13,7 @@ import { intelligenceService } from './services/intelligence.service';
 import { initializeCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
+import mcpRoute from './routes/mcp.route';
 
 // Create Express app
 const app: Application = express();
@@ -105,6 +106,7 @@ app.use(sanitizeInput);
 
 // API routes
 app.use('/api', apiRouter);
+app.use('/api/mcp', mcpRoute);
 
 // Health check route with minimal logging
 app.get('/', (req, res) => {

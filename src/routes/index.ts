@@ -19,7 +19,7 @@ import { chatgptRoutes } from './chatgpt.routes';
 import { apiKeyRoutes } from './apiKey.routes';
 import { onboardingRoutes } from './onboarding.routes';
 import { monitoringRoutes } from './monitoring.routes';
-import { mcpRoutes } from './mcp.routes';
+// import { mcpRoutes } from './mcp.routes';
 
 const router = Router();
 
@@ -54,6 +54,6 @@ router.use('/chatgpt', chatgptRoutes);
 router.use('/api-keys', apiKeyRoutes);
 router.use('/onboarding', onboardingRoutes);
 router.use('/monitoring', monitoringRoutes);
-router.use('/mcp', mcpRoutes);
+// router.use('/mcp', mcpRoutes);
 
 export const apiRouter = router;
