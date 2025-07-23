@@ -156,8 +156,10 @@ export class OnboardingController {
                 const apiKey = `ck_${userId}_${keyId}_${keySecret}`;
                 const maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
 
+                // Generate a readable temporary password that users can actually use
+                const tempPassword = crypto.randomBytes(8).toString('hex').toUpperCase(); // Shorter, readable password
+
                 // Create new user with API key already included
-                const tempPassword = crypto.randomBytes(16).toString('hex');
                 user = new User({
                     _id: userId,
                     email,
@@ -182,6 +184,88 @@ export class OnboardingController {
                 await user.save();
                 isNewUser = true;
                 logger.info('New user created via magic link with API key', { email, userId: user._id, keyId });
+                
+                // Send welcome email with login credentials
+                try {
+                    const { EmailService } = await import('../services/email.service');
+                    const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
+                    const loginUrl = `${frontendUrl}/login`;
+                    
+                    await EmailService.sendEmail({
+                        to: email,
+                        subject: '🎉 Welcome to Cost Katana! Your Account is Ready',
+                        html: `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+                                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0; }
+                                .content { padding: 30px 20px; background: #f8fafc; }
+                                .credentials-box { background: white; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; }
+                                .password { font-family: Monaco, monospace; font-size: 18px; font-weight: bold; color: #059669; background: #f0f9ff; padding: 10px; border-radius: 4px; text-align: center; margin: 10px 0; letter-spacing: 2px; }
+                                .login-btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+                                .important { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 15px; margin: 20px 0; }
+                                .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="header">
+                                <h1>🎉 Welcome to Cost Katana!</h1>
+                                <p>Your AI cost tracking account is ready</p>
+                            </div>
+                            <div class="content">
+                                <h2>Hi ${user.name}!</h2>
+                                <p>Great news! Your Cost Katana account has been successfully created via magic link from ${source}.</p>
+                                
+                                <div class="credentials-box">
+                                    <h3>🔐 Your Login Credentials</h3>
+                                    <p><strong>Email:</strong> ${email}</p>
+                                    <p><strong>Temporary Password:</strong></p>
+                                    <div class="password">${tempPassword}</div>
+                                    <p style="font-size: 14px; color: #6b7280;">You can change this password after logging in</p>
+                                </div>
+
+                                <div style="text-align: center;">
+                                    <a href="${loginUrl}" class="login-btn">Login to Cost Katana Dashboard</a>
+                                </div>
+
+                                <div class="important">
+                                    <strong>⚠️ Important:</strong>
+                                    <ul>
+                                        <li>Save this email - your temporary password is: <strong>${tempPassword}</strong></li>
+                                        <li>Your ${source} integration is already configured and ready to use</li>
+                                        <li>Change your password after first login for security</li>
+                                    </ul>
+                                </div>
+
+                                <h3>🚀 What's Next?</h3>
+                                <ol>
+                                    <li>Login to your dashboard using the credentials above</li>
+                                    <li>Go back to ${source} and start tracking your AI costs</li>
+                                    <li>Set up budget alerts and optimization preferences</li>
+                                    <li>View your detailed cost analytics and insights</li>
+                                </ol>
+
+                                <p>Need help? Just reply to this email and we'll assist you!</p>
+                                <p>Happy cost tracking! 📊</p>
+                            </div>
+                            <div class="footer">
+                                <p>© ${new Date().getFullYear()} Cost Katana. All rights reserved.</p>
+                                <p>This email was sent because you connected via magic link from ${source}</p>
+                            </div>
+                        </body>
+                        </html>
+                        `
+                    });
+                    logger.info('Welcome email sent with login credentials', { email });
+                } catch (emailError) {
+                    logger.error('Failed to send welcome email:', emailError);
+                    // Don't fail the onboarding if email fails
+                }
+                
+                // Store the temp password to show on success page
+                (user as any).tempPasswordForDisplay = tempPassword;
                 
                 // API key variables are already set above, skip the generation below
             } else {
@@ -369,6 +453,9 @@ export class OnboardingController {
 
             // Success HTML response with CSP-compliant external script
             const scriptNonce = crypto.randomBytes(16).toString('base64');
+            const tempPasswordDisplay = (user as any).tempPasswordForDisplay;
+            const loginUrl = `${process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000'}/login`;
+            
             const successHtml = `
             <!DOCTYPE html>
             <html>
@@ -383,12 +470,16 @@ export class OnboardingController {
                     .success-icon { font-size: 48px; margin-bottom: 20px; }
                     h1 { color: #059669; margin: 0 0 10px 0; }
                     .subtitle { color: #6b7280; margin-bottom: 30px; }
+                    .credentials-box { background: #f0f9ff; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; text-align: left; }
+                    .password { font-family: Monaco, monospace; font-size: 16px; font-weight: bold; color: #059669; background: white; padding: 10px; border-radius: 4px; text-align: center; margin: 10px 0; letter-spacing: 1px; border: 1px solid #d1d5db; }
                     .api-key { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; padding: 15px; font-family: 'Monaco', monospace; font-size: 12px; word-break: break-all; margin: 20px 0; }
-                    .copy-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 10px; }
+                    .copy-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; margin: 5px 5px 0 0; }
                     .copy-btn:hover { background: #2563eb; }
                     .copy-btn.copied { background: #059669; }
+                    .login-btn { display: inline-block; background: #059669; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 15px 0; }
+                    .login-btn:hover { background: #047857; }
                     .auto-return { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 14px; }
-                    .success { color: #059669; font-weight: 500; }
+                    .warning { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px; margin: 15px 0; font-size: 14px; }
                 </style>
             </head>
             <body>
@@ -397,15 +488,32 @@ export class OnboardingController {
                     <h1>Successfully Connected to Cost Katana!</h1>
                     <p class="subtitle">Welcome ${user.name}! Your account is now set up for AI cost tracking.</p>
                     
+                    ${isNewUser && tempPasswordDisplay ? `
+                    <div class="credentials-box">
+                        <h3>🔐 Your Login Credentials</h3>
+                        <p><strong>Email:</strong> ${user.email}</p>
+                        <p><strong>Temporary Password:</strong></p>
+                        <div class="password" id="password">${tempPasswordDisplay}</div>
+                        <button class="copy-btn" id="copyPasswordBtn">Copy Password</button>
+                        <div style="text-align: center; margin-top: 15px;">
+                            <a href="${loginUrl}" class="login-btn" target="_blank">Login to Dashboard</a>
+                        </div>
+                    </div>
+                    
+                    <div class="warning">
+                        <strong>⚠️ Important:</strong> Save these credentials! We've also sent them to your email (${user.email}). You can change your password after logging in.
+                    </div>
+                    ` : ''}
+                    
                     <div class="api-key">
-                        <strong>Your API Key:</strong><br>
+                        <strong>Your ${source} API Integration:</strong><br>
                         <span id="apiKey">${maskedKey || 'Generated successfully'}</span>
-                        <br><button class="copy-btn" id="copyBtn">Copy to Clipboard</button>
+                        <br><button class="copy-btn" id="copyApiBtn">Copy API Key</button>
                     </div>
                     
                     <div class="auto-return">
-                        <strong>🔄 Returning to ChatGPT...</strong><br>
-                        Your account is ready to track AI costs! This window will close automatically.
+                        <strong>🔄 Returning to ${source}...</strong><br>
+                        Your account is ready to track AI costs! This window will close automatically in 15 seconds.
                     </div>
                 </div>
                 
@@ -418,32 +526,46 @@ export class OnboardingController {
                         projectId: '${defaultProject._id}'
                     };
                     
-                    // Add event listener for copy button
+                    // Add event listeners for copy buttons
                     document.addEventListener('DOMContentLoaded', function() {
-                        const copyBtn = document.getElementById('copyBtn');
+                        // API Key copy button
+                        const copyApiBtn = document.getElementById('copyApiBtn');
                         const apiKeyElement = document.getElementById('apiKey');
                         
-                        if (copyBtn && apiKeyElement) {
-                            copyBtn.addEventListener('click', function() {
+                        if (copyApiBtn && apiKeyElement) {
+                            copyApiBtn.addEventListener('click', function() {
                                 const apiKeyText = apiKeyElement.textContent || 'API Key Generated';
-                                
-                                // Try modern clipboard API first
-                                if (navigator.clipboard && window.isSecureContext) {
-                                    navigator.clipboard.writeText(apiKeyText).then(() => {
-                                        showCopySuccess();
-                                    }).catch(() => {
-                                        fallbackCopy(apiKeyText);
-                                    });
-                                } else {
-                                    fallbackCopy(apiKeyText);
-                                }
+                                copyToClipboard(apiKeyText, 'copyApiBtn', 'Copy API Key');
                             });
                         }
                         
-                        function showCopySuccess() {
-                            const btn = document.getElementById('copyBtn');
+                        // Password copy button (only for new users)
+                        const copyPasswordBtn = document.getElementById('copyPasswordBtn');
+                        const passwordElement = document.getElementById('password');
+                        
+                        if (copyPasswordBtn && passwordElement) {
+                            copyPasswordBtn.addEventListener('click', function() {
+                                const passwordText = passwordElement.textContent || '';
+                                copyToClipboard(passwordText, 'copyPasswordBtn', 'Copy Password');
+                            });
+                        }
+                        
+                        function copyToClipboard(text, buttonId, originalText) {
+                            // Try modern clipboard API first
+                            if (navigator.clipboard && window.isSecureContext) {
+                                navigator.clipboard.writeText(text).then(() => {
+                                    showCopySuccess(buttonId, originalText);
+                                }).catch(() => {
+                                    fallbackCopy(text, buttonId, originalText);
+                                });
+                            } else {
+                                fallbackCopy(text, buttonId, originalText);
+                            }
+                        }
+                        
+                        function showCopySuccess(buttonId, originalText) {
+                            const btn = document.getElementById(buttonId);
                             if (btn) {
-                                const originalText = btn.textContent;
                                 btn.textContent = 'Copied!';
                                 btn.classList.add('copied');
                                 setTimeout(() => {
@@ -453,7 +575,7 @@ export class OnboardingController {
                             }
                         }
                         
-                        function fallbackCopy(text) {
+                        function fallbackCopy(text, buttonId, originalText) {
                             // Fallback for older browsers
                             const textArea = document.createElement('textarea');
                             textArea.value = text;
@@ -466,7 +588,7 @@ export class OnboardingController {
                             
                             try {
                                 document.execCommand('copy');
-                                showCopySuccess();
+                                showCopySuccess(buttonId, originalText);
                             } catch (err) {
                                 console.error('Copy failed:', err);
                                 alert('Copy failed. Please manually copy: ' + text);
@@ -475,12 +597,12 @@ export class OnboardingController {
                             document.body.removeChild(textArea);
                         }
                         
-                        // Auto-close window after 8 seconds
+                        // Auto-close window after 15 seconds
                         setTimeout(() => {
                             if (window.opener) {
                                 window.close();
                             }
-                        }, 8000);
+                        }, 15000);
                     });
                 </script>
             </body>

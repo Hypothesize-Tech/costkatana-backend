@@ -88,13 +88,90 @@ export class ChatGPTController {
                     userId = user_id;
                 }
             } else if (api_key) {
-                // Validate API key using the ApiKeyController
-                const { ApiKeyController } = await import('./apiKey.controller');
-                const validation = await ApiKeyController.validateApiKey(api_key);
+                // Try both ChatGPT integration keys and dashboard API keys
+                let validation: any = null;
+                
+                // First try ChatGPT integration API keys (ck_user_ format)
+                if (api_key.startsWith('ck_user_')) {
+                    const { ApiKeyController } = await import('./apiKey.controller');
+                    validation = await ApiKeyController.validateApiKey(api_key);
+                }
+                
+                // If no validation yet, try dashboard API keys (dak_ format or full key)
+                if (!validation) {
+                    try {
+                        const { User } = await import('../models/User');
+                        const { AuthService } = await import('../services/auth.service');
+                        const { decrypt } = await import('../utils/helpers');
+                        
+                        // Handle dashboard API keys (dak_ format)
+                        if (api_key.startsWith('dak_')) {
+                            const parsedKey = AuthService.parseApiKey(api_key);
+                            if (parsedKey) {
+                                const user = await User.findById(parsedKey.userId);
+                                if (user) {
+                                    const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
+                                    if (userApiKey && (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt)) {
+                                        try {
+                                            const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
+                                            const decryptedKey = decrypt(encrypted, iv, authTag);
+                                            if (decryptedKey === api_key) {
+                                                userApiKey.lastUsed = new Date();
+                                                await user.save();
+                                                validation = { userId: user._id.toString(), user };
+                                            }
+                                        } catch (error) {
+                                            logger.warn('Failed to decrypt dashboard API key:', error);
+                                        }
+                                    }
+                                }
+                            }
+                        } 
+                        // Handle full dashboard API keys (starts with user ID)
+                        else {
+                            // Try to extract user ID from the key format
+                            const userIdMatch = api_key.match(/^[a-f0-9]{24}_/);
+                            if (userIdMatch) {
+                                const potentialUserId = userIdMatch[0].slice(0, -1); // Remove trailing underscore
+                                const user = await User.findById(potentialUserId);
+                                if (user && user.dashboardApiKeys) {
+                                    // Check if this key matches any encrypted key
+                                    for (const userApiKey of user.dashboardApiKeys) {
+                                        if (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt) {
+                                            try {
+                                                const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
+                                                const decryptedKey = decrypt(encrypted, iv, authTag);
+                                                if (decryptedKey === api_key) {
+                                                    userApiKey.lastUsed = new Date();
+                                                    await user.save();
+                                                    validation = { userId: user._id.toString(), user };
+                                                    break;
+                                                }
+                                            } catch (error) {
+                                                // Continue to next key
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        logger.error('Error validating dashboard API key:', error);
+                    }
+                }
+                
                 if (!validation) {
                     res.status(401).json({
                         success: false,
-                        error: 'Invalid or inactive API key. Please check your API key in the Cost Katana dashboard.'
+                        error: 'Invalid or inactive API key. Please check your API key in the Cost Katana dashboard.',
+                        debug: {
+                            keyFormat: api_key.startsWith('ck_user_') ? 'ChatGPT Integration Key' : 
+                                      api_key.startsWith('dak_') ? 'Dashboard API Key (dak_)' : 
+                                      'Dashboard API Key (full)',
+                            keyLength: api_key.length,
+                            keyPrefix: api_key.substring(0, 10) + '...'
+                        }
                     });
                     return;
                 }
