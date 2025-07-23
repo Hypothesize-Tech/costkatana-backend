@@ -10,6 +10,18 @@ interface ChatGPTRequest extends Request {
         user_id?: string;
         api_key?: string;
         email?: string; // For magic link generation
+        name?: string; // For magic link generation
+        source?: string; // For magic link generation
+        onboarding?: {
+            email: string;
+            name?: string;
+            source?: string;
+            preferences?: {
+                use_case?: string;
+                ai_coaching?: boolean;
+                email_insights?: boolean;
+            };
+        };
         conversation_data?: {
             prompt: string;
             response: string;
@@ -121,13 +133,20 @@ export class ChatGPTController {
      */
     private static async generateMagicLink(req: ChatGPTRequest, res: Response): Promise<void> {
         try {
-            const { email } = req.body;
+            // Extract email from either direct body or onboarding object
+            const email = req.body.email || req.body.onboarding?.email;
+            const name = req.body.name || req.body.onboarding?.name;
+            const source = req.body.source || req.body.onboarding?.source || 'chatgpt';
 
             if (!email) {
                 res.status(400).json({
                     success: false,
                     error: 'Email is required for magic link generation',
-                    message: 'Please provide your email address to create a magic link.'
+                    message: 'Please provide your email address to create a magic link.',
+                    debug: {
+                        received_body: req.body,
+                        expected_structure: 'email should be in req.body.email or req.body.onboarding.email'
+                    }
                 });
                 return;
             }
@@ -137,7 +156,11 @@ export class ChatGPTController {
             
             // Create a mock request for the onboarding controller
             const mockReq = {
-                body: { email, source: 'chatgpt' }
+                body: { 
+                    email, 
+                    name,
+                    source: source || 'chatgpt'
+                }
             } as Request;
 
             let magicLinkResponse: any;

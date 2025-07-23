@@ -14,7 +14,7 @@ export class OnboardingController {
      */
     static async generateMagicLink(req: Request, res: Response): Promise<void> {
         try {
-            const { email, source = 'chatgpt' } = req.body;
+            const { email, name, source = 'chatgpt' } = req.body;
 
             if (!email) {
                 res.status(400).json({
@@ -31,6 +31,7 @@ export class OnboardingController {
             // Store magic link session (you might want to use Redis for this)
             const magicLinkData = {
                 email,
+                name,
                 source,
                 sessionId,
                 createdAt: new Date(),
@@ -101,7 +102,7 @@ export class OnboardingController {
                 return;
             }
 
-            const { email, source } = magicLinkData;
+            const { email, name, source } = magicLinkData;
 
             // Find or create user
             let user = await User.findOne({ email });
@@ -112,7 +113,7 @@ export class OnboardingController {
                 const tempPassword = crypto.randomBytes(16).toString('hex');
                 user = new User({
                     email,
-                    name: email.split('@')[0], // Use email prefix as default name
+                    name: name || email.split('@')[0], // Use provided name or email prefix as default
                     password: tempPassword,
                     emailVerified: true, // Auto-verify via magic link
                     preferences: {
