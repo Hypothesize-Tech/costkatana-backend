@@ -193,6 +193,7 @@ export class OnboardingController {
                 if (existingChatGPTKey) {
                     logger.info('User already has ChatGPT API key', { email, userId: user._id });
                     // Return existing setup instead of creating duplicate
+                    const alreadyConnectedNonce = crypto.randomBytes(16).toString('base64');
                     const successHtml = `
                     <!DOCTYPE html>
                     <html>
@@ -200,6 +201,7 @@ export class OnboardingController {
                         <title>Cost Katana - Already Connected!</title>
                         <meta charset="utf-8">
                         <meta name="viewport" content="width=device-width, initial-scale=1">
+                        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-${alreadyConnectedNonce}'; object-src 'none';">
                         <style>
                             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8fafc; }
                             .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; }
@@ -222,12 +224,14 @@ export class OnboardingController {
                             </div>
                         </div>
                         
-                        <script>
-                            setTimeout(() => {
-                                if (window.opener) {
-                                    window.close();
-                                }
-                            }, 3000);
+                        <script nonce="${alreadyConnectedNonce}">
+                            document.addEventListener('DOMContentLoaded', function() {
+                                setTimeout(() => {
+                                    if (window.opener) {
+                                        window.close();
+                                    }
+                                }, 3000);
+                            });
                         </script>
                     </body>
                     </html>
@@ -363,7 +367,8 @@ export class OnboardingController {
                 { expiresIn: '7d' }
             );
 
-            // Success HTML response with embedded data
+            // Success HTML response with CSP-compliant external script
+            const scriptNonce = crypto.randomBytes(16).toString('base64');
             const successHtml = `
             <!DOCTYPE html>
             <html>
@@ -371,6 +376,7 @@ export class OnboardingController {
                 <title>Cost Katana - Connected Successfully!</title>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
+                <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-${scriptNonce}'; object-src 'none';">
                 <style>
                     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8fafc; }
                     .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; }
@@ -380,6 +386,7 @@ export class OnboardingController {
                     .api-key { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; padding: 15px; font-family: 'Monaco', monospace; font-size: 12px; word-break: break-all; margin: 20px 0; }
                     .copy-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 10px; }
                     .copy-btn:hover { background: #2563eb; }
+                    .copy-btn.copied { background: #059669; }
                     .auto-return { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 14px; }
                     .success { color: #059669; font-weight: 500; }
                 </style>
@@ -393,7 +400,7 @@ export class OnboardingController {
                     <div class="api-key">
                         <strong>Your API Key:</strong><br>
                         <span id="apiKey">${maskedKey || 'Generated successfully'}</span>
-                        <br><button class="copy-btn" onclick="copyApiKey()">Copy to Clipboard</button>
+                        <br><button class="copy-btn" id="copyBtn">Copy to Clipboard</button>
                     </div>
                     
                     <div class="auto-return">
@@ -402,7 +409,7 @@ export class OnboardingController {
                     </div>
                 </div>
                 
-                <script>
+                <script nonce="${scriptNonce}">
                     // Store auth data for potential use
                     const authData = {
                         token: '${jwtToken}',
@@ -411,26 +418,70 @@ export class OnboardingController {
                         projectId: '${defaultProject._id}'
                     };
                     
-                    function copyApiKey() {
-                        const apiKeyText = '${maskedKey || 'API Key Generated'}';
-                        navigator.clipboard.writeText(apiKeyText).then(() => {
-                            const btn = event.target;
-                            const originalText = btn.textContent;
-                            btn.textContent = 'Copied!';
-                            btn.style.background = '#059669';
-                            setTimeout(() => {
-                                btn.textContent = originalText;
-                                btn.style.background = '#3b82f6';
-                            }, 2000);
-                        });
-                    }
-                    
-                    // Auto-close window after 5 seconds
-                    setTimeout(() => {
-                        if (window.opener) {
-                            window.close();
+                    // Add event listener for copy button
+                    document.addEventListener('DOMContentLoaded', function() {
+                        const copyBtn = document.getElementById('copyBtn');
+                        const apiKeyElement = document.getElementById('apiKey');
+                        
+                        if (copyBtn && apiKeyElement) {
+                            copyBtn.addEventListener('click', function() {
+                                const apiKeyText = apiKeyElement.textContent || 'API Key Generated';
+                                
+                                // Try modern clipboard API first
+                                if (navigator.clipboard && window.isSecureContext) {
+                                    navigator.clipboard.writeText(apiKeyText).then(() => {
+                                        showCopySuccess();
+                                    }).catch(() => {
+                                        fallbackCopy(apiKeyText);
+                                    });
+                                } else {
+                                    fallbackCopy(apiKeyText);
+                                }
+                            });
                         }
-                    }, 5000);
+                        
+                        function showCopySuccess() {
+                            const btn = document.getElementById('copyBtn');
+                            if (btn) {
+                                const originalText = btn.textContent;
+                                btn.textContent = 'Copied!';
+                                btn.classList.add('copied');
+                                setTimeout(() => {
+                                    btn.textContent = originalText;
+                                    btn.classList.remove('copied');
+                                }, 2000);
+                            }
+                        }
+                        
+                        function fallbackCopy(text) {
+                            // Fallback for older browsers
+                            const textArea = document.createElement('textarea');
+                            textArea.value = text;
+                            textArea.style.position = 'fixed';
+                            textArea.style.left = '-999999px';
+                            textArea.style.top = '-999999px';
+                            document.body.appendChild(textArea);
+                            textArea.focus();
+                            textArea.select();
+                            
+                            try {
+                                document.execCommand('copy');
+                                showCopySuccess();
+                            } catch (err) {
+                                console.error('Copy failed:', err);
+                                alert('Copy failed. Please manually copy: ' + text);
+                            }
+                            
+                            document.body.removeChild(textArea);
+                        }
+                        
+                        // Auto-close window after 8 seconds
+                        setTimeout(() => {
+                            if (window.opener) {
+                                window.close();
+                            }
+                        }, 8000);
+                    });
                 </script>
             </body>
             </html>
