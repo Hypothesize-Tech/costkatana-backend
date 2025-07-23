@@ -108,19 +108,46 @@ mcpRoute.get('/', (req: Request, res: Response) => {
         headers: req.headers
     });
 
-    // Return simple JSON instead of SSE
-    res.json({
-        status: 'ready',
-        protocol: PROTOCOL_VERSION,
-        capabilities: SERVER_CAPABILITIES,
-        serverInfo: {
-            name: 'ai-cost-optimizer-mcp',
-            version: '1.0.0',
-            description: "AI Cost Intelligence & Optimization Platform"
-        },
-        message: 'MCP server is ready. Use POST requests for JSON-RPC calls.',
-        timestamp: new Date().toISOString()
-    });
+    // Check if client expects SSE (like Claude does)
+    const acceptsSSE = req.get('Accept')?.includes('text/event-stream');
+    
+    if (acceptsSSE) {
+        // Provide minimal SSE response to satisfy Claude's expectations
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+        });
+        
+        // Send immediate ready event and close
+        res.write(`event: ready\ndata: ${JSON.stringify({
+            status: 'ready',
+            protocol: PROTOCOL_VERSION,
+            capabilities: SERVER_CAPABILITIES,
+            message: 'Server ready for JSON-RPC calls'
+        })}\n\n`);
+        
+        // Close the connection immediately - no long-lived SSE
+        setTimeout(() => {
+            res.end();
+        }, 100);
+        
+    } else {
+        // Return simple JSON for non-SSE clients
+        res.json({
+            status: 'ready',
+            protocol: PROTOCOL_VERSION,
+            capabilities: SERVER_CAPABILITIES,
+            serverInfo: {
+                name: 'ai-cost-optimizer-mcp',
+                version: '1.0.0',
+                description: "AI Cost Intelligence & Optimization Platform"
+            },
+            message: 'MCP server is ready. Use POST requests for JSON-RPC calls.',
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 // Simple status endpoint for MCP health checks (replaces problematic SSE)
