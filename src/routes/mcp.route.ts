@@ -109,37 +109,9 @@ mcpRoute.get('/', (req: Request, res: Response) => {
     }
 });
 
-// Debug endpoint that bypasses middleware
-const debugRouter = express.Router();
-debugRouter.post('/debug', (req: Request, res: Response) => {
-    console.log('=== DEBUG ENDPOINT HIT ===');
-    console.log('Body:', req.body);
-    console.log('Headers:', req.headers);
-    console.log('Method:', req.method);
-    console.log('=========================');
-    
-    res.json({
-        status: 'debug-success',
-        receivedBody: req.body,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Add debug router to main route
-mcpRoute.use(debugRouter);
-
 // JSON-RPC Endpoint (POST) - For client-to-server messages
 mcpRoute.post('/', async (req: Request, res: Response) => {
     const { method, params, id } = req.body;
-    
-    // Extra detailed logging for debugging
-    console.log('=== MCP POST REQUEST ===');
-    console.log('Method:', method);
-    console.log('ID:', id);
-    console.log('Full Body:', JSON.stringify(req.body, null, 2));
-    console.log('User-Agent:', req.get('User-Agent'));
-    console.log('Content-Type:', req.get('Content-Type'));
-    console.log('========================');
     
     logger.info('MCP JSON-RPC Request received', {
         method,
@@ -276,31 +248,6 @@ mcpRoute.get('/health', (_req: Request, res: Response) => {
             details: connections
         },
         uptime: process.uptime()
-    });
-});
-
-// Catch-all route to log unexpected requests
-mcpRoute.all('*', (req: Request, res: Response) => {
-    console.log('=== UNEXPECTED MCP REQUEST ===');
-    console.log('Method:', req.method);
-    console.log('Path:', req.path);
-    console.log('Body:', req.body);
-    console.log('Headers:', req.headers);
-    console.log('==============================');
-    
-    logger.warn('Unexpected MCP request', {
-        method: req.method,
-        path: req.path,
-        body: req.body,
-        headers: req.headers
-    });
-    
-    res.status(404).json({
-        jsonrpc: '2.0',
-        error: {
-            code: -32601,
-            message: `Path '${req.path}' not found`
-        }
     });
 });
 
