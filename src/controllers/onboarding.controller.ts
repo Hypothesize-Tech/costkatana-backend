@@ -42,7 +42,8 @@ export class OnboardingController {
             // For now, we'll encode it in the token itself
             const encodedData = Buffer.from(JSON.stringify(magicLinkData)).toString('base64');
             
-            const magicLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/connect/chatgpt?token=${magicToken}&data=${encodedData}`;
+            const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, ''); // Remove trailing slash
+            const magicLink = `${frontendUrl}/connect/chatgpt?token=${magicToken}&data=${encodedData}`;
 
             res.json({
                 success: true,
