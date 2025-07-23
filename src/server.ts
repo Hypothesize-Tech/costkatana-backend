@@ -191,12 +191,17 @@ export const startServer = async () => {
         
         initializeCronJobs();
 
-        app.listen(PORT, () => {
+        const server = app.listen(PORT, () => {
             logger.info(`Server is running on port ${PORT}`);
             logger.info('Security middleware enabled');
             logger.info('Rate limiting enabled');
             logger.info('Health check logging filtered');
         });
+
+        // Increase keep-alive timeout for ELB
+        server.keepAliveTimeout = 61 * 1000;
+        server.headersTimeout = 65 * 1000;
+
     } catch (error) {
         logger.error('Failed to start server:', error);
         process.exit(1);
