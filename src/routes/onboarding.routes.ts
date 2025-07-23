@@ -40,19 +40,13 @@ router.get(
             .withMessage('Data is required')
     ],
     validateRequest,
-    asyncHandler(OnboardingController.completeMagicLinkOnboarding)
+    asyncHandler(OnboardingController.completeMagicLink)
 );
 
-// Generate QR code for mobile onboarding
-router.post(
-    '/qr-code',
-    asyncHandler(OnboardingController.generateQRCode)
-);
-
-// Check onboarding status (for ChatGPT polling)
+// Verify magic link token
 router.get(
-    '/status/:sessionId',
-    asyncHandler(OnboardingController.checkOnboardingStatus)
+    '/verify/:token',
+    asyncHandler(OnboardingController.verifyMagicLink)
 );
 
 export { router as onboardingRoutes }; 

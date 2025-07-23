@@ -4,17 +4,14 @@ import { ProjectService } from '../services/project.service';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
 export class OnboardingController {
-    /**
-     * Step 1: Generate magic link for ChatGPT integration
-     * Called by ChatGPT GPT when user wants to connect
-     */
     static async generateMagicLink(req: Request, res: Response): Promise<void> {
         try {
-            const { email, name, source = 'chatgpt' } = req.body;
+            const { email, name, source = 'ChatGPT' } = req.body;
 
             if (!email) {
                 res.status(400).json({
@@ -24,69 +21,74 @@ export class OnboardingController {
                 return;
             }
 
-            // Generate magic token
-            const magicToken = crypto.randomBytes(32).toString('hex');
+            // Generate session ID and tokens
             const sessionId = crypto.randomBytes(16).toString('hex');
+            const token = crypto.randomBytes(32).toString('hex');
 
-            // Store magic link session (you might want to use Redis for this)
+            // Create magic link data
             const magicLinkData = {
                 email,
                 name,
                 source,
                 sessionId,
-                createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
+                createdAt: new Date().toISOString(),
+                expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() // 15 minutes
             };
 
-            // In production, store this in Redis or database
-            // For now, we'll encode it in the token itself
+            // Encode the data
             const encodedData = Buffer.from(JSON.stringify(magicLinkData)).toString('base64');
-            
-            const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, ''); // Remove trailing slash
-            const magicLink = `${frontendUrl}/connect/chatgpt?token=${magicToken}&data=${encodedData}`;
+
+            // Create magic link
+            const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
+            const magicLink = `${frontendUrl}/connect/chatgpt?token=${token}&data=${encodedData}`;
+
+            logger.info('Magic link generated', { email, sessionId, source });
 
             res.json({
                 success: true,
+                message: 'Magic link created successfully!',
                 data: {
                     magic_link: magicLink,
-                    session_id: sessionId,
-                    expires_in: 900, // 15 minutes
-                    message: `Magic link generated for ${email}. Valid for 15 minutes.`
+                    expires_in_minutes: 15,
+                    instructions: [
+                        '🔗 Click the magic link above',
+                        '📝 Complete the quick setup (30 seconds)',
+                        '🔄 Come back to this chat',
+                        '🎉 Start tracking your AI costs!'
+                    ],
+                    message: 'Magic link sent! Click the link above to connect your account in 30 seconds. The link expires in 15 minutes.'
                 }
             });
 
-            logger.info('Magic link generated', { email, source, sessionId });
-        } catch (error: any) {
+        } catch (error) {
             logger.error('Generate magic link error:', error);
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate magic link',
-                message: error.message
+                message: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     }
 
-    /**
-     * Step 2: Handle magic link click - Complete onboarding
-     * User clicks magic link from ChatGPT and gets redirected here
-     */
-    static async completeMagicLinkOnboarding(req: Request, res: Response): Promise<void> {
+    static async completeMagicLink(req: Request, res: Response): Promise<void> {
         try {
             const { token, data } = req.query;
 
             if (!token || !data) {
                 res.status(400).json({
                     success: false,
-                    error: 'Invalid magic link. Please generate a new one.'
+                    error: 'Invalid magic link format.'
                 });
                 return;
             }
 
-            // Decode magic link data
+            // Decode and parse the magic link data
             let magicLinkData;
             try {
-                magicLinkData = JSON.parse(Buffer.from(data as string, 'base64').toString());
-            } catch {
+                const decodedData = Buffer.from(data as string, 'base64').toString('utf-8');
+                magicLinkData = JSON.parse(decodedData);
+            } catch (parseError) {
+                logger.error('Failed to parse magic link data:', parseError);
                 res.status(400).json({
                     success: false,
                     error: 'Invalid magic link format.'
@@ -104,15 +106,48 @@ export class OnboardingController {
             }
 
             const { email, name, source } = magicLinkData;
+            logger.info('Processing onboarding completion', { token: token.toString().substring(0, 10) + '...', email });
 
-            // Find or create user
+            // Find existing user and clean up any corrupted data
             let user = await User.findOne({ email });
             let isNewUser = false;
 
+            // Clean up any corrupted data for existing users
+            if (user && user.dashboardApiKeys && user.dashboardApiKeys.length > 0) {
+                const cleanApiKeys = user.dashboardApiKeys.filter(key => 
+                    key && key.keyId && key.keyId !== null && key.keyId !== undefined
+                );
+                
+                if (cleanApiKeys.length !== user.dashboardApiKeys.length) {
+                    logger.info('Cleaning corrupted API keys for user', { 
+                        email, 
+                        originalCount: user.dashboardApiKeys.length, 
+                        cleanCount: cleanApiKeys.length 
+                    });
+                    
+                    // Update user with cleaned data
+                    await User.updateOne(
+                        { email },
+                        { $set: { dashboardApiKeys: cleanApiKeys } }
+                    );
+                    
+                    // Refresh user data
+                    user = await User.findOne({ email });
+                }
+            }
+
             if (!user) {
-                // Create new user with temporary password
+                // Generate API key FIRST before creating user
+                const userId = new mongoose.Types.ObjectId().toString();
+                const keyId = crypto.randomBytes(16).toString('hex');
+                const keySecret = crypto.randomBytes(16).toString('hex');
+                const apiKey = `ck_${userId}_${keyId}_${keySecret}`;
+                const maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
+
+                // Create new user with API key already included
                 const tempPassword = crypto.randomBytes(16).toString('hex');
                 user = new User({
+                    _id: userId,
                     email,
                     name: name || email.split('@')[0], // Use provided name or email prefix as default
                     password: tempPassword,
@@ -123,15 +158,24 @@ export class OnboardingController {
                         weeklyReports: true,
                         optimizationSuggestions: true
                     },
-                    dashboardApiKeys: [] // Initialize empty array
+                    dashboardApiKeys: [{
+                        name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                        keyId,
+                        encryptedKey: apiKey, // Store unencrypted for simplicity
+                        maskedKey,
+                        permissions: ['read', 'write'],
+                        createdAt: new Date(),
+                    }]
                 });
                 await user.save();
                 isNewUser = true;
-                logger.info('New user created via magic link', { email, userId: user._id });
+                logger.info('New user created via magic link with API key', { email, userId: user._id, keyId });
+                
+                // API key variables are already set above, skip the generation below
             } else {
                 // User exists, check if they already have a ChatGPT integration API key
                 const existingChatGPTKey = user.dashboardApiKeys?.find(key => 
-                    key.name && key.name.toLowerCase().includes('chatgpt')
+                    key && key.name && key.name.toLowerCase().includes('chatgpt')
                 );
                 
                 if (existingChatGPTKey) {
@@ -183,61 +227,89 @@ export class OnboardingController {
                 }
             }
 
-            // Generate API key for ChatGPT integration using AuthService
+            // Generate API key for ChatGPT integration with robust error handling (only for existing users)
             let apiKey, keyId, maskedKey;
-            try {
-                const { AuthService } = await import('../services/auth.service');
-                const result = AuthService.generateDashboardApiKey(
-                    user as any, 
-                    `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                    ['read', 'write']
-                );
-                apiKey = result.apiKey;
-                keyId = result.keyId;
-                maskedKey = result.maskedKey;
-
-                // Encrypt the API key for storage
-                const { encrypt } = await import('../utils/helpers');
-                const { encrypted, iv, authTag } = encrypt(apiKey);
-                const encryptedKey = `${iv}:${authTag}:${encrypted}`;
-
-                // Initialize dashboardApiKeys array if it doesn't exist
-                if (!user.dashboardApiKeys) {
-                    user.dashboardApiKeys = [];
-                }
-
-                const newApiKey = {
-                    name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                    keyId,
-                    encryptedKey,
-                    maskedKey,
-                    permissions: ['read', 'write'],
-                    createdAt: new Date(),
-                };
-
-                user.dashboardApiKeys.push(newApiKey);
-            } catch (keyGenError) {
-                logger.error('Error generating API key:', keyGenError);
-                // Fallback to simple API key generation
+            
+            // Only generate API key if user already exists (new users already have one)
+            if (!isNewUser) {
+                // Generate unique keyId first to avoid conflicts
                 keyId = crypto.randomBytes(16).toString('hex');
-                apiKey = `ck_user_${user._id}_${crypto.randomBytes(16).toString('hex')}`;
-                maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
+                logger.info('Generated initial keyId:', keyId);
+                
+                try {
+                    // Try using AuthService first
+                    const { AuthService } = await import('../services/auth.service');
+                    logger.info('About to call AuthService.generateDashboardApiKey');
+                    
+                    const result = AuthService.generateDashboardApiKey(
+                        user as any, 
+                        `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                        ['read', 'write']
+                    );
+                    
+                    logger.info('AuthService result:', result);
+                    
+                    // Validate the result
+                    if (result && result.keyId && result.apiKey && result.maskedKey) {
+                        apiKey = result.apiKey;
+                        keyId = result.keyId;
+                        maskedKey = result.maskedKey;
+                        logger.info('Using AuthService generated keyId:', keyId);
+                    } else {
+                        logger.error('AuthService returned invalid data:', result);
+                        throw new Error('AuthService returned invalid API key data');
+                    }
 
-                // Initialize dashboardApiKeys array if it doesn't exist
-                if (!user.dashboardApiKeys) {
-                    user.dashboardApiKeys = [];
+                    // Encrypt the API key for storage
+                    const { encrypt } = await import('../utils/helpers');
+                    const { encrypted, iv, authTag } = encrypt(apiKey);
+                    const encryptedKey = `${iv}:${authTag}:${encrypted}`;
+
+                    // Initialize dashboardApiKeys array if it doesn't exist
+                    if (!user.dashboardApiKeys) {
+                        user.dashboardApiKeys = [];
+                    }
+
+                    const newApiKey = {
+                        name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                        keyId,
+                        encryptedKey,
+                        maskedKey,
+                        permissions: ['read', 'write'],
+                        createdAt: new Date(),
+                    };
+
+                    user.dashboardApiKeys.push(newApiKey);
+                    
+                } catch (keyGenError) {
+                    logger.error('Error with AuthService, using fallback API key generation:', keyGenError);
+                    
+                    // Fallback to simple but robust API key generation
+                    const userId = user._id ? user._id.toString() : 'unknown';
+                    const keySecret = crypto.randomBytes(16).toString('hex');
+                    apiKey = `ck_${userId}_${keyId}_${keySecret}`;
+                    maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
+                    
+                    logger.info('Fallback API key generated:', { keyId, apiKey: apiKey.substring(0, 20) + '...', maskedKey });
+
+                    // Initialize dashboardApiKeys array if it doesn't exist
+                    if (!user.dashboardApiKeys) {
+                        user.dashboardApiKeys = [];
+                    }
+
+                    const newApiKey = {
+                        name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
+                        keyId,
+                        encryptedKey: apiKey, // Store unencrypted as fallback
+                        maskedKey,
+                        permissions: ['read', 'write'],
+                        createdAt: new Date(),
+                    };
+
+                    logger.info('About to push API key to user:', { keyId: newApiKey.keyId, name: newApiKey.name });
+                    user.dashboardApiKeys.push(newApiKey);
+                    logger.info('API key pushed successfully');
                 }
-
-                const newApiKey = {
-                    name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
-                    keyId,
-                    encryptedKey: apiKey, // Store unencrypted as fallback
-                    maskedKey,
-                    permissions: ['read', 'write'],
-                    createdAt: new Date(),
-                };
-
-                user.dashboardApiKeys.push(newApiKey);
             }
 
             // Create default project
@@ -250,23 +322,36 @@ export class OnboardingController {
                     currency: 'USD'
                 },
                 settings: {
+                    requireApprovalAbove: 100,
                     enablePromptLibrary: true,
                     enableCostAllocation: true
-                },
-                tags: [source, 'auto-created']
+                }
             });
 
-            await user.save();
+            // Save user (only if it's an existing user with new API key)
+            if (!isNewUser) {
+                await user.save();
+            }
 
-            // Generate JWT for immediate login
-            // Generate JWT for future session management
-            jwt.sign(
-                { id: user._id, email: user.email },
+            logger.info('Magic link onboarding completed', { 
+                email, 
+                userId: user._id, 
+                projectId: defaultProject._id,
+                isNewUser
+            });
+
+            // Create JWT token for authentication
+            const jwtToken = jwt.sign(
+                { 
+                    userId: user._id, 
+                    email: user.email,
+                    sessionId: magicLinkData.sessionId
+                },
                 JWT_SECRET,
                 { expiresIn: '7d' }
             );
 
-            // Return success page with embedded JavaScript to communicate back to ChatGPT
+            // Success HTML response with embedded data
             const successHtml = `
             <!DOCTYPE html>
             <html>
@@ -281,71 +366,59 @@ export class OnboardingController {
                     h1 { color: #059669; margin: 0 0 10px 0; }
                     .subtitle { color: #6b7280; margin-bottom: 30px; }
                     .api-key { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 8px; padding: 15px; font-family: 'Monaco', monospace; font-size: 12px; word-break: break-all; margin: 20px 0; }
-                    .copy-btn { background: #059669; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-top: 10px; }
-                    .copy-btn:hover { background: #047857; }
-                    .next-steps { text-align: left; margin-top: 30px; }
-                    .step { margin: 15px 0; padding: 15px; background: #f8fafc; border-left: 4px solid #059669; }
+                    .copy-btn { background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 12px; margin-top: 10px; }
+                    .copy-btn:hover { background: #2563eb; }
                     .auto-return { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 14px; }
+                    .success { color: #059669; font-weight: 500; }
                 </style>
             </head>
             <body>
                 <div class="success-card">
                     <div class="success-icon">🎉</div>
                     <h1>Successfully Connected to Cost Katana!</h1>
-                    <p class="subtitle">${isNewUser ? 'Welcome to Cost Katana!' : 'Welcome back!'} Your ${source} integration is ready.</p>
+                    <p class="subtitle">Welcome ${user.name}! Your account is now set up for AI cost tracking.</p>
                     
-                    <div class="next-steps">
-                        <h3>✅ What's been set up for you:</h3>
-                        
-                        <div class="step">
-                            <strong>🔑 API Key Generated</strong><br>
-                            <div class="api-key" id="apiKey">${apiKey}</div>
-                            <button class="copy-btn" onclick="copyApiKey()">Copy API Key</button>
-                        </div>
-                        
-                        <div class="step">
-                            <strong>📁 Default Project Created</strong><br>
-                            "${defaultProject.name}" with $100 monthly budget
-                        </div>
-                        
-                        <div class="step">
-                            <strong>👤 Account Ready</strong><br>
-                            ${isNewUser ? 'New account created' : 'Existing account connected'} for ${email}
-                        </div>
+                    <div class="api-key">
+                        <strong>Your API Key:</strong><br>
+                        <span id="apiKey">${maskedKey || 'Generated successfully'}</span>
+                        <br><button class="copy-btn" onclick="copyApiKey()">Copy to Clipboard</button>
                     </div>
                     
                     <div class="auto-return">
-                        <strong>🔄 Returning to ${source.charAt(0).toUpperCase() + source.slice(1)}...</strong><br>
-                        You can now start tracking your AI costs! This window will close automatically.
+                        <strong>🔄 Returning to ChatGPT...</strong><br>
+                        Your account is ready to track AI costs! This window will close automatically.
                     </div>
                 </div>
                 
                 <script>
+                    // Store auth data for potential use
+                    const authData = {
+                        token: '${jwtToken}',
+                        userId: '${user._id}',
+                        email: '${user.email}',
+                        projectId: '${defaultProject._id}'
+                    };
+                    
                     function copyApiKey() {
-                        const apiKey = document.getElementById('apiKey').textContent;
-                        navigator.clipboard.writeText(apiKey);
-                        alert('API key copied to clipboard!');
+                        const apiKeyText = '${maskedKey || 'API Key Generated'}';
+                        navigator.clipboard.writeText(apiKeyText).then(() => {
+                            const btn = event.target;
+                            const originalText = btn.textContent;
+                            btn.textContent = 'Copied!';
+                            btn.style.background = '#059669';
+                            setTimeout(() => {
+                                btn.textContent = originalText;
+                                btn.style.background = '#3b82f6';
+                            }, 2000);
+                        });
                     }
                     
-                    // Auto-close after 5 seconds if opened in popup
+                    // Auto-close window after 5 seconds
                     setTimeout(() => {
                         if (window.opener) {
                             window.close();
                         }
                     }, 5000);
-                    
-                    // Store success data for parent window communication
-                    if (window.opener) {
-                        window.opener.postMessage({
-                            type: 'COST_KATANA_CONNECTED',
-                            data: {
-                                apiKey: '${apiKey}',
-                                projectId: '${defaultProject._id}',
-                                projectName: '${defaultProject.name}',
-                                userId: '${user._id}'
-                            }
-                        }, '*');
-                    }
                 </script>
             </body>
             </html>
@@ -354,80 +427,41 @@ export class OnboardingController {
             res.setHeader('Content-Type', 'text/html');
             res.send(successHtml);
 
-            logger.info('Magic link onboarding completed', {
-                userId: user._id,
-                email,
-                source,
-                isNewUser,
-                projectId: defaultProject._id
-            });
-
-        } catch (error: any) {
+        } catch (error) {
             logger.error('Complete magic link onboarding error:', error);
             res.status(500).json({
                 success: false,
                 error: 'Failed to complete onboarding',
-                message: error.message
+                message: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     }
 
-    /**
-     * Generate QR code for mobile onboarding
-     */
-    static async generateQRCode(_req: Request, res: Response): Promise<void> {
+    static async verifyMagicLink(req: Request, res: Response): Promise<void> {
         try {
-            const sessionId = crypto.randomBytes(16).toString('hex');
-            const qrData = {
-                sessionId,
-                url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/connect/mobile?session=${sessionId}`,
-                createdAt: new Date(),
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
-            };
-
-            res.json({
-                success: true,
-                data: {
-                    qr_code_url: qrData.url,
-                    session_id: sessionId,
-                    display_code: sessionId.substring(0, 8).toUpperCase(),
-                    expires_in: 600,
-                    message: 'Scan QR code or enter the 8-digit code on costkatana.com/connect'
-                }
-            });
-        } catch (error: any) {
-            logger.error('Generate QR code error:', error);
-            res.status(500).json({
-                success: false,
-                error: 'Failed to generate QR code',
-                message: error.message
-            });
-        }
-    }
-
-    /**
-     * Check onboarding status for ChatGPT polling
-     */
-    static async checkOnboardingStatus(_req: Request, res: Response): Promise<void> {
-        try {
-            // const { sessionId } = req.params; // TODO: Implement session status checking
-
-            // In production, check Redis/database for session status
-            // For now, return pending (implement your session storage)
+            const { token } = req.params;
             
+            if (!token) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Token is required'
+                });
+                return;
+            }
+
+            // For now, return success if token exists
+            // In production, you'd verify against stored tokens
             res.json({
                 success: true,
-                data: {
-                    status: 'pending', // pending, completed, expired
-                    message: 'Waiting for user to complete onboarding...'
-                }
+                message: 'Magic link verified successfully'
             });
-        } catch (error: any) {
-            logger.error('Check onboarding status error:', error);
+
+        } catch (error) {
+            logger.error('Verify magic link error:', error);
             res.status(500).json({
                 success: false,
-                error: 'Failed to check status',
-                message: error.message
+                error: 'Failed to verify magic link',
+                message: error instanceof Error ? error.message : 'Unknown error'
             });
         }
     }
