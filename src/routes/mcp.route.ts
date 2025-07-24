@@ -15,6 +15,26 @@ mcpRoute.use(validateMCPRequest);
 mcpRoute.use(mcpResponseTimer);
 mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
 
+// MCP Health check endpoint
+mcpRoute.get('/health', (_req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-cache');
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        mcp: {
+            protocolVersion: PROTOCOL_VERSION,
+            capabilities: Object.keys(SERVER_CAPABILITIES),
+            cacheStatus: {
+                toolsListCached: MCPController.toolsListCache !== null,
+                cacheAge: MCPController.toolsListCache ? 
+                    Math.floor((Date.now() - MCPController.toolsListCacheTime) / 1000) : 0
+            }
+        }
+    });
+});
+
 // MCP protocol version
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -124,10 +144,49 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
                 case 'tools/list':
                     logger.info('MCP Tools list requested - returning 8 cost optimization tools');
+                    
                     // Set immediate response headers to prevent client-side timeouts
                     res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
                     res.setHeader('X-Response-Time-Priority', 'high');
-                    await mcpController.listTools(req, res);
+                    res.setHeader('Connection', 'keep-alive');
+                    res.setHeader('Keep-Alive', 'timeout=30, max=100');
+                    
+                    // Add timeout protection for the tools/list endpoint
+                    const timeoutPromise = new Promise<never>((_, reject) => {
+                        setTimeout(() => reject(new Error('MCP tools/list timeout')), 5000); // 5 second timeout
+                    });
+                    
+                    try {
+                        await Promise.race([
+                            mcpController.listTools(req, res),
+                            timeoutPromise
+                        ]);
+                    } catch (timeoutError) {
+                        logger.error('MCP tools/list timeout, sending cached response');
+                        // Send a minimal cached response to prevent client timeout
+                        res.json({
+                            jsonrpc: '2.0',
+                            id,
+                            result: {
+                                tools: [
+                                    {
+                                        name: 'track_claude_usage',
+                                        description: 'Track Claude conversation usage and costs in real-time',
+                                        inputSchema: {
+                                            type: 'object',
+                                            properties: {
+                                                model: { type: 'string', enum: ['claude-3-5-sonnet', 'claude-3-haiku', 'claude-3-opus'] },
+                                                inputTokens: { type: 'number' },
+                                                outputTokens: { type: 'number' },
+                                                message: { type: 'string' }
+                                            },
+                                            required: ['model', 'inputTokens', 'outputTokens', 'message']
+                                        }
+                                    }
+                                ]
+                            }
+                        });
+                    }
                     break;
 
                 case 'tools/call':
@@ -205,19 +264,6 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
             code: -32000,
             message: `HTTP method ${method} not supported`
         }
-    });
-});
-
-// Health check endpoint
-mcpRoute.get('/health', (_req: Request, res: Response) => {
-    res.json({
-        status: 'healthy',
-        protocol: PROTOCOL_VERSION,
-        transport: 'http',
-        capabilities: SERVER_CAPABILITIES,
-        serverInfo: SERVER_INFO,
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
     });
 });
 

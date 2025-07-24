@@ -11,8 +11,8 @@ import { logger } from '../utils/logger';
 export class MCPController {
 
     // Add static cache for tools list to improve performance
-    private static toolsListCache: any = null;
-    private static toolsListCacheTime: number = 0;
+    public static toolsListCache: any = null;
+    public static toolsListCacheTime: number = 0;
     private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
     // Note: Initialize method removed - handled by route directly
@@ -251,299 +251,373 @@ export class MCPController {
         }
     };
 
-    // MCP Tools List - OPTIMIZED with caching and fast response
+    // MCP Tools List
     public listTools = async (req: Request, res: Response) => {
         try {
-            console.log('MCP Tools List called - FAST RESPONSE MODE:', JSON.stringify(req.body, null, 2));
+            console.log('MCP Tools List called:', JSON.stringify(req.body, null, 2));
             
-            const { id, method } = req.body;
+            const { id } = req.body;
             
             // Add immediate timeout to prevent hanging
             const timeout = setTimeout(() => {
                 if (!res.headersSent) {
-                    console.error('MCP Tools List TIMEOUT - sending error response');
                     res.status(200).json({
-                        jsonrpc: "2.0",
-                        id: id,
-                        error: {
-                            code: -32001,
-                            message: "Request timeout in tools/list"
+                        jsonrpc: '2.0',
+                        id,
+                        result: {
+                            tools: [
+                                {
+                                    name: 'track_claude_usage',
+                                    description: 'Track Claude conversation usage and costs in real-time',
+                                    inputSchema: {
+                                        type: 'object',
+                                        properties: {
+                                            model: { type: 'string', enum: ['claude-3-5-sonnet', 'claude-3-haiku', 'claude-3-opus'] },
+                                            inputTokens: { type: 'number' },
+                                            outputTokens: { type: 'number' },
+                                            message: { type: 'string' }
+                                        },
+                                        required: ['model', 'inputTokens', 'outputTokens', 'message']
+                                    }
+                                }
+                            ]
                         }
                     });
                 }
-            }, 3000); // Reduced to 3 second timeout for faster failure detection
-            
-            if (method === 'tools/list') {
-                // Check cache first for ultra-fast response
-                const now = Date.now();
-                if (MCPController.toolsListCache && (now - MCPController.toolsListCacheTime) < MCPController.CACHE_DURATION) {
-                    console.log('MCP Tools List - serving from cache');
-                    clearTimeout(timeout);
-                    res.json({
-                        jsonrpc: "2.0",
-                        id: id,
-                        result: MCPController.toolsListCache
-                    });
-                    return;
-                }
+            }, 3000); // 3 second fallback timeout
 
-                // Generate fresh response and cache it
-                const toolsResult = {
-                    tools: [
-                        {
-                            name: "track_claude_usage",
-                            description: "Track Claude conversation usage and costs in real-time",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    model: {
-                                        type: "string",
-                                        description: "Claude model used",
-                                        enum: ["claude-3-5-sonnet", "claude-3-haiku", "claude-3-opus", "claude-instant"]
-                                    },
-                                    inputTokens: {
-                                        type: "number",
-                                        description: "Input tokens used"
-                                    },
-                                    outputTokens: {
-                                        type: "number",
-                                        description: "Output tokens generated"
-                                    },
-                                    message: {
-                                        type: "string",
-                                        description: "The conversation message"
-                                    },
-                                    projectId: {
-                                        type: "string",
-                                        description: "Project ID to associate this usage with (optional)"
-                                    }
-                                },
-                                required: ["model", "inputTokens", "outputTokens", "message"]
-                            }
-                        },
-                        {
-                            name: "get_cost_analytics",
-                            description: "Get detailed cost analytics, spending trends, and optimization insights",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    timeRange: {
-                                        type: "string",
-                                        enum: ["24h", "7d", "30d", "90d"],
-                                        description: "Time range for analysis",
-                                        default: "7d"
-                                    },
-                                    breakdown: {
-                                        type: "string",
-                                        enum: ["model", "project", "date", "provider"],
-                                        description: "How to break down the analytics",
-                                        default: "model"
-                                    },
-                                    includeOptimization: {
-                                        type: "boolean",
-                                        description: "Include optimization recommendations",
-                                        default: true
-                                    }
-                                },
-                                required: ["timeRange"]
-                            }
-                        },
-                        {
-                            name: "create_project",
-                            description: "Create a new Cost Katana project for organized cost tracking",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    name: {
-                                        type: "string",
-                                        description: "Project name"
-                                    },
-                                    description: {
-                                        type: "string",
-                                        description: "Project description"
-                                    },
-                                    budget: {
-                                        type: "number",
-                                        description: "Monthly budget in USD"
-                                    },
-                                    alertThreshold: {
-                                        type: "number",
-                                        description: "Budget alert threshold (percentage, e.g., 80 for 80%)",
-                                        default: 80
-                                    }
-                                },
-                                required: ["name"]
-                            }
-                        },
-                        {
-                            name: "optimize_costs",
-                            description: "Get AI-powered cost optimization recommendations based on your usage patterns",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    analysisType: {
-                                        type: "string",
-                                        enum: ["quick", "detailed", "comprehensive"],
-                                        description: "Depth of optimization analysis",
-                                        default: "detailed"
-                                    },
-                                    focusArea: {
-                                        type: "string",
-                                        enum: ["models", "prompts", "usage_patterns", "projects", "all"],
-                                        description: "Specific area to focus optimization on",
-                                        default: "all"
-                                    },
-                                    targetSavings: {
-                                        type: "number",
-                                        description: "Target percentage savings (e.g., 20 for 20%)",
-                                        default: 25
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            name: "compare_models",
-                            description: "Compare AI models by cost, performance, and efficiency for your specific use case",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    useCase: {
-                                        type: "string",
-                                        description: "Your use case (coding, writing, analysis, chat, etc.)"
-                                    },
-                                    currentModel: {
-                                        type: "string",
-                                        description: "Current model you're using"
-                                    },
-                                    priorityFactor: {
-                                        type: "string",
-                                        enum: ["cost", "performance", "balanced"],
-                                        description: "What to prioritize in recommendations",
-                                        default: "balanced"
-                                    },
-                                    includeAlternatives: {
-                                        type: "boolean",
-                                        description: "Include alternative providers (OpenAI, Google, etc.)",
-                                        default: true
-                                    }
-                                },
-                                required: ["useCase"]
-                            }
-                        },
-                        {
-                            name: "setup_budget_alerts",
-                            description: "Configure intelligent budget alerts and spending notifications",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    alertType: {
-                                        type: "string",
-                                        enum: ["budget_threshold", "daily_limit", "weekly_summary", "cost_spike", "model_efficiency"],
-                                        description: "Type of alert to set up"
-                                    },
-                                    threshold: {
-                                        type: "number",
-                                        description: "Alert threshold (dollar amount or percentage)"
-                                    },
-                                    frequency: {
-                                        type: "string",
-                                        enum: ["immediate", "daily", "weekly", "monthly"],
-                                        description: "How often to check and send alerts",
-                                        default: "immediate"
-                                    },
-                                    projectId: {
-                                        type: "string",
-                                        description: "Specific project to monitor (optional, defaults to all)"
-                                    }
-                                },
-                                required: ["alertType", "threshold"]
-                            }
-                        },
-                        {
-                            name: "forecast_costs",
-                            description: "Predict future AI costs based on current usage patterns and trends",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    forecastPeriod: {
-                                        type: "string",
-                                        enum: ["7d", "30d", "90d", "1y"],
-                                        description: "Period to forecast",
-                                        default: "30d"
-                                    },
-                                    includeTrends: {
-                                        type: "boolean",
-                                        description: "Include usage trend analysis",
-                                        default: true
-                                    },
-                                    scenarios: {
-                                        type: "string",
-                                        enum: ["conservative", "realistic", "aggressive"],
-                                        description: "Forecast scenario based on usage growth",
-                                        default: "realistic"
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            name: "audit_project_costs",
-                            description: "Comprehensive cost audit of a specific project with detailed recommendations",
-                            inputSchema: {
-                                type: "object",
-                                properties: {
-                                    projectId: {
-                                        type: "string",
-                                        description: "Project ID to audit"
-                                    },
-                                    auditDepth: {
-                                        type: "string",
-                                        enum: ["surface", "detailed", "comprehensive"],
-                                        description: "Depth of the audit analysis",
-                                        default: "detailed"
-                                    },
-                                    includeRecommendations: {
-                                        type: "boolean",
-                                        description: "Include specific optimization recommendations",
-                                        default: true
-                                    },
-                                    compareToBaseline: {
-                                        type: "boolean",
-                                        description: "Compare to industry benchmarks",
-                                        default: true
-                                    }
-                                },
-                                required: ["projectId"]
-                            }
-                        }
-                    ]
-                };
-
-                // Cache the result for future requests
-                MCPController.toolsListCache = toolsResult;
-                MCPController.toolsListCacheTime = now;
-
-                const response = {
-                    jsonrpc: "2.0",
-                    id: id,
-                    result: toolsResult
-                };
-                
+            // Check cache first for immediate response
+            if (MCPController.toolsListCache && 
+                (Date.now() - MCPController.toolsListCacheTime) < MCPController.CACHE_DURATION) {
                 clearTimeout(timeout);
-                console.log('MCP Tools List - sending fresh response and caching');
-                res.json(response);
+                res.json({
+                    jsonrpc: '2.0',
+                    id,
+                    result: MCPController.toolsListCache
+                });
                 return;
             }
-            
+
+            // Generate tools list (this should be very fast)
+            const toolsList = {
+                tools: [
+                    {
+                        name: 'track_claude_usage',
+                        description: 'Track Claude conversation usage and costs in real-time',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                model: {
+                                    type: 'string',
+                                    description: 'Claude model used',
+                                    enum: [
+                                        'claude-3-5-sonnet',
+                                        'claude-3-haiku',
+                                        'claude-3-opus',
+                                        'claude-instant'
+                                    ]
+                                },
+                                inputTokens: {
+                                    type: 'number',
+                                    description: 'Input tokens used'
+                                },
+                                outputTokens: {
+                                    type: 'number',
+                                    description: 'Output tokens generated'
+                                },
+                                message: {
+                                    type: 'string',
+                                    description: 'The conversation message'
+                                },
+                                projectId: {
+                                    type: 'string',
+                                    description: 'Project ID to associate this usage with (optional)'
+                                }
+                            },
+                            required: [
+                                'model',
+                                'inputTokens',
+                                'outputTokens',
+                                'message'
+                            ]
+                        }
+                    },
+                    {
+                        name: 'get_cost_analytics',
+                        description: 'Get detailed cost analytics, spending trends, and optimization insights',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                timeRange: {
+                                    type: 'string',
+                                    enum: [
+                                        '24h',
+                                        '7d',
+                                        '30d',
+                                        '90d'
+                                    ],
+                                    description: 'Time range for analysis',
+                                    default: '7d'
+                                },
+                                breakdown: {
+                                    type: 'string',
+                                    enum: [
+                                        'model',
+                                        'project',
+                                        'date',
+                                        'provider'
+                                    ],
+                                    description: 'How to break down the analytics',
+                                    default: 'model'
+                                },
+                                includeOptimization: {
+                                    type: 'boolean',
+                                    description: 'Include optimization recommendations',
+                                    default: true
+                                }
+                            },
+                            required: [
+                                'timeRange'
+                            ]
+                        }
+                    },
+                    {
+                        name: 'create_project',
+                        description: 'Create a new Cost Katana project for organized cost tracking',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                name: {
+                                    type: 'string',
+                                    description: 'Project name'
+                                },
+                                description: {
+                                    type: 'string',
+                                    description: 'Project description'
+                                },
+                                budget: {
+                                    type: 'number',
+                                    description: 'Monthly budget in USD'
+                                },
+                                alertThreshold: {
+                                    type: 'number',
+                                    description: 'Budget alert threshold (percentage, e.g., 80 for 80%)',
+                                    default: 80
+                                }
+                            },
+                            required: [
+                                'name'
+                            ]
+                        }
+                    },
+                    {
+                        name: 'optimize_costs',
+                        description: 'Get AI-powered cost optimization recommendations based on your usage patterns',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                analysisType: {
+                                    type: 'string',
+                                    enum: [
+                                        'quick',
+                                        'detailed',
+                                        'comprehensive'
+                                    ],
+                                    description: 'Depth of optimization analysis',
+                                    default: 'detailed'
+                                },
+                                focusArea: {
+                                    type: 'string',
+                                    enum: [
+                                        'models',
+                                        'prompts',
+                                        'usage_patterns',
+                                        'projects',
+                                        'all'
+                                    ],
+                                    description: 'Specific area to focus optimization on',
+                                    default: 'all'
+                                },
+                                targetSavings: {
+                                    type: 'number',
+                                    description: 'Target percentage savings (e.g., 20 for 20%)',
+                                    default: 25
+                                }
+                            }
+                        }
+                    },
+                    {
+                        name: 'compare_models',
+                        description: 'Compare AI models by cost, performance, and efficiency for your specific use case',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                useCase: {
+                                    type: 'string',
+                                    description: 'Your use case (coding, writing, analysis, chat, etc.)'
+                                },
+                                currentModel: {
+                                    type: 'string',
+                                    description: 'Current model you\'re using'
+                                },
+                                priorityFactor: {
+                                    type: 'string',
+                                    enum: [
+                                        'cost',
+                                        'performance',
+                                        'balanced'
+                                    ],
+                                    description: 'What to prioritize in recommendations',
+                                    default: 'balanced'
+                                },
+                                includeAlternatives: {
+                                    type: 'boolean',
+                                    description: 'Include alternative providers (OpenAI, Google, etc.)',
+                                    default: true
+                                }
+                            },
+                            required: [
+                                'useCase'
+                            ]
+                        }
+                    },
+                    {
+                        name: 'setup_budget_alerts',
+                        description: 'Configure intelligent budget alerts and spending notifications',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                alertType: {
+                                    type: 'string',
+                                    enum: [
+                                        'budget_threshold',
+                                        'daily_limit',
+                                        'weekly_summary',
+                                        'cost_spike',
+                                        'model_efficiency'
+                                    ],
+                                    description: 'Type of alert to set up'
+                                },
+                                threshold: {
+                                    type: 'number',
+                                    description: 'Alert threshold (dollar amount or percentage)'
+                                },
+                                frequency: {
+                                    type: 'string',
+                                    enum: [
+                                        'immediate',
+                                        'daily',
+                                        'weekly',
+                                        'monthly'
+                                    ],
+                                    description: 'How often to check and send alerts',
+                                    default: 'immediate'
+                                },
+                                projectId: {
+                                    type: 'string',
+                                    description: 'Specific project to monitor (optional, defaults to all)'
+                                }
+                            },
+                            required: [
+                                'alertType',
+                                'threshold'
+                            ]
+                        }
+                    },
+                    {
+                        name: 'forecast_costs',
+                        description: 'Predict future AI costs based on current usage patterns and trends',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                forecastPeriod: {
+                                    type: 'string',
+                                    enum: [
+                                        '7d',
+                                        '30d',
+                                        '90d',
+                                        '1y'
+                                    ],
+                                    description: 'Period to forecast',
+                                    default: '30d'
+                                },
+                                includeTrends: {
+                                    type: 'boolean',
+                                    description: 'Include usage trend analysis',
+                                    default: true
+                                },
+                                scenarios: {
+                                    type: 'string',
+                                    enum: [
+                                        'conservative',
+                                        'realistic',
+                                        'aggressive'
+                                    ],
+                                    description: 'Forecast scenario based on usage growth',
+                                    default: 'realistic'
+                                }
+                            }
+                        }
+                    },
+                    {
+                        name: 'audit_project_costs',
+                        description: 'Comprehensive cost audit of a specific project with detailed recommendations',
+                        inputSchema: {
+                            type: 'object',
+                            properties: {
+                                projectId: {
+                                    type: 'string',
+                                    description: 'Project ID to audit'
+                                },
+                                auditDepth: {
+                                    type: 'string',
+                                    enum: [
+                                        'surface',
+                                        'detailed',
+                                        'comprehensive'
+                                    ],
+                                    description: 'Depth of the audit analysis',
+                                    default: 'detailed'
+                                },
+                                includeRecommendations: {
+                                    type: 'boolean',
+                                    description: 'Include specific optimization recommendations',
+                                    default: true
+                                },
+                                compareToBaseline: {
+                                    type: 'boolean',
+                                    description: 'Compare to industry benchmarks',
+                                    default: true
+                                }
+                            },
+                            required: [
+                                'projectId'
+                            ]
+                        }
+                    }
+                ]
+            };
+
+            // Cache the response
+            MCPController.toolsListCache = toolsList;
+            MCPController.toolsListCacheTime = Date.now();
+
             clearTimeout(timeout);
-            throw new Error(`Unknown method: ${method}`);
+            res.json({
+                jsonrpc: '2.0',
+                id,
+                result: toolsList
+            });
+
         } catch (error) {
-            console.error('MCP List Tools Error:', error);
-            res.status(200).json({
-                jsonrpc: "2.0",
+            console.error('Error in MCP Tools List:', error);
+            res.status(500).json({
+                jsonrpc: '2.0',
                 id: req.body?.id || null,
                 error: {
                     code: -32603,
-                    message: error instanceof Error ? error.message : "Internal error"
+                    message: 'Internal error',
+                    data: error instanceof Error ? error.message : 'Unknown error'
                 }
             });
         }
