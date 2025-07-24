@@ -662,7 +662,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 });
 
 // Add config.json route for MCP compatibility
-mcpRoute.get('/config.json', (req: Request, res: Response) => {
+mcpRoute.get('/config.json', (_req: Request, res: Response) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
