@@ -501,7 +501,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                 return;
             }
 
-            // Set timeout for all requests to prevent hanging
+            // Set a global timeout for all MCP requests (10 seconds)
             const requestTimeout = setTimeout(() => {
                 if (!res.headersSent) {
                     logger.warn('MCP request timeout', { method: rpcMethod, id });
@@ -510,11 +510,11 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                         id: id || null,
                         error: {
                             code: -32001,
-                            message: 'Request timeout'
+                            message: 'Request timed out'
                         }
                     });
                 }
-            }, 10000); // 10 second timeout
+            }, 10000);
 
             const clearTimeoutAndRespond = (response: any) => {
                 clearTimeout(requestTimeout);
@@ -523,6 +523,7 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                 }
             };
 
+            // Handle different MCP methods with optimized responses
             switch (rpcMethod) {
                 case 'initialize':
                     logger.info('MCP Initialize request', { params });
@@ -539,13 +540,11 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
                 case 'notifications/initialized':
                     logger.info('MCP Initialized notification received');
-                    
-                    // Send immediate acknowledgment
                     clearTimeoutAndRespond({
-                        jsonrpc: '2.0'
+                        jsonrpc: '2.0',
+                        id,
+                        result: null
                     });
-                    
-                    logger.info('MCP handshake completed - server ready for capability requests');
                     break;
 
                 case 'tools/list':
@@ -648,7 +647,8 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                 method: rpcMethod, 
                 error: error instanceof Error ? error.message : error 
             });
-            res.status(500).json({
+            
+            res.status(200).json({
                 jsonrpc: '2.0',
                 id: id || null,
                 error: {
@@ -658,15 +658,23 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
                 }
             });
         }
-        return;
     }
+});
 
-    // Handle unsupported HTTP methods
-    res.status(405).json({
-        jsonrpc: '2.0',
-        error: {
-            code: -32000,
-            message: `HTTP method ${method} not supported`
+// Add config.json route for MCP compatibility
+mcpRoute.get('/config.json', (req: Request, res: Response) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+    
+    res.json({
+        name: "Cost Katana MCP Server",
+        version: "1.0.0",
+        description: "AI Cost Optimization MCP Server",
+        capabilities: SERVER_CAPABILITIES,
+        endpoints: {
+            health: "/api/mcp/health",
+            main: "/api/mcp"
         }
     });
 });

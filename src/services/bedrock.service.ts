@@ -231,7 +231,12 @@ export class BedrockService {
         });
 
         try {
-            const response = await retry(() => bedrockClient.send(command), 3, 1000);
+            // Add exponential backoff for throttling with better error handling
+            const response = await retry(
+                () => bedrockClient.send(command), 
+                4, // Increase retry attempts
+                2000 // Start with 2 second delay
+            );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
             // Extract text based on response format
