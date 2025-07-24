@@ -93,7 +93,7 @@ export class ChatGPTController {
                 
                 // First try ChatGPT integration API keys (ck_user_ format)
                 if (api_key.startsWith('ck_user_')) {
-                    const { ApiKeyController } = await import('./apiKey.controller');
+                const { ApiKeyController } = await import('./apiKey.controller');
                     validation = await ApiKeyController.validateApiKey(api_key);
                 }
                 

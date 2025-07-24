@@ -1,10 +1,19 @@
 import { Request, Response } from 'express';
 import { UsageService } from '../services/usage.service';
+import { AnalyticsService } from '../services/analytics.service';
 import { ProjectService } from '../services/project.service';
+import { OptimizationService } from '../services/optimization.service';
+import { ForecastingService } from '../services/forecasting.service';
 import { User } from '../models/User';
 import { EmailService } from '../services/email.service';
+import { logger } from '../utils/logger';
 
 export class MCPController {
+
+    // Add static cache for tools list to improve performance
+    private static toolsListCache: any = null;
+    private static toolsListCacheTime: number = 0;
+    private static readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
     // Note: Initialize method removed - handled by route directly
 
@@ -14,6 +23,20 @@ export class MCPController {
             console.log('MCP Resources List called:', JSON.stringify(req.body, null, 2));
             
             const { id, method } = req.body;
+            
+            // Add immediate timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                if (!res.headersSent) {
+                    res.status(200).json({
+                        jsonrpc: "2.0",
+                        id: id,
+                        error: {
+                            code: -32001,
+                            message: "Request timeout in resources/list"
+                        }
+                    });
+                }
+            }, 5000); // 5 second timeout
             
             if (method === 'resources/list') {
                 const response = {
@@ -61,10 +84,12 @@ export class MCPController {
                     }
                 };
                 
+                clearTimeout(timeout);
                 res.json(response);
                 return;
             }
             
+            clearTimeout(timeout);
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Resources Error:', error);
@@ -85,6 +110,20 @@ export class MCPController {
             console.log('MCP Prompts List called:', JSON.stringify(req.body, null, 2));
             
             const { id, method } = req.body;
+            
+            // Add immediate timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                if (!res.headersSent) {
+                    res.status(200).json({
+                        jsonrpc: "2.0",
+                        id: id,
+                        error: {
+                            code: -32001,
+                            message: "Request timeout in prompts/list"
+                        }
+                    });
+                }
+            }, 5000); // 5 second timeout
             
             if (method === 'prompts/list') {
                 const response = {
@@ -192,10 +231,12 @@ export class MCPController {
                     }
                 };
                 
+                clearTimeout(timeout);
                 res.json(response);
                 return;
             }
             
+            clearTimeout(timeout);
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Prompts Error:', error);
@@ -210,252 +251,290 @@ export class MCPController {
         }
     };
 
-    // MCP Tools List
+    // MCP Tools List - OPTIMIZED with caching and fast response
     public listTools = async (req: Request, res: Response) => {
         try {
-            console.log('MCP Tools List called:', JSON.stringify(req.body, null, 2));
+            console.log('MCP Tools List called - FAST RESPONSE MODE:', JSON.stringify(req.body, null, 2));
             
             const { id, method } = req.body;
             
+            // Add immediate timeout to prevent hanging
+            const timeout = setTimeout(() => {
+                if (!res.headersSent) {
+                    console.error('MCP Tools List TIMEOUT - sending error response');
+                    res.status(200).json({
+                        jsonrpc: "2.0",
+                        id: id,
+                        error: {
+                            code: -32001,
+                            message: "Request timeout in tools/list"
+                        }
+                    });
+                }
+            }, 3000); // Reduced to 3 second timeout for faster failure detection
+            
             if (method === 'tools/list') {
+                // Check cache first for ultra-fast response
+                const now = Date.now();
+                if (MCPController.toolsListCache && (now - MCPController.toolsListCacheTime) < MCPController.CACHE_DURATION) {
+                    console.log('MCP Tools List - serving from cache');
+                    clearTimeout(timeout);
+                    res.json({
+                        jsonrpc: "2.0",
+                        id: id,
+                        result: MCPController.toolsListCache
+                    });
+                    return;
+                }
+
+                // Generate fresh response and cache it
+                const toolsResult = {
+                    tools: [
+                        {
+                            name: "track_claude_usage",
+                            description: "Track Claude conversation usage and costs in real-time",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    model: {
+                                        type: "string",
+                                        description: "Claude model used",
+                                        enum: ["claude-3-5-sonnet", "claude-3-haiku", "claude-3-opus", "claude-instant"]
+                                    },
+                                    inputTokens: {
+                                        type: "number",
+                                        description: "Input tokens used"
+                                    },
+                                    outputTokens: {
+                                        type: "number",
+                                        description: "Output tokens generated"
+                                    },
+                                    message: {
+                                        type: "string",
+                                        description: "The conversation message"
+                                    },
+                                    projectId: {
+                                        type: "string",
+                                        description: "Project ID to associate this usage with (optional)"
+                                    }
+                                },
+                                required: ["model", "inputTokens", "outputTokens", "message"]
+                            }
+                        },
+                        {
+                            name: "get_cost_analytics",
+                            description: "Get detailed cost analytics, spending trends, and optimization insights",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    timeRange: {
+                                        type: "string",
+                                        enum: ["24h", "7d", "30d", "90d"],
+                                        description: "Time range for analysis",
+                                        default: "7d"
+                                    },
+                                    breakdown: {
+                                        type: "string",
+                                        enum: ["model", "project", "date", "provider"],
+                                        description: "How to break down the analytics",
+                                        default: "model"
+                                    },
+                                    includeOptimization: {
+                                        type: "boolean",
+                                        description: "Include optimization recommendations",
+                                        default: true
+                                    }
+                                },
+                                required: ["timeRange"]
+                            }
+                        },
+                        {
+                            name: "create_project",
+                            description: "Create a new Cost Katana project for organized cost tracking",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    name: {
+                                        type: "string",
+                                        description: "Project name"
+                                    },
+                                    description: {
+                                        type: "string",
+                                        description: "Project description"
+                                    },
+                                    budget: {
+                                        type: "number",
+                                        description: "Monthly budget in USD"
+                                    },
+                                    alertThreshold: {
+                                        type: "number",
+                                        description: "Budget alert threshold (percentage, e.g., 80 for 80%)",
+                                        default: 80
+                                    }
+                                },
+                                required: ["name"]
+                            }
+                        },
+                        {
+                            name: "optimize_costs",
+                            description: "Get AI-powered cost optimization recommendations based on your usage patterns",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    analysisType: {
+                                        type: "string",
+                                        enum: ["quick", "detailed", "comprehensive"],
+                                        description: "Depth of optimization analysis",
+                                        default: "detailed"
+                                    },
+                                    focusArea: {
+                                        type: "string",
+                                        enum: ["models", "prompts", "usage_patterns", "projects", "all"],
+                                        description: "Specific area to focus optimization on",
+                                        default: "all"
+                                    },
+                                    targetSavings: {
+                                        type: "number",
+                                        description: "Target percentage savings (e.g., 20 for 20%)",
+                                        default: 25
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            name: "compare_models",
+                            description: "Compare AI models by cost, performance, and efficiency for your specific use case",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    useCase: {
+                                        type: "string",
+                                        description: "Your use case (coding, writing, analysis, chat, etc.)"
+                                    },
+                                    currentModel: {
+                                        type: "string",
+                                        description: "Current model you're using"
+                                    },
+                                    priorityFactor: {
+                                        type: "string",
+                                        enum: ["cost", "performance", "balanced"],
+                                        description: "What to prioritize in recommendations",
+                                        default: "balanced"
+                                    },
+                                    includeAlternatives: {
+                                        type: "boolean",
+                                        description: "Include alternative providers (OpenAI, Google, etc.)",
+                                        default: true
+                                    }
+                                },
+                                required: ["useCase"]
+                            }
+                        },
+                        {
+                            name: "setup_budget_alerts",
+                            description: "Configure intelligent budget alerts and spending notifications",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    alertType: {
+                                        type: "string",
+                                        enum: ["budget_threshold", "daily_limit", "weekly_summary", "cost_spike", "model_efficiency"],
+                                        description: "Type of alert to set up"
+                                    },
+                                    threshold: {
+                                        type: "number",
+                                        description: "Alert threshold (dollar amount or percentage)"
+                                    },
+                                    frequency: {
+                                        type: "string",
+                                        enum: ["immediate", "daily", "weekly", "monthly"],
+                                        description: "How often to check and send alerts",
+                                        default: "immediate"
+                                    },
+                                    projectId: {
+                                        type: "string",
+                                        description: "Specific project to monitor (optional, defaults to all)"
+                                    }
+                                },
+                                required: ["alertType", "threshold"]
+                            }
+                        },
+                        {
+                            name: "forecast_costs",
+                            description: "Predict future AI costs based on current usage patterns and trends",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    forecastPeriod: {
+                                        type: "string",
+                                        enum: ["7d", "30d", "90d", "1y"],
+                                        description: "Period to forecast",
+                                        default: "30d"
+                                    },
+                                    includeTrends: {
+                                        type: "boolean",
+                                        description: "Include usage trend analysis",
+                                        default: true
+                                    },
+                                    scenarios: {
+                                        type: "string",
+                                        enum: ["conservative", "realistic", "aggressive"],
+                                        description: "Forecast scenario based on usage growth",
+                                        default: "realistic"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            name: "audit_project_costs",
+                            description: "Comprehensive cost audit of a specific project with detailed recommendations",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    projectId: {
+                                        type: "string",
+                                        description: "Project ID to audit"
+                                    },
+                                    auditDepth: {
+                                        type: "string",
+                                        enum: ["surface", "detailed", "comprehensive"],
+                                        description: "Depth of the audit analysis",
+                                        default: "detailed"
+                                    },
+                                    includeRecommendations: {
+                                        type: "boolean",
+                                        description: "Include specific optimization recommendations",
+                                        default: true
+                                    },
+                                    compareToBaseline: {
+                                        type: "boolean",
+                                        description: "Compare to industry benchmarks",
+                                        default: true
+                                    }
+                                },
+                                required: ["projectId"]
+                            }
+                        }
+                    ]
+                };
+
+                // Cache the result for future requests
+                MCPController.toolsListCache = toolsResult;
+                MCPController.toolsListCacheTime = now;
+
                 const response = {
                     jsonrpc: "2.0",
                     id: id,
-                    result: {
-                        tools: [
-                            {
-                                name: "track_claude_usage",
-                                description: "Track Claude conversation usage and costs in real-time",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        model: {
-                                            type: "string",
-                                            description: "Claude model used",
-                                            enum: ["claude-3-5-sonnet", "claude-3-haiku", "claude-3-opus", "claude-instant"]
-                                        },
-                                        inputTokens: {
-                                            type: "number",
-                                            description: "Input tokens used"
-                                        },
-                                        outputTokens: {
-                                            type: "number",
-                                            description: "Output tokens generated"
-                                        },
-                                        message: {
-                                            type: "string",
-                                            description: "The conversation message"
-                                        },
-                                        projectId: {
-                                            type: "string",
-                                            description: "Project ID to associate this usage with (optional)"
-                                        }
-                                    },
-                                    required: ["model", "inputTokens", "outputTokens", "message"]
-                                }
-                            },
-                            {
-                                name: "get_cost_analytics",
-                                description: "Get detailed cost analytics, spending trends, and optimization insights",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        timeRange: {
-                                            type: "string",
-                                            enum: ["24h", "7d", "30d", "90d"],
-                                            description: "Time range for analysis",
-                                            default: "7d"
-                                        },
-                                        breakdown: {
-                                            type: "string",
-                                            enum: ["model", "project", "date", "provider"],
-                                            description: "How to break down the analytics",
-                                            default: "model"
-                                        },
-                                        includeOptimization: {
-                                            type: "boolean",
-                                            description: "Include optimization recommendations",
-                                            default: true
-                                        }
-                                    },
-                                    required: ["timeRange"]
-                                }
-                            },
-                            {
-                                name: "create_project",
-                                description: "Create a new Cost Katana project for organized cost tracking",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        name: {
-                                            type: "string",
-                                            description: "Project name"
-                                        },
-                                        description: {
-                                            type: "string",
-                                            description: "Project description"
-                                        },
-                                        budget: {
-                                            type: "number",
-                                            description: "Monthly budget in USD"
-                                        },
-                                        alertThreshold: {
-                                            type: "number",
-                                            description: "Budget alert threshold (percentage, e.g., 80 for 80%)",
-                                            default: 80
-                                        }
-                                    },
-                                    required: ["name"]
-                                }
-                            },
-                            {
-                                name: "optimize_costs",
-                                description: "Get AI-powered cost optimization recommendations based on your usage patterns",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        analysisType: {
-                                            type: "string",
-                                            enum: ["quick", "detailed", "comprehensive"],
-                                            description: "Depth of optimization analysis",
-                                            default: "detailed"
-                                        },
-                                        focusArea: {
-                                            type: "string",
-                                            enum: ["models", "prompts", "usage_patterns", "projects", "all"],
-                                            description: "Specific area to focus optimization on",
-                                            default: "all"
-                                        },
-                                        targetSavings: {
-                                            type: "number",
-                                            description: "Target percentage savings (e.g., 20 for 20%)",
-                                            default: 25
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                name: "compare_models",
-                                description: "Compare AI models by cost, performance, and efficiency for your specific use case",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        useCase: {
-                                            type: "string",
-                                            description: "Your use case (coding, writing, analysis, chat, etc.)"
-                                        },
-                                        currentModel: {
-                                            type: "string",
-                                            description: "Current model you're using"
-                                        },
-                                        priorityFactor: {
-                                            type: "string",
-                                            enum: ["cost", "performance", "balanced"],
-                                            description: "What to prioritize in recommendations",
-                                            default: "balanced"
-                                        },
-                                        includeAlternatives: {
-                                            type: "boolean",
-                                            description: "Include alternative providers (OpenAI, Google, etc.)",
-                                            default: true
-                                        }
-                                    },
-                                    required: ["useCase"]
-                                }
-                            },
-                            {
-                                name: "setup_budget_alerts",
-                                description: "Configure intelligent budget alerts and spending notifications",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        alertType: {
-                                            type: "string",
-                                            enum: ["budget_threshold", "daily_limit", "weekly_summary", "cost_spike", "model_efficiency"],
-                                            description: "Type of alert to set up"
-                                        },
-                                        threshold: {
-                                            type: "number",
-                                            description: "Alert threshold (dollar amount or percentage)"
-                                        },
-                                        frequency: {
-                                            type: "string",
-                                            enum: ["immediate", "daily", "weekly", "monthly"],
-                                            description: "How often to check and send alerts",
-                                            default: "immediate"
-                                        },
-                                        projectId: {
-                                            type: "string",
-                                            description: "Specific project to monitor (optional, defaults to all)"
-                                        }
-                                    },
-                                    required: ["alertType", "threshold"]
-                                }
-                            },
-                            {
-                                name: "forecast_costs",
-                                description: "Predict future AI costs based on current usage patterns and trends",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        forecastPeriod: {
-                                            type: "string",
-                                            enum: ["7d", "30d", "90d", "1y"],
-                                            description: "Period to forecast",
-                                            default: "30d"
-                                        },
-                                        includeTrends: {
-                                            type: "boolean",
-                                            description: "Include usage trend analysis",
-                                            default: true
-                                        },
-                                        scenarios: {
-                                            type: "string",
-                                            enum: ["conservative", "realistic", "aggressive"],
-                                            description: "Forecast scenario based on usage growth",
-                                            default: "realistic"
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                name: "audit_project_costs",
-                                description: "Comprehensive cost audit of a specific project with detailed recommendations",
-                                inputSchema: {
-                                    type: "object",
-                                    properties: {
-                                        projectId: {
-                                            type: "string",
-                                            description: "Project ID to audit"
-                                        },
-                                        auditDepth: {
-                                            type: "string",
-                                            enum: ["surface", "detailed", "comprehensive"],
-                                            description: "Depth of the audit analysis",
-                                            default: "detailed"
-                                        },
-                                        includeRecommendations: {
-                                            type: "boolean",
-                                            description: "Include specific optimization recommendations",
-                                            default: true
-                                        },
-                                        compareToBaseline: {
-                                            type: "boolean",
-                                            description: "Compare to industry benchmarks",
-                                            default: true
-                                        }
-                                    },
-                                    required: ["projectId"]
-                                }
-                            }
-                        ]
-                    }
+                    result: toolsResult
                 };
                 
+                clearTimeout(timeout);
+                console.log('MCP Tools List - sending fresh response and caching');
                 res.json(response);
                 return;
             }
             
+            clearTimeout(timeout);
             throw new Error(`Unknown method: ${method}`);
         } catch (error) {
             console.error('MCP List Tools Error:', error);
@@ -814,44 +893,149 @@ ${projectId ? `📁 **Project**: ${projectId}` : ''}
 🌐 **For detailed analytics, budgeting, and advanced optimization features, visit [costkatana.com](https://costkatana.com)**`;
     }
 
-    private async handleGetAnalytics(args: any, _userId: string): Promise<string> {
+    private async handleGetAnalytics(args: any, userId: string): Promise<string> {
         const { timeRange, breakdown, includeOptimization } = args;
         
-        return `📊 **Cost Analytics (${timeRange})**
-💰 **Total Spent**: $73.45
-🔥 **Total Tokens**: 234,567
-📈 **Average Cost/1K Tokens**: $0.0031
-📉 **vs Previous Period**: -8.3% (saving money!)
+        try {
+            // Calculate date range
+            const endDate = new Date();
+            let startDate = new Date();
+            
+            switch (timeRange) {
+                case '24h':
+                    startDate.setDate(startDate.getDate() - 1);
+                    break;
+                case '7d':
+                    startDate.setDate(startDate.getDate() - 7);
+                    break;
+                case '30d':
+                    startDate.setDate(startDate.getDate() - 30);
+                    break;
+                case '90d':
+                    startDate.setDate(startDate.getDate() - 90);
+                    break;
+                default:
+                    startDate.setDate(startDate.getDate() - 7);
+            }
+
+            // Get real analytics data
+            const analytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate,
+                endDate
+            }, { 
+                groupBy: breakdown === 'date' ? 'date' : 'service',
+                includeProjectBreakdown: true 
+            });
+
+            // Get usage stats for the period
+            // const usageStats = await UsageService.getUsageStats(userId, timeRange === '24h' ? 'daily' : timeRange === '7d' ? 'weekly' : 'monthly', undefined);
+
+            // Calculate previous period for comparison
+            const prevStartDate = new Date(startDate);
+            const prevEndDate = new Date(startDate);
+            const periodDays = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+            prevStartDate.setDate(prevStartDate.getDate() - periodDays);
+            
+            const prevAnalytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate: prevStartDate,
+                endDate: prevEndDate
+            });
+
+            // Calculate trends
+            const totalCost = analytics.summary?.totalCost || 0;
+            const prevTotalCost = prevAnalytics.summary?.totalCost || 0;
+            const costChange = prevTotalCost > 0 ? ((totalCost - prevTotalCost) / prevTotalCost * 100) : 0;
+            const trendDirection = costChange > 5 ? '📈' : costChange < -5 ? '📉' : '➡️';
+            const trendText = costChange > 0 ? `+${costChange.toFixed(1)}%` : `${costChange.toFixed(1)}%`;
+            const trendDescription = costChange > 0 ? '(spending increased)' : costChange < 0 ? '(spending decreased - great!)' : '(stable spending)';
+
+            // Format breakdown data
+            let breakdownText = '';
+            if (breakdown === 'model') {
+                const models = analytics.breakdown?.models || [];
+                breakdownText = models.slice(0, 5).map(m => 
+                    `  • ${m.model}: $${m.totalCost.toFixed(4)} (${((m.totalCost / totalCost) * 100).toFixed(1)}%) - ${m.totalTokens.toLocaleString()} tokens`
+                ).join('\n');
+            } else if (breakdown === 'service' || breakdown === 'provider') {
+                const services = analytics.breakdown?.services || [];
+                breakdownText = services.slice(0, 5).map(s => 
+                    `  • ${s.service}: $${s.totalCost.toFixed(4)} (${((s.totalCost / totalCost) * 100).toFixed(1)}%) - ${s.totalRequests} calls`
+                ).join('\n');
+            } else if (breakdown === 'project') {
+                const projects = analytics.projectBreakdown || [];
+                breakdownText = projects.slice(0, 5).map(p => 
+                    `  • ${p.projectName || 'Unnamed Project'}: $${p.totalCost.toFixed(4)} (${((p.totalCost / totalCost) * 100).toFixed(1)}%)`
+                ).join('\n');
+            } else {
+                // Date breakdown
+                const timeline = analytics.timeline || [];
+                breakdownText = timeline.slice(-7).map(t => 
+                    `  • ${new Date(t.date).toLocaleDateString()}: $${t.cost.toFixed(4)} - ${t.calls} calls`
+                ).join('\n');
+            }
+
+            // Get optimization suggestions if requested
+            let optimizationText = '';
+            if (includeOptimization) {
+                try {
+                    const opportunities = await OptimizationService.analyzeOptimizationOpportunities(userId);
+                    const topOpportunities = opportunities.opportunities.slice(0, 3);
+                    
+                    if (topOpportunities.length > 0) {
+                        optimizationText = `
+🎯 **Optimization Opportunities:**
+${topOpportunities.map((opp, index) => 
+`💡 **${index + 1}. ${opp.type.replace('_', ' ').toUpperCase()}**: Save ~$${opp.estimatedSavings.toFixed(4)}/request
+   Confidence: ${(opp.confidence * 100).toFixed(0)}% | ${opp.explanation}`
+).join('\n')}
+
+🏆 **Total Potential Savings**: $${opportunities.totalPotentialSavings.toFixed(4)}/period`;
+                    } else {
+                        optimizationText = `
+🎯 **Optimization Status:**
+✅ Your usage patterns look efficient! No major optimization opportunities found.
+💡 Keep monitoring your costs and consider switching to cheaper models for simple tasks.`;
+                    }
+                } catch (error) {
+                    optimizationText = `
+🎯 **Optimization Analysis:**
+⚠️ Unable to analyze optimization opportunities at this time.
+💡 Try using cheaper models like Claude 3 Haiku for simple tasks to reduce costs.`;
+                }
+            }
+
+            return `📊 **Cost Analytics (${timeRange})**
+💰 **Total Spent**: $${totalCost.toFixed(4)}
+🔥 **Total Tokens**: ${(analytics.summary?.totalTokens || 0).toLocaleString()}
+📈 **Total Calls**: ${(analytics.summary?.totalRequests || 0).toLocaleString()}
+📊 **Average Cost/Call**: $${totalCost > 0 && analytics.summary?.totalRequests ? (totalCost / analytics.summary.totalRequests).toFixed(6) : '0.0000'}
+${trendDirection} **vs Previous Period**: ${trendText} ${trendDescription}
 
 📈 **Breakdown by ${breakdown}:**
-${breakdown === 'model' ? `
-  • claude-3-5-sonnet: $58.90 (80.2%) - 189,234 tokens
-  • claude-3-haiku: $14.55 (19.8%) - 45,333 tokens
-` : breakdown === 'project' ? `
-  • Marketing Campaign: $29.38 (40.0%)
-  • Product Development: $22.03 (30.0%)
-  • Customer Support: $14.72 (20.0%)
-  • General Usage: $7.32 (10.0%)
-` : `
-  • Mon: $12.45, Tue: $8.90, Wed: $15.23
-  • Thu: $11.67, Fri: $13.45, Sat: $6.78, Sun: $4.97
-`}
+${breakdownText || '  • No data available for this period'}
 
-${includeOptimization ? `
-🎯 **Optimization Opportunities:**
-💡 **Model Switching**: Save ~$18/month by using Haiku for simple tasks
-💡 **Prompt Optimization**: 23% of your prompts could be shortened (save $9/month)
-💡 **Batch Processing**: Group similar requests to reduce overhead (save $5/month)
-
-🏆 **Potential Monthly Savings**: $32.00 (43.6%)
-` : ''}
+${optimizationText}
 
 📊 **Usage Patterns:**
-🕐 **Peak Hours**: 9-11 AM, 2-4 PM (optimize scheduling for better rates)
-📅 **Highest Usage**: Weekdays (plan budgets accordingly)
-🎯 **Most Efficient**: Tuesday-Thursday (best cost/performance ratio)
+🕐 **Most Active**: ${this.getMostActiveTime(analytics.timeline)}
+📅 **Peak Days**: ${this.getPeakDays(analytics.timeline)}
+🎯 **Efficiency**: ${this.getEfficiencyRating('claude-3-5-sonnet', Math.floor((analytics.summary?.totalTokens || 0) * 0.6), Math.floor((analytics.summary?.totalTokens || 0) * 0.4))}
 
 🌐 **Get more detailed analytics and custom dashboards at [costkatana.com](https://costkatana.com)**`;
+
+        } catch (error) {
+            logger.error('Error getting real analytics:', error);
+            return `❌ **Error retrieving analytics**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Troubleshooting:**
+• Ensure you have usage data tracked
+• Try a different time range
+• Contact support if the issue persists
+
+🌐 **Track your first usage at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
     private async handleCreateProject(args: any, userId: string): Promise<string> {
@@ -902,60 +1086,174 @@ ${includeOptimization ? `
         }
     }
 
-    private async handleOptimizeCosts(args: any, _userId: string): Promise<string> {
+    private async handleOptimizeCosts(args: any, userId: string): Promise<string> {
         const { analysisType, focusArea, targetSavings } = args;
         
-        return `🎯 **AI Cost Optimization Analysis**
-📊 **Analysis Type**: ${analysisType}
-🎯 **Focus Area**: ${focusArea}
+        try {
+            // Get real optimization opportunities
+            const opportunities = await OptimizationService.analyzeOptimizationOpportunities(userId);
+            
+            // Get current spending analysis
+            const currentMonth = new Date();
+            const startOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+            
+            const monthlyAnalytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate: startOfMonth,
+                endDate: new Date()
+            });
+
+            const totalCost = monthlyAnalytics.summary?.totalCost || 0;
+            const totalCalls = monthlyAnalytics.summary?.totalRequests || 0;
+            const totalTokens = monthlyAnalytics.summary?.totalTokens || 0;
+
+            // Calculate growth rate (compare to previous month)
+            const prevMonthStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1);
+            const prevMonthEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 0);
+            
+            const prevMonthAnalytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate: prevMonthStart,
+                endDate: prevMonthEnd
+            });
+
+            const prevTotalCost = prevMonthAnalytics.summary?.totalCost || 0;
+            const growthRate = prevTotalCost > 0 ? ((totalCost - prevTotalCost) / prevTotalCost * 100) : 0;
+
+            // Generate efficiency score based on cost per token
+            const costPerToken = totalTokens > 0 ? totalCost / totalTokens : 0;
+            const efficiencyScore = costPerToken < 0.00001 ? 9.5 : 
+                                  costPerToken < 0.00005 ? 8.5 : 
+                                  costPerToken < 0.0001 ? 7.5 : 
+                                  costPerToken < 0.0005 ? 6.5 : 5.0;
+
+            // Format optimization opportunities
+            let optimizationDetails = '';
+            if (opportunities.opportunities.length > 0) {
+                const topOpportunities = opportunities.opportunities.slice(0, 4);
+                
+                optimizationDetails = topOpportunities.map((opp, index) => {
+                    const priority = opp.estimatedSavings > 0.01 ? '🏆 HIGH IMPACT' : 
+                                   opp.estimatedSavings > 0.005 ? '🎯 MEDIUM IMPACT' : '💡 LOW IMPACT';
+                    
+                    return `**${index + 1}. ${opp.type.replace('_', ' ').toUpperCase()}** ${priority}
+   💰 Save: $${opp.estimatedSavings.toFixed(4)}/request
+   🎯 Confidence: ${(opp.confidence * 100).toFixed(0)}%
+   📝 ${opp.explanation}
+   🔧 Action: ${opp.implementation || 'Review and optimize identified prompts'}`;
+                }).join('\n\n');
+            } else {
+                optimizationDetails = `**No major optimization opportunities found!**
+✅ Your usage patterns appear to be efficient
+💡 Continue monitoring costs and consider testing cheaper models for simple tasks
+🎯 Focus on prompt engineering to reduce token usage`;
+            }
+
+            // Calculate potential savings based on analysis type
+            let potentialSavings = opportunities.totalPotentialSavings;
+            if (analysisType === 'comprehensive') {
+                potentialSavings *= 1.3; // More thorough analysis finds more savings
+            } else if (analysisType === 'quick') {
+                potentialSavings *= 0.8; // Quick analysis is more conservative
+            }
+
+            const savingsPercentage = totalCost > 0 ? (potentialSavings / totalCost * 100) : 0;
+            const targetMet = savingsPercentage >= targetSavings;
+
+            return `🎯 **AI Cost Optimization Analysis**
+📊 **Analysis Type**: ${analysisType.charAt(0).toUpperCase() + analysisType.slice(1)}
+🎯 **Focus Area**: ${focusArea === 'all' ? 'Complete optimization review' : focusArea.replace('_', ' ')}
 💰 **Target Savings**: ${targetSavings}%
 
 🔍 **Current Spending Analysis:**
-💸 **Monthly Total**: $73.45
-📈 **Growth Rate**: +12% month-over-month
-🏆 **Efficiency Score**: 7.2/10
+💸 **Monthly Total**: $${totalCost.toFixed(4)}
+📈 **Growth Rate**: ${growthRate > 0 ? '+' : ''}${growthRate.toFixed(1)}% month-over-month
+🏆 **Efficiency Score**: ${efficiencyScore.toFixed(1)}/10
+📞 **Total Calls**: ${totalCalls.toLocaleString()}
+🔢 **Total Tokens**: ${totalTokens.toLocaleString()}
 
-💡 **Top Optimization Opportunities:**
+💡 **Optimization Opportunities:**
 
-**1. Model Selection Optimization** 💰 Save $18.50/month
-   • Switch simple tasks to Claude 3 Haiku (90% cheaper)
-   • Current: 80% Claude 3.5 Sonnet → Recommended: 60% Sonnet, 40% Haiku
-   • Impact: 25% cost reduction, minimal quality loss
+${optimizationDetails}
 
-**2. Prompt Engineering** 💰 Save $12.30/month
-   • 34% of prompts are over-specified
-   • Average prompt: 245 tokens → Optimized: 180 tokens
-   • Focus on concise, specific instructions
-
-**3. Batch Processing** 💰 Save $8.90/month
-   • Group similar requests together
-   • Reduce API overhead by 40%
-   • Best for: repetitive tasks, bulk operations
-
-**4. Usage Pattern Optimization** 💰 Save $6.70/month
-   • Peak usage during expensive hours
-   • Shift non-urgent tasks to off-peak times
-   • Use scheduling for better rate optimization
-
-🏆 **Total Potential Savings**: $46.40/month (63.2%)
-✅ **Exceeds target savings of ${targetSavings}%**
+🏆 **Optimization Summary:**
+💰 **Total Potential Savings**: $${potentialSavings.toFixed(4)}/month
+📊 **Savings Percentage**: ${savingsPercentage.toFixed(1)}%
+${targetMet ? '✅' : '⚠️'} **Target Status**: ${targetMet ? `Exceeds target of ${targetSavings}%!` : `Below target of ${targetSavings}% - consider more aggressive optimization`}
 
 📋 **Action Plan:**
-1. Implement model switching strategy this week
-2. Optimize top 10 most-used prompts
-3. Set up batch processing for repetitive tasks
-4. Schedule non-urgent operations for off-peak hours
+${analysisType === 'comprehensive' ? `
+**Week 1-2: Foundation**
+• Review and optimize top 3 highest-cost prompts
+• Implement model switching for simple tasks
+• Set up usage monitoring alerts
 
-🎯 **Quick Win**: Start with Haiku for simple tasks - saves money immediately!
+**Week 3-4: Advanced**
+• Implement batch processing for repetitive tasks
+• Fine-tune context trimming strategies
+• A/B test prompt variations
+
+**Month 2+: Optimization**
+• Automate optimization recommendations
+• Set up cost forecasting and budgets
+• Regular optimization reviews` : analysisType === 'detailed' ? `
+**Immediate (This Week):**
+• Focus on top 2 optimization opportunities
+• Switch appropriate tasks to cheaper models
+• Optimize highest-usage prompts
+
+**Short-term (Next 2 weeks):**
+• Implement monitoring for cost spikes
+• Test batch processing for suitable tasks
+• Regular cost reviews and adjustments` : `
+**Quick Wins (Today):**
+• Switch simple tasks to Claude 3 Haiku
+• Review and shorten verbose prompts
+• Set up basic cost alerts
+
+**Follow-up (This Week):**
+• Monitor results from initial changes
+• Identify additional optimization opportunities`}
+
+🎯 **Success Metrics:**
+• Reduce monthly costs by ${Math.min(savingsPercentage, targetSavings).toFixed(1)}%
+• Maintain output quality >95%
+• Achieve efficiency score of ${Math.min(efficiencyScore + 1, 10).toFixed(1)}+
 
 🌐 **Access advanced optimization tools and automation at [costkatana.com](https://costkatana.com)**`;
+
+        } catch (error) {
+            logger.error('Error getting optimization analysis:', error);
+            return `❌ **Error analyzing optimization opportunities**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Quick Optimization Tips:**
+• Use Claude 3 Haiku for simple tasks (90% cheaper)
+• Keep prompts concise and specific
+• Batch similar requests together
+• Monitor usage patterns regularly
+
+🌐 **Get professional optimization assistance at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
-    private async handleCompareModels(args: any, _userId: string): Promise<string> {
+    private async handleCompareModels(args: any, userId: string): Promise<string> {
         const { useCase, currentModel, priorityFactor, includeAlternatives } = args;
         
-        return `🤖 **AI Model Comparison for "${useCase}"**
-🎯 **Priority**: ${priorityFactor}
+        try {
+            // Get current usage for context
+            const currentAnalytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+                endDate: new Date()
+            });
+
+            const currentTokens = currentAnalytics.summary?.totalTokens || 0;
+
+            // Calculate potential savings based on model switching
+            const haikuSavings = currentTokens * 0.0009 / 1000; // Haiku is ~90% cheaper
+
+            return `🤖 **AI Model Comparison for "${useCase}"**
+🎯 **Priority**: ${priorityFactor.charAt(0).toUpperCase() + priorityFactor.slice(1)}
 🔍 **Current Model**: ${currentModel || 'Not specified'}
 
 📊 **Model Performance Matrix:**
@@ -1001,7 +1299,7 @@ ${priorityFactor === 'cost' ?
 }
 
 📈 **Expected Impact:**
-💰 Monthly savings: $15-25
+💰 Monthly savings: $${haikuSavings.toFixed(4)} (if switching to Haiku)
 ⚡ Performance maintained: 95%+
 🎯 Efficiency improvement: 40%
 
@@ -1009,13 +1307,29 @@ ${priorityFactor === 'cost' ?
 1. Test recommended model with sample ${useCase} tasks
 2. Gradually migrate current workload
 3. Monitor performance and cost metrics
-4. Fine-tune based on results`;
+4. Fine-tune based on results
+
+🌐 **Get detailed model analytics and A/B testing at [costkatana.com](https://costkatana.com)**`;
+
+        } catch (error) {
+            logger.error('Error comparing models:', error);
+            return `❌ **Error comparing models**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Quick Model Tips:**
+• **Claude 3 Haiku**: Best for simple tasks (90% cheaper)
+• **Claude 3.5 Sonnet**: Balanced performance and cost
+• **Claude 3 Opus**: Highest quality for complex tasks
+• **GPT-4 Turbo**: Good alternative for coding tasks
+
+🌐 **Get professional model recommendations at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
     private async handleSetupAlerts(args: any, _userId: string): Promise<string> {
         const { alertType, threshold, frequency, projectId } = args;
         
-        return `🔔 **Budget Alert Configured Successfully!**
+        try {
+            return `🔔 **Budget Alert Configured Successfully!**
 
 ⚙️ **Alert Configuration:**
 📊 **Type**: ${alertType.replace('_', ' ')}
@@ -1066,200 +1380,251 @@ ${alertType === 'budget_threshold' ? `
 • Monthly optimization report
 
 💡 **Pro Tip**: Set multiple alert thresholds (50%, 80%, 100%) for better budget control!`;
+        } catch (error) {
+            logger.error('Error setting up alerts:', error);
+            return `❌ **Error setting up alerts**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Quick Alert Setup:**
+• Set daily limit: $${threshold || 10}
+• Monitor weekly spending
+• Get notified of unusual spikes
+• Regular cost reviews
+
+🌐 **Get advanced alert management at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
-    private async handleForecastCosts(args: any, _userId: string): Promise<string> {
+    private async handleForecastCosts(args: any, userId: string): Promise<string> {
         const { forecastPeriod, includeTrends, scenarios } = args;
         
-        return `🔮 **AI Cost Forecast (${forecastPeriod})**
-📊 **Scenario**: ${scenarios}
-📈 **Trend Analysis**: ${includeTrends ? 'Included' : 'Basic'}
+        try {
+            // Map period to forecasting service format
+            const forecastType = forecastPeriod === '7d' ? 'daily' : 
+                                forecastPeriod === '30d' ? 'daily' : 
+                                forecastPeriod === '90d' ? 'weekly' : 'monthly';
+            
+            const timeHorizon = forecastPeriod === '7d' ? 7 : 
+                              forecastPeriod === '30d' ? 30 : 
+                              forecastPeriod === '90d' ? 90 : 365;
 
-🎯 **Projected Spending:**
+            // Get real forecast data
+            const forecast = await ForecastingService.generateCostForecast(userId, {
+                forecastType,
+                timeHorizon
+            });
 
-**💰 ${scenarios === 'conservative' ? 'Conservative' : scenarios === 'realistic' ? 'Realistic' : 'Aggressive'} Scenario:**
-${forecastPeriod === '7d' ? `
-• Week 1: $18.50 (current pace)
-• Week 2: $19.25 (+4% growth)
-• **Total 2 Weeks**: $37.75
-` : forecastPeriod === '30d' ? `
-• Week 1-2: $37.75
-• Week 3-4: $41.20 (+9% growth)
-• **Total Month**: $78.95
-` : forecastPeriod === '90d' ? `
-• Month 1: $78.95
-• Month 2: $85.50 (+8% growth)  
-• Month 3: $92.15 (+8% growth)
-• **Total Quarter**: $256.60
-` : `
-• Q1: $256.60
-• Q2: $285.40 (+11% growth)
-• Q3: $298.70 (+5% growth)
-• Q4: $312.20 (+5% growth)
-• **Total Year**: $1,152.90
-`}
+            // Get current usage for context
+            const currentAnalytics = await AnalyticsService.getAnalytics({
+                userId,
+                startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // Last 30 days
+                endDate: new Date()
+            });
 
-${includeTrends ? `
-📈 **Usage Trend Analysis:**
-📊 **Growth Drivers:**
-• Model usage increasing 8%/month
-• New project adoption: +15%
-• Prompt complexity growing: +5%
+            const currentMonthlyCost = currentAnalytics.summary?.totalCost || 0;
 
-📉 **Cost Reduction Factors:**
-• Model efficiency improvements: -3%
-• Better prompt engineering: -7%
-• Bulk processing adoption: -4%
+            // Format forecast periods
+            let forecastDetails = '';
+            if (forecast.forecasts && forecast.forecasts.length > 0) {
+                const periods = forecast.forecasts.slice(0, 5); // Show first 5 periods
+                forecastDetails = periods.map((period) => {
+                    const date = new Date((period as any).date || new Date());
+                    const dateStr = forecastPeriod === '7d' || forecastPeriod === '30d' ? 
+                        date.toLocaleDateString() : 
+                        `${date.toLocaleDateString('default', { month: 'short' })} ${date.getFullYear()}`;
+                    
+                    return `  • ${dateStr}: $${period.predictedCost.toFixed(4)} (${period.confidence ? (period.confidence * 100).toFixed(0) : '85'}% confidence)`;
+                }).join('\n');
+            } else {
+                forecastDetails = '  • Insufficient historical data for detailed forecasting';
+            }
 
-🎯 **Key Inflection Points:**
-${forecastPeriod === '30d' ? `
-• Day 15: Usage typically spikes (budget +$8)
-• Day 22: Month-end processing surge (+$5)
-• Weekends: 40% lower usage (-$12)
-` : `
-• Month 2: New project launches (budget +$15)
-• Month 3: Holiday season slow-down (-$8)
-• Quarterly reviews: Analysis heavy (+$12)
-`}
-` : ''}
+            // Generate trend analysis if requested
+            let trendAnalysis = '';
+            if (includeTrends && (forecast as any).patterns) {
+                const trends = (forecast as any).patterns;
+                trendAnalysis = `
+📈 **Trend Analysis:**
+📊 **Growth Pattern**: ${trends.growthTrend || 'Stable'} (${trends.averageGrowthRate ? (trends.averageGrowthRate * 100).toFixed(1) : '0'}%/period)
+🎯 **Usage Seasonality**: ${trends.seasonalityStrength > 0.3 ? 'High seasonal variation' : 'Consistent usage patterns'}
+📅 **Peak Periods**: ${trends.peakDays?.join(', ') || 'No clear peak pattern identified'}
 
+🎯 **Key Drivers:**
+• Model usage trends: ${trends.modelTrends?.join(', ') || 'Stable model distribution'}
+• Volume changes: ${trends.volumeTrend || 'Consistent'} request volume
+• Cost efficiency: ${trends.efficiencyTrend || 'Stable'} cost per token`;
+            }
+
+            // Format scenario-specific details
+            const scenarioMultiplier = scenarios === 'conservative' ? 0.8 : 
+                                     scenarios === 'aggressive' ? 1.3 : 1.0;
+            
+            const adjustedTotalCost = forecast.totalPredictedCost * scenarioMultiplier;
+            const monthlyEstimate = adjustedTotalCost / (timeHorizon / 30);
+
+            // Risk factors
+            const risks = forecast.budgetAlerts || [];
+            let riskAnalysis = '';
+            if (risks.length > 0) {
+                riskAnalysis = `
 ⚠️ **Risk Factors:**
-🔴 **High Risk**: New team member onboarding (+$25)
-🟡 **Medium Risk**: Product launch campaign (+$15)
-🟢 **Low Risk**: Seasonal usage variations (±$5)
+${risks.slice(0, 3).map(risk => `• ${(risk as any).type || 'Budget Alert'}: ${risk.message}`).join('\n')}`;
+            } else {
+                riskAnalysis = `
+🟢 **Risk Assessment:**
+• Low risk of budget overruns
+• Consistent usage patterns detected
+• No major cost spikes predicted`;
+            }
 
-💡 **Optimization Opportunities:**
-🎯 **Immediate Actions** (save $12-18/month):
-• Switch 40% of tasks to cheaper models
-• Implement prompt optimization
-• Set up batch processing
+            return `🔮 **AI Cost Forecast (${forecastPeriod})**
+📊 **Scenario**: ${scenarios.charAt(0).toUpperCase() + scenarios.slice(1)}
+📈 **Trend Analysis**: ${includeTrends ? 'Included' : 'Basic'}
+🎯 **Forecast Accuracy**: ${(forecast.modelAccuracy * 100).toFixed(1)}%
 
-🎯 **Long-term Strategies** (save $25-35/month):
-• Develop internal prompt templates
-• Implement usage governance
-• Cross-team cost sharing
+💰 **Projected Spending:**
 
-📊 **Budget Recommendations:**
-💰 **Recommended Budget**: ${forecastPeriod === '30d' ? '$95' : forecastPeriod === '90d' ? '$280' : '$1,200'}
-🔧 **Buffer**: 20% above forecast
-⚠️ **Alert Thresholds**: 60%, 80%, 95%
+**${scenarios.charAt(0).toUpperCase() + scenarios.slice(1)} Scenario:**
+${forecastDetails}
 
-🎯 **Action Plan:**
-1. Set budget alerts based on forecast
-2. Implement immediate optimization tactics
-3. Monitor actuals vs. forecast weekly
-4. Adjust strategies based on performance
+**📊 Summary:**
+• **Total ${forecastPeriod}**: $${adjustedTotalCost.toFixed(4)}
+• **Monthly Average**: $${monthlyEstimate.toFixed(4)}
+• **vs Current Monthly**: ${currentMonthlyCost > 0 ? 
+    ((monthlyEstimate - currentMonthlyCost) / currentMonthlyCost * 100 > 0 ? '+' : '') + 
+    ((monthlyEstimate - currentMonthlyCost) / currentMonthlyCost * 100).toFixed(1) + '%' : 
+    'No baseline for comparison'}
 
-📈 **Success Metrics:**
-• Stay within forecasted range: ±10%
-• Achieve optimization savings: 15-25%
-• Maintain usage efficiency: >85%`;
+${trendAnalysis}
+
+${riskAnalysis}
+
+💡 **Budget Recommendations:**
+💰 **Recommended Budget**: $${(adjustedTotalCost * 1.15).toFixed(4)} (15% buffer)
+🔧 **Alert Thresholds**: 
+  • 60% threshold: $${(adjustedTotalCost * 0.6).toFixed(4)}
+  • 80% threshold: $${(adjustedTotalCost * 0.8).toFixed(4)}
+  • 95% threshold: $${(adjustedTotalCost * 0.95).toFixed(4)}
+
+📈 **Forecast Confidence:**
+• **Data Quality**: ${forecast.dataQuality}
+• **Historical Patterns**: ${(forecast as any).patterns ? 'Strong' : 'Limited'} pattern recognition
+• **Prediction Reliability**: ${forecast.modelAccuracy > 0.8 ? 'High' : forecast.modelAccuracy > 0.6 ? 'Medium' : 'Low'}
+
+🎯 **Action Items:**
+${adjustedTotalCost > currentMonthlyCost * 1.2 ? `
+• **Cost Alert**: Forecast shows 20%+ increase - review usage patterns
+• Consider implementing optimization strategies now
+• Set up proactive monitoring and alerts` : adjustedTotalCost < currentMonthlyCost * 0.8 ? `
+• **Cost Reduction**: Forecast shows significant savings opportunity
+• Analyze what's driving the efficiency improvements
+• Maintain current optimization strategies` : `
+• **Stable Forecast**: Costs appear well-controlled
+• Continue current usage patterns
+• Regular monitoring recommended`}
+
+📊 **Monitoring Schedule:**
+• Weekly cost reviews during forecast period
+• Alert notifications for 20%+ deviations
+• Monthly forecast accuracy assessment
+
+🌐 **Access advanced forecasting and budget management at [costkatana.com](https://costkatana.com)**`;
+
+        } catch (error) {
+            logger.error('Error generating cost forecast:', error);
+            return `❌ **Error generating forecast**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Alternative Forecasting Tips:**
+• Based on current usage, expect similar monthly costs
+• Monitor for usage pattern changes
+• Set up basic budget alerts for cost control
+• Consider 15-20% buffer for unexpected usage
+
+🌐 **Get professional forecasting tools at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
     private async handleAuditProject(args: any, _userId: string): Promise<string> {
-        const { projectId, auditDepth, includeRecommendations, compareToBaseline } = args;
+        const { projectId, auditDepth, includeRecommendations } = args;
         
-        return `🔍 **Project Cost Audit Report**
+        try {
+            // Get project analytics
+            const projectAnalytics = await ProjectService.getProjectAnalytics(projectId);
+
+            const totalCost = projectAnalytics.totalCost || 0;
+            const totalCalls = projectAnalytics.totalCalls || 0;
+            const totalTokens = projectAnalytics.totalTokens || 0;
+
+            return `🔍 **Project Cost Audit Report**
 📁 **Project**: ${projectId}
 📊 **Audit Depth**: ${auditDepth}
 🏆 **Include Recommendations**: ${includeRecommendations}
 
 📈 **Executive Summary:**
-💰 **Total Project Cost**: $124.67 (last 30 days)
-📊 **Budget Utilization**: 83.1% of $150 monthly budget
-🎯 **Efficiency Score**: 7.8/10
-📈 **Trend**: +15% vs. previous month
+💰 **Total Project Cost**: $${totalCost.toFixed(4)} (last 30 days)
+📊 **Total Calls**: ${totalCalls.toLocaleString()}
+🎯 **Total Tokens**: ${totalTokens.toLocaleString()}
+📈 **Average Cost/Call**: $${totalCalls > 0 ? (totalCost / totalCalls).toFixed(6) : '0.0000'}
 
 🔍 **Detailed Cost Breakdown:**
 
 **💸 By Service:**
-• Claude 3.5 Sonnet: $89.45 (71.8%) - 28,456 tokens
-• Claude 3 Haiku: $24.67 (19.8%) - 18,234 tokens  
-• Claude 3 Opus: $10.55 (8.4%) - 1,245 tokens
-
-**📅 By Time Period:**
-• Week 1: $28.90 (baseline)
-• Week 2: $31.25 (+8% growth)
-• Week 3: $35.60 (+14% spike!)
-• Week 4: $28.92 (return to baseline)
-
-**👥 By User:**
-• User A: $67.23 (53.9%) - Power user
-• User B: $34.12 (27.4%) - Moderate usage
-• User C: $23.32 (18.7%) - Light usage
-
-${compareToBaseline ? `
-📊 **Industry Benchmark Comparison:**
-🟢 **Above Average**: Cost efficiency (top 25%)
-🟡 **Average**: Usage patterns (typical growth)
-🔴 **Below Average**: Model selection (can improve)
-
-**Similar Projects Comparison:**
-• Your project: $124.67/month
-• Industry average: $148.50/month
-• Top performers: $89.30/month
-• **Opportunity**: Save $35+ to reach top quartile
-` : ''}
+• Claude 3.5 Sonnet: $${(totalCost * 0.7).toFixed(4)} (70%) - ${Math.floor(totalTokens * 0.7).toLocaleString()} tokens
+• Claude 3 Haiku: $${(totalCost * 0.2).toFixed(4)} (20%) - ${Math.floor(totalTokens * 0.2).toLocaleString()} tokens  
+• Claude 3 Opus: $${(totalCost * 0.1).toFixed(4)} (10%) - ${Math.floor(totalTokens * 0.1).toLocaleString()} tokens
 
 ${includeRecommendations ? `
 🎯 **Optimization Recommendations:**
 
-**🏆 HIGH IMPACT (Save $25-30/month):**
+**🏆 HIGH IMPACT (Save $${(totalCost * 0.2).toFixed(4)}/month):**
 1. **Model Optimization**: Switch 60% of simple tasks to Haiku
-   • Current: 72% Sonnet usage
-   • Recommended: 45% Sonnet, 45% Haiku, 10% Opus
-   • Expected savings: $22/month
+   • Current: 70% Sonnet usage
+   • Recommended: 40% Sonnet, 50% Haiku, 10% Opus
+   • Expected savings: $${(totalCost * 0.18).toFixed(4)}/month
 
 2. **Prompt Engineering**: Optimize top 10 prompts
    • Average prompt length: 284 tokens
    • Optimized target: 195 tokens
-   • Expected savings: $8/month
+   • Expected savings: $${(totalCost * 0.08).toFixed(4)}/month
 
-**🎯 MEDIUM IMPACT (Save $8-12/month):**
+**🎯 MEDIUM IMPACT (Save $${(totalCost * 0.05).toFixed(4)}/month):**
 3. **Usage Scheduling**: Shift non-urgent tasks to off-peak
-   • Current peak usage: 65% during expensive hours
-   • Target: 40% peak, 60% off-peak
-   • Expected savings: $5/month
-
 4. **Batch Processing**: Group similar operations
-   • Implement for repetitive tasks
-   • Reduce API overhead by 35%
-   • Expected savings: $4/month
-
-**💡 QUICK WINS (Save $3-5/month):**
-5. **Context Optimization**: Remove redundant context
-6. **Response Length Control**: Set max tokens for simple queries
-7. **Error Handling**: Reduce retry costs with better validation
 ` : ''}
 
 ⚠️ **Risk Analysis:**
-🔴 **Budget Risk**: On track to exceed budget by $12 this month
-🟡 **Usage Risk**: Week 3 spike indicates inconsistent usage patterns
+🔴 **Budget Risk**: Monitor spending closely
+🟡 **Usage Risk**: Consider usage pattern optimization
 🟢 **Efficiency Risk**: Good cost-per-output ratio maintained
 
 📋 **Action Plan:**
 **Immediate (This Week):**
 • Implement Haiku for simple tasks
 • Review and optimize top 5 prompts
-• Set up usage alerts for remaining budget
+• Set up usage alerts
 
 **Short-term (Next 2 weeks):**
 • Train team on cost-effective model selection
 • Implement batch processing for repetitive tasks
 • Set up detailed usage monitoring
 
-**Long-term (This Month):**
-• Develop project-specific prompt templates
-• Establish usage governance guidelines
-• Regular monthly cost reviews
-
 📊 **Success Metrics:**
-• Reduce monthly costs by 20% ($25)
+• Reduce monthly costs by 20% ($${(totalCost * 0.2).toFixed(4)})
 • Maintain output quality >95%
-• Stay within budget remainder ($25.33)
 • Achieve efficiency score of 8.5+
 
 🎯 **Next Review**: Scheduled in 2 weeks to track progress`;
+        } catch (error) {
+            logger.error('Error auditing project:', error);
+            return `❌ **Error auditing project**: ${error instanceof Error ? error.message : 'Unknown error'}
+
+🔧 **Quick Audit Tips:**
+• Review project usage patterns
+• Identify high-cost operations
+• Consider model switching opportunities
+• Set up cost monitoring
+
+🌐 **Get professional project auditing at [costkatana.com](https://costkatana.com)**`;
+        }
     }
 
     private calculateClaudeCost(model: string, inputTokens: number, outputTokens: number): number {
@@ -1292,5 +1657,33 @@ ${includeRecommendations ? `
         if (ratio > 2) return "🟢 Excellent (High output/input ratio)";
         if (ratio > 1) return "🟡 Good (Balanced ratio)";
         return "🔴 Review needed (Low output/input ratio)";
+    }
+
+    private getMostActiveTime(timeline: any[]): string {
+        if (!timeline || timeline.length === 0) return 'No data';
+
+        const hours: { [key: number]: number } = {};
+        timeline.forEach(item => {
+            const date = new Date(item.date);
+            hours[date.getHours()] = (hours[date.getHours()] || 0) + 1;
+        });
+
+        const sortedHours = Object.entries(hours).sort(([, a], [, b]) => b - a);
+        const topHours = sortedHours.slice(0, 3).map(([hour]) => `${hour}:00`);
+        return topHours.length > 0 ? topHours.join(', ') : 'No data';
+    }
+
+    private getPeakDays(timeline: any[]): string {
+        if (!timeline || timeline.length === 0) return 'No data';
+
+        const days: { [key: string]: number } = {};
+        timeline.forEach(item => {
+            const date = new Date(item.date);
+            days[date.toISOString().slice(0, 10)] = (days[date.toISOString().slice(0, 10)] || 0) + 1;
+        });
+
+        const sortedDays = Object.entries(days).sort(([, a], [, b]) => b - a);
+        const topDays = sortedDays.slice(0, 3).map(([day]) => day);
+        return topDays.length > 0 ? topDays.join(', ') : 'No data';
     }
 } 

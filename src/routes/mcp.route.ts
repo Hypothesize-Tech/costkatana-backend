@@ -124,6 +124,9 @@ mcpRoute.all('/', async (req: Request, res: Response) => {
 
                 case 'tools/list':
                     logger.info('MCP Tools list requested - returning 8 cost optimization tools');
+                    // Set immediate response headers to prevent client-side timeouts
+                    res.setHeader('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+                    res.setHeader('X-Response-Time-Priority', 'high');
                     await mcpController.listTools(req, res);
                     break;
 

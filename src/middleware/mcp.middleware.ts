@@ -21,7 +21,15 @@ export const validateMCPRequest = (req: Request, res: Response, next: NextFuncti
         startTime: Date.now()
     };
 
-    // Log incoming MCP request
+    // Fast path for tools/list to minimize processing overhead
+    if (req.method === 'POST' && req.body?.method === 'tools/list') {
+        // Skip expensive logging for tools/list requests to improve performance
+        console.log('MCP tools/list request - fast path');
+        next();
+        return;
+    }
+
+    // Log incoming MCP request (only for non-tools/list requests)
     logger.info('MCP Request incoming', {
         method: req.method,
         path: req.path,
@@ -59,19 +67,24 @@ export const validateMCPRequest = (req: Request, res: Response, next: NextFuncti
     next();
 };
 
-// MCP response timing middleware
+// MCP response timing middleware - optimized for performance-critical endpoints
 export const mcpResponseTimer = (req: Request, res: Response, next: NextFunction) => {
     const originalSend = res.send;
     
     res.send = function(data: any) {
         if (req.mcpContext) {
             const duration = Date.now() - req.mcpContext.startTime;
-            logger.info('MCP Response sent', {
-                method: req.method,
-                path: req.path,
-                duration,
-                statusCode: res.statusCode
-            });
+            
+            // Only log timing for non-tools/list requests or if duration is unusually high
+            if (req.body?.method !== 'tools/list' || duration > 1000) {
+                logger.info('MCP Response sent', {
+                    method: req.method,
+                    path: req.path,
+                    rpcMethod: req.body?.method,
+                    duration,
+                    statusCode: res.statusCode
+                });
+            }
         }
         return originalSend.call(this, data);
     };
