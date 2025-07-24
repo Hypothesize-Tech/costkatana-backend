@@ -382,9 +382,7 @@ We welcome contributions to enhance the AI-powered features!
 ## 💬 **Support**
 
 ### **Get Help**
-- 📧 **Email**: support@costkatana.com
-- 💬 **Discord**: [Join our community](https://discord.gg/costkatana)
-- 📖 **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
+- 📧 **Email**: abdul@hypothesize.tech
 - 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/ai-cost-optimizer-backend/issues)
 
 ### **AI Feature Support**
@@ -405,6 +403,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 **🚀 Transform your AI cost management with intelligent, personalized coaching!**
 
 [![GitHub Stars](https://img.shields.io/github/stars/cost-katana/ai-cost-optimizer-backend?style=social)](https://github.com/cost-katana/ai-cost-optimizer-backend)
-[![Twitter Follow](https://img.shields.io/twitter/follow/costkatana?style=social)](https://twitter.com/costkatana)
-
 </div>
