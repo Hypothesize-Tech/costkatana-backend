@@ -57,7 +57,7 @@ RUN mkdir -p logs && chown nodejs:nodejs logs
 USER nodejs
 
 # Expose port
-EXPOSE 3000
+EXPOSE 8000
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
