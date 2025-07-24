@@ -21,15 +21,14 @@ export const validateMCPRequest = (req: Request, res: Response, next: NextFuncti
         startTime: Date.now()
     };
 
-    // Fast path for tools/list to minimize processing overhead
-    if (req.method === 'POST' && req.body?.method === 'tools/list') {
-        // Skip expensive logging for tools/list requests to improve performance
-        console.log('MCP tools/list request - fast path');
+    // Fast path for high-frequency requests to minimize processing overhead
+    if (req.method === 'POST' && ['tools/list', 'resources/list', 'prompts/list'].includes(req.body?.method)) {
+        // Skip expensive logging for high-frequency requests to improve performance
         next();
         return;
     }
 
-    // Log incoming MCP request (only for non-tools/list requests)
+    // Log incoming MCP request (only for non-high-frequency requests)
     logger.info('MCP Request incoming', {
         method: req.method,
         path: req.path,
@@ -75,8 +74,8 @@ export const mcpResponseTimer = (req: Request, res: Response, next: NextFunction
         if (req.mcpContext) {
             const duration = Date.now() - req.mcpContext.startTime;
             
-            // Only log timing for non-tools/list requests or if duration is unusually high
-            if (req.body?.method !== 'tools/list' || duration > 1000) {
+            // Only log timing for non-high-frequency requests or if duration is unusually high
+            if (!['tools/list', 'resources/list', 'prompts/list'].includes(req.body?.method) || duration > 1000) {
                 logger.info('MCP Response sent', {
                     method: req.method,
                     path: req.path,

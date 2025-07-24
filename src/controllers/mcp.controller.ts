@@ -17,80 +17,57 @@ export class MCPController {
 
     // Note: Initialize method removed - handled by route directly
 
-    // MCP Resources List
+    // MCP Resources List - Simplified for better performance
     public listResources = async (req: Request, res: Response) => {
         try {
-            console.log('MCP Resources List called:', JSON.stringify(req.body, null, 2));
+            const { id } = req.body;
             
-            const { id, method } = req.body;
-            
-            // Add immediate timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                if (!res.headersSent) {
-                    res.status(200).json({
-                        jsonrpc: "2.0",
-                        id: id,
-                        error: {
-                            code: -32001,
-                            message: "Request timeout in resources/list"
+            const response = {
+                jsonrpc: "2.0",
+                id: id,
+                result: {
+                    resources: [
+                        {
+                            uri: "cost-katana://pricing/ai-models",
+                            name: "AI Model Pricing Database",
+                            description: "Real-time pricing data for all major AI models (OpenAI, Anthropic, Google, etc.)",
+                            mimeType: "application/json"
+                        },
+                        {
+                            uri: "cost-katana://analytics/cost-trends",
+                            name: "Cost Analytics Dashboard",
+                            description: "Your AI spending trends, model usage patterns, and cost optimization opportunities",
+                            mimeType: "application/json"
+                        },
+                        {
+                            uri: "cost-katana://projects/active",
+                            name: "Active Projects",
+                            description: "All your Cost Katana projects with current budgets, spending, and usage metrics",
+                            mimeType: "application/json"
+                        },
+                        {
+                            uri: "cost-katana://optimization/recommendations",
+                            name: "Cost Optimization Recommendations",
+                            description: "AI-powered recommendations to reduce your AI costs based on usage patterns",
+                            mimeType: "application/json"
+                        },
+                        {
+                            uri: "cost-katana://alerts/budget",
+                            name: "Budget Alerts & Notifications",
+                            description: "Active budget alerts, spending thresholds, and notification settings",
+                            mimeType: "application/json"
+                        },
+                        {
+                            uri: "cost-katana://comparison/models",
+                            name: "Model Performance vs Cost Comparison",
+                            description: "Side-by-side comparison of AI models showing performance, cost, and efficiency ratings",
+                            mimeType: "application/json"
                         }
-                    });
+                    ]
                 }
-            }, 5000); // 5 second timeout
+            };
             
-            if (method === 'resources/list') {
-                const response = {
-                    jsonrpc: "2.0",
-                    id: id,
-                    result: {
-                        resources: [
-                            {
-                                uri: "cost-katana://pricing/ai-models",
-                                name: "AI Model Pricing Database",
-                                description: "Real-time pricing data for all major AI models (OpenAI, Anthropic, Google, etc.)",
-                                mimeType: "application/json"
-                            },
-                            {
-                                uri: "cost-katana://analytics/cost-trends",
-                                name: "Cost Analytics Dashboard",
-                                description: "Your AI spending trends, model usage patterns, and cost optimization opportunities",
-                                mimeType: "application/json"
-                            },
-                            {
-                                uri: "cost-katana://projects/active",
-                                name: "Active Projects",
-                                description: "All your Cost Katana projects with current budgets, spending, and usage metrics",
-                                mimeType: "application/json"
-                            },
-                            {
-                                uri: "cost-katana://optimization/recommendations",
-                                name: "Cost Optimization Recommendations",
-                                description: "AI-powered recommendations to reduce your AI costs based on usage patterns",
-                                mimeType: "application/json"
-                            },
-                            {
-                                uri: "cost-katana://alerts/budget",
-                                name: "Budget Alerts & Notifications",
-                                description: "Active budget alerts, spending thresholds, and notification settings",
-                                mimeType: "application/json"
-                            },
-                            {
-                                uri: "cost-katana://comparison/models",
-                                name: "Model Performance vs Cost Comparison",
-                                description: "Side-by-side comparison of AI models showing performance, cost, and efficiency ratings",
-                                mimeType: "application/json"
-                            }
-                        ]
-                    }
-                };
-                
-                clearTimeout(timeout);
-                res.json(response);
-                return;
-            }
-            
-            clearTimeout(timeout);
-            throw new Error(`Unknown method: ${method}`);
+            res.json(response);
         } catch (error) {
             console.error('MCP List Resources Error:', error);
             res.status(200).json({
@@ -104,140 +81,117 @@ export class MCPController {
         }
     };
 
-    // MCP Prompts List  
+    // MCP Prompts List - Simplified for better performance
     public listPrompts = async (req: Request, res: Response) => {
         try {
-            console.log('MCP Prompts List called:', JSON.stringify(req.body, null, 2));
+            const { id } = req.body;
             
-            const { id, method } = req.body;
-            
-            // Add immediate timeout to prevent hanging
-            const timeout = setTimeout(() => {
-                if (!res.headersSent) {
-                    res.status(200).json({
-                        jsonrpc: "2.0",
-                        id: id,
-                        error: {
-                            code: -32001,
-                            message: "Request timeout in prompts/list"
+            const response = {
+                jsonrpc: "2.0",
+                id: id,
+                result: {
+                    prompts: [
+                        {
+                            name: "analyze_spending_pattern",
+                            description: "Analyze my AI spending patterns and identify cost optimization opportunities",
+                            arguments: [
+                                {
+                                    name: "timeframe",
+                                    description: "Analysis timeframe (7d, 30d, 90d)",
+                                    required: false
+                                },
+                                {
+                                    name: "focus_area",
+                                    description: "Specific area to focus on (models, projects, usage_patterns)",
+                                    required: false
+                                }
+                            ]
+                        },
+                        {
+                            name: "suggest_model_alternatives",
+                            description: "Get recommendations for cheaper AI models that maintain similar performance",
+                            arguments: [
+                                {
+                                    name: "current_model",
+                                    description: "Current AI model you're using",
+                                    required: true
+                                },
+                                {
+                                    name: "use_case",
+                                    description: "What you use the model for (coding, writing, analysis, etc.)",
+                                    required: true
+                                }
+                            ]
+                        },
+                        {
+                            name: "create_budget_plan",
+                            description: "Create a comprehensive budget plan for AI usage across projects",
+                            arguments: [
+                                {
+                                    name: "monthly_budget",
+                                    description: "Total monthly budget for AI costs",
+                                    required: true
+                                },
+                                {
+                                    name: "project_count",
+                                    description: "Number of projects to distribute budget across",
+                                    required: false
+                                }
+                            ]
+                        },
+                        {
+                            name: "optimize_prompt_efficiency",
+                            description: "Get suggestions to make your prompts more cost-effective while maintaining quality",
+                            arguments: [
+                                {
+                                    name: "sample_prompt",
+                                    description: "A sample prompt you frequently use",
+                                    required: true
+                                },
+                                {
+                                    name: "expected_output",
+                                    description: "What you expect the prompt to produce",
+                                    required: false
+                                }
+                            ]
+                        },
+                        {
+                            name: "setup_cost_alerts",
+                            description: "Configure intelligent cost alerts and spending notifications",
+                            arguments: [
+                                {
+                                    name: "alert_type",
+                                    description: "Type of alert (daily, weekly, budget_threshold, anomaly)",
+                                    required: true
+                                },
+                                {
+                                    name: "threshold_amount",
+                                    description: "Dollar amount to trigger alert",
+                                    required: false
+                                }
+                            ]
+                        },
+                        {
+                            name: "project_cost_analysis",
+                            description: "Detailed cost analysis and optimization recommendations for a specific project",
+                            arguments: [
+                                {
+                                    name: "project_name",
+                                    description: "Name of the project to analyze",
+                                    required: true
+                                },
+                                {
+                                    name: "analysis_depth",
+                                    description: "Depth of analysis (quick, detailed, comprehensive)",
+                                    required: false
+                                }
+                            ]
                         }
-                    });
+                    ]
                 }
-            }, 5000); // 5 second timeout
+            };
             
-            if (method === 'prompts/list') {
-                const response = {
-                    jsonrpc: "2.0",
-                    id: id,
-                    result: {
-                        prompts: [
-                            {
-                                name: "analyze_spending_pattern",
-                                description: "Analyze my AI spending patterns and identify cost optimization opportunities",
-                                arguments: [
-                                    {
-                                        name: "timeframe",
-                                        description: "Analysis timeframe (7d, 30d, 90d)",
-                                        required: false
-                                    },
-                                    {
-                                        name: "focus_area",
-                                        description: "Specific area to focus on (models, projects, usage_patterns)",
-                                        required: false
-                                    }
-                                ]
-                            },
-                            {
-                                name: "suggest_model_alternatives",
-                                description: "Get recommendations for cheaper AI models that maintain similar performance",
-                                arguments: [
-                                    {
-                                        name: "current_model",
-                                        description: "Current AI model you're using",
-                                        required: true
-                                    },
-                                    {
-                                        name: "use_case",
-                                        description: "What you use the model for (coding, writing, analysis, etc.)",
-                                        required: true
-                                    }
-                                ]
-                            },
-                            {
-                                name: "create_budget_plan",
-                                description: "Create a comprehensive budget plan for AI usage across projects",
-                                arguments: [
-                                    {
-                                        name: "monthly_budget",
-                                        description: "Total monthly budget for AI costs",
-                                        required: true
-                                    },
-                                    {
-                                        name: "project_count",
-                                        description: "Number of projects to distribute budget across",
-                                        required: false
-                                    }
-                                ]
-                            },
-                            {
-                                name: "optimize_prompt_efficiency",
-                                description: "Get suggestions to make your prompts more cost-effective while maintaining quality",
-                                arguments: [
-                                    {
-                                        name: "sample_prompt",
-                                        description: "A sample prompt you frequently use",
-                                        required: true
-                                    },
-                                    {
-                                        name: "expected_output",
-                                        description: "What you expect the prompt to produce",
-                                        required: false
-                                    }
-                                ]
-                            },
-                            {
-                                name: "setup_cost_alerts",
-                                description: "Configure intelligent cost alerts and spending notifications",
-                                arguments: [
-                                    {
-                                        name: "alert_type",
-                                        description: "Type of alert (daily, weekly, budget_threshold, anomaly)",
-                                        required: true
-                                    },
-                                    {
-                                        name: "threshold_amount",
-                                        description: "Dollar amount to trigger alert",
-                                        required: false
-                                    }
-                                ]
-                            },
-                            {
-                                name: "project_cost_analysis",
-                                description: "Detailed cost analysis and optimization recommendations for a specific project",
-                                arguments: [
-                                    {
-                                        name: "project_name",
-                                        description: "Name of the project to analyze",
-                                        required: true
-                                    },
-                                    {
-                                        name: "analysis_depth",
-                                        description: "Depth of analysis (quick, detailed, comprehensive)",
-                                        required: false
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                };
-                
-                clearTimeout(timeout);
-                res.json(response);
-                return;
-            }
-            
-            clearTimeout(timeout);
-            throw new Error(`Unknown method: ${method}`);
+            res.json(response);
         } catch (error) {
             console.error('MCP List Prompts Error:', error);
             res.status(200).json({

@@ -204,10 +204,27 @@ export const startServer = async () => {
         server.keepAliveTimeout = 65000; // 65 seconds (longer than client timeouts)
         server.headersTimeout = 66000; // 66 seconds (longer than keepAliveTimeout)
         
-        // Enable TCP keep-alive
+        // Enable TCP keep-alive with optimized settings for MCP
         server.on('connection', (socket) => {
             socket.setKeepAlive(true, 60000); // Enable keep-alive with 60s initial delay
             socket.setTimeout(30000); // 30 second socket timeout
+            
+            // Handle connection errors gracefully
+            socket.on('error', (err) => {
+                logger.warn('Socket error:', err.message);
+            });
+            
+            // Handle connection close
+            socket.on('close', (hadError) => {
+                if (hadError) {
+                    logger.warn('Socket closed with error');
+                }
+            });
+        });
+        
+        // Handle server errors gracefully
+        server.on('error', (err) => {
+            logger.error('Server error:', err);
         });
 
     } catch (error) {
