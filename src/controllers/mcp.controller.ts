@@ -258,9 +258,16 @@ export class MCPController {
             
             const { id } = req.body;
             
+            // Set immediate response headers to prevent client timeouts
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('Keep-Alive', 'timeout=30, max=100');
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            res.setHeader('X-Response-Time-Priority', 'high');
+            
             // Add immediate timeout to prevent hanging
             const timeout = setTimeout(() => {
                 if (!res.headersSent) {
+                    console.log('MCP Tools List - sending fallback response due to timeout');
                     res.status(200).json({
                         jsonrpc: '2.0',
                         id,
@@ -284,12 +291,13 @@ export class MCPController {
                         }
                     });
                 }
-            }, 3000); // 3 second fallback timeout
+            }, 2000); // Reduced to 2 second timeout for faster response
 
             // Check cache first for immediate response
             if (MCPController.toolsListCache && 
                 (Date.now() - MCPController.toolsListCacheTime) < MCPController.CACHE_DURATION) {
                 clearTimeout(timeout);
+                console.log('MCP Tools List - serving from cache');
                 res.json({
                     jsonrpc: '2.0',
                     id,

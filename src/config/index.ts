@@ -24,8 +24,11 @@ export const config = {
     env: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT || '8000', 10),
     cors: {
-        origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+        origin: process.env.CORS_ORIGIN || '*', // Allow all origins for MCP compatibility
         credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'Accept', 'Cache-Control'],
+        exposedHeaders: ['X-Response-Time-Priority', 'Cache-Control']
     },
     jwt: {
         secret: process.env.JWT_SECRET!,

@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import { 
     validateMCPRequest, 
@@ -14,6 +14,24 @@ const mcpController = new MCPController();
 mcpRoute.use(validateMCPRequest);
 mcpRoute.use(mcpResponseTimer);
 mcpRoute.use(mcpRateLimit(100, 60000)); // 100 requests per minute
+
+// MCP-specific CORS middleware
+mcpRoute.use((req: Request, res: Response, next: NextFunction) => {
+    // Allow all origins for MCP compatibility
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, User-Agent, Accept, Cache-Control, X-Requested-With');
+    res.header('Access-Control-Expose-Headers', 'X-Response-Time-Priority, Cache-Control');
+    res.header('Access-Control-Max-Age', '86400'); // 24 hours
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        res.status(200).end();
+        return;
+    }
+    
+    next();
+});
 
 // MCP Health check endpoint
 mcpRoute.get('/health', (_req: Request, res: Response) => {
@@ -32,6 +50,15 @@ mcpRoute.get('/health', (_req: Request, res: Response) => {
                     Math.floor((Date.now() - MCPController.toolsListCacheTime) / 1000) : 0
             }
         }
+    });
+});
+
+// Simple ping endpoint for connectivity testing
+mcpRoute.get('/ping', (_req: Request, res: Response) => {
+    res.json({
+        pong: true,
+        timestamp: new Date().toISOString(),
+        server: 'Cost Katana MCP'
     });
 });
 

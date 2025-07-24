@@ -200,9 +200,15 @@ export const startServer = async () => {
             logger.info(`🎯 MCP Server: Ready for Claude integration`);
         });
 
-        // Configure server timeouts for ALB compatibility
-        server.keepAliveTimeout = 310000; // 310 seconds (longer than ALB timeout)
-        server.headersTimeout = 320000; // 320 seconds (longer than keepAliveTimeout)
+        // Configure server timeouts for MCP compatibility
+        server.keepAliveTimeout = 65000; // 65 seconds (longer than client timeouts)
+        server.headersTimeout = 66000; // 66 seconds (longer than keepAliveTimeout)
+        
+        // Enable TCP keep-alive
+        server.on('connection', (socket) => {
+            socket.setKeepAlive(true, 60000); // Enable keep-alive with 60s initial delay
+            socket.setTimeout(30000); // 30 second socket timeout
+        });
 
     } catch (error) {
         logger.error('Failed to start server:', error);
