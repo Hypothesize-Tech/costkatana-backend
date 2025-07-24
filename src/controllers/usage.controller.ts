@@ -448,6 +448,69 @@ export class UsageController {
             next(error);
         }
     }
+
+    static async getRealTimeUsageSummary(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { projectId } = req.query;
+
+            const summary = await UsageService.getRealTimeUsageSummary(userId, projectId);
+
+            res.json({
+                success: true,
+                data: summary
+            });
+        } catch (error: any) {
+            logger.error('Get real-time usage summary error:', error);
+            next(error);
+        }
+    }
+
+    static async getRealTimeRequests(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { projectId, limit = 100 } = req.query;
+
+            const requests = await UsageService.getRealTimeRequests(userId, projectId, parseInt(limit as string));
+
+            res.json({
+                success: true,
+                data: requests
+            });
+        } catch (error: any) {
+            logger.error('Get real-time requests error:', error);
+            next(error);
+        }
+    }
+
+    static async getUsageAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { 
+                timeRange, 
+                status, 
+                model, 
+                service, 
+                projectId 
+            } = req.query;
+
+            const analytics = await UsageService.getUsageAnalytics(userId, {
+                timeRange: timeRange as '1h' | '24h' | '7d' | '30d',
+                status: status as 'all' | 'success' | 'error',
+                model: model as string,
+                service: service as string,
+                projectId: projectId as string
+            });
+
+            res.json({
+                success: true,
+                data: analytics
+            });
+        } catch (error: any) {
+            logger.error('Get usage analytics error:', error);
+            next(error);
+        }
+    }
 }
 
 // Add the cost calculation function for SDK usage

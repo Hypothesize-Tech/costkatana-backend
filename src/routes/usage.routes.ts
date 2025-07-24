@@ -42,4 +42,9 @@ router.get('/search', validateQuery(paginationSchema), asyncHandler(UsageControl
 // Export usage data
 router.get('/export', asyncHandler(UsageController.exportUsage));
 
+// Real-time usage tracking dashboard routes
+router.get('/realtime/summary', authenticate, asyncHandler(UsageController.getRealTimeUsageSummary));
+router.get('/realtime/requests', authenticate, asyncHandler(UsageController.getRealTimeRequests));
+router.get('/analytics', authenticate, asyncHandler(UsageController.getUsageAnalytics));
+
 export default router;

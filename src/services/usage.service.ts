@@ -410,43 +410,340 @@ export class UsageService {
      */
     static async getRealTimeUsageSummary(userId: string, projectId?: string) {
         try {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-
-            const matchCondition: any = {
-                userId: userId,
-                createdAt: { $gte: today },
-            };
-
+            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
             if (projectId) {
-                matchCondition.projectId = new mongoose.Types.ObjectId(projectId);
+                match.projectId = new mongoose.Types.ObjectId(projectId);
             }
 
-            const summary = await Usage.aggregate([
-                {
-                    $match: matchCondition,
-                },
-                {
-                    $group: {
-                        _id: null,
-                        todayCost: { $sum: '$cost' },
-                        todayTokens: { $sum: '$totalTokens' },
-                        todayCalls: { $sum: 1 },
-                        lastRequest: { $max: '$createdAt' },
+            const now = new Date();
+            const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+            const [currentPeriod, previousPeriod, modelBreakdown, serviceBreakdown, recentRequests] = await Promise.all([
+                // Current period stats (last 24 hours)
+                Usage.aggregate([
+                    { $match: { ...match, createdAt: { $gte: last24Hours } } },
+                    {
+                        $group: {
+                            _id: null,
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalRequests: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' },
+                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
+                            successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
+                        }
+                    }
+                ]),
+                // Previous period stats (24 hours before that)
+                Usage.aggregate([
+                    { 
+                        $match: { 
+                            ...match, 
+                            createdAt: { 
+                                $gte: new Date(last24Hours.getTime() - 24 * 60 * 60 * 1000),
+                                $lt: last24Hours 
+                            } 
+                        } 
                     },
-                },
+                    {
+                        $group: {
+                            _id: null,
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalRequests: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' }
+                        }
+                    }
+                ]),
+                // Model breakdown
+                Usage.aggregate([
+                    { $match: { ...match, createdAt: { $gte: last7Days } } },
+                    {
+                        $group: {
+                            _id: '$model',
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            requestCount: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' },
+                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                        }
+                    },
+                    { $sort: { totalCost: -1 } },
+                    { $limit: 10 }
+                ]),
+                // Service breakdown
+                Usage.aggregate([
+                    { $match: { ...match, createdAt: { $gte: last7Days } } },
+                    {
+                        $group: {
+                            _id: '$service',
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            requestCount: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' },
+                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                        }
+                    },
+                    { $sort: { totalCost: -1 } }
+                ]),
+                // Recent requests (last 50)
+                Usage.find(match)
+                    .sort({ createdAt: -1 })
+                    .limit(50)
+                    .select('model service promptTokens completionTokens totalTokens cost responseTime errorOccurred createdAt')
+                    .lean()
             ]);
 
-            const result = summary[0] || {
-                todayCost: 0,
-                todayTokens: 0,
-                todayCalls: 0,
-                lastRequest: null,
+            const current = currentPeriod[0] || {
+                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0, errorCount: 0, successCount: 0
+            };
+            const previous = previousPeriod[0] || {
+                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0
             };
 
-            return result;
+            // Calculate percentage changes
+            const costChange = previous.totalCost > 0 ? ((current.totalCost - previous.totalCost) / previous.totalCost) * 100 : 0;
+            const requestChange = previous.totalRequests > 0 ? ((current.totalRequests - previous.totalRequests) / previous.totalRequests) * 100 : 0;
+            const tokenChange = previous.totalTokens > 0 ? ((current.totalTokens - previous.totalTokens) / previous.totalTokens) * 100 : 0;
+
+            return {
+                currentPeriod: {
+                    ...current,
+                    avgResponseTime: Math.round(current.avgResponseTime || 0)
+                },
+                previousPeriod: {
+                    ...previous,
+                    avgResponseTime: Math.round(previous.avgResponseTime || 0)
+                },
+                changes: {
+                    cost: Math.round(costChange * 100) / 100,
+                    requests: Math.round(requestChange * 100) / 100,
+                    tokens: Math.round(tokenChange * 100) / 100
+                },
+                modelBreakdown,
+                serviceBreakdown,
+                recentRequests: recentRequests.map(req => ({
+                    ...req,
+                    timestamp: req.createdAt,
+                    status: req.errorOccurred ? 'error' : 'success',
+                    statusCode: req.errorOccurred ? 500 : 200
+                }))
+            };
         } catch (error) {
             logger.error('Error getting real-time usage summary:', error);
+            throw error;
+        }
+    }
+
+    // New method for real-time requests monitoring
+    static async getRealTimeRequests(userId: string, projectId?: string, limit: number = 100) {
+        try {
+            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
+            if (projectId) {
+                match.projectId = new mongoose.Types.ObjectId(projectId);
+            }
+
+            const requests = await Usage.aggregate([
+                { $match: match },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'user'
+                    }
+                },
+                {
+                    $addFields: {
+                        userName: {
+                            $ifNull: [
+                                { $arrayElemAt: ['$user.name', 0] },
+                                { $concat: ['user_', { $substr: [{ $toString: '$userId' }, -8, 8] }] }
+                            ]
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        _id: 1,
+                        model: 1,
+                        service: 1,
+                        promptTokens: 1,
+                        completionTokens: 1,
+                        totalTokens: 1,
+                        cost: 1,
+                        responseTime: 1,
+                        errorOccurred: 1,
+                        errorMessage: 1,
+                        createdAt: 1,
+                        ipAddress: 1,
+                        userAgent: 1,
+                        metadata: 1,
+                        userName: 1
+                    }
+                },
+                { $sort: { createdAt: -1 } },
+                { $limit: limit }
+            ]);
+
+            return requests.map(req => ({
+                id: req._id,
+                timestamp: req.createdAt,
+                model: req.model,
+                service: req.service,
+                status: req.errorOccurred ? 'error' : 'success',
+                statusCode: req.errorOccurred ? 500 : 200,
+                latency: Math.round(req.responseTime),
+                totalTokens: req.totalTokens,
+                cost: req.cost,
+                user: req.userName,
+                errorMessage: req.errorMessage,
+                ipAddress: req.ipAddress,
+                userAgent: req.userAgent,
+                metadata: req.metadata
+            }));
+        } catch (error) {
+            logger.error('Error getting real-time requests:', error);
+            throw error;
+        }
+    }
+
+    // New method for usage analytics with filters
+    static async getUsageAnalytics(userId: string, filters: {
+        timeRange?: '1h' | '24h' | '7d' | '30d';
+        status?: 'all' | 'success' | 'error';
+        model?: string;
+        service?: string;
+        projectId?: string;
+    } = {}) {
+        try {
+            const match: any = { userId: new mongoose.Types.ObjectId(userId) };
+            
+            // Time range filter
+            if (filters.timeRange) {
+                const now = new Date();
+                let startDate: Date;
+                switch (filters.timeRange) {
+                    case '1h':
+                        startDate = new Date(now.getTime() - 60 * 60 * 1000);
+                        break;
+                    case '24h':
+                        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                        break;
+                    case '7d':
+                        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '30d':
+                        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                        break;
+                    default:
+                        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+                }
+                match.createdAt = { $gte: startDate };
+            }
+
+            // Status filter
+            if (filters.status && filters.status !== 'all') {
+                match.errorOccurred = filters.status === 'error';
+            }
+
+            // Model filter
+            if (filters.model) {
+                match.model = filters.model;
+            }
+
+            // Service filter
+            if (filters.service) {
+                match.service = filters.service;
+            }
+
+            // Project filter
+            if (filters.projectId) {
+                match.projectId = new mongoose.Types.ObjectId(filters.projectId);
+            }
+
+            const [requests, stats] = await Promise.all([
+                Usage.aggregate([
+                    { $match: match },
+                    {
+                        $lookup: {
+                            from: 'users',
+                            localField: 'userId',
+                            foreignField: '_id',
+                            as: 'user'
+                        }
+                    },
+                    {
+                        $addFields: {
+                            userName: {
+                                $ifNull: [
+                                    { $arrayElemAt: ['$user.name', 0] },
+                                    { $concat: ['user_', { $substr: [{ $toString: '$userId' }, -8, 8] }] }
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        $project: {
+                            _id: 1,
+                            model: 1,
+                            service: 1,
+                            promptTokens: 1,
+                            completionTokens: 1,
+                            totalTokens: 1,
+                            cost: 1,
+                            responseTime: 1,
+                            errorOccurred: 1,
+                            createdAt: 1,
+                            userName: 1
+                        }
+                    },
+                    { $sort: { createdAt: -1 } },
+                    { $limit: 1000 }
+                ]),
+                Usage.aggregate([
+                    { $match: match },
+                    {
+                        $group: {
+                            _id: null,
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalRequests: { $sum: 1 },
+                            avgResponseTime: { $avg: '$responseTime' },
+                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
+                            successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
+                        }
+                    }
+                ])
+            ]);
+
+            const statsData = stats[0] || {
+                totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0, errorCount: 0, successCount: 0
+            };
+
+            return {
+                requests: requests.map(req => ({
+                    id: req._id,
+                    timestamp: req.createdAt,
+                    model: req.model,
+                    service: req.service,
+                    status: req.errorOccurred ? 'error' : 'success',
+                    statusCode: req.errorOccurred ? 500 : 200,
+                    latency: Math.round(req.responseTime),
+                    totalTokens: req.totalTokens,
+                    cost: req.cost,
+                    user: req.userName
+                })),
+                stats: {
+                    ...statsData,
+                    avgResponseTime: Math.round(statsData.avgResponseTime || 0),
+                    successRate: statsData.totalRequests > 0 ? 
+                        ((statsData.successCount / statsData.totalRequests) * 100).toFixed(1) : '0.0'
+                }
+            };
+        } catch (error) {
+            logger.error('Error getting usage analytics:', error);
             throw error;
         }
     }
