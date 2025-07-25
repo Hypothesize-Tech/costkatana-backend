@@ -40,13 +40,171 @@ interface ChatGPTRequest extends Request {
             budget_amount?: number;
             budget_period?: 'monthly' | 'quarterly' | 'yearly';
         };
-        action: 'track_usage' | 'create_project' | 'get_projects' | 'get_analytics' | 'generate_magic_link';
+        action: 'track_usage' | 'create_project' | 'get_projects' | 'get_analytics' | 'generate_magic_link' | 'check_connection';
     };
+}
+
+interface ConnectionStatus {
+    connected: boolean;
+    userId?: string;
+    user?: any;
+    message: string;
+    needsOnboarding?: boolean;
+    magicLinkRequired?: boolean;
 }
 
 export class ChatGPTController {
     /**
-     * Main endpoint for ChatGPT Custom GPT actions
+     * Check user connection status automatically
+     */
+    private static async checkConnectionStatus(req: ChatGPTRequest): Promise<ConnectionStatus> {
+        const { user_id, api_key } = req.body;
+
+        // If no authentication provided at all
+        if (!user_id && !api_key) {
+            return {
+                connected: false,
+                message: 'Welcome to Cost Katana! I need to connect you to start tracking your AI costs.',
+                needsOnboarding: true,
+                magicLinkRequired: true
+            };
+        }
+
+        let userId: string | undefined;
+        let user: any;
+
+        // Check user_id authentication
+        if (user_id) {
+            if (user_id.includes('@')) {
+                // It's an email, look up the actual user ObjectId
+                const { User } = await import('../models/User');
+                user = await User.findOne({ email: user_id });
+                if (!user) {
+                    return {
+                        connected: false,
+                        message: `I don't see an account for ${user_id}. Let me create one for you with a magic link!`,
+                        needsOnboarding: true,
+                        magicLinkRequired: true
+                    };
+                }
+                userId = user._id.toString();
+            } else {
+                // It's an ObjectId
+                const { User } = await import('../models/User');
+                user = await User.findById(user_id);
+                if (!user) {
+                    return {
+                        connected: false,
+                        message: 'I found your user ID, but the account seems to be missing. Let me help you reconnect!',
+                        needsOnboarding: true,
+                        magicLinkRequired: true
+                    };
+                }
+                userId = user_id;
+            }
+        }
+        // Check API key authentication
+        else if (api_key) {
+            let validation: any = null;
+            
+            // Try ChatGPT integration API keys (ck_user_ format)
+            if (api_key.startsWith('ck_user_')) {
+                const { ApiKeyController } = await import('./apiKey.controller');
+                validation = await ApiKeyController.validateApiKey(api_key);
+            }
+            
+            // Try dashboard API keys (dak_ format or full key)
+            if (!validation) {
+                try {
+                    const { User } = await import('../models/User');
+                    const { AuthService } = await import('../services/auth.service');
+                    const { decrypt } = await import('../utils/helpers');
+                    
+                    if (api_key.startsWith('dak_')) {
+                        const parsedKey = AuthService.parseApiKey(api_key);
+                        if (parsedKey) {
+                            user = await User.findById(parsedKey.userId);
+                            if (user) {
+                                const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
+                                if (userApiKey && (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt)) {
+                                    try {
+                                        const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
+                                        const decryptedKey = decrypt(encrypted, iv, authTag);
+                                        if (decryptedKey === api_key) {
+                                            userApiKey.lastUsed = new Date();
+                                            await user.save();
+                                            validation = { userId: user._id.toString(), user };
+                                        }
+                                    } catch (error) {
+                                        logger.warn('Failed to decrypt dashboard API key:', error);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Handle full dashboard API keys
+                        const userIdMatch = api_key.match(/^[a-f0-9]{24}_/);
+                        if (userIdMatch) {
+                            const potentialUserId = userIdMatch[0].slice(0, -1);
+                            user = await User.findById(potentialUserId);
+                            if (user && user.dashboardApiKeys) {
+                                for (const userApiKey of user.dashboardApiKeys) {
+                                    if (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt) {
+                                        try {
+                                            const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
+                                            const decryptedKey = decrypt(encrypted, iv, authTag);
+                                            if (decryptedKey === api_key) {
+                                                userApiKey.lastUsed = new Date();
+                                                await user.save();
+                                                validation = { userId: user._id.toString(), user };
+                                                break;
+                                            }
+                                        } catch (error) {
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    logger.error('Error validating dashboard API key:', error);
+                }
+            }
+            
+            if (!validation) {
+                return {
+                    connected: false,
+                    message: 'I found your API key, but it seems to be invalid or expired. Let me help you get a new one!',
+                    needsOnboarding: true,
+                    magicLinkRequired: true
+                };
+            }
+            userId = validation.userId;
+            user = validation.user;
+        }
+
+        // User is connected
+        if (userId && user) {
+            return {
+                connected: true,
+                userId,
+                user,
+                message: `Great! You're connected as ${user.email}. I'm ready to help you track and optimize your AI costs!`
+            };
+        }
+
+        // Fallback case - should not reach here
+        return {
+            connected: false,
+            message: 'I encountered an issue with your connection. Let me help you reconnect!',
+            needsOnboarding: true,
+            magicLinkRequired: true
+        };
+    }
+
+    /**
+     * Main endpoint for ChatGPT Custom GPT actions with automatic connection checking
      */
     static async handleAction(req: ChatGPTRequest, res: Response): Promise<void> {
         try {
@@ -57,7 +215,7 @@ export class ChatGPTController {
                 hasEmail: !!req.body.email
             });
 
-            const { action, user_id, api_key } = req.body;
+            const { action } = req.body;
 
             // Handle magic link generation first (no auth required)
             if (action === 'generate_magic_link') {
@@ -65,124 +223,27 @@ export class ChatGPTController {
                 return;
             }
 
-            // Authenticate user for other actions
-            let userId: string;
-            if (user_id) {
-                // Check if user_id is an email or ObjectId
-                if (user_id.includes('@')) {
-                    // It's an email, look up the actual user ObjectId
-                    const { User } = await import('../models/User');
-                    const user = await User.findOne({ email: user_id });
-                    if (!user) {
-                        res.status(404).json({
-                            success: false,
-                            error: 'User not found',
-                            message: `No account found for email: ${user_id}. Please complete the magic link setup first.`,
-                            onboarding_required: true
-                        });
-                        return;
-                    }
-                    userId = user._id.toString();
-                    logger.info('Resolved email to userId:', { email: user_id, userId });
-                } else {
-                    userId = user_id;
-                }
-            } else if (api_key) {
-                // Try both ChatGPT integration keys and dashboard API keys
-                let validation: any = null;
-                
-                // First try ChatGPT integration API keys (ck_user_ format)
-                if (api_key.startsWith('ck_user_')) {
-                const { ApiKeyController } = await import('./apiKey.controller');
-                    validation = await ApiKeyController.validateApiKey(api_key);
-                }
-                
-                // If no validation yet, try dashboard API keys (dak_ format or full key)
-                if (!validation) {
-                    try {
-                        const { User } = await import('../models/User');
-                        const { AuthService } = await import('../services/auth.service');
-                        const { decrypt } = await import('../utils/helpers');
-                        
-                        // Handle dashboard API keys (dak_ format)
-                        if (api_key.startsWith('dak_')) {
-                            const parsedKey = AuthService.parseApiKey(api_key);
-                            if (parsedKey) {
-                                const user = await User.findById(parsedKey.userId);
-                                if (user) {
-                                    const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
-                                    if (userApiKey && (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt)) {
-                                        try {
-                                            const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
-                                            const decryptedKey = decrypt(encrypted, iv, authTag);
-                                            if (decryptedKey === api_key) {
-                                                userApiKey.lastUsed = new Date();
-                                                await user.save();
-                                                validation = { userId: user._id.toString(), user };
-                                            }
-                                        } catch (error) {
-                                            logger.warn('Failed to decrypt dashboard API key:', error);
-                                        }
-                                    }
-                                }
-                            }
-                        } 
-                        // Handle full dashboard API keys (starts with user ID)
-                        else {
-                            // Try to extract user ID from the key format
-                            const userIdMatch = api_key.match(/^[a-f0-9]{24}_/);
-                            if (userIdMatch) {
-                                const potentialUserId = userIdMatch[0].slice(0, -1); // Remove trailing underscore
-                                const user = await User.findById(potentialUserId);
-                                if (user && user.dashboardApiKeys) {
-                                    // Check if this key matches any encrypted key
-                                    for (const userApiKey of user.dashboardApiKeys) {
-                                        if (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt) {
-                                            try {
-                                                const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
-                                                const decryptedKey = decrypt(encrypted, iv, authTag);
-                                                if (decryptedKey === api_key) {
-                                                    userApiKey.lastUsed = new Date();
-                                                    await user.save();
-                                                    validation = { userId: user._id.toString(), user };
-                                                    break;
-                                                }
-                                            } catch (error) {
-                                                // Continue to next key
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (error) {
-                        logger.error('Error validating dashboard API key:', error);
-                    }
-                }
-                
-                if (!validation) {
-                    res.status(401).json({
-                        success: false,
-                        error: 'Invalid or inactive API key. Please check your API key in the Cost Katana dashboard.',
-                        debug: {
-                            keyFormat: api_key.startsWith('ck_user_') ? 'ChatGPT Integration Key' : 
-                                      api_key.startsWith('dak_') ? 'Dashboard API Key (dak_)' : 
-                                      'Dashboard API Key (full)',
-                            keyLength: api_key.length,
-                            keyPrefix: api_key.substring(0, 10) + '...'
-                        }
-                    });
-                    return;
-                }
-                userId = validation.userId;
-            } else {
-                // No authentication provided - guide user through magic link onboarding
+            // Handle connection check action
+            if (action === 'check_connection') {
+                const connectionStatus = await ChatGPTController.checkConnectionStatus(req);
+                res.json({
+                    success: true,
+                    data: connectionStatus
+                });
+                return;
+            }
+
+            // For all other actions, automatically check connection status first
+            const connectionStatus = await ChatGPTController.checkConnectionStatus(req);
+
+            // If not connected, guide user through onboarding
+            if (!connectionStatus.connected) {
                 res.status(200).json({
                     success: false,
                     error: 'authentication_required',
                     onboarding: true,
-                    message: 'Welcome to Cost Katana! Let me help you get connected in 30 seconds.',
+                    connection_status: connectionStatus,
+                    message: connectionStatus.message,
                     instructions: {
                         step1: 'I need your email to create a magic link',
                         step2: 'Click the magic link to instantly connect your account',
@@ -192,6 +253,9 @@ export class ChatGPTController {
                 });
                 return;
             }
+
+            // User is connected - proceed with the requested action
+            const userId = connectionStatus.userId!;
 
             // Route to appropriate handler
             switch (action) {
@@ -210,7 +274,7 @@ export class ChatGPTController {
                 default:
                     res.status(400).json({
                         success: false,
-                        error: 'Invalid action. Supported actions: track_usage, create_project, get_projects, get_analytics, generate_magic_link'
+                        error: 'Invalid action. Supported actions: track_usage, create_project, get_projects, get_analytics, generate_magic_link, check_connection'
                     });
             }
         } catch (error: any) {
@@ -651,7 +715,7 @@ export class ChatGPTController {
             success: true,
             message: 'ChatGPT integration with AI-powered insights is running',
             version: '2.0.0',
-            ai_features: ['bedrock_optimization', 'smart_tips', 'usage_analysis'],
+            ai_features: ['bedrock_optimization', 'smart_tips', 'usage_analysis', 'automatic_connection_checking'],
             timestamp: new Date().toISOString()
         });
     }
