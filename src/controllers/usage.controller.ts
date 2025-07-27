@@ -3,6 +3,7 @@ import { UsageService } from '../services/usage.service';
 import { trackUsageSchema, paginationSchema, sdkTrackUsageSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
 import jwt from 'jsonwebtoken';
+import { RealtimeUpdateService } from '../services/realtime-update.service';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
@@ -509,6 +510,43 @@ export class UsageController {
         } catch (error: any) {
             logger.error('Get usage analytics error:', error);
             next(error);
+        }
+    }
+
+    /**
+     * SSE endpoint for real-time usage updates
+     * GET /api/usage/stream
+     */
+    static async streamUsageUpdates(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId || req.query.userId;
+            
+            if (!userId) {
+                res.status(401).json({ message: 'User ID is required' });
+                return;
+            }
+
+            logger.info(`Initializing SSE connection for user: ${userId}`);
+            
+            // Initialize SSE connection
+            RealtimeUpdateService.initializeSSEConnection(userId, res);
+            
+            // Send initial usage data
+            const recentUsage = await UsageService.getRecentUsageForUser(userId, 5);
+            const stats = await UsageService.getUsageStats(userId, 'daily');
+            
+            res.write(`data: ${JSON.stringify({
+                type: 'initial_data',
+                data: {
+                    recentUsage,
+                    stats
+                },
+                timestamp: new Date().toISOString()
+            })}\n\n`);
+
+        } catch (error: any) {
+            logger.error('Error in SSE stream:', error);
+            res.status(500).json({ message: 'SSE stream error' });
         }
     }
 }

@@ -47,4 +47,7 @@ router.get('/realtime/summary', authenticate, asyncHandler(UsageController.getRe
 router.get('/realtime/requests', authenticate, asyncHandler(UsageController.getRealTimeRequests));
 router.get('/analytics', authenticate, asyncHandler(UsageController.getUsageAnalytics));
 
+// Add the SSE route
+router.get('/stream', authenticate, UsageController.streamUsageUpdates);
+
 export default router;

@@ -926,4 +926,23 @@ export class UsageService {
             throw error;
         }
     }
+
+    /**
+     * Get recent usage records for a user
+     */
+    static async getRecentUsageForUser(userId: string, limit: number = 10): Promise<any[]> {
+        try {
+            const { Usage } = await import('../models');
+            
+            const recentUsage = await Usage.find({ userId })
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .lean();
+
+            return recentUsage;
+        } catch (error) {
+            logger.error('Error getting recent usage:', error);
+            return [];
+        }
+    }
 }

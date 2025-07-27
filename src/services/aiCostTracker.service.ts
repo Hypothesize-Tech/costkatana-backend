@@ -3,6 +3,7 @@ import { ProjectService } from './project.service';
 import { Usage } from '../models/Usage';
 import { User } from '../models/User';
 import { ActivityService } from './activity.service';
+import { RealtimeUpdateService } from './realtime-update.service';
 import {
     AIProvider,
     OptimizationResult,
@@ -146,6 +147,14 @@ export class AICostTrackerService {
             tags?: string[];
             costAllocation?: Record<string, any>;
             promptTemplateId?: string;
+            metadata?: {
+                workspace?: any;
+                codeContext?: any;
+                requestType?: string;
+                executionTime?: number;
+                contextFiles?: string[];
+                generatedFiles?: string[];
+            };
         }
     ): Promise<void> {
         try {
@@ -253,6 +262,18 @@ export class AICostTrackerService {
                         tokens: finalTotalTokens,
                         cost: estimatedCost,
                         projectId: metadata?.projectId
+                    }
+                });
+
+                // Emit real-time update for usage
+                RealtimeUpdateService.emitUsageUpdate(userId, {
+                    type: 'usage_tracked',
+                    data: {
+                        model: request.model,
+                        cost: estimatedCost,
+                        tokens: finalTotalTokens,
+                        service: metadata?.service || 'openai',
+                        timestamp: new Date().toISOString()
                     }
                 });
             }

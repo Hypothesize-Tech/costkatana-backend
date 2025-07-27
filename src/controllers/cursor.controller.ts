@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
+import { AICostTrackerService } from '../services/aiCostTracker.service';
+import { UsageService } from '../services/usage.service';
+import { RealtimeUpdateService } from '../services/realtime-update.service';
 
 interface CursorRequest extends Request {
     body: {
@@ -156,32 +159,98 @@ export class CursorController {
     }
 
     private static async trackUsage(req: CursorRequest, res: Response): Promise<void> {
-        const { ai_request } = req.body;
-        if (!ai_request) {
-            res.status(400).json({
-                success: false,
-                error: 'AI request data is required',
-                message: 'Please provide the AI request details.'
-            });
-            return;
-        }
-        const tokens = ai_request.tokens_used || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 };
-        const cost = 0.001;
-        res.json({
-            success: true,
-            data: {
-                usage_id: 'mock-usage-id',
-                cost: cost.toFixed(8),
-                tokens: tokens.total_tokens,
-                smart_tip: '💡 Use "Cost Katana: Optimize Prompt" to reduce costs for similar requests.',
-                suggestions: [
-                    'Use the optimized prompt for similar requests',
-                    'Consider using a cheaper model for simple tasks',
-                    'Batch similar requests to reduce API overhead'
-                ],
-                message: `Usage tracked successfully! Cost: $${cost.toFixed(6)}`
+        try {
+            const { ai_request, user_id, workspace, code_context } = req.body;
+            
+            if (!ai_request) {
+                res.status(400).json({
+                    success: false,
+                    error: 'AI request data is required',
+                    message: 'Please provide the AI request details.'
+                });
+                return;
             }
-        });
+
+            // Use real user ID or fallback to extension user
+            const userId = user_id || 'extension-user-id';
+            
+                         // Services are now imported at the top of the file
+            
+            // Track the real usage
+            await AICostTrackerService.trackRequest(
+                {
+                    prompt: ai_request.prompt,
+                    model: ai_request.model,
+                    promptTokens: ai_request.tokens_used?.prompt_tokens
+                },
+                {
+                    content: ai_request.response,
+                    usage: {
+                        promptTokens: ai_request.tokens_used?.prompt_tokens || Math.ceil(ai_request.prompt.length / 4),
+                        completionTokens: ai_request.tokens_used?.completion_tokens || Math.ceil(ai_request.response.length / 4),
+                        totalTokens: ai_request.tokens_used?.total_tokens || 
+                            (ai_request.tokens_used?.prompt_tokens || Math.ceil(ai_request.prompt.length / 4)) +
+                            (ai_request.tokens_used?.completion_tokens || Math.ceil(ai_request.response.length / 4))
+                    }
+                },
+                userId,
+                {
+                    service: 'cursor',
+                    endpoint: 'extension',
+                    projectId: workspace?.projectId,
+                    tags: ['extension', 'cursor'],
+                    metadata: {
+                        workspace: workspace,
+                        codeContext: code_context,
+                        requestType: ai_request.request_type,
+                        executionTime: ai_request.execution_time,
+                        contextFiles: ai_request.context_files,
+                        generatedFiles: ai_request.generated_files
+                    }
+                }
+            );
+
+            // Get the latest usage stats
+            const usageStats = await UsageService.getRecentUsageForUser(userId, 1);
+            const latestUsage = usageStats[0];
+
+            if (!latestUsage) {
+                throw new Error('Failed to retrieve tracked usage');
+            }
+
+            // Emit real-time update
+            RealtimeUpdateService.emitUsageUpdate(userId, {
+                type: 'usage_tracked',
+                data: latestUsage
+            });
+
+            // Generate smart suggestions based on usage patterns
+            const suggestions = await CursorController.generateSmartSuggestions(userId, latestUsage);
+
+            res.json({
+                success: true,
+                data: {
+                    usage_id: latestUsage._id,
+                    cost: latestUsage.cost.toFixed(8),
+                    tokens: latestUsage.totalTokens,
+                    smart_tip: suggestions.tip,
+                    suggestions: suggestions.list,
+                    message: `Usage tracked successfully! Cost: $${latestUsage.cost.toFixed(6)}`,
+                    breakdown: {
+                        promptTokens: latestUsage.promptTokens,
+                        completionTokens: latestUsage.completionTokens,
+                        model: latestUsage.model
+                    }
+                }
+            });
+        } catch (error: any) {
+            logger.error('Error tracking usage:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to track usage',
+                message: error.message
+            });
+        }
     }
 
     private static async optimizePrompt(req: CursorRequest, res: Response): Promise<void> {
@@ -375,6 +444,51 @@ export class CursorController {
                 }
             }
         });
+    }
+
+    /**
+     * Generate smart suggestions based on usage patterns
+     */
+    private static async generateSmartSuggestions(userId: string, latestUsage: any) {
+        try {
+            // Get recent usage patterns
+            const recentUsage = await UsageService.getRecentUsageForUser(userId, 10);
+            
+            let tip = '💡 Use "Cost Katana: Optimize Prompt" to reduce costs for similar requests.';
+            const suggestions = [
+                'Use the optimized prompt for similar requests',
+                'Consider using a cheaper model for simple tasks',
+                'Batch similar requests to reduce API overhead'
+            ];
+
+            // Analyze patterns and generate personalized tips
+            if (recentUsage.length >= 3) {
+                const avgCost = recentUsage.reduce((sum, usage) => sum + usage.cost, 0) / recentUsage.length;
+                const models = [...new Set(recentUsage.map(u => u.model))];
+                
+                if (latestUsage.cost > avgCost * 1.5) {
+                    tip = '⚠️ This request cost 50% more than your average. Consider prompt optimization.';
+                    suggestions.unshift('Try shortening your prompt while maintaining clarity');
+                }
+                
+                if (models.length === 1 && models[0].includes('gpt-4')) {
+                    tip = '💰 You\'re consistently using GPT-4. Consider GPT-3.5 for simpler tasks.';
+                    suggestions.unshift('Use GPT-3.5-turbo for basic code questions');
+                }
+            }
+
+            return { tip, list: suggestions };
+        } catch (error) {
+            logger.error('Error generating suggestions:', error);
+            return {
+                tip: '💡 Use "Cost Katana: Optimize Prompt" to reduce costs for similar requests.',
+                list: [
+                    'Use the optimized prompt for similar requests',
+                    'Consider using a cheaper model for simple tasks',
+                    'Batch similar requests to reduce API overhead'
+                ]
+            };
+        }
     }
 
     static async healthCheck(_req: Request, res: Response): Promise<void> {
