@@ -70,28 +70,60 @@ export class BedrockService {
             return '';
         }
 
-        const jsonRegex = /```json\s*([\s\S]*?)\s*```|```([\s\S]*?)```|\{([\s\S]*)\}/;
-        const match = text.match(jsonRegex);
-
-        if (match) {
-            // Prioritize the content within ```json ... ```
-            if (match[1]) return match[1];
-            // Fallback to content within ``` ... ```
-            if (match[2]) return match[2];
-            // Fallback to content within { ... }
-            if (match[3] && !match[3].includes("```")) {
-                // If we found braces, let's try to reconstruct a valid JSON object
-                // This is a bit of a safeguard
-                try {
-                    return `{${match[3]}}`;
-                } catch (e) {
-                    // ignore if it's not valid
-                }
+        // First, try to find JSON within code blocks
+        const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+        const jsonBlockMatch = text.match(jsonBlockRegex);
+        
+        if (jsonBlockMatch && jsonBlockMatch[1]) {
+            const extracted = jsonBlockMatch[1].trim();
+            // Validate that it's actually JSON
+            try {
+                JSON.parse(extracted);
+                return extracted;
+            } catch (e) {
+                // If it's not valid JSON, continue to other methods
             }
         }
 
-        // If no JSON block is found, assume the whole string is the JSON
-        return text;
+        // Try to find JSON object in the text
+        const jsonObjectRegex = /\{[\s\S]*\}/;
+        const jsonObjectMatch = text.match(jsonObjectRegex);
+        
+        if (jsonObjectMatch) {
+            const extracted = jsonObjectMatch[0];
+            // Validate that it's actually JSON
+            try {
+                JSON.parse(extracted);
+                return extracted;
+            } catch (e) {
+                // If it's not valid JSON, continue to other methods
+            }
+        }
+
+        // Try to find JSON array in the text
+        const jsonArrayRegex = /\[[\s\S]*\]/;
+        const jsonArrayMatch = text.match(jsonArrayRegex);
+        
+        if (jsonArrayMatch) {
+            const extracted = jsonArrayMatch[0];
+            // Validate that it's actually JSON
+            try {
+                JSON.parse(extracted);
+                return extracted;
+            } catch (e) {
+                // If it's not valid JSON, continue to other methods
+            }
+        }
+
+        // If no valid JSON is found, return the original text
+        // but try to clean it up first
+        const cleanedText = text.trim();
+        
+        // Remove common prefixes/suffixes that might be added by AI models
+        const withoutPrefix = cleanedText.replace(/^(Here's the|The|Here is the|JSON:?|Response:?|Answer:?)\s*/i, '');
+        const withoutSuffix = withoutPrefix.replace(/\s*(\.|$)/, '');
+        
+        return withoutSuffix;
     }
 
     private static createMessagesPayload(prompt: string) {

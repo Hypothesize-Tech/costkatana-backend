@@ -878,7 +878,14 @@ export class ExperimentationService {
                 );
             }
 
-            return JSON.parse(BedrockService.extractJson(analysisResponse));
+            const extractedJson = BedrockService.extractJson(analysisResponse);
+            try {
+                return JSON.parse(extractedJson);
+            } catch (parseError) {
+                logger.error('Failed to parse comparison analysis JSON:', parseError);
+                logger.error('Extracted JSON:', extractedJson.substring(0, 500) + '...');
+                throw new Error('Failed to parse AI analysis response');
+            }
         } catch (error) {
             logger.error('Error generating comparison analysis:', error);
             
@@ -1082,14 +1089,35 @@ export class ExperimentationService {
     private static parseEvaluationResponse(response: string, results: RealTimeComparisonResult[]): any[] {
         try {
             const cleanedResponse = BedrockService.extractJson(response);
-            return JSON.parse(cleanedResponse);
+            logger.info('Extracted JSON response:', cleanedResponse.substring(0, 200) + '...');
+            
+            const parsed = JSON.parse(cleanedResponse);
+            
+            // Validate that the parsed result is an array
+            if (!Array.isArray(parsed)) {
+                logger.warn('Parsed response is not an array, wrapping in array');
+                return [parsed];
+            }
+            
+            return parsed;
         } catch (error) {
             logger.error('Error parsing evaluation response:', error);
-            return results.map(_r => ({
+            logger.error('Original response:', response.substring(0, 500) + '...');
+            logger.error('Cleaned response:', BedrockService.extractJson(response).substring(0, 500) + '...');
+            
+            // Return fallback evaluations for each result
+            return results.map((result, index) => ({
                 overallScore: 50,
-                criteriaScores: { accuracy: 50, relevance: 50, completeness: 50, coherence: 50 },
-                reasoning: 'Evaluation parsing failed',
-                recommendation: 'Manual review recommended'
+                criteriaScores: { 
+                    accuracy: 50, 
+                    relevance: 50, 
+                    completeness: 50, 
+                    coherence: 50 
+                },
+                reasoning: `Evaluation parsing failed for ${result.model}. Using fallback scores.`,
+                recommendation: 'Manual review recommended due to parsing error',
+                modelIndex: index,
+                modelName: result.model
             }));
         }
     }

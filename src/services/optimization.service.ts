@@ -142,12 +142,25 @@ export class OptimizationService {
 
             // Get token count and cost for original prompt
             const originalTokens = estimateTokens(request.prompt, provider);
-            const originalSimpleEstimate = estimateCost(
-                originalTokens,
-                150, // Expected completion tokens
-                providerEnumToString(provider),
-                request.model
-            );
+            
+            let originalSimpleEstimate;
+            try {
+                originalSimpleEstimate = estimateCost(
+                    originalTokens,
+                    150, // Expected completion tokens
+                    providerEnumToString(provider),
+                    request.model
+                );
+            } catch (error) {
+                logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing`);
+                // Use fallback pricing (GPT-4o-mini rates as default)
+                originalSimpleEstimate = {
+                    inputCost: (originalTokens / 1_000_000) * 0.15,
+                    outputCost: (150 / 1_000_000) * 0.60,
+                    totalCost: (originalTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
+                };
+            }
+            
             const originalEstimate: CostEstimate = convertToCostEstimate(
                 originalSimpleEstimate,
                 originalTokens,
@@ -172,12 +185,25 @@ export class OptimizationService {
 
             // Get token count and cost for optimized prompt
             const optimizedTokens = estimateTokens(bestSuggestion.optimizedPrompt || request.prompt, provider);
-            const optimizedSimpleEstimate = estimateCost(
-                optimizedTokens,
-                150, // Expected completion tokens
-                providerEnumToString(provider),
-                request.model
-            );
+            
+            let optimizedSimpleEstimate;
+            try {
+                optimizedSimpleEstimate = estimateCost(
+                    optimizedTokens,
+                    150, // Expected completion tokens
+                    providerEnumToString(provider),
+                    request.model
+                );
+            } catch (error) {
+                logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing for optimized prompt`);
+                // Use fallback pricing (GPT-4o-mini rates as default)
+                optimizedSimpleEstimate = {
+                    inputCost: (optimizedTokens / 1_000_000) * 0.15,
+                    outputCost: (150 / 1_000_000) * 0.60,
+                    totalCost: (optimizedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
+                };
+            }
+            
             const optimizedEstimate: CostEstimate = convertToCostEstimate(
                 optimizedSimpleEstimate,
                 optimizedTokens,
@@ -324,12 +350,25 @@ export class OptimizationService {
                     for (const req of request.requests) {
                         const provider = this.getAIProviderFromString(req.provider);
                         const promptTokens = estimateTokens(req.prompt, provider);
-                        const estimate = estimateCost(
-                            promptTokens,
-                            150,
-                            providerEnumToString(provider),
-                            req.model
-                        );
+                        
+                        let estimate;
+                        try {
+                            estimate = estimateCost(
+                                promptTokens,
+                                150,
+                                providerEnumToString(provider),
+                                req.model
+                            );
+                        } catch (error) {
+                            logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${req.model}, using fallback pricing`);
+                            // Use fallback pricing (GPT-4o-mini rates as default)
+                            estimate = {
+                                inputCost: (promptTokens / 1_000_000) * 0.15,
+                                outputCost: (150 / 1_000_000) * 0.60,
+                                totalCost: (promptTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
+                            };
+                        }
+                        
                         originalTotalCost += estimate.totalCost;
                         originalTotalTokens += promptTokens + 150;
                     }
@@ -337,12 +376,24 @@ export class OptimizationService {
                     // Calculate optimized cost
                     const firstProvider = this.getAIProviderFromString(request.requests[0].provider);
                     const optimizedPromptTokens = estimateTokens(suggestion.optimizedPrompt!, firstProvider);
-                    const optimizedEstimate = estimateCost(
-                        optimizedPromptTokens,
-                        150,
-                        providerEnumToString(firstProvider),
-                        request.requests[0].model
-                    );
+                    
+                    let optimizedEstimate;
+                    try {
+                        optimizedEstimate = estimateCost(
+                            optimizedPromptTokens,
+                            150,
+                            providerEnumToString(firstProvider),
+                            request.requests[0].model
+                        );
+                    } catch (error) {
+                        logger.warn(`No pricing data found for ${providerEnumToString(firstProvider)}/${request.requests[0].model}, using fallback pricing`);
+                        // Use fallback pricing (GPT-4o-mini rates as default)
+                        optimizedEstimate = {
+                            inputCost: (optimizedPromptTokens / 1_000_000) * 0.15,
+                            outputCost: (150 / 1_000_000) * 0.60,
+                            totalCost: (optimizedPromptTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
+                        };
+                    }
 
                     const optimizedTokens = optimizedPromptTokens + 150;
                     const tokensSaved = originalTotalTokens - optimizedTokens;
