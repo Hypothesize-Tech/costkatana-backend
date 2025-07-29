@@ -10,3 +10,5 @@ export { PromptTemplate, IPromptTemplate } from './PromptTemplate';
 export { ApprovalRequest, IApprovalRequest } from './ApprovalRequest';
 export { Conversation, IConversation } from './Conversation';
 export { ChatMessage, IChatMessage } from './ChatMessage';
+export { Experiment, IExperiment } from './Experiment';
+export { WhatIfScenario, IWhatIfScenario } from './WhatIfScenario';

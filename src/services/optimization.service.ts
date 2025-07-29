@@ -478,7 +478,7 @@ export class OptimizationService {
             if (options.sort) {
                 sort[options.sort] = options.order === 'asc' ? 1 : -1;
             } else {
-                sort.costSaved = -1; // Default to highest savings first
+                sort.createdAt = -1; // Default to most recent first
             }
 
             const [data, total] = await Promise.all([

@@ -352,7 +352,7 @@ export class UsageService {
         }
     }
 
-    static async searchUsage(userId: string, searchTerm: string, options: PaginationOptions, projectId?: string) {
+    static async searchUsage(userId: string, searchTerm: string, options: PaginationOptions, projectId?: string, additionalFilters?: any) {
         try {
             const page = options.page || 1;
             const limit = options.limit || 10;
@@ -367,11 +367,28 @@ export class UsageService {
                 searchQuery.projectId = new mongoose.Types.ObjectId(projectId);
             }
 
+            // Add additional filters if provided
+            if (additionalFilters) {
+                if (additionalFilters.service) searchQuery.service = additionalFilters.service;
+                if (additionalFilters.model) searchQuery.model = additionalFilters.model;
+                if (additionalFilters.minCost !== undefined || additionalFilters.maxCost !== undefined) {
+                    searchQuery.cost = {};
+                    if (additionalFilters.minCost !== undefined) searchQuery.cost.$gte = additionalFilters.minCost;
+                    if (additionalFilters.maxCost !== undefined) searchQuery.cost.$lte = additionalFilters.maxCost;
+                }
+                if (additionalFilters.startDate || additionalFilters.endDate) {
+                    searchQuery.createdAt = {};
+                    if (additionalFilters.startDate) searchQuery.createdAt.$gte = additionalFilters.startDate;
+                    if (additionalFilters.endDate) searchQuery.createdAt.$lte = additionalFilters.endDate;
+                }
+            }
+
             const [data, total] = await Promise.all([
                 Usage.find(searchQuery)
                     .sort({ score: { $meta: 'textScore' } })
                     .skip(skip)
                     .limit(limit)
+                    .populate('userId', 'name email')
                     .lean(),
                 Usage.countDocuments(searchQuery),
             ]);

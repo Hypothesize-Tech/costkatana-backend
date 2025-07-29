@@ -178,12 +178,27 @@ export class UsageController {
                 maxCost: req.query.maxCost ? parseFloat(req.query.maxCost as string) : undefined,
             };
 
-            const result = await UsageService.getUsage(filters, {
-                page,
-                limit,
-                sort,
-                order,
-            });
+            // Handle search query
+            const searchQuery = req.query.q as string;
+            
+            let result;
+            if (searchQuery) {
+                // Use search functionality if query is provided
+                result = await UsageService.searchUsage(userId, searchQuery, {
+                    page,
+                    limit,
+                    sort,
+                    order,
+                }, filters.projectId, filters);
+            } else {
+                // Use regular getUsage if no search query
+                result = await UsageService.getUsage(filters, {
+                    page,
+                    limit,
+                    sort,
+                    order,
+                });
+            }
 
             res.json({
                 success: true,

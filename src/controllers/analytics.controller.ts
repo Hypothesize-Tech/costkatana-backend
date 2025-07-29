@@ -427,6 +427,29 @@ export class AnalyticsController {
         }
     }
 
+    static async getRecentUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { limit, projectId, startDate, endDate } = req.query;
+
+            const recentUsage = await AnalyticsService.getRecentUsage({
+                userId,
+                limit: limit ? parseInt(limit as string) : 10,
+                projectId: projectId as string,
+                startDate: startDate ? new Date(startDate as string) : undefined,
+                endDate: endDate ? new Date(endDate as string) : undefined
+            });
+
+            res.json({
+                success: true,
+                data: recentUsage
+            });
+        } catch (error: any) {
+            logger.error('Get recent usage error:', error);
+            next(error);
+        }
+    }
+
     private static calculateChange(oldValue: number, newValue: number): {
         value: number;
         percentage: number;

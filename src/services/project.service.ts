@@ -84,6 +84,12 @@ export class ProjectService {
                 settings: {
                     enablePromptLibrary: true,
                     enableCostAllocation: true,
+                    notifications: {
+                        budgetAlerts: true,
+                        weeklyReports: true,
+                        monthlyReports: true,
+                        usageReports: true
+                    },
                     ...data.settings
                 }
             };
@@ -133,6 +139,91 @@ export class ProjectService {
                 logger.error('Mongoose validation errors:', error.errors);
             }
 
+            throw error;
+        }
+    }
+
+    /**
+     * Recalculate spending for all user projects
+     */
+    static async recalculateUserProjectSpending(userId: string): Promise<void> {
+        try {
+            const projects = await Project.find({
+                $or: [
+                    { ownerId: userId },
+                    { 'members.userId': userId }
+                ],
+                isActive: true
+            });
+
+            let totalRecalculated = 0;
+            for (const project of projects) {
+                await this.recalculateProjectSpending(project._id.toString());
+                totalRecalculated++;
+            }
+
+            logger.info(`Recalculated spending for ${totalRecalculated} user projects`);
+        } catch (error) {
+            logger.error('Error recalculating user project spending:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Recalculate spending for all projects
+     */
+    static async recalculateAllProjectSpending(): Promise<void> {
+        try {
+            const projects = await Project.find({ isActive: true });
+            let totalRecalculated = 0;
+
+            for (const project of projects) {
+                await this.recalculateProjectSpending(project._id.toString());
+                totalRecalculated++;
+            }
+
+            logger.info(`Recalculated spending for ${totalRecalculated} projects`);
+        } catch (error) {
+            logger.error('Error recalculating all project spending:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Recalculate project spending from Usage data
+     */
+    static async recalculateProjectSpending(projectId: string): Promise<void> {
+        try {
+            const project = await Project.findById(projectId);
+            if (!project) {
+                throw new Error('Project not found');
+            }
+
+            // Calculate total spending from Usage data
+            const usageStats = await Usage.aggregate([
+                {
+                    $match: {
+                        projectId: new mongoose.Types.ObjectId(projectId)
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalCost: { $sum: '$cost' }
+                    }
+                }
+            ]);
+
+            const totalSpending = usageStats[0]?.totalCost || 0;
+
+            // Update project spending
+            project.spending.current = totalSpending;
+            project.spending.lastUpdated = new Date();
+
+            await project.save();
+            logger.info(`Recalculated spending for project ${projectId}: $${totalSpending}`);
+        } catch (error) {
+            logger.error('Error recalculating project spending:', error);
             throw error;
         }
     }
@@ -536,16 +627,69 @@ export class ProjectService {
     }
 
     /**
-     * Get all projects for a user
+     * Get user projects with usage statistics
      */
     static async getUserProjects(userId: string): Promise<IProject[]> {
-        return Project.find({
+        const projects = await Project.find({
             $or: [
                 { ownerId: userId },
                 { 'members.userId': userId }
             ],
             isActive: true
-        }).sort({ createdAt: -1 });
+        })
+        .populate('members.userId', 'name email')
+        .populate('ownerId', 'name email')
+        .sort({ createdAt: -1 });
+
+        // Enhance with usage statistics
+        const enhancedProjects = await Promise.all(projects.map(async (project) => {
+            try {
+                // Get usage statistics for the last 30 days
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+                const usageStats = await Usage.aggregate([
+                    {
+                        $match: {
+                            projectId: project._id,
+                            createdAt: { $gte: thirtyDaysAgo }
+                        }
+                    },
+                    {
+                        $group: {
+                            _id: null,
+                            totalCost: { $sum: '$cost' },
+                            totalRequests: { $sum: 1 },
+                            totalTokens: { $sum: '$totalTokens' }
+                        }
+                    }
+                ]);
+
+                const stats = usageStats[0] || { totalCost: 0, totalRequests: 0, totalTokens: 0 };
+
+                // Convert to plain object and add usage stats
+                const projectObj = project.toObject() as any;
+                projectObj.usage = {
+                    totalCost: stats.totalCost,
+                    totalRequests: stats.totalRequests,
+                    totalTokens: stats.totalTokens
+                };
+
+                return projectObj;
+            } catch (error) {
+                logger.error(`Error getting usage stats for project ${project._id}:`, error);
+                // Return project without usage stats on error
+                const projectObj = project.toObject() as any;
+                projectObj.usage = {
+                    totalCost: 0,
+                    totalRequests: 0,
+                    totalTokens: 0
+                };
+                return projectObj;
+            }
+        }));
+
+        return enhancedProjects;
     }
 
     /**
@@ -895,7 +1039,19 @@ export class ProjectService {
             throw new Error('Access denied');
         }
 
-        return project;
+        // Recalculate spending from Usage data to ensure accuracy
+        await this.recalculateProjectSpending(projectId);
+
+        // Return the updated project
+        const updatedProject = await Project.findById(projectId)
+            .populate('members.userId', 'name email')
+            .populate('ownerId', 'name email');
+
+        if (!updatedProject) {
+            throw new Error('Project not found after recalculation');
+        }
+
+        return updatedProject;
     }
 
     /**

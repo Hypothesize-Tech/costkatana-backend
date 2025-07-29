@@ -90,6 +90,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Optimization not found',
                 });
+                return;
             }
 
             res.json({
@@ -100,7 +101,6 @@ export class OptimizationController {
             logger.error('Get optimization error:', error);
             next(error);
         }
-        return;
     }
 
     static async applyOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -122,11 +122,11 @@ export class OptimizationController {
                     success: false,
                     message: 'Optimization not found',
                 });
+                return;
             }
 
             next(error);
         }
-        return;
     }
 
     static async provideFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -140,6 +140,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Feedback helpful status is required',
                 });
+                return;
             }
 
             if (rating !== undefined && (rating < 1 || rating > 5)) {
@@ -147,6 +148,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Rating must be between 1 and 5',
                 });
+                return;
             }
 
             await OptimizationService.provideFeedback(id, userId, {
@@ -167,11 +169,11 @@ export class OptimizationController {
                     success: false,
                     message: 'Optimization not found',
                 });
+                return;
             }
 
             next(error);
         }
-        return;
     }
 
     static async analyzeOpportunities(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -221,6 +223,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Array of prompt IDs is required',
                 });
+                return;
             }
 
             if (promptIds.length > 10) {
@@ -228,6 +231,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Maximum 10 prompts can be optimized at once',
                 });
+                return;
             }
 
             const result = await OptimizationService.generateBulkOptimizations(userId, promptIds);
@@ -241,7 +245,6 @@ export class OptimizationController {
             logger.error('Bulk optimize error:', error);
             next(error);
         }
-        return;
     }
 
     static async getOptimizationSummary(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -271,19 +274,20 @@ export class OptimizationController {
                 { page: 1, limit: 1000 }
             );
 
-            if (!result) {
+            if (!result || !result.data) {
                 res.status(404).json({
                     success: false,
                     message: 'Optimization summary not found',
                 });
+                return;
             }
 
             const summary = {
                 total: result.pagination.total,
-                totalSaved: result.data.reduce((sum, o) => sum + o.costSaved, 0),
-                totalTokensSaved: result.data.reduce((sum, o) => sum + o.tokensSaved, 0),
+                totalSaved: result.data.reduce((sum, o) => sum + (o.costSaved || 0), 0),
+                totalTokensSaved: result.data.reduce((sum, o) => sum + (o.tokensSaved || 0), 0),
                 avgImprovement: result.data.length > 0
-                    ? result.data.reduce((sum, o) => sum + o.improvementPercentage, 0) / result.data.length
+                    ? result.data.reduce((sum, o) => sum + (o.improvementPercentage || 0), 0) / result.data.length
                     : 0,
                 applied: result.data.filter(o => o.applied).length,
                 applicationRate: result.data.length > 0
@@ -291,7 +295,7 @@ export class OptimizationController {
                     : 0,
                 byCategory: OptimizationController.groupByCategory(result.data),
                 topOptimizations: result.data
-                    .sort((a, b) => b.costSaved - a.costSaved)
+                    .sort((a, b) => (b.costSaved || 0) - (a.costSaved || 0))
                     .slice(0, 5),
             };
 
@@ -299,11 +303,9 @@ export class OptimizationController {
                 success: true,
                 data: summary,
             });
-            return;
         } catch (error: any) {
             logger.error('Get optimization summary error:', error);
             next(error);
-            return;
         }
     }
 
@@ -317,6 +319,7 @@ export class OptimizationController {
                     success: false,
                     message: 'At least 2 requests are required for batch optimization',
                 });
+                return;
             }
 
             if (requests.length > 10) {
@@ -324,6 +327,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Maximum 10 requests can be optimized in a batch',
                 });
+                return;
             }
 
             const optimizations = await OptimizationService.createBatchOptimization({
@@ -347,7 +351,6 @@ export class OptimizationController {
             logger.error('Create batch optimization error:', error);
             next(error);
         }
-        return;
     }
 
     static async optimizeConversation(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -360,6 +363,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Array of conversation messages is required',
                 });
+                return;
             }
 
             // Validate message format
@@ -373,6 +377,7 @@ export class OptimizationController {
                     success: false,
                     message: 'Invalid message format. Each message must have role and content',
                 });
+                return;
             }
 
             const optimization = await OptimizationService.createOptimization({
@@ -405,7 +410,6 @@ export class OptimizationController {
             logger.error('Optimize conversation error:', error);
             next(error);
         }
-        return;
     }
 
     static async getOptimizationPreview(req: any, res: Response, next: NextFunction): Promise<void> {

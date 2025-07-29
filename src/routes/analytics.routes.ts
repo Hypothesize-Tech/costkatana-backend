@@ -28,6 +28,9 @@ router.get('/insights', asyncHandler(AnalyticsController.getInsights));
 // Get dashboard data
 router.get('/dashboard', asyncHandler(AnalyticsController.getDashboardData));
 
+// Get recent usage data
+router.get('/recent-usage', asyncHandler(AnalyticsController.getRecentUsage));
+
 // Export analytics
 router.get('/export', validateQuery(analyticsQuerySchema), asyncHandler(AnalyticsController.exportAnalytics));
 

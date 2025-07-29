@@ -90,20 +90,103 @@ export const VOLUME_DISCOUNTS: Record<string, Array<{ threshold: number; discoun
     ]
 };
 
-// Utility functions for pricing calculations
+/**
+ * Normalize model name for consistent matching across different naming conventions
+ */
+export function normalizeModelName(model: string): string {
+    return model.toLowerCase()
+        .replace(/^[a-z]+\./, '') // Remove provider prefixes like "anthropic."
+        .replace(/-\d{8}-v\d+:\d+$/, '') // Remove version suffixes like "-20241022-v1:0"
+        .replace(/-\d{8}$/, '') // Remove date suffixes like "-20241022"
+        .replace(/-\d{4}-\d{2}-\d{2}$/, '') // Remove date formats like "-2024-10-22"
+        .replace(/latest$/, '') // Remove "latest" suffix
+        .trim();
+}
+
+/**
+ * Get all possible variations of a model name for matching
+ */
+export function getModelNameVariations(model: string): string[] {
+    const normalized = normalizeModelName(model);
+    const variations = [normalized, model.toLowerCase()];
+    
+    // Add common variations for Claude models
+    if (normalized.includes('claude-3-5-haiku')) {
+        variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0');
+    }
+    if (normalized.includes('claude-3-5-sonnet')) {
+        variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20241022-v1:0', 'anthropic.claude-3-5-sonnet-20241022-v1:0');
+    }
+    if (normalized.includes('claude-3-opus')) {
+        variations.push('claude-3-opus', 'claude-3-opus-20240229-v1:0', 'anthropic.claude-3-opus-20240229-v1:0');
+    }
+    if (normalized.includes('claude-3-sonnet')) {
+        variations.push('claude-3-sonnet', 'claude-3-sonnet-20240229-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0');
+    }
+    if (normalized.includes('claude-3-haiku')) {
+        variations.push('claude-3-haiku', 'claude-3-haiku-20240307-v1:0', 'anthropic.claude-3-haiku-20240307-v1:0');
+    }
+    
+    return [...new Set(variations)]; // Remove duplicates
+}
+
 export function calculateCost(
     inputTokens: number,
     outputTokens: number,
     provider: string,
-    modelId: string
+    model: string
 ): number {
-    const pricing = MODEL_PRICING.find(p =>
+    // First try exact match
+    let pricing = MODEL_PRICING.find(p =>
         p.provider.toLowerCase() === provider.toLowerCase() &&
-        p.modelId.toLowerCase() === modelId.toLowerCase()
+        p.modelId.toLowerCase() === model.toLowerCase()
     );
 
+    // If no exact match, try matching with model name variations
     if (!pricing) {
-        throw new Error(`No pricing data found for ${provider}/${modelId}`);
+        const modelVariations = getModelNameVariations(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const modelMatch = modelVariations.some(variant => 
+                p.modelId.toLowerCase() === variant ||
+                p.modelName.toLowerCase() === variant ||
+                p.modelId.toLowerCase().includes(variant) ||
+                p.modelName.toLowerCase().includes(variant) ||
+                variant.includes(p.modelId.toLowerCase()) ||
+                variant.includes(p.modelName.toLowerCase())
+            );
+            return providerMatch && modelMatch;
+        });
+    }
+
+    // If still no match, try fuzzy matching for AWS Bedrock models
+    if (!pricing && provider.toLowerCase().includes('bedrock')) {
+        const normalizedModel = normalizeModelName(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const normalizedPricingModel = normalizeModelName(p.modelId);
+            const normalizedPricingName = normalizeModelName(p.modelName);
+            
+            return providerMatch && (
+                normalizedPricingModel === normalizedModel ||
+                normalizedPricingName === normalizedModel ||
+                normalizedPricingModel.includes(normalizedModel) ||
+                normalizedPricingName.includes(normalizedModel) ||
+                normalizedModel.includes(normalizedPricingModel) ||
+                normalizedModel.includes(normalizedPricingName)
+            );
+        });
+    }
+
+    if (!pricing) {
+        // Log available models for debugging
+        const availableModels = MODEL_PRICING
+            .filter(p => p.provider.toLowerCase() === provider.toLowerCase())
+            .map(p => `${p.modelId} (${p.modelName})`)
+            .slice(0, 10); // Show first 10 for brevity
+        
+        console.warn(`No pricing data found for ${provider}/${model}. Available models for ${provider}:`, availableModels);
+        throw new Error(`No pricing data found for ${provider}/${model}`);
     }
 
     // Convert to million tokens for calculation
@@ -117,15 +200,59 @@ export function estimateCost(
     inputTokens: number,
     outputTokens: number,
     provider: string,
-    modelId: string
+    model: string
 ): { inputCost: number; outputCost: number; totalCost: number } {
-    const pricing = MODEL_PRICING.find(p =>
+    // First try exact match
+    let pricing = MODEL_PRICING.find(p =>
         p.provider.toLowerCase() === provider.toLowerCase() &&
-        p.modelId.toLowerCase() === modelId.toLowerCase()
+        p.modelId.toLowerCase() === model.toLowerCase()
     );
 
+    // If no exact match, try matching with model name variations
     if (!pricing) {
-        throw new Error(`No pricing data found for ${provider}/${modelId}`);
+        const modelVariations = getModelNameVariations(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const modelMatch = modelVariations.some(variant => 
+                p.modelId.toLowerCase() === variant ||
+                p.modelName.toLowerCase() === variant ||
+                p.modelId.toLowerCase().includes(variant) ||
+                p.modelName.toLowerCase().includes(variant) ||
+                variant.includes(p.modelId.toLowerCase()) ||
+                variant.includes(p.modelName.toLowerCase())
+            );
+            return providerMatch && modelMatch;
+        });
+    }
+
+    // If still no match, try fuzzy matching for AWS Bedrock models
+    if (!pricing && provider.toLowerCase().includes('bedrock')) {
+        const normalizedModel = normalizeModelName(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const normalizedPricingModel = normalizeModelName(p.modelId);
+            const normalizedPricingName = normalizeModelName(p.modelName);
+            
+            return providerMatch && (
+                normalizedPricingModel === normalizedModel ||
+                normalizedPricingName === normalizedModel ||
+                normalizedPricingModel.includes(normalizedModel) ||
+                normalizedPricingName.includes(normalizedModel) ||
+                normalizedModel.includes(normalizedPricingModel) ||
+                normalizedModel.includes(normalizedPricingName)
+            );
+        });
+    }
+
+    if (!pricing) {
+        // Log available models for debugging
+        const availableModels = MODEL_PRICING
+            .filter(p => p.provider.toLowerCase() === provider.toLowerCase())
+            .map(p => `${p.modelId} (${p.modelName})`)
+            .slice(0, 10); // Show first 10 for brevity
+        
+        console.warn(`No pricing data found for ${provider}/${model}. Available models for ${provider}:`, availableModels);
+        throw new Error(`No pricing data found for ${provider}/${model}`);
     }
 
     const inputCost = (inputTokens / 1_000_000) * pricing.inputPrice;
@@ -138,11 +265,60 @@ export function estimateCost(
     };
 }
 
-export function getModelPricing(provider: string, modelId: string): ModelPricing | null {
-    return MODEL_PRICING.find(p =>
+export function getModelPricing(provider: string, model: string): ModelPricing | null {
+    // First try exact match
+    let pricing = MODEL_PRICING.find(p =>
         p.provider.toLowerCase() === provider.toLowerCase() &&
-        p.modelId.toLowerCase() === modelId.toLowerCase()
-    ) || null;
+        p.modelId.toLowerCase() === model.toLowerCase()
+    );
+
+    // If no exact match, try matching with model name variations
+    if (!pricing) {
+        const modelVariations = getModelNameVariations(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const modelMatch = modelVariations.some(variant => 
+                p.modelId.toLowerCase() === variant ||
+                p.modelName.toLowerCase() === variant ||
+                p.modelId.toLowerCase().includes(variant) ||
+                p.modelName.toLowerCase().includes(variant) ||
+                variant.includes(p.modelId.toLowerCase()) ||
+                variant.includes(p.modelName.toLowerCase())
+            );
+            return providerMatch && modelMatch;
+        });
+    }
+
+    // If still no match, try fuzzy matching for AWS Bedrock models
+    if (!pricing && provider.toLowerCase().includes('bedrock')) {
+        const normalizedModel = normalizeModelName(model);
+        pricing = MODEL_PRICING.find(p => {
+            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const normalizedPricingModel = normalizeModelName(p.modelId);
+            const normalizedPricingName = normalizeModelName(p.modelName);
+            
+            return providerMatch && (
+                normalizedPricingModel === normalizedModel ||
+                normalizedPricingName === normalizedModel ||
+                normalizedPricingModel.includes(normalizedModel) ||
+                normalizedPricingName.includes(normalizedModel) ||
+                normalizedModel.includes(normalizedPricingModel) ||
+                normalizedModel.includes(normalizedPricingName)
+            );
+        });
+    }
+
+    if (!pricing) {
+        // Log available models for debugging
+        const availableModels = MODEL_PRICING
+            .filter(p => p.provider.toLowerCase() === provider.toLowerCase())
+            .map(p => `${p.modelId} (${p.modelName})`)
+            .slice(0, 10); // Show first 10 for brevity
+        
+        console.warn(`No pricing data found for ${provider}/${model}. Available models for ${provider}:`, availableModels);
+    }
+
+    return pricing || null;
 }
 
 export function getProviderModels(provider: string): ModelPricing[] {

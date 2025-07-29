@@ -162,6 +162,85 @@ export class AnalyticsService {
         }
     }
 
+    static async getRecentUsage(filters: {
+        userId?: string;
+        limit?: number;
+        projectId?: string;
+        startDate?: Date;
+        endDate?: Date;
+    } = {}) {
+        try {
+            const match: any = {};
+            
+            if (filters.userId) {
+                match.userId = new mongoose.Types.ObjectId(filters.userId);
+            }
+            
+            if (filters.projectId && filters.projectId !== 'all') {
+                match.projectId = new mongoose.Types.ObjectId(filters.projectId);
+            }
+            
+            if (filters.startDate || filters.endDate) {
+                match.createdAt = {};
+                if (filters.startDate) match.createdAt.$gte = filters.startDate;
+                if (filters.endDate) match.createdAt.$lte = filters.endDate;
+            }
+
+            const pipeline = [
+                { $match: match },
+                {
+                    $lookup: {
+                        from: 'projects',
+                        localField: 'projectId',
+                        foreignField: '_id',
+                        as: 'project'
+                    }
+                },
+                {
+                    $addFields: {
+                        projectName: {
+                            $cond: {
+                                if: { $gt: [{ $size: '$project' }, 0] },
+                                then: { $arrayElemAt: ['$project.name', 0] },
+                                else: null
+                            }
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        userId: 1,
+                        service: 1,
+                        model: 1,
+                        prompt: 1,
+                        completion: 1,
+                        cost: 1,
+                        totalTokens: 1,
+                        promptTokens: 1,
+                        completionTokens: 1,
+                        responseTime: 1,
+                        createdAt: 1,
+                        projectName: 1,
+                        metadata: 1,
+                        tags: 1,
+                        optimizationApplied: 1,
+                        errorOccurred: 1
+                    }
+                },
+                { $sort: { createdAt: -1 as -1 } },
+                { $limit: filters.limit || 20 }
+            ];
+
+            const recentUsage = await Usage.aggregate(pipeline);
+            
+            logger.debug(`Retrieved ${recentUsage.length} recent usage records`);
+            return recentUsage;
+        } catch (error) {
+            logger.error('Error getting recent usage:', error);
+            throw error;
+        }
+    }
+
     private static async calculateProjectBreakdown(userId: string) {
         try {
             const breakdown = await Usage.aggregate([

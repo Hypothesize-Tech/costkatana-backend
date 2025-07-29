@@ -79,6 +79,27 @@ router.get(
     ProjectController.exportProjectData
 );
 
+// Recalculate project spending
+router.post(
+    '/:projectId/recalculate-spending',
+    [
+        param('projectId').isMongoId()
+    ],
+    validateRequest,
+    authenticate,
+    requirePermission('write', 'admin'),
+    ProjectController.recalculateProjectSpending
+);
+
+// Recalculate all user project spending
+router.post(
+    '/recalculate-all-spending',
+    validateRequest,
+    authenticate,
+    requirePermission('write', 'admin'),
+    ProjectController.recalculateUserProjectSpending
+);
+
 // Routes that require full authentication (write operations)
 // Create project
 router.post(

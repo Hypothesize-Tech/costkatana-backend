@@ -416,6 +416,51 @@ export class ProjectController {
     }
 
     /**
+     * Recalculate all user project spending
+     */
+    static async recalculateUserProjectSpending(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+
+            // Recalculate spending for all user projects
+            await ProjectService.recalculateUserProjectSpending(userId);
+
+            res.json({
+                success: true,
+                message: 'All project spending recalculated successfully'
+            });
+        } catch (error: any) {
+            logger.error('Error recalculating user project spending:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to recalculate project spending'
+            });
+        }
+    }
+
+    /**
+     * Recalculate project spending from Usage data
+     */
+    static async recalculateProjectSpending(req: any, res: Response): Promise<void> {
+        try {
+            const { projectId } = req.params;
+            // Recalculate spending
+            await ProjectService.recalculateProjectSpending(projectId);
+
+            res.json({
+                success: true,
+                message: 'Project spending recalculated successfully'
+            });
+        } catch (error: any) {
+            logger.error('Error recalculating project spending:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to recalculate project spending'
+            });
+        }
+    }
+
+    /**
      * Export project data
      */
     static async exportProjectData(req: any, res: Response): Promise<void> {

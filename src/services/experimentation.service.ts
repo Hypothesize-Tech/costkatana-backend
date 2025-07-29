@@ -1,7 +1,9 @@
 import { logger } from '../utils/logger';
 import { Usage } from '../models/Usage';
-import { Optimization } from '../models/Optimization';
+import { Experiment } from '../models/Experiment';
+import { WhatIfScenario } from '../models/WhatIfScenario';
 import { MODEL_PRICING } from '../utils/pricing';
+import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import mongoose from 'mongoose';
 import { BedrockService } from './bedrock.service'; // Add Bedrock integration
 import { EventEmitter } from 'events'; // For SSE support
@@ -97,9 +99,6 @@ export class ExperimentationService {
     
     // Track active sessions for security validation
     private static activeSessions = new Map<string, { userId: string, createdAt: Date }>();
-
-    // In-memory storage for user-created scenarios (in production, this would be in database)
-    private static userScenarios = new Map<string, any[]>(); // userId -> scenarios[]
 
     // ============================================================================
     // REAL-TIME BEDROCK MODEL COMPARISON
@@ -379,241 +378,85 @@ export class ExperimentationService {
      */
     static async getAccessibleBedrockModels(): Promise<any[]> {
         try {
-            // Import AWS SDK here to avoid circular dependencies
-            const { BedrockClient, ListFoundationModelsCommand } = await import('@aws-sdk/client-bedrock');
-            
-            const client = new BedrockClient({ 
-                region: process.env.AWS_BEDROCK_REGION || process.env.AWS_REGION || 'us-east-1',
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                }
-            });
-            const command = new ListFoundationModelsCommand({});
-            
-            const response = await client.send(command);
-            
-            // Filter for text models that support on-demand inference, exclude embeddings and image models
-            const accessibleModels = response.modelSummaries
-                ?.filter(model => 
-                    model.inferenceTypesSupported?.includes('ON_DEMAND') &&
-                    model.outputModalities?.includes('TEXT') &&
-                    !model.modelId?.includes('embedding') &&
-                    !model.modelId?.includes('canvas') &&
-                    !model.modelId?.includes('image') &&
-                    model.inputModalities?.includes('TEXT')
-                )
-                .map(model => {
-                    // Find matching pricing info
-                    const pricingInfo = MODEL_PRICING.find(p => 
-                        p.modelId === model.modelId || 
-                        p.modelName.toLowerCase().includes(model.modelName?.toLowerCase() || '')
-                    );
+            // Use AWS Bedrock pricing data directly from our pricing files
+            const accessibleModels = AWS_BEDROCK_PRICING.map(pricing => ({
+                provider: pricing.provider,
+                model: pricing.modelId,
+                modelName: pricing.modelName,
+                pricing: {
+                    input: pricing.inputPrice,
+                    output: pricing.outputPrice,
+                    unit: pricing.unit
+                },
+                capabilities: pricing.capabilities || ['text'],
+                contextWindow: pricing.contextWindow || 8192,
+                category: pricing.category || 'text',
+                isLatest: pricing.isLatest || false,
+                notes: pricing.notes || 'Available in AWS Bedrock'
+            }));
 
-                    // Default pricing for common models if not found in MODEL_PRICING
-                    let defaultPricing = { input: 0.001, output: 0.005, unit: 'Per 1M tokens' };
-                    
-                    if (model.modelId?.includes('nova-micro')) {
-                        defaultPricing = { input: 0.035, output: 0.14, unit: 'Per 1M tokens' };
-                    } else if (model.modelId?.includes('nova-lite')) {
-                        defaultPricing = { input: 0.6, output: 2.4, unit: 'Per 1M tokens' };
-                    } else if (model.modelId?.includes('nova-pro')) {
-                        defaultPricing = { input: 0.8, output: 3.2, unit: 'Per 1M tokens' };
-                    } else if (model.modelId?.includes('claude-3-haiku')) {
-                        defaultPricing = { input: 0.25, output: 1.25, unit: 'Per 1M tokens' };
-                    } else if (model.modelId?.includes('claude-3-5-sonnet')) {
-                        defaultPricing = { input: 3, output: 15, unit: 'Per 1M tokens' };
-                    } else if (model.modelId?.includes('titan-text-express')) {
-                        defaultPricing = { input: 0.2, output: 0.6, unit: 'Per 1M tokens' };
-                    }
-
-                    return {
-                        provider: model.providerName || 'Unknown',
-                        model: model.modelId || '',
-                        modelName: model.modelName || model.modelId || '',
-                        pricing: pricingInfo ? {
-                            input: pricingInfo.inputPrice,
-                            output: pricingInfo.outputPrice,
-                            unit: pricingInfo.unit || 'Per 1M tokens'
-                        } : defaultPricing,
-                        capabilities: pricingInfo?.capabilities || ['text'],
-                        contextWindow: pricingInfo?.contextWindow || (
-                            model.modelId?.includes('nova') ? 300000 : 
-                            model.modelId?.includes('claude') ? 200000 : 
-                            8192
-                        ),
-                        category: pricingInfo?.category || 'general',
-                        isLatest: true,
-                        notes: `Available in your AWS account`
-                    };
-                }) || [];
-
-            logger.info(`Found ${accessibleModels.length} accessible Bedrock models`);
+            logger.info(`Found ${accessibleModels.length} AWS Bedrock models from pricing data`);
             return accessibleModels;
 
         } catch (error) {
-            logger.error('Error fetching accessible Bedrock models:', error);
+            logger.error('Error getting AWS Bedrock models from pricing data:', error);
             
-            // Log additional context for debugging
-            if (error instanceof Error) {
-                logger.error('Error details:', {
-                    message: error.message,
-                    stack: error.stack
-                });
-            }
-            
-            // Return fallback list of common AWS Bedrock models instead of throwing
-            logger.info('Returning fallback model list due to AWS API error');
+            // Return a subset of the most common models as fallback
             return [
-                // Amazon Nova Models
                 {
-                    provider: 'Amazon',
-                    model: 'amazon.nova-micro-v1:0',
-                    modelName: 'Nova Micro',
-                    pricing: { input: 0.035, output: 0.14, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 300000,
-                    category: 'general',
+                    provider: 'AWS Bedrock',
+                    model: 'anthropic.claude-3-5-sonnet-20241022-v1:0',
+                    modelName: 'Claude 3.5 Sonnet',
+                    pricing: { input: 3.00, output: 15.00, unit: 'PER_1M_TOKENS' },
+                    capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
+                    contextWindow: 200000,
+                    category: 'text',
                     isLatest: true,
-                    notes: 'Fast and cost-effective model for simple tasks'
+                    notes: 'Claude 3.5 Sonnet on AWS Bedrock'
                 },
                 {
-                    provider: 'Amazon',
-                    model: 'amazon.nova-lite-v1:0',
-                    modelName: 'Nova Lite',
-                    pricing: { input: 0.6, output: 2.4, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 300000,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Balanced performance and cost for general use'
-                },
-                {
-                    provider: 'Amazon',
-                    model: 'amazon.nova-pro-v1:0',
-                    modelName: 'Nova Pro',
-                    pricing: { input: 0.8, output: 3.2, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 300000,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'High-performance model for complex tasks'
-                },
-                
-                // Anthropic Claude Models
-                {
-                    provider: 'Anthropic',
+                    provider: 'AWS Bedrock',
                     model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
                     modelName: 'Claude 3.5 Haiku',
-                    pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
+                    pricing: { input: 0.25, output: 1.25, unit: 'PER_1M_TOKENS' },
+                    capabilities: ['text', 'vision', 'multimodal'],
                     contextWindow: 200000,
-                    category: 'general',
+                    category: 'text',
                     isLatest: true,
-                    notes: 'Fast and intelligent for quick responses'
+                    notes: 'Claude 3.5 Haiku on AWS Bedrock'
                 },
                 {
-                    provider: 'Anthropic',
-                    model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-                    modelName: 'Claude 3.5 Sonnet',
-                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 200000,
-                    category: 'general',
+                    provider: 'AWS Bedrock',
+                    model: 'amazon.nova-pro-v1:0',
+                    modelName: 'Amazon Nova Pro',
+                    pricing: { input: 0.15, output: 0.60, unit: 'PER_1M_TOKENS' },
+                    capabilities: ['text', 'multimodal', 'cache-read'],
+                    contextWindow: 300000,
+                    category: 'text',
                     isLatest: true,
-                    notes: 'Advanced reasoning and analysis capabilities'
+                    notes: 'Amazon Nova Pro with cache read support'
                 },
                 {
-                    provider: 'Anthropic',
-                    model: 'anthropic.claude-3-haiku-20240307-v1:0',
-                    modelName: 'Claude 3 Haiku',
-                    pricing: { input: 0.25, output: 1.25, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 200000,
-                    category: 'general',
+                    provider: 'AWS Bedrock',
+                    model: 'amazon.nova-lite-v1:0',
+                    modelName: 'Amazon Nova Lite',
+                    pricing: { input: 0.06, output: 0.24, unit: 'PER_1M_TOKENS' },
+                    capabilities: ['text', 'multimodal', 'cache-read'],
+                    contextWindow: 300000,
+                    category: 'text',
                     isLatest: true,
-                    notes: 'Fast responses with good reasoning'
+                    notes: 'Amazon Nova Lite with cache read support'
                 },
                 {
-                    provider: 'Anthropic',
-                    model: 'anthropic.claude-3-sonnet-20240229-v1:0',
-                    modelName: 'Claude 3 Sonnet',
-                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 200000,
-                    category: 'general',
+                    provider: 'AWS Bedrock',
+                    model: 'amazon.nova-micro-v1:0',
+                    modelName: 'Amazon Nova Micro',
+                    pricing: { input: 0.035, output: 0.14, unit: 'PER_1M_TOKENS' },
+                    capabilities: ['text', 'efficient', 'cache-read'],
+                    contextWindow: 128000,
+                    category: 'text',
                     isLatest: true,
-                    notes: 'Balanced performance for complex tasks'
-                },
-                
-                // Meta Llama Models  
-                {
-                    provider: 'Meta',
-                    model: 'meta.llama3-2-1b-instruct-v1:0',
-                    modelName: 'Llama 3.2 1B Instruct',
-                    pricing: { input: 0.1, output: 0.1, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Compact, efficient model for basic tasks'
-                },
-                {
-                    provider: 'Meta',
-                    model: 'meta.llama3-2-3b-instruct-v1:0',
-                    modelName: 'Llama 3.2 3B Instruct',
-                    pricing: { input: 0.15, output: 0.15, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Efficient model for general tasks'
-                },
-                {
-                    provider: 'Meta',
-                    model: 'meta.llama3-1-8b-instruct-v1:0',
-                    modelName: 'Llama 3.1 8B Instruct',
-                    pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Good balance of performance and efficiency'
-                },
-                {
-                    provider: 'Meta',
-                    model: 'meta.llama3-1-70b-instruct-v1:0',
-                    modelName: 'Llama 3.1 70B Instruct',
-                    pricing: { input: 2.65, output: 3.5, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Large model for complex reasoning tasks'
-                },
-                
-                // Mistral AI Models
-                {
-                    provider: 'Mistral AI',
-                    model: 'mistral.mistral-7b-instruct-v0:2',
-                    modelName: 'Mistral 7B Instruct',
-                    pricing: { input: 0.15, output: 0.2, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'Efficient open-source model'
-                },
-                {
-                    provider: 'Mistral AI',
-                    model: 'mistral.mixtral-8x7b-instruct-v0:1',
-                    modelName: 'Mixtral 8x7B Instruct',
-                    pricing: { input: 0.45, output: 0.7, unit: 'Per 1M tokens' },
-                    capabilities: ['text'],
-                    contextWindow: 8192,
-                    category: 'general',
-                    isLatest: true,
-                    notes: 'High-quality mixture of experts model'
+                    notes: 'Amazon Nova Micro with cache read support'
                 }
             ];
         }
@@ -919,6 +762,19 @@ export class ExperimentationService {
             const inputTokens = Math.ceil(prompt.length / 4); // Rough token estimate
             const outputTokens = Math.ceil(response.length / 4);
             
+            // First try to find in AWS Bedrock pricing
+            const bedrockPricing = AWS_BEDROCK_PRICING.find(p => 
+                p.modelId === modelName || 
+                p.modelName.toLowerCase().includes(modelName.toLowerCase())
+            );
+
+            if (bedrockPricing) {
+                const inputCost = (inputTokens / 1000000) * bedrockPricing.inputPrice;
+                const outputCost = (outputTokens / 1000000) * bedrockPricing.outputPrice;
+                return inputCost + outputCost;
+            }
+
+            // Fallback to general MODEL_PRICING
             const pricing = MODEL_PRICING.find(p => 
                 p.modelName.toLowerCase().includes(modelName.toLowerCase())
             );
@@ -1017,6 +873,26 @@ export class ExperimentationService {
             const inputTokens = Math.ceil(prompt.length / 4);
             const outputTokens = Math.ceil(response.length / 4);
             
+            // First try to find in AWS Bedrock pricing
+            const bedrockPricing = AWS_BEDROCK_PRICING.find(p => 
+                p.modelId === modelName || 
+                p.modelName.toLowerCase().includes(modelName.toLowerCase())
+            );
+
+            if (bedrockPricing) {
+                const inputCost = (inputTokens / 1000000) * bedrockPricing.inputPrice;
+                const outputCost = (outputTokens / 1000000) * bedrockPricing.outputPrice;
+                
+                return {
+                    inputTokens,
+                    outputTokens,
+                    inputCost,
+                    outputCost,
+                    totalCost: inputCost + outputCost
+                };
+            }
+
+            // Fallback to general MODEL_PRICING
             const pricing = MODEL_PRICING.find(p => 
                 p.modelName.toLowerCase().includes(modelName.toLowerCase())
             );
@@ -1088,7 +964,18 @@ export class ExperimentationService {
 
     private static parseEvaluationResponse(response: string, results: RealTimeComparisonResult[]): any[] {
         try {
-            const cleanedResponse = BedrockService.extractJson(response);
+            let cleanedResponse = BedrockService.extractJson(response);
+            
+            // Additional cleaning for control characters and invalid JSON
+            cleanedResponse = cleanedResponse
+                .replace(/[\x00-\x1F\x7F-\x9F]/g, '') // Remove control characters
+                .replace(/\n/g, ' ') // Replace newlines with spaces
+                .replace(/\r/g, '') // Remove carriage returns
+                .replace(/\t/g, ' ') // Replace tabs with spaces
+                .replace(/\\"/g, '"') // Fix escaped quotes
+                .replace(/\\\\/g, '\\') // Fix double backslashes
+                .trim();
+            
             logger.info('Extracted JSON response:', cleanedResponse.substring(0, 200) + '...');
             
             const parsed = JSON.parse(cleanedResponse);
@@ -1103,7 +990,27 @@ export class ExperimentationService {
         } catch (error) {
             logger.error('Error parsing evaluation response:', error);
             logger.error('Original response:', response.substring(0, 500) + '...');
-            logger.error('Cleaned response:', BedrockService.extractJson(response).substring(0, 500) + '...');
+            
+            // Try alternative parsing approaches
+            try {
+                // Try to find JSON-like structures in the response
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const alternativeJson = jsonMatch[0]
+                        .replace(/[\x00-\x1F\x7F-\x9F]/g, '')
+                        .replace(/\n/g, ' ')
+                        .replace(/\r/g, '')
+                        .replace(/\t/g, ' ')
+                        .replace(/\\"/g, '"')
+                        .replace(/\\\\/g, '\\');
+                    
+                    const parsed = JSON.parse(alternativeJson);
+                    logger.info('Successfully parsed with alternative method');
+                    return Array.isArray(parsed) ? parsed : [parsed];
+                }
+            } catch (altError) {
+                logger.error('Alternative parsing also failed:', altError);
+            }
             
             // Return fallback evaluations for each result
             return results.map((result, index) => ({
@@ -1140,10 +1047,18 @@ export class ExperimentationService {
         }
     ): Promise<ExperimentResult[]> {
         try {
-            // Get actual optimization history which represents past experiments
+            // Build query for experiments
             const query: any = {
                 userId: new mongoose.Types.ObjectId(userId)
             };
+
+            if (filters.type) {
+                query.type = filters.type;
+            }
+
+            if (filters.status) {
+                query.status = filters.status;
+            }
 
             if (filters.startDate || filters.endDate) {
                 query.createdAt = {};
@@ -1151,46 +1066,26 @@ export class ExperimentationService {
                 if (filters.endDate) query.createdAt.$lte = filters.endDate;
             }
 
-            const optimizations = await Optimization.find(query)
+            const experiments = await Experiment.find(query)
                 .sort({ createdAt: -1 })
                 .limit(filters.limit || 20)
                 .lean();
 
-            // Convert optimizations to experiment results
-            const experiments: ExperimentResult[] = optimizations.map((opt) => {
-                const experiment: ExperimentResult = {
-                    id: `exp_${opt._id}`,
-                    name: `Optimization: ${opt.category || 'Unknown'} - ${opt.model || 'Multiple Models'}`,
-                    type: this.getExperimentType(opt.category),
-                    status: opt.applied ? 'completed' : 'failed',
-                    startTime: opt.createdAt.toISOString(),
-                    endTime: opt.appliedAt?.toISOString() || new Date(opt.createdAt.getTime() + 60000).toISOString(),
-                    results: {
-                        tokensSaved: opt.tokensSaved || 0,
-                        costSaved: opt.costSaved || 0,
-                        improvementPercentage: opt.improvementPercentage || 0,
-                        originalPrompt: opt.originalPrompt?.substring(0, 100) + '...',
-                        optimizedPrompt: opt.optimizedPrompt?.substring(0, 100) + '...'
-                    },
-                    metadata: {
-                        duration: opt.appliedAt ? 
-                            Math.floor((opt.appliedAt.getTime() - opt.createdAt.getTime()) / 1000) : 60,
-                        iterations: 1,
-                        confidence: opt.improvementPercentage ? opt.improvementPercentage / 100 : 0.5
-                    },
-                    userId,
-                    createdAt: opt.createdAt
-                };
+            // Convert database experiments to ExperimentResult format
+            const experimentResults: ExperimentResult[] = experiments.map((exp) => ({
+                id: exp._id.toString(),
+                name: exp.name,
+                type: exp.type,
+                status: exp.status,
+                startTime: exp.startTime.toISOString(),
+                endTime: exp.endTime?.toISOString(),
+                results: exp.results,
+                metadata: exp.metadata,
+                userId,
+                createdAt: exp.createdAt
+            }));
 
-                return experiment;
-            });
-
-            // Apply type filter if specified
-            if (filters.type) {
-                return experiments.filter(exp => exp.type === filters.type);
-            }
-
-            return experiments;
+            return experimentResults;
         } catch (error) {
             logger.error('Error getting experiment history:', error);
             throw error;
@@ -1227,6 +1122,27 @@ export class ExperimentationService {
                 createdAt: new Date()
             };
 
+            // Save experiment to database
+            const savedExperiment = new Experiment({
+                userId: new mongoose.Types.ObjectId(userId),
+                name: experiment.name,
+                type: experiment.type,
+                status: experiment.status,
+                startTime: new Date(experiment.startTime),
+                endTime: experiment.endTime ? new Date(experiment.endTime) : undefined,
+                results: experiment.results,
+                metadata: experiment.metadata,
+                request: {
+                    prompt: request.prompt,
+                    models: request.models,
+                    evaluationCriteria: request.evaluationCriteria,
+                    iterations: request.iterations
+                }
+            });
+
+            await savedExperiment.save();
+            logger.info(`Saved experiment ${experimentId} to database for user ${userId}`);
+
             return experiment;
         } catch (error) {
             logger.error('Error running model comparison:', error);
@@ -1239,41 +1155,26 @@ export class ExperimentationService {
      */
     static async getExperimentById(experimentId: string, userId: string): Promise<ExperimentResult | null> {
         try {
-            // Extract optimization ID from experiment ID
-            const optimizationId = experimentId.replace('exp_', '');
-            
-            const optimization = await Optimization.findOne({
-                _id: new mongoose.Types.ObjectId(optimizationId),
+            const experiment = await Experiment.findOne({
+                _id: new mongoose.Types.ObjectId(experimentId),
                 userId: new mongoose.Types.ObjectId(userId)
             }).lean();
 
-            if (!optimization) {
+            if (!experiment) {
                 return null;
             }
 
             return {
-                id: experimentId,
-                name: `Optimization: ${optimization.category || 'Unknown'} - ${optimization.model || 'Multiple Models'}`,
-                type: this.getExperimentType(optimization.category),
-                status: optimization.applied ? 'completed' : 'failed',
-                startTime: optimization.createdAt.toISOString(),
-                endTime: optimization.appliedAt?.toISOString() || new Date(optimization.createdAt.getTime() + 60000).toISOString(),
-                results: {
-                    tokensSaved: optimization.tokensSaved || 0,
-                    costSaved: optimization.costSaved || 0,
-                    improvementPercentage: optimization.improvementPercentage || 0,
-                    originalPrompt: optimization.originalPrompt,
-                    optimizedPrompt: optimization.optimizedPrompt,
-                    feedback: optimization.feedback
-                },
-                metadata: {
-                    duration: optimization.appliedAt ? 
-                        Math.floor((optimization.appliedAt.getTime() - optimization.createdAt.getTime()) / 1000) : 60,
-                    iterations: 1,
-                    confidence: optimization.improvementPercentage ? optimization.improvementPercentage / 100 : 0.5
-                },
+                id: experiment._id.toString(),
+                name: experiment.name,
+                type: experiment.type,
+                status: experiment.status,
+                startTime: experiment.startTime.toISOString(),
+                endTime: experiment.endTime?.toISOString(),
+                results: experiment.results,
+                metadata: experiment.metadata,
                 userId,
-                createdAt: optimization.createdAt
+                createdAt: experiment.createdAt
             };
         } catch (error) {
             logger.error('Error getting experiment by ID:', error);
@@ -1286,11 +1187,8 @@ export class ExperimentationService {
      */
     static async deleteExperiment(experimentId: string, userId: string): Promise<void> {
         try {
-            // Extract optimization ID and delete the actual optimization record
-            const optimizationId = experimentId.replace('exp_', '');
-            
-            await Optimization.deleteOne({
-                _id: new mongoose.Types.ObjectId(optimizationId),
+            await Experiment.deleteOne({
+                _id: new mongoose.Types.ObjectId(experimentId),
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
@@ -1374,7 +1272,7 @@ export class ExperimentationService {
     }
 
     /**
-     * Get experiment recommendations based on actual user data
+     * Get experiment recommendations
      */
     static async getExperimentRecommendations(userId: string): Promise<Array<{
         type: 'model_comparison' | 'what_if' | 'fine_tuning';
@@ -1391,33 +1289,85 @@ export class ExperimentationService {
             // Get comprehensive usage analysis
             const usageAnalysis = await this.analyzeUserUsagePatterns(userId);
             
-            if (!usageAnalysis.hasData) {
-                return []; // No usage data, no recommendations
+            // Always provide recommendations, even if no usage data exists
+            if (usageAnalysis.hasData) {
+                // AI-driven recommendation generation based on usage patterns
+                const modelRecommendations = await this.generateModelRecommendations(usageAnalysis);
+                const optimizationRecommendations = await this.generateOptimizationRecommendations(usageAnalysis);
+
+                recommendations.push(...modelRecommendations, ...optimizationRecommendations);
+            } else {
+                // Provide default recommendations for new users
+                recommendations.push(
+                    {
+                        type: 'model_comparison' as const,
+                        title: 'Start with Model Comparison',
+                        description: 'Compare different AI models to find the most cost-effective solution for your use case',
+                        priority: 'high' as const,
+                        potentialSavings: 50.0,
+                        effort: 'low' as const,
+                        actions: [
+                            'Select 2-3 models to compare',
+                            'Define your evaluation criteria',
+                            'Run a comparison experiment'
+                        ]
+                    },
+                    {
+                        type: 'what_if' as const,
+                        title: 'Explore Cost Optimization Scenarios',
+                        description: 'Analyze how different strategies could impact your AI costs and performance',
+                        priority: 'medium' as const,
+                        potentialSavings: 30.0,
+                        effort: 'medium' as const,
+                        actions: [
+                            'Create a what-if scenario',
+                            'Define your optimization goals',
+                            'Run scenario analysis'
+                        ]
+                    },
+                    {
+                        type: 'model_comparison' as const,
+                        title: 'Test Different Model Providers',
+                        description: 'Compare models from different providers to find the best value for your needs',
+                        priority: 'medium' as const,
+                        potentialSavings: 25.0,
+                        effort: 'low' as const,
+                        actions: [
+                            'Compare Amazon vs Anthropic models',
+                            'Test different model sizes',
+                            'Evaluate cost vs performance trade-offs'
+                        ]
+                    }
+                );
             }
-
-            // AI-driven recommendation generation based on usage patterns
-            const modelRecommendations = await this.generateModelRecommendations(usageAnalysis);
-            const optimizationRecommendations = await this.generateOptimizationRecommendations(usageAnalysis);
-
-            recommendations.push(...modelRecommendations, ...optimizationRecommendations);
 
             // Sort by potential savings (highest first)
             return recommendations.sort((a, b) => b.potentialSavings - a.potentialSavings);
         } catch (error) {
             logger.error('Error getting experiment recommendations:', error);
-            throw error;
+            
+            // Return fallback recommendations on error
+            return [
+                {
+                    type: 'model_comparison' as const,
+                    title: 'Model Comparison Experiment',
+                    description: 'Compare different AI models to optimize your costs',
+                    priority: 'high' as const,
+                    potentialSavings: 40.0,
+                    effort: 'low' as const,
+                    actions: [
+                        'Select models to compare',
+                        'Define evaluation criteria',
+                        'Run comparison'
+                    ]
+                }
+            ];
         }
     }
 
     /**
      * Private helper methods
      */
-    private static getExperimentType(optimizationCategory?: string): 'model_comparison' | 'what_if' | 'fine_tuning' {
-        if (optimizationCategory?.includes('model_selection')) return 'model_comparison';
-        if (optimizationCategory?.includes('batch_processing')) return 'what_if';
-        return 'model_comparison'; // default
-    }
-
     private static async analyzeModelsFromUsageData(userId: string, request: ModelComparisonRequest) {
         try {
             const results = [];
@@ -1658,31 +1608,96 @@ export class ExperimentationService {
      */
     static async getWhatIfScenarios(userId: string): Promise<any[]> {
         try {
-            const scenarios: any[] = [];
+            // Get user-created scenarios from database
+            const userCreatedScenarios = await WhatIfScenario.find({
+                userId: new mongoose.Types.ObjectId(userId),
+                isUserCreated: true
+            }).sort({ createdAt: -1 }).lean();
 
-            // First, get user-created scenarios from memory storage
-            const userCreatedScenarios = this.userScenarios.get(userId) || [];
-            scenarios.push(...userCreatedScenarios);
+            // Convert database scenarios to expected format
+            const scenarios = userCreatedScenarios.map(scenario => ({
+                id: scenario._id.toString(),
+                name: scenario.name,
+                description: scenario.description,
+                changes: scenario.changes,
+                timeframe: scenario.timeframe,
+                baselineData: scenario.baselineData,
+                status: scenario.status,
+                isUserCreated: scenario.isUserCreated,
+                createdAt: scenario.createdAt,
+                analysis: scenario.analysis
+            }));
 
             // Then add auto-generated scenarios based on usage analysis
             const usageAnalysis = await this.analyzeUserUsagePatterns(userId);
             
             if (usageAnalysis.hasData) {
-            const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
-            if (modelOptimizationScenario) scenarios.push(modelOptimizationScenario);
+                const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
+                if (modelOptimizationScenario) {
+                    scenarios.push({
+                        id: `auto_${Date.now()}_1`,
+                        name: modelOptimizationScenario.name,
+                        description: modelOptimizationScenario.description,
+                        changes: modelOptimizationScenario.changes as any,
+                        timeframe: modelOptimizationScenario.timeframe as any,
+                        baselineData: modelOptimizationScenario.baselineData,
+                        status: 'created' as const,
+                        isUserCreated: false,
+                        createdAt: new Date(),
+                        analysis: undefined
+                    });
+                }
 
-            const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
-            if (volumeScenario) scenarios.push(volumeScenario);
+                const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
+                if (volumeScenario) {
+                    scenarios.push({
+                        id: `auto_${Date.now()}_2`,
+                        name: volumeScenario.name,
+                        description: volumeScenario.description,
+                        changes: volumeScenario.changes as any,
+                        timeframe: volumeScenario.timeframe as any,
+                        baselineData: volumeScenario.baselineData,
+                        status: 'created' as const,
+                        isUserCreated: false,
+                        createdAt: new Date(),
+                        analysis: undefined
+                    });
+                }
 
-            const cachingScenario = await this.generateCachingScenario(usageAnalysis);
-            if (cachingScenario) scenarios.push(cachingScenario);
+                const cachingScenario = await this.generateCachingScenario(usageAnalysis);
+                if (cachingScenario) {
+                    scenarios.push({
+                        id: `auto_${Date.now()}_3`,
+                        name: cachingScenario.name,
+                        description: cachingScenario.description,
+                        changes: cachingScenario.changes as any,
+                        timeframe: cachingScenario.timeframe as any,
+                        baselineData: cachingScenario.baselineData,
+                        status: 'created' as const,
+                        isUserCreated: false,
+                        createdAt: new Date(),
+                        analysis: undefined
+                    });
+                }
 
-            const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
-            if (batchingScenario) scenarios.push(batchingScenario);
+                const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
+                if (batchingScenario) {
+                    scenarios.push({
+                        id: `auto_${Date.now()}_4`,
+                        name: batchingScenario.name,
+                        description: batchingScenario.description,
+                        changes: batchingScenario.changes as any,
+                        timeframe: batchingScenario.timeframe as any,
+                        baselineData: batchingScenario.baselineData,
+                        status: 'created' as const,
+                        isUserCreated: false,
+                        createdAt: new Date(),
+                        analysis: undefined
+                    });
+                }
             }
 
             return scenarios;
-
         } catch (error) {
             logger.error('Error getting what-if scenarios:', error);
             throw error;
@@ -1695,22 +1710,34 @@ export class ExperimentationService {
     static async createWhatIfScenario(userId: string, scenarioData: any): Promise<any> {
         try {
             const scenario = {
-                id: `scenario_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                ...scenarioData,
-                userId,
-                createdAt: new Date(),
-                status: 'created',
-                isUserCreated: true // Flag to distinguish from auto-generated scenarios
+                userId: new mongoose.Types.ObjectId(userId),
+                name: scenarioData.name,
+                description: scenarioData.description,
+                changes: scenarioData.changes,
+                timeframe: scenarioData.timeframe,
+                baselineData: scenarioData.baselineData,
+                status: 'created' as const,
+                isUserCreated: true
             };
 
-            // Store scenario in memory (in production, this would be saved to database)
-            if (!this.userScenarios.has(userId)) {
-                this.userScenarios.set(userId, []);
-            }
-            this.userScenarios.get(userId)!.push(scenario);
+            // Save scenario to database
+            const savedScenario = new WhatIfScenario(scenario);
+            await savedScenario.save();
 
-            logger.info(`Created and stored what-if scenario: ${scenario.name} for user: ${userId}`);
-            return scenario;
+            logger.info(`Created and stored what-if scenario: ${scenarioData.name} for user: ${userId}`);
+            
+            return {
+                id: (savedScenario._id as any).toString(),
+                name: savedScenario.name,
+                description: savedScenario.description,
+                changes: savedScenario.changes,
+                timeframe: savedScenario.timeframe,
+                baselineData: savedScenario.baselineData,
+                status: savedScenario.status,
+                isUserCreated: savedScenario.isUserCreated,
+                createdAt: savedScenario.createdAt,
+                analysis: savedScenario.analysis
+            };
 
         } catch (error) {
             logger.error('Error creating what-if scenario:', error);
@@ -1740,7 +1767,7 @@ export class ExperimentationService {
             // Merge AI insights with mathematical calculations
             const mergedProjections = this.mergeAIAndMathematicalProjections(aiAnalysis, mathematicalProjections);
 
-            return {
+            const analysisResult = {
                 scenario: { name: scenarioName },
                 projectedImpact: {
                     costChange: Math.round(mergedProjections.costChange * 100) / 100,
@@ -1759,6 +1786,22 @@ export class ExperimentationService {
                 warnings: mergedProjections.warnings,
                 aiInsights: aiAnalysis.insights || []
             };
+
+            // Update the scenario in database with analysis results
+            await WhatIfScenario.findOneAndUpdate(
+                {
+                    userId: new mongoose.Types.ObjectId(userId),
+                    name: scenarioName
+                },
+                {
+                    $set: {
+                        status: 'analyzed',
+                        analysis: analysisResult
+                    }
+                }
+            );
+
+            return analysisResult;
 
         } catch (error) {
             logger.error('Error running what-if analysis:', error);
@@ -2011,9 +2054,10 @@ Base your analysis on real-world AI cost optimization patterns and industry best
      */
     static async deleteWhatIfScenario(userId: string, scenarioName: string): Promise<void> {
         try {
-            const userScenarios = this.userScenarios.get(userId) || [];
-            const filteredScenarios = userScenarios.filter(scenario => scenario.name !== scenarioName);
-            this.userScenarios.set(userId, filteredScenarios);
+            await WhatIfScenario.deleteOne({
+                userId: new mongoose.Types.ObjectId(userId),
+                name: scenarioName
+            });
 
             logger.info(`Deleted what-if scenario: ${scenarioName} for user: ${userId}`);
         } catch (error) {
