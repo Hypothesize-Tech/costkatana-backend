@@ -195,7 +195,6 @@ export const startServer = async () => {
             logger.info(`🚀 AI Cost Optimizer Backend running on port ${PORT}`);
             logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
             logger.info(`🔗 Database: ${process.env.MONGODB_URI ? 'Connected' : 'Not configured'}`);
-            logger.info(`🎯 MCP Server: Ready for Claude integration`);
         });
 
         // Configure server timeouts for MCP compatibility

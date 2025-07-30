@@ -47,6 +47,11 @@ router.get('/realtime/summary', authenticate, asyncHandler(UsageController.getRe
 router.get('/realtime/requests', authenticate, asyncHandler(UsageController.getRealTimeRequests));
 router.get('/analytics', authenticate, asyncHandler(UsageController.getUsageAnalytics));
 
+// Property analytics routes
+router.get('/properties/analytics', authenticate, asyncHandler(UsageController.getPropertyAnalytics));
+router.get('/properties/available', authenticate, asyncHandler(UsageController.getAvailableProperties));
+router.put('/:usageId/properties', authenticate, asyncHandler(UsageController.updateUsageProperties));
+
 // Add the SSE route
 router.get('/stream', authenticate, UsageController.streamUsageUpdates);
 

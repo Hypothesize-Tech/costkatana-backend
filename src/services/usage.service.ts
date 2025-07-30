@@ -21,6 +21,10 @@ interface TrackUsageData {
     responseTime: number;
     metadata?: Record<string, any>;
     tags?: string[];
+    workflowId?: string;
+    workflowName?: string;
+    workflowStep?: string;
+    workflowSequence?: number;
 }
 
 interface UsageFilters {
@@ -33,6 +37,8 @@ interface UsageFilters {
     tags?: string[];
     minCost?: number;
     maxCost?: number;
+    customProperties?: Record<string, string>; // For filtering by custom properties
+    propertyExists?: string[]; // For filtering by existence of specific properties
 }
 
 
@@ -40,6 +46,14 @@ export class UsageService {
 
     static async trackUsage(data: any, req?: any): Promise<IUsage | null> {
         try {
+            // DEBUG: Check workflow fields received by service
+            console.log('🔍 WORKFLOW DEBUG - Service received:', {
+                workflowId: data.workflowId,
+                workflowName: data.workflowName,
+                workflowStep: data.workflowStep,
+                workflowSequence: data.workflowSequence
+            });
+
             // Ensure userId is a valid ObjectId
             let userId = data.userId;
             // If userId is missing, try to get from req (if provided)
@@ -67,7 +81,12 @@ export class UsageService {
                 errorOccurred: data.errorOccurred || false,
                 errorMessage: data.errorMessage,
                 ipAddress: data.ipAddress,
-                userAgent: data.userAgent
+                userAgent: data.userAgent,
+                // Add workflow tracking fields
+                workflowId: data.workflowId,
+                workflowName: data.workflowName,
+                workflowStep: data.workflowStep,
+                workflowSequence: data.workflowSequence
             };
 
             // Only add projectId if it exists and is not empty
@@ -75,8 +94,26 @@ export class UsageService {
                 (usageData as any).projectId = new mongoose.Types.ObjectId(data.projectId);
             }
 
+            // DEBUG: Check workflow fields before MongoDB save
+            console.log('🔍 WORKFLOW DEBUG - Before MongoDB save:', {
+                workflowId: usageData.workflowId,
+                workflowName: usageData.workflowName,
+                workflowStep: usageData.workflowStep,
+                workflowSequence: usageData.workflowSequence
+            });
+
             const usage = new Usage(usageData);
             const savedUsage = await usage.save();
+            
+            // DEBUG: Check workflow fields after MongoDB save
+            console.log('🔍 WORKFLOW DEBUG - After MongoDB save:', {
+                _id: savedUsage._id,
+                workflowId: savedUsage.workflowId,
+                workflowName: savedUsage.workflowName,
+                workflowStep: savedUsage.workflowStep,
+                workflowSequence: savedUsage.workflowSequence
+            });
+            
             return savedUsage;
         } catch (error: any) {
             console.error('Error in UsageService.trackUsage:', error);
@@ -98,9 +135,6 @@ export class UsageService {
             }
             if (filters.service) query.service = filters.service;
             if (filters.model) query.model = filters.model;
-            if (filters.tags && filters.tags.length > 0) {
-                query.tags = { $in: filters.tags };
-            }
             if (filters.minCost !== undefined || filters.maxCost !== undefined) {
                 query.cost = {};
                 if (filters.minCost !== undefined) query.cost.$gte = filters.minCost;
@@ -110,6 +144,79 @@ export class UsageService {
                 query.createdAt = {};
                 if (filters.startDate) query.createdAt.$gte = filters.startDate;
                 if (filters.endDate) query.createdAt.$lte = filters.endDate;
+            }
+
+            // Add custom property filtering
+            if (filters.customProperties) {
+                Object.entries(filters.customProperties).forEach(([key, value]) => {
+                    // Special handling for tags - check both tags field and metadata.tags
+                    if (key === 'tags') {
+                        // Parse the value if it's a JSON string
+                        let searchValue = value;
+                        try {
+                            if (typeof value === 'string' && (value.startsWith('[') || value.startsWith('{'))) {
+                                searchValue = JSON.parse(value);
+                            }
+                        } catch (e) {
+                            // If parsing fails, use original value
+                        }
+
+                        if (!query.$or) query.$or = [];
+                        if (Array.isArray(searchValue)) {
+                            // Search for any of the array values
+                            query.$or.push(
+                                { tags: { $in: searchValue } },
+                                { 'metadata.tags': { $in: searchValue } }
+                            );
+                        } else {
+                            query.$or.push(
+                                { tags: searchValue },
+                                { 'metadata.tags': searchValue }
+                            );
+                        }
+                    } else {
+                        // For other properties, handle JSON strings and objects
+                        let searchValue = value;
+                        try {
+                            if (typeof value === 'string' && (value.startsWith('[') || value.startsWith('{'))) {
+                                const parsed = JSON.parse(value);
+                                if (Array.isArray(parsed)) {
+                                    // For arrays, search for documents containing any of the values
+                                    query[`metadata.${key}`] = { $in: parsed };
+                                    return;
+                                } else if (typeof parsed === 'object' && parsed !== null) {
+                                    // For objects, do a partial match
+                                    Object.entries(parsed).forEach(([subKey, subValue]) => {
+                                        query[`metadata.${key}.${subKey}`] = subValue;
+                                    });
+                                    return;
+                                } else {
+                                    searchValue = parsed;
+                                }
+                            }
+                        } catch (e) {
+                            // If parsing fails, use original value
+                        }
+                        
+                        query[`metadata.${key}`] = searchValue;
+                    }
+                });
+            }
+
+            // Add regular tags filtering (for backward compatibility)
+            if (filters.tags && filters.tags.length > 0) {
+                if (!query.$or) query.$or = [];
+                query.$or.push(
+                    { tags: { $in: filters.tags } },
+                    { 'metadata.tags': { $in: filters.tags } }
+                );
+            }
+
+            // Add property existence filtering
+            if (filters.propertyExists && filters.propertyExists.length > 0) {
+                filters.propertyExists.forEach(property => {
+                    query[`metadata.${property}`] = { $exists: true };
+                });
             }
 
             const page = options.page || 1;
@@ -129,6 +236,7 @@ export class UsageService {
                     .skip(skip)
                     .limit(limit)
                     .populate('userId', 'name email')
+                    .populate('projectId', 'name')
                     .lean(),
                 Usage.countDocuments(query),
             ]);
@@ -893,6 +1001,222 @@ export class UsageService {
     /**
      * Get usage by ID and verify ownership
      */
+    static async getPropertyAnalytics(userId: string, options: {
+        startDate?: Date;
+        endDate?: Date;
+        projectId?: string;
+        groupBy: string; // The property to group by
+    }) {
+        try {
+            const matchStage: any = { userId: new mongoose.Types.ObjectId(userId) };
+            
+            if (options.projectId && options.projectId !== 'all') {
+                matchStage.projectId = new mongoose.Types.ObjectId(options.projectId);
+            }
+            
+            if (options.startDate || options.endDate) {
+                matchStage.createdAt = {};
+                if (options.startDate) matchStage.createdAt.$gte = options.startDate;
+                if (options.endDate) matchStage.createdAt.$lte = options.endDate;
+            }
+
+            const pipeline: any[] = [
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: `$metadata.${options.groupBy}`,
+                        totalCost: { $sum: '$cost' },
+                        totalTokens: { $sum: '$totalTokens' },
+                        totalRequests: { $sum: 1 },
+                        averageCost: { $avg: '$cost' },
+                        averageTokens: { $avg: '$totalTokens' },
+                        averageResponseTime: { $avg: '$responseTime' }
+                    }
+                },
+                {
+                    $project: {
+                        propertyValue: '$_id',
+                        totalCost: { $round: ['$totalCost', 6] },
+                        totalTokens: 1,
+                        totalRequests: 1,
+                        averageCost: { $round: ['$averageCost', 6] },
+                        averageTokens: { $round: ['$averageTokens', 0] },
+                        averageResponseTime: { $round: ['$averageResponseTime', 0] },
+                        _id: 0
+                    }
+                },
+                { $sort: { totalCost: -1 } }
+            ];
+
+            const results = await Usage.aggregate(pipeline);
+            
+            // Calculate totals
+            const totals = results.reduce((acc, item) => ({
+                totalCost: acc.totalCost + item.totalCost,
+                totalTokens: acc.totalTokens + item.totalTokens,
+                totalRequests: acc.totalRequests + item.totalRequests
+            }), { totalCost: 0, totalTokens: 0, totalRequests: 0 });
+
+            return {
+                groupBy: options.groupBy,
+                data: results,
+                totals,
+                summary: {
+                    uniqueValues: results.length,
+                    totalCost: Math.round(totals.totalCost * 1000000) / 1000000,
+                    totalTokens: totals.totalTokens,
+                    totalRequests: totals.totalRequests
+                }
+            };
+        } catch (error) {
+            logger.error('Error getting property analytics:', error);
+            throw error;
+        }
+    }
+
+    static async getAvailableProperties(userId: string, options: {
+        startDate?: Date;
+        endDate?: Date;
+        projectId?: string;
+    }) {
+        try {
+            const matchStage: any = { userId: new mongoose.Types.ObjectId(userId) };
+            
+            if (options.projectId && options.projectId !== 'all') {
+                matchStage.projectId = new mongoose.Types.ObjectId(options.projectId);
+            }
+            
+            if (options.startDate || options.endDate) {
+                matchStage.createdAt = {};
+                if (options.startDate) matchStage.createdAt.$gte = options.startDate;
+                if (options.endDate) matchStage.createdAt.$lte = options.endDate;
+            }
+
+            // Get regular metadata properties
+            const metadataPipeline: any[] = [
+                { $match: matchStage },
+                { $project: { metadata: { $objectToArray: '$metadata' } } },
+                { $unwind: '$metadata' },
+                {
+                    $group: {
+                        _id: '$metadata.k',
+                        count: { $sum: 1 },
+                        sampleValues: { $addToSet: '$metadata.v' }
+                    }
+                },
+                {
+                    $project: {
+                        property: '$_id',
+                        count: 1,
+                        sampleValues: { $slice: ['$sampleValues', 10] },
+                        type: 'metadata',
+                        _id: 0
+                    }
+                }
+            ];
+
+            // Get tags as a separate property - simplified pipeline
+            const tagsPipeline: any[] = [
+                { $match: { ...matchStage, $or: [{ tags: { $exists: true, $ne: [] } }, { 'metadata.tags': { $exists: true, $ne: [] } }] } },
+                {
+                    $project: {
+                        allTags: {
+                            $concatArrays: [
+                                { $ifNull: ['$tags', []] },
+                                { $ifNull: ['$metadata.tags', []] }
+                            ]
+                        }
+                    }
+                },
+                { $unwind: '$allTags' },
+                {
+                    $group: {
+                        _id: '$allTags',
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        property: { $first: 'tags' },
+                        count: { $sum: '$count' },
+                        sampleValues: { $push: '$_id' },
+                        type: { $first: 'tags' }
+                    }
+                },
+                {
+                    $project: {
+                        property: 1,
+                        count: 1,
+                        sampleValues: { $slice: ['$sampleValues', 10] },
+                        type: 1,
+                        _id: 0
+                    }
+                }
+            ];
+
+            const [metadataResults, tagsResults] = await Promise.all([
+                Usage.aggregate(metadataPipeline),
+                Usage.aggregate(tagsPipeline)
+            ]);
+
+            const filteredMetadata = metadataResults.filter(item => 
+                item.property && 
+                !item.property.startsWith('workspace') && 
+                !item.property.startsWith('requestType') &&
+                !item.property.startsWith('executionTime') &&
+                !item.property.startsWith('contextFiles') &&
+                !item.property.startsWith('generatedFiles')
+            );
+
+            const results = [...filteredMetadata, ...tagsResults].sort((a, b) => b.count - a.count);
+            return results;
+        } catch (error) {
+            logger.error('Error getting available properties:', error);
+            throw error;
+        }
+    }
+
+    static async updateUsageProperties(usageId: string, userId: string, properties: Record<string, any>): Promise<IUsage | null> {
+        try {
+            const usage = await Usage.findOne({
+                _id: usageId,
+                userId: userId
+            });
+
+            if (!usage) {
+                return null;
+            }
+
+            // Merge new properties with existing metadata
+            const updatedMetadata = {
+                ...usage.metadata,
+                ...properties
+            };
+
+            const updatedUsage = await Usage.findByIdAndUpdate(
+                usageId,
+                { 
+                    metadata: updatedMetadata,
+                    updatedAt: new Date()
+                },
+                { new: true }
+            ).lean();
+
+            logger.info('Usage properties updated:', {
+                usageId,
+                userId,
+                newProperties: Object.keys(properties),
+                totalProperties: Object.keys(updatedMetadata).length
+            });
+
+            return updatedUsage;
+        } catch (error) {
+            logger.error('Error updating usage properties:', error);
+            throw error;
+        }
+    }
+
     static async getUsageById(usageId: string, userId: string): Promise<IUsage | null> {
         try {
             const usage = await Usage.findOne({

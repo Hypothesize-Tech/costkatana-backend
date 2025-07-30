@@ -1,0 +1,310 @@
+###
+# CostKATANA Workflow Testing Suite
+# Test the complete workflow functionality implementation
+###
+
+### Variables
+@baseUrl = http://localhost:8000/api
+@gatewayUrl = http://localhost:8000/api/gateway
+@authToken = your-jwt-token-here
+@apiKey = dak_your-api-key-here
+
+### 1. Test Basic Gateway Request (No Workflow)
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, this is a test message without workflow tracking."
+    }
+  ],
+  "max_tokens": 100
+}
+
+### 2. Test Workflow Request - Step 1: Initial Analysis
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_test_001
+CostKatana-Workflow-Name: ContentSummarizerAgent
+CostKatana-Workflow-Step: /analyze
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Analyze this content for key themes: 'The future of AI in healthcare involves personalized medicine, predictive analytics, and automated diagnostics.'"
+    }
+  ],
+  "max_tokens": 150
+}
+
+### 3. Test Workflow Request - Step 2: Clarification
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_test_001
+CostKatana-Workflow-Name: ContentSummarizerAgent
+CostKatana-Workflow-Step: /analyze/clarify
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Based on the previous analysis, provide more specific details about predictive analytics in healthcare."
+    }
+  ],
+  "max_tokens": 200
+}
+
+### 4. Test Workflow Request - Step 3: Final Summary
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_test_001
+CostKatana-Workflow-Name: ContentSummarizerAgent
+CostKatana-Workflow-Step: /summarize
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Summarize all the findings into a concise executive summary."
+    }
+  ],
+  "max_tokens": 100
+}
+
+### 5. Test Different Workflow - Code Generation
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_test_002
+CostKatana-Workflow-Name: CodeGenerationAssistant
+CostKatana-Workflow-Step: /generate
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Create a Python function to fetch weather data from an API."
+    }
+  ],
+  "max_tokens": 300
+}
+
+### 6. Test Code Generation - Refinement Step
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_test_002
+CostKatana-Workflow-Name: CodeGenerationAssistant
+CostKatana-Workflow-Step: /generate/refine
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Add error handling and retry logic to the weather function."
+    }
+  ],
+  "max_tokens": 250
+}
+
+###
+# WORKFLOW API ENDPOINTS TESTING
+###
+
+### 7. Get All User Workflows
+GET {{baseUrl}}/workflows
+Authorization: Bearer {{authToken}}
+
+### 8. Get Workflow Analytics
+GET {{baseUrl}}/workflows/analytics
+Authorization: Bearer {{authToken}}
+
+### 9. Get Specific Workflow Details
+GET {{baseUrl}}/workflows/workflow_test_001
+Authorization: Bearer {{authToken}}
+
+### 10. Get Workflow Steps
+GET {{baseUrl}}/workflows/workflow_test_001/steps
+Authorization: Bearer {{authToken}}
+
+### 11. Compare Multiple Workflows
+POST {{baseUrl}}/workflows/compare
+Authorization: Bearer {{authToken}}
+Content-Type: application/json
+
+{
+  "workflowIds": ["workflow_test_001", "workflow_test_002"]
+}
+
+### 12. Get Workflows with Filters
+GET {{baseUrl}}/workflows?workflowName=ContentSummarizerAgent&page=1&limit=10
+Authorization: Bearer {{authToken}}
+
+### 13. Get Workflows with Date Range
+GET {{baseUrl}}/workflows?startDate=2024-01-01&endDate=2024-12-31
+Authorization: Bearer {{authToken}}
+
+### 14. Get Analytics with Date Range
+GET {{baseUrl}}/workflows/analytics?startDate=2024-01-01&endDate=2024-12-31
+Authorization: Bearer {{authToken}}
+
+###
+# COMPLEX WORKFLOW SCENARIOS
+###
+
+### 15. Multi-Provider Workflow - OpenAI Step
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_multi_001
+CostKatana-Workflow-Name: MultiProviderAnalysis
+CostKatana-Workflow-Step: /openai/analyze
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Analyze market trends for Q4 2024"
+    }
+  ],
+  "max_tokens": 200
+}
+
+### 16. Multi-Provider Workflow - Anthropic Step (if you have Claude access)
+POST {{gatewayUrl}}/anthropic/messages
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.anthropic.com/v1/messages
+CostKatana-Workflow-Id: workflow_multi_001
+CostKatana-Workflow-Name: MultiProviderAnalysis
+CostKatana-Workflow-Step: /anthropic/validate
+
+{
+  "model": "claude-3-haiku-20240307",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Validate the market analysis from the previous step"
+    }
+  ],
+  "max_tokens": 150
+}
+
+###
+# TESTING EDGE CASES
+###
+
+### 17. Workflow with Custom Properties
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_custom_001
+CostKatana-Workflow-Name: CustomPropertiesTest
+CostKatana-Workflow-Step: /test
+CostKatana-Property-Department: Engineering
+CostKatana-Property-Team: AI-Research
+CostKatana-Property-Priority: High
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This is a test with custom properties"
+    }
+  ],
+  "max_tokens": 50
+}
+
+### 18. Test Workflow without Step (should still work)
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_no_step_001
+CostKatana-Workflow-Name: NoStepTest
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This workflow has no step defined"
+    }
+  ],
+  "max_tokens": 50
+}
+
+### 19. Test Workflow with Long Step Path
+POST {{gatewayUrl}}/openai/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{authToken}}
+CostKatana-Target-Url: https://api.openai.com/v1/chat/completions
+CostKatana-Workflow-Id: workflow_deep_001
+CostKatana-Workflow-Name: DeepHierarchyTest
+CostKatana-Workflow-Step: /level1/level2/level3/final
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This tests deep workflow hierarchy"
+    }
+  ],
+  "max_tokens": 50
+}
+
+###
+# VERIFICATION QUERIES
+###
+
+### 20. Check Usage with Workflow Data
+GET {{baseUrl}}/usage?limit=20
+Authorization: Bearer {{authToken}}
+
+### 21. Check Usage Properties
+GET {{baseUrl}}/usage/properties/available
+Authorization: Bearer {{authToken}}
+
+### 22. Filter Usage by Workflow
+GET {{baseUrl}}/usage?property.workflowId=workflow_test_001
+Authorization: Bearer {{authToken}}
+
+### 23. Gateway Health Check
+GET {{gatewayUrl}}/health
+
+### 24. Gateway Stats
+GET {{gatewayUrl}}/stats
+Authorization: Bearer {{authToken}}
+
+###
+# Expected Results:
+# 1. All gateway requests should succeed and track workflow data
+# 2. Workflow API endpoints should return structured data
+# 3. Usage data should include workflowId, workflowName, workflowStep, workflowSequence
+# 4. Workflow analytics should show cost breakdowns by workflow and step
+# 5. Workflow comparison should work for multiple workflows
+###

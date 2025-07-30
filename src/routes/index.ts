@@ -20,6 +20,9 @@ import { cursorRoutes } from './cursor.routes';
 import { apiKeyRoutes } from './apiKey.routes';
 import { onboardingRoutes } from './onboarding.routes';
 import { monitoringRoutes } from './monitoring.routes';
+import { gatewayRoutes } from './gateway.routes';
+import workflowRoutes from './workflow.routes';
+import keyVaultRoutes from './keyVault.routes';
 
 const router = Router();
 
@@ -55,5 +58,8 @@ router.use('/cursor', cursorRoutes);
 router.use('/api-keys', apiKeyRoutes);
 router.use('/onboarding', onboardingRoutes);
 router.use('/monitoring', monitoringRoutes);
+router.use('/gateway', gatewayRoutes);
+router.use('/workflows', workflowRoutes);
+router.use('/key-vault', keyVaultRoutes);
 
 export const apiRouter = router;

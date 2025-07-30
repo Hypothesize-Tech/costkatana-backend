@@ -136,6 +136,12 @@ export function calculateCost(
     provider: string,
     model: string
 ): number {
+    // Add null checks
+    if (!provider || !model) {
+        console.warn(`Invalid provider or model: provider=${provider}, model=${model}`);
+        return 0; // Return 0 cost for invalid requests
+    }
+    
     // First try exact match
     let pricing = MODEL_PRICING.find(p =>
         p.provider.toLowerCase() === provider.toLowerCase() &&
@@ -202,6 +208,12 @@ export function estimateCost(
     provider: string,
     model: string
 ): { inputCost: number; outputCost: number; totalCost: number } {
+    // Add null checks
+    if (!provider || !model) {
+        console.warn(`Invalid provider or model: provider=${provider}, model=${model}`);
+        return { inputCost: 0, outputCost: 0, totalCost: 0 };
+    }
+    
     // First try exact match
     let pricing = MODEL_PRICING.find(p =>
         p.provider.toLowerCase() === provider.toLowerCase() &&

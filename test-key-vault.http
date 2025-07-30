@@ -1,0 +1,222 @@
+### Key Vault API Testing
+### Test file for CostKATANA Key Vault functionality
+
+@baseUrl = http://localhost:8000/api
+@apiKey = dak_68790a13c350ea09cde79fb1_b7ef552ac7ebb2002ec2723470f457ea_25efb247a5aa737374326e2a0ab93388d273071784ffab2c5281d4d58736b471
+
+### 1. Get Key Vault Dashboard
+GET {{baseUrl}}/key-vault/dashboard
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 2. Create a Provider Key (OpenAI)
+POST {{baseUrl}}/key-vault/provider-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "name": "Production-OpenAI-Master-Key",
+    "provider": "openai", 
+    "apiKey": "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",
+    "description": "Master OpenAI API key for production use"
+}
+
+### 3. Get All Provider Keys
+GET {{baseUrl}}/key-vault/provider-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 4. Create a Provider Key (Anthropic)
+POST {{baseUrl}}/key-vault/provider-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "name": "Production-Anthropic-Master-Key",
+    "provider": "anthropic",
+    "apiKey": "sk-ant-api03-dummy-key-for-testing-purposes-only",
+    "description": "Master Anthropic API key for production use"
+}
+
+### 5. Create a Proxy Key (WebApp Backend)
+# Note: Replace PROVIDER_KEY_ID with actual ID from step 2 response
+POST {{baseUrl}}/key-vault/proxy-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "name": "WebApp-Backend-Key",
+    "providerKeyId": "PROVIDER_KEY_ID_FROM_STEP_2",
+    "description": "Proxy key for web application backend",
+    "permissions": ["read", "write"],
+    "budgetLimit": 100.00,
+    "dailyBudgetLimit": 10.00,
+    "monthlyBudgetLimit": 300.00,
+    "rateLimit": 1000
+}
+
+### 6. Create a Proxy Key (Data Science Team)
+# Note: Replace PROVIDER_KEY_ID with actual ID from step 2 response
+POST {{baseUrl}}/key-vault/proxy-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "name": "DataScience-Team-Key",
+    "providerKeyId": "PROVIDER_KEY_ID_FROM_STEP_2",
+    "description": "Proxy key for data science team with strict limits",
+    "permissions": ["read"],
+    "budgetLimit": 50.00,
+    "dailyBudgetLimit": 5.00,
+    "monthlyBudgetLimit": 150.00,
+    "rateLimit": 500,
+    "allowedIPs": ["192.168.1.100", "192.168.1.101"]
+}
+
+### 7. Get All Proxy Keys
+GET {{baseUrl}}/key-vault/proxy-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 8. Get Proxy Key Analytics
+GET {{baseUrl}}/key-vault/analytics
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 9. Test Proxy Key Authentication via Gateway
+# Note: Replace PROXY_KEY_ID with actual proxy key from step 5 response
+POST {{baseUrl}}/gateway/v1/chat/completions
+CostKatana-Auth: Bearer PROXY_KEY_ID_FROM_STEP_5
+CostKatana-Target-Url: https://api.openai.com
+Content-Type: application/json
+
+{
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Hello! This is a test request through the CostKATANA proxy key system."
+        }
+    ],
+    "max_tokens": 50
+}
+
+### 10. Update Proxy Key Status (Deactivate)
+# Note: Replace PROXY_KEY_ID with actual proxy key ID
+PATCH {{baseUrl}}/key-vault/proxy-keys/PROXY_KEY_ID_FROM_STEP_5/status
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "isActive": false
+}
+
+### 11. Test Deactivated Proxy Key (Should Fail)
+# Note: Replace PROXY_KEY_ID with actual proxy key from step 5 response
+POST {{baseUrl}}/gateway/v1/chat/completions
+CostKatana-Auth: Bearer PROXY_KEY_ID_FROM_STEP_5
+CostKatana-Target-Url: https://api.openai.com
+Content-Type: application/json
+
+{
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "user",
+            "content": "This should fail because the proxy key is deactivated."
+        }
+    ],
+    "max_tokens": 50
+}
+
+### 12. Reactivate Proxy Key
+# Note: Replace PROXY_KEY_ID with actual proxy key ID
+PATCH {{baseUrl}}/key-vault/proxy-keys/PROXY_KEY_ID_FROM_STEP_5/status
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "isActive": true
+}
+
+### 13. Test Workflow Tracking with Proxy Key
+# Note: Replace PROXY_KEY_ID with actual proxy key from step 5 response
+POST {{baseUrl}}/gateway/v1/chat/completions
+CostKatana-Auth: Bearer PROXY_KEY_ID_FROM_STEP_5
+CostKatana-Target-Url: https://api.openai.com
+CostKatana-Workflow-Id: keyvault-test-workflow-001
+CostKatana-Workflow-Name: KeyVaultTestWorkflow
+CostKatana-Workflow-Step: /test-proxy-key
+CostKatana-Property-Environment: testing
+CostKatana-Property-Feature: key-vault
+Content-Type: application/json
+
+{
+    "model": "gpt-4o-mini",
+    "messages": [
+        {
+            "role": "user",
+            "content": "Test proxy key with workflow tracking and custom properties."
+        }
+    ],
+    "max_tokens": 100
+}
+
+### 14. Get Updated Dashboard After Usage
+GET {{baseUrl}}/key-vault/dashboard
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 15. Delete a Proxy Key
+# Note: Replace PROXY_KEY_ID with actual proxy key ID
+DELETE {{baseUrl}}/key-vault/proxy-keys/PROXY_KEY_ID_FROM_STEP_6
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 16. Delete a Provider Key (This will delete all associated proxy keys)
+# Note: Replace PROVIDER_KEY_ID with actual provider key ID
+DELETE {{baseUrl}}/key-vault/provider-keys/PROVIDER_KEY_ID_FROM_STEP_4
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 17. Final Dashboard Check
+GET {{baseUrl}}/key-vault/dashboard
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+### 18. Test Error Cases
+
+# Test invalid proxy key format
+POST {{baseUrl}}/gateway/v1/chat/completions
+CostKatana-Auth: Bearer invalid-proxy-key-format
+CostKatana-Target-Url: https://api.openai.com
+Content-Type: application/json
+
+{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "This should fail"}],
+    "max_tokens": 50
+}
+
+### 19. Test non-existent proxy key
+POST {{baseUrl}}/gateway/v1/chat/completions
+CostKatana-Auth: Bearer ck-proxy-nonexistentkeyid12345678901234567890
+CostKatana-Target-Url: https://api.openai.com
+Content-Type: application/json
+
+{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "This should fail"}],
+    "max_tokens": 50
+}
+
+### 20. Test creating proxy key with invalid provider key ID
+POST {{baseUrl}}/key-vault/proxy-keys
+Authorization: Bearer {{apiKey}}
+Content-Type: application/json
+
+{
+    "name": "Invalid-Provider-Key-Test",
+    "providerKeyId": "invalid-provider-key-id",
+    "description": "This should fail"
+}

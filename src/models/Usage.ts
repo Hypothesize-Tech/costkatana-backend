@@ -38,6 +38,10 @@ export interface IUsage {
     errorMessage?: string;
     ipAddress?: string;
     userAgent?: string;
+    workflowId?: string;
+    workflowName?: string;
+    workflowStep?: string;
+    workflowSequence?: number;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -120,6 +124,22 @@ const usageSchema = new Schema<IUsage>({
     errorMessage: String,
     ipAddress: String,
     userAgent: String,
+    // Workflow tracking fields
+    workflowId: {
+        type: String,
+        index: true  // Index for efficient workflow grouping
+    },
+    workflowName: {
+        type: String,
+        index: true  // Index for workflow type filtering
+    },
+    workflowStep: {
+        type: String
+    },
+    workflowSequence: {
+        type: Number,
+        min: 0
+    },
 }, {
     timestamps: true,
 });
@@ -132,6 +152,11 @@ usageSchema.index({ cost: -1 });
 usageSchema.index({ 'costAllocation.department': 1 });
 usageSchema.index({ 'costAllocation.team': 1 });
 usageSchema.index({ 'costAllocation.client': 1 });
+
+// Workflow indexes for efficient workflow queries
+usageSchema.index({ workflowId: 1, workflowSequence: 1 }); // For workflow step ordering
+usageSchema.index({ userId: 1, workflowId: 1, createdAt: -1 }); // For user workflow queries
+usageSchema.index({ workflowName: 1, createdAt: -1 }); // For workflow type analytics
 
 // Text index for prompt searching
 usageSchema.index({ prompt: 'text', completion: 'text' });

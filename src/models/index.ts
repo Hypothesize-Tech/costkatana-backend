@@ -12,3 +12,7 @@ export { Conversation, IConversation } from './Conversation';
 export { ChatMessage, IChatMessage } from './ChatMessage';
 export { Experiment, IExperiment } from './Experiment';
 export { WhatIfScenario, IWhatIfScenario } from './WhatIfScenario';
+export { ProviderKey, IProviderKey } from './ProviderKey';
+export { ProxyKey, IProxyKey } from './ProxyKey';
+export { Team, ITeam } from './Team';
+export { ThreatLog, IThreatLog } from './ThreatLog';

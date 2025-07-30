@@ -53,7 +53,12 @@ export const sdkTrackUsageSchema = z.object({
     responseTime: z.number().min(0).optional().default(0),
     metadata: z.object({}).optional().default({}),
     tags: z.array(z.string()).optional().default([]),
-    projectId: z.string().optional()
+    projectId: z.string().optional(),
+    // Workflow tracking fields
+    workflowId: z.string().optional(),
+    workflowName: z.string().optional(),
+    workflowStep: z.string().optional(),
+    workflowSequence: z.number().min(0).optional()
 }).refine(
     (data) => data.provider || data.service,
     { message: "Either 'provider' or 'service' must be provided" }

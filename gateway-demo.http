@@ -1,0 +1,111 @@
+# CostKATANA Gateway Demo
+# Use this file to test the gateway functionality with different providers
+
+### Gateway Health Check
+GET http://localhost:3000/api/gateway/health
+
+### Gateway Statistics (requires authentication)
+GET http://localhost:3000/api/gateway/stats
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+
+### Example 1: OpenAI ChatGPT request with basic tracking
+POST http://localhost:3000/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+CostKatana-Target-Url: https://api.openai.com
+CostKatana-Property-Environment: production
+CostKatana-Property-Feature: chat-bot
+CostKatana-User-Id: user_123
+CostKatana-Cache-Enabled: true
+
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! What's the weather like today?"
+    }
+  ],
+  "max_tokens": 150
+}
+
+### Example 2: Anthropic Claude request with budget control
+POST http://localhost:3000/api/gateway/v1/messages
+Content-Type: application/json
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+CostKatana-Target-Url: https://api.anthropic.com
+CostKatana-Property-Team: marketing
+CostKatana-Property-Campaign: summer-2024
+CostKatana-Budget-Id: YOUR_PROJECT_ID_HERE
+CostKatana-Retry-Enabled: true
+CostKatana-Property-Trace-Id: trace_abc123
+
+{
+  "model": "claude-3-haiku-20240307",
+  "max_tokens": 200,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a short product description for eco-friendly water bottles."
+    }
+  ]
+}
+
+### Example 3: OpenAI request with privacy settings
+POST http://localhost:3000/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+CostKatana-Target-Url: https://api.openai.com
+CostKatana-Property-Department: legal
+CostKatana-Omit-Request: true
+CostKatana-Omit-Response: true
+CostKatana-LLM-Security-Enabled: true
+
+{
+  "model": "gpt-4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Analyze this contract for potential issues..."
+    }
+  ]
+}
+
+### Example 4: Model override example
+POST http://localhost:3000/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+CostKatana-Target-Url: https://api.openai.com
+CostKatana-Model-Override: gpt-4o-mini
+CostKatana-Property-AB-Test: model-comparison
+CostKatana-Session-Id: session_xyz789
+
+{
+  "model": "gpt-4",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This will actually use gpt-4o-mini due to the override header"
+    }
+  ]
+}
+
+### Example 5: Google AI request
+POST http://localhost:3000/api/gateway/v1/models/gemini-pro:generateContent
+Content-Type: application/json
+CostKatana-Auth: Bearer YOUR_API_KEY_HERE
+CostKatana-Target-Url: https://generativelanguage.googleapis.com
+CostKatana-Property-Service: content-generation
+CostKatana-Cache-Enabled: true
+
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "Write a haiku about programming"
+        }
+      ]
+    }
+  ]
+}

@@ -147,6 +147,10 @@ export class AICostTrackerService {
             tags?: string[];
             costAllocation?: Record<string, any>;
             promptTemplateId?: string;
+            // Workflow tracking fields
+            workflowId?: string;
+            workflowName?: string;
+            workflowStep?: string;
             metadata?: {
                 workspace?: any;
                 codeContext?: any;
@@ -217,7 +221,22 @@ export class AICostTrackerService {
                     throw new Error(`Approval required. Request ID: ${approvalRequest._id}`);
                 }
             }
-            console.log("metadatametadatametadata", metadata)
+
+            // Calculate workflow sequence if workflow ID is provided
+            let workflowSequence: number | undefined;
+            if (metadata?.workflowId) {
+                try {
+                    // Get the current count of requests in this workflow to determine sequence
+                    const existingCount = await Usage.countDocuments({ 
+                        workflowId: metadata.workflowId 
+                    });
+                    workflowSequence = existingCount + 1;
+                } catch (error) {
+                    logger.warn('Could not calculate workflow sequence:', error);
+                    workflowSequence = 1; // Default to 1 if count fails
+                }
+            }
+
             // Save to database
             await Usage.create({
                 userId,
@@ -237,6 +256,11 @@ export class AICostTrackerService {
                 },
                 tags: metadata?.tags || [],
                 costAllocation: metadata?.costAllocation,
+                // Add workflow tracking fields
+                workflowId: metadata?.workflowId,
+                workflowName: metadata?.workflowName,
+                workflowStep: metadata?.workflowStep,
+                workflowSequence: workflowSequence,
                 optimizationApplied: false,
                 errorOccurred: false,
                 createdAt: metadata?.originalCreatedAt || new Date()
