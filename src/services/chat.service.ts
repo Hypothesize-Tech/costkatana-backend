@@ -4,6 +4,7 @@ import { ExperimentationService } from './experimentation.service';
 import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
 import { agentService } from './agent.service';
+import { conversationalFlowService } from './conversationFlow.service';
 
 export interface ChatMessageResponse {
     id: string;
@@ -108,46 +109,84 @@ export class ChatService {
             .limit(20) // Last 20 messages for context
             .lean();
 
-            // Build context from conversation history
-            const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
-
-            // Use intelligent agent service for data-aware responses
+            // Use conversational flow service for human-like interaction
             let response: string;
             let agentThinking: any = undefined;
             
             try {
-                // Try agent service first for intelligent, data-aware responses
-                const agentResponse = await agentService.query({
-                    userId: request.userId,
-                    query: request.message,
-                    context: {
-                        conversationId: conversation._id.toString(),
+                // Process message through conversational flow service
+                const flowResult = await conversationalFlowService.processMessage(
+                    conversation._id.toString(),
+                    request.userId,
+                    request.message,
+                    {
                         previousMessages: recentMessages.map(msg => ({
                             role: msg.role,
                             content: msg.content
                         })),
                         selectedModel: request.modelId
                     }
-                });
+                );
 
-                if (agentResponse.success && agentResponse.response) {
-                    response = agentResponse.response;
-                    agentThinking = agentResponse.thinking;
-                } else {
-                    // Fallback to direct Bedrock call if agent fails
-                    logger.warn('Agent service failed, falling back to Bedrock:', agentResponse.error);
-                    response = await BedrockService.invokeModel(contextualPrompt, request.modelId);
+                response = flowResult.response;
+                agentThinking = flowResult.thinking;
+
+                // If the conversational flow indicates an MCP call is needed
+                if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
+                    try {
+                        // Prepare MCP data with actual userId
+                        const mcpData = { ...flowResult.mcpData, userId: request.userId };
+                        
+                        // Call the appropriate agent service tool
+                        const agentResponse = await agentService.query({
+                            userId: request.userId,
+                            query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
+                            context: {
+                                conversationId: conversation._id.toString(),
+                                previousMessages: recentMessages.map(msg => ({
+                                    role: msg.role,
+                                    content: msg.content
+                                })),
+                                selectedModel: request.modelId,
+                                mcpAction: flowResult.mcpAction,
+                                mcpData: mcpData
+                            }
+                        });
+
+                        if (agentResponse.success && agentResponse.response) {
+                            // Combine the flow response with the MCP result
+                            response = `${response}\n\n${agentResponse.response}`;
+                            // Merge thinking processes
+                            if (agentResponse.thinking) {
+                                agentThinking = {
+                                    ...agentThinking,
+                                    steps: [
+                                        ...(agentThinking?.steps || []),
+                                        ...(agentResponse.thinking.steps || [])
+                                    ]
+                                };
+                            }
+                        } else {
+                            logger.warn('MCP action failed:', agentResponse.error);
+                            response += '\n\nI encountered an issue executing the task. Please try again.';
+                        }
+                    } catch (mcpError) {
+                        logger.error('Error executing MCP action:', mcpError);
+                        response += '\n\nI encountered an issue executing the task. Please try again.';
+                    }
                 }
+
             } catch (error) {
-                // Fallback to direct Bedrock call if agent service is unavailable
-                logger.warn('Agent service unavailable, falling back to Bedrock:', error);
+                // Fallback to direct Bedrock call if conversational flow is unavailable
+                logger.warn('Conversational flow service unavailable, falling back to Bedrock:', error);
+                const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
                 response = await BedrockService.invokeModel(contextualPrompt, request.modelId);
             }
 
             const latency = Date.now() - startTime;
             
             // Calculate cost (rough estimation)
-            const inputTokens = Math.ceil(contextualPrompt.length / 4);
+            const inputTokens = Math.ceil(request.message.length / 4);
             const outputTokens = Math.ceil(response.length / 4);
             const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
 
