@@ -14,6 +14,8 @@ declare global {
                 startTime: number;
                 requestId?: string; // CostKatana-Request-Id for feedback tracking
                 targetUrl?: string;
+                projectId?: string; // CostKatana-Project-Id for project tracking
+                authMethodOverride?: 'gateway' | 'standard'; // CostKatana-Auth-Method override
                 cacheEnabled?: boolean;
                 retryEnabled?: boolean;
                 budgetId?: string;
@@ -327,6 +329,20 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
         requestId = uuidv4();
     }
     context.requestId = requestId;
+
+    // Process CostKatana-Project-Id header (for project tracking)
+    const projectId = req.headers['costkatana-project-id'] as string;
+    if (projectId) {
+        context.projectId = projectId;
+        logger.debug('Project ID detected', { projectId, requestId: context.requestId });
+    }
+
+    // Process CostKatana-Auth-Method header (for authentication method override)
+    const authMethodOverride = req.headers['costkatana-auth-method'] as string;
+    if (authMethodOverride && (authMethodOverride === 'gateway' || authMethodOverride === 'standard')) {
+        context.authMethodOverride = authMethodOverride as 'gateway' | 'standard';
+        logger.debug('Auth method override detected', { authMethodOverride, requestId: context.requestId });
+    }
 
     // Check for failover policy first
     const failoverPolicy = req.headers['costkatana-failover-policy'] as string;

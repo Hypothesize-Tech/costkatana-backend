@@ -20,8 +20,22 @@ export const authenticate = async (
 
         logger.info('Step 1: Extracting authentication from request');
 
-        // Check for Bearer token
-        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        // Check for CostKatana-Auth header first (gateway requests)
+        const costkatanaAuth = req.headers['costkatana-auth'] as string;
+        if (costkatanaAuth && costkatanaAuth.startsWith('Bearer ')) {
+            const authValue = costkatanaAuth.substring(7);
+
+            // Check if it's an API key (starts with 'dak_') or JWT token
+            if (authValue.startsWith('dak_')) {
+                apiKey = authValue;
+                logger.info('Dashboard API key found in CostKatana-Auth header');
+            } else {
+                token = authValue;
+                logger.info('JWT token found in CostKatana-Auth header');
+            }
+        }
+        // Check for standard Authorization header
+        else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
             const authValue = req.headers.authorization.substring(7);
 
             // Check if it's an API key (starts with 'dak_') or JWT token
@@ -289,8 +303,13 @@ export const optionalAuth = async (
     try {
         let authValue: string | undefined;
 
-        // Check for authorization header
-        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+        // Check for CostKatana-Auth header first (gateway requests)
+        const costkatanaAuth = req.headers['costkatana-auth'] as string;
+        if (costkatanaAuth && costkatanaAuth.startsWith('Bearer ')) {
+            authValue = costkatanaAuth.substring(7);
+        }
+        // Check for standard authorization header
+        else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
             authValue = req.headers.authorization.substring(7);
         } else if (req.query.token) {
             authValue = req.query.token as string;

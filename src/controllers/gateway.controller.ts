@@ -901,7 +901,7 @@ export class GatewayController {
                 service: GatewayController.inferServiceFromUrl(context.targetUrl!),
                 model: model,
                 endpoint: req.path,
-                projectId: context.budgetId,
+                projectId: context.projectId || context.budgetId, // Use new projectId header or fallback to budgetId
                 tags: context.properties ? Object.keys(context.properties) : [],
                 costAllocation: context.properties,
                 // Add workflow tracking data
