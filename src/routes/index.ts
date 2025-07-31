@@ -23,6 +23,8 @@ import { monitoringRoutes } from './monitoring.routes';
 import { gatewayRoutes } from './gateway.routes';
 import workflowRoutes from './workflow.routes';
 import keyVaultRoutes from './keyVault.routes';
+import requestFeedbackRoutes from './requestFeedback.routes';
+import trainingRoutes from './training.routes';
 
 const router = Router();
 
@@ -61,5 +63,7 @@ router.use('/monitoring', monitoringRoutes);
 router.use('/gateway', gatewayRoutes);
 router.use('/workflows', workflowRoutes);
 router.use('/key-vault', keyVaultRoutes);
+router.use('/v1', requestFeedbackRoutes);
+router.use('/training', trainingRoutes);
 
 export const apiRouter = router;

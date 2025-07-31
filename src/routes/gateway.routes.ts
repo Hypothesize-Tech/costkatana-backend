@@ -38,6 +38,14 @@ router.delete('/cache',
 );
 
 /**
+ * Failover Analytics Routes (requires authentication)
+ */
+router.get('/failover/analytics', 
+    authenticate,
+    GatewayController.getFailoverAnalytics
+);
+
+/**
  * Firewall Analytics Routes (requires authentication)
  */
 router.get('/firewall/analytics', 

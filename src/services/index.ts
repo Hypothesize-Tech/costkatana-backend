@@ -17,3 +17,4 @@ export { ForecastingService } from './forecasting.service';
 export { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
 export { RecommendationEngineService } from './recommendationEngine.service';
 export { KeyVaultService } from './keyVault.service';
+export { FailoverService } from './failover.service';

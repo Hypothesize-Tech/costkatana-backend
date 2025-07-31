@@ -3,6 +3,7 @@ import axios, { AxiosResponse, AxiosError } from 'axios';
 import { logger } from '../utils/logger';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { ProjectService } from '../services/project.service';
+import { FailoverService } from '../services/failover.service';
 import https from 'https';
 
 import crypto from 'crypto';
@@ -76,6 +77,12 @@ export class GatewayController {
                 if (cachedResponse) {
                     logger.info('Cache hit - returning cached response');
                     res.setHeader('CostKatana-Cache-Status', 'HIT');
+                    
+                    // Add CostKatana-Request-Id header for feedback tracking
+                    if (context.requestId) {
+                        res.setHeader('CostKatana-Request-Id', context.requestId);
+                    }
+                    
                     res.status(200).json(cachedResponse.response);
                     return;
                 }
@@ -115,65 +122,111 @@ export class GatewayController {
                 }
             }
 
-            // Prepare the request to the AI provider
-            const proxyRequest = await GatewayController.prepareProxyRequest(req);
-            
-            // Check circuit breaker
-            const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
-            if (!GatewayController.checkCircuitBreaker(provider)) {
-                res.status(503).json({
-                    error: 'Service temporarily unavailable',
-                    message: `Circuit breaker is open for ${provider}`,
-                    retryAfter: Math.ceil(CIRCUIT_BREAKER_TIMEOUT / 1000)
-                });
-                return;
-            }
-            
-            // Make the request with retry logic if enabled
+            // Handle failover vs single provider requests
             let response: AxiosResponse;
             let retryAttempts = 0;
             let requestSuccess = false;
-            
-            try {
-                if (context.retryEnabled) {
-                    const result = await GatewayController.makeRequestWithRetry(proxyRequest, context);
-                    response = result.response;
-                    retryAttempts = result.retryAttempts;
-                } else {
-                    response = await axios(proxyRequest);
-                }
-                requestSuccess = true;
-            } catch (error) {
-                // If the main request fails, try with a different approach
-                logger.warn('Primary request failed, trying fallback approach');
+            let failoverProviderIndex = -1;
+
+            if (context.failoverEnabled && context.failoverPolicy) {
+                // Handle failover request
+                logger.info('Processing failover request', { requestId: context.requestId });
                 
-                // Try with different headers or endpoint
-                const fallbackRequest = { ...proxyRequest };
-                fallbackRequest.headers = {
-                    ...fallbackRequest.headers,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Origin': 'https://openai.com',
-                    'Referer': 'https://openai.com/'
-                };
+                try {
+                    const policy = FailoverService.parseFailoverPolicy(context.failoverPolicy);
+                    const proxyRequest = await GatewayController.prepareProxyRequest(req);
+                    
+                    const failoverResult = await FailoverService.executeFailover(
+                        proxyRequest,
+                        policy,
+                        context.requestId
+                    );
+
+                    if (failoverResult.success) {
+                        response = {
+                            data: failoverResult.response,
+                            status: failoverResult.statusCode || 200,
+                            statusText: 'OK',
+                            headers: failoverResult.responseHeaders || {},
+                            config: proxyRequest
+                        } as AxiosResponse;
+                        
+                        failoverProviderIndex = failoverResult.successfulProviderIndex;
+                        requestSuccess = true;
+
+                        logger.info('Failover request succeeded', {
+                            requestId: context.requestId,
+                            successfulProviderIndex: failoverProviderIndex,
+                            totalDuration: failoverResult.totalDuration,
+                            providersAttempted: failoverResult.providersAttempted
+                        });
+                    } else {
+                        throw new Error(`All ${failoverResult.providersAttempted} providers failed: ${failoverResult.finalError?.message || 'Unknown error'}`);
+                    }
+                } catch (error) {
+                    logger.error('Failover request failed', {
+                        requestId: context.requestId,
+                        error: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                    throw error;
+                }
+            } else {
+                // Handle single provider request (existing logic)
+                const proxyRequest = await GatewayController.prepareProxyRequest(req);
+                
+                // Check circuit breaker
+                const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
+                if (!GatewayController.checkCircuitBreaker(provider)) {
+                    res.status(503).json({
+                        error: 'Service temporarily unavailable',
+                        message: `Circuit breaker is open for ${provider}`,
+                        retryAfter: Math.ceil(CIRCUIT_BREAKER_TIMEOUT / 1000)
+                    });
+                    return;
+                }
                 
                 try {
                     if (context.retryEnabled) {
-                        const result = await GatewayController.makeRequestWithRetry(fallbackRequest, context);
+                        const result = await GatewayController.makeRequestWithRetry(proxyRequest, context);
                         response = result.response;
                         retryAttempts = result.retryAttempts;
                     } else {
-                        response = await axios(fallbackRequest);
+                        response = await axios(proxyRequest);
                     }
                     requestSuccess = true;
-                } catch (fallbackError) {
-                    // Both attempts failed
-                    GatewayController.updateCircuitBreaker(provider, false);
-                    throw fallbackError;
+                } catch (error) {
+                    // If the main request fails, try with a different approach
+                    logger.warn('Primary request failed, trying fallback approach');
+                    
+                    // Try with different headers or endpoint
+                    const fallbackRequest = { ...proxyRequest };
+                    fallbackRequest.headers = {
+                        ...fallbackRequest.headers,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Origin': 'https://openai.com',
+                        'Referer': 'https://openai.com/'
+                    };
+                    
+                    try {
+                        if (context.retryEnabled) {
+                            const result = await GatewayController.makeRequestWithRetry(fallbackRequest, context);
+                            response = result.response;
+                            retryAttempts = result.retryAttempts;
+                        } else {
+                            response = await axios(fallbackRequest);
+                        }
+                        requestSuccess = true;
+                    } catch (fallbackError) {
+                        // Both attempts failed
+                        GatewayController.updateCircuitBreaker(provider, false);
+                        throw fallbackError;
+                    }
                 }
             }
             
-            // Update circuit breaker on success
-            if (requestSuccess) {
+            // Update circuit breaker on success (only for single provider requests)
+            if (requestSuccess && !context.failoverEnabled) {
+                const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
                 GatewayController.updateCircuitBreaker(provider, true);
             }
 
@@ -191,6 +244,16 @@ export class GatewayController {
 
             // Return the response
             res.status(response.status);
+            
+            // Add CostKatana-Request-Id header for feedback tracking
+            if (context.requestId) {
+                res.setHeader('CostKatana-Request-Id', context.requestId);
+            }
+            
+            // Add CostKatana-Failover-Index header for failover requests
+            if (context.failoverEnabled && failoverProviderIndex >= 0) {
+                res.setHeader('CostKatana-Failover-Index', failoverProviderIndex.toString());
+            }
             
             // Copy relevant headers from the AI provider response
             const headersToForward = ['content-type', 'content-length', 'content-encoding'];
@@ -845,6 +908,8 @@ export class GatewayController {
                 workflowId: context.workflowId,
                 workflowName: context.workflowName,
                 workflowStep: context.workflowStep,
+                // Add request ID for feedback tracking
+                requestId: context.requestId,
                 metadata: {
                     workspace: { gatewayRequest: true },
                     requestType: 'gateway-proxy',
@@ -867,7 +932,9 @@ export class GatewayController {
                         workflowStep: context.workflowStep,
                         sessionId: context.sessionId,
                         traceId: context.traceId
-                    }
+                    },
+                    // Add request ID for feedback correlation
+                    requestId: context.requestId
                 }
             };
 
@@ -1254,6 +1321,31 @@ export class GatewayController {
         } catch (error) {
             logger.error('Error extracting prompt from request', error as Error);
             return null;
+        }
+    }
+
+    /**
+     * Get failover analytics
+     */
+    static async getFailoverAnalytics(res: Response): Promise<void> {
+        try {
+            const metrics = FailoverService.getMetrics();
+            const healthStatus = FailoverService.getProviderHealthStatus();
+
+            res.json({
+                success: true,
+                data: {
+                    metrics,
+                    healthStatus,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        } catch (error) {
+            logger.error('Error getting failover analytics:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve failover analytics'
+            });
         }
     }
 

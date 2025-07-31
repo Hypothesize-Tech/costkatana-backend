@@ -28,6 +28,9 @@ router.get('/insights', asyncHandler(AnalyticsController.getInsights));
 // Get dashboard data
 router.get('/dashboard', asyncHandler(AnalyticsController.getDashboardData));
 
+// Get feedback analytics (Return on AI Spend)
+router.get('/feedback', asyncHandler(AnalyticsController.getFeedbackAnalytics));
+
 // Get recent usage data
 router.get('/recent-usage', asyncHandler(AnalyticsController.getRecentUsage));
 

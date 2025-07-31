@@ -16,3 +16,6 @@ export { ProviderKey, IProviderKey } from './ProviderKey';
 export { ProxyKey, IProxyKey } from './ProxyKey';
 export { Team, ITeam } from './Team';
 export { ThreatLog, IThreatLog } from './ThreatLog';
+export { RequestFeedback, IRequestFeedback } from './RequestFeedback';
+export { RequestScore, IRequestScore } from './RequestScore';
+export { TrainingDataset, ITrainingDataset } from './TrainingDataset';

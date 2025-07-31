@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { AnalyticsService } from '../services/analytics.service';
+import { RequestFeedbackService } from '../services/requestFeedback.service';
 import { logger } from '../utils/logger';
 import { Usage, User } from '../models';
 import mongoose from 'mongoose';
@@ -465,5 +466,85 @@ export class AnalyticsController {
             percentage,
             trend: change > 0 ? 'up' : change < 0 ? 'down' : 'stable',
         };
+    }
+
+    /**
+     * Get feedback analytics with Return on AI Spend metrics
+     * GET /api/analytics/feedback
+     */
+    static async getFeedbackAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            
+            const feedbackAnalytics = await RequestFeedbackService.getFeedbackAnalytics(userId);
+
+            res.json({
+                success: true,
+                data: {
+                    ...feedbackAnalytics,
+                    insights: {
+                        wastedSpendPercentage: feedbackAnalytics.totalCost > 0 ? 
+                            (feedbackAnalytics.negativeCost / feedbackAnalytics.totalCost) * 100 : 0,
+                        returnOnAISpend: feedbackAnalytics.averageRating,
+                        costEfficiencyScore: feedbackAnalytics.totalCost > 0 ?
+                            (feedbackAnalytics.positiveCost / feedbackAnalytics.totalCost) * 100 : 0,
+                        recommendations: AnalyticsController.generateFeedbackRecommendations(feedbackAnalytics)
+                    }
+                }
+            });
+
+        } catch (error) {
+            logger.error('Get feedback analytics error:', error);
+            next(error);
+        }
+    }
+
+    /**
+     * Generate actionable recommendations based on feedback data
+     */
+    private static generateFeedbackRecommendations(analytics: any): string[] {
+        const recommendations: string[] = [];
+
+        // Check for high negative cost percentage
+        if (analytics.totalCost > 0) {
+            const wastedPercentage = (analytics.negativeCost / analytics.totalCost) * 100;
+            if (wastedPercentage > 30) {
+                recommendations.push(`You're spending ${wastedPercentage.toFixed(1)}% of your AI budget on negatively-rated responses. Consider optimizing prompts or switching models.`);
+            }
+        }
+
+        // Check for low copy rate (implicit signal)
+        if (analytics.implicitSignalsAnalysis.copyRate < 0.3) {
+            recommendations.push(`Only ${(analytics.implicitSignalsAnalysis.copyRate * 100).toFixed(1)}% of responses are being copied by users. This suggests low practical value - review your prompts.`);
+        }
+
+        // Check for high rephrase rate
+        if (analytics.implicitSignalsAnalysis.rephraseRate > 0.4) {
+            recommendations.push(`${(analytics.implicitSignalsAnalysis.rephraseRate * 100).toFixed(1)}% of users are rephrasing their questions immediately. Your AI may not be understanding queries correctly.`);
+        }
+
+        // Check for models with poor performance
+        for (const [model, stats] of Object.entries(analytics.ratingsByModel)) {
+            const modelStats = stats as any;
+            const totalForModel = modelStats.positive + modelStats.negative;
+            if (totalForModel > 5 && (modelStats.positive / totalForModel) < 0.5) {
+                recommendations.push(`Model "${model}" has a low satisfaction rate (${((modelStats.positive / totalForModel) * 100).toFixed(1)}%). Consider switching to a different model.`);
+            }
+        }
+
+        // Check for features with poor ROI
+        for (const [feature, stats] of Object.entries(analytics.ratingsByFeature)) {
+            const featureStats = stats as any;
+            const totalForFeature = featureStats.positive + featureStats.negative;
+            if (totalForFeature > 3 && (featureStats.positive / totalForFeature) < 0.4) {
+                recommendations.push(`Feature "${feature}" has poor user satisfaction (${((featureStats.positive / totalForFeature) * 100).toFixed(1)}%). Consider redesigning this feature.`);
+            }
+        }
+
+        if (recommendations.length === 0) {
+            recommendations.push("Great job! Your AI responses are performing well. Keep monitoring feedback to maintain quality.");
+        }
+
+        return recommendations;
     }
 }

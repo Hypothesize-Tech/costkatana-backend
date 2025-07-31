@@ -4,6 +4,7 @@ import { User } from '../models/User';
 import { AuthService } from '../services/auth.service';
 import { decrypt } from '../utils/helpers';
 import { KeyVaultService } from '../services/keyVault.service';
+import { v4 as uuidv4 } from 'uuid';
 
 // Extend Request interface to include gateway-specific properties
 declare global {
@@ -11,6 +12,7 @@ declare global {
         interface Request {
             gatewayContext?: {
                 startTime: number;
+                requestId?: string; // CostKatana-Request-Id for feedback tracking
                 targetUrl?: string;
                 cacheEnabled?: boolean;
                 retryEnabled?: boolean;
@@ -42,6 +44,10 @@ declare global {
                 proxyKeyId?: string;
                 providerKey?: string;
                 provider?: string;
+                // Failover specific properties
+                failoverEnabled?: boolean;
+                failoverPolicy?: string;
+                isFailoverRequest?: boolean;
             };
         }
     }
@@ -314,26 +320,46 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
 
     const context = req.gatewayContext;
 
-    // Core routing header
-    const targetUrl = req.headers['costkatana-target-url'] as string;
-    if (!targetUrl) {
-        res.status(400).json({
-            error: 'Missing required header',
-            message: 'CostKatana-Target-Url header is required for routing'
-        });
-        return;
+    // Process CostKatana-Request-Id header (for feedback tracking)
+    let requestId = req.headers['costkatana-request-id'] as string;
+    if (!requestId) {
+        // Generate a unique request ID if not provided
+        requestId = uuidv4();
     }
+    context.requestId = requestId;
 
-    // Validate target URL format
-    try {
-        new URL(targetUrl);
-        context.targetUrl = targetUrl;
-    } catch (error) {
-        res.status(400).json({
-            error: 'Invalid target URL',
-            message: 'CostKatana-Target-Url must be a valid URL'
-        });
-        return;
+    // Check for failover policy first
+    const failoverPolicy = req.headers['costkatana-failover-policy'] as string;
+    if (failoverPolicy) {
+        context.failoverEnabled = true;
+        context.failoverPolicy = failoverPolicy;
+        context.isFailoverRequest = true;
+        // For failover requests, we don't need a single target URL
+        logger.debug('Failover policy detected', { requestId: context.requestId });
+    } else {
+        // Core routing header (required for non-failover requests)
+        const targetUrl = req.headers['costkatana-target-url'] as string;
+        if (!targetUrl) {
+            res.status(400).json({
+                error: 'Missing required header',
+                message: 'Either CostKatana-Target-Url or CostKatana-Failover-Policy header is required for routing'
+            });
+            return;
+        }
+
+        // Validate target URL format
+        try {
+            new URL(targetUrl);
+            context.targetUrl = targetUrl;
+            context.failoverEnabled = false;
+            context.isFailoverRequest = false;
+        } catch (error) {
+            res.status(400).json({
+                error: 'Invalid target URL',
+                message: 'CostKatana-Target-Url must be a valid URL'
+            });
+            return;
+        }
     }
 
     // Process feature flags
