@@ -94,8 +94,6 @@ const userSchema = new Schema<IUser>({
         },
         keyId: {
             type: String,
-            required: true,
-            unique: true,
         },
         encryptedKey: {
             type: String,
@@ -267,5 +265,6 @@ userSchema.statics.resetAllMonthlyUsage = async function () {
 // Indexes
 userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ createdAt: -1 });
+userSchema.index({ 'dashboardApiKeys.keyId': 1, '_id': 1 }); 
 
 export const User = mongoose.model<IUser>('User', userSchema);
