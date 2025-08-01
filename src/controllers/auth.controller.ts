@@ -88,6 +88,7 @@ export class AuthController {
                     success: false,
                     message: 'User with this email already exists',
                 });
+                return;
             }
 
             next(error);
@@ -134,6 +135,7 @@ export class AuthController {
                     success: false,
                     message: 'Invalid email or password',
                 });
+                return;
             }
 
             if (error.message === 'Account is deactivated') {
@@ -141,6 +143,7 @@ export class AuthController {
                     success: false,
                     message: 'Your account has been deactivated',
                 });
+                return;
             }
 
             next(error);
@@ -157,6 +160,7 @@ export class AuthController {
                     success: false,
                     message: 'Refresh token not provided',
                 });
+                return;
             }
 
             // Refresh tokens
@@ -211,6 +215,7 @@ export class AuthController {
                     success: false,
                     message: 'Verification token is required',
                 });
+                return;
             }
 
             await AuthService.verifyEmail(token);
@@ -227,6 +232,7 @@ export class AuthController {
                     success: false,
                     message: 'Invalid or expired verification token',
                 });
+                return;
             }
 
             next(error);
@@ -243,6 +249,7 @@ export class AuthController {
                     success: false,
                     message: 'Email is required',
                 });
+                return;
             }
 
             const resetToken = await AuthService.forgotPassword(email);
@@ -278,6 +285,7 @@ export class AuthController {
                     success: false,
                     message: 'Token and password are required',
                 });
+                return;
             }
 
             if (password.length < 8) {
@@ -285,6 +293,7 @@ export class AuthController {
                     success: false,
                     message: 'Password must be at least 8 characters',
                 });
+                return;
             }
 
             await AuthService.resetPassword(token, password);
@@ -301,6 +310,7 @@ export class AuthController {
                     success: false,
                     message: 'Invalid or expired reset token',
                 });
+                return;
             }
 
             next(error);
@@ -318,6 +328,7 @@ export class AuthController {
                     success: false,
                     message: 'Old password and new password are required',
                 });
+                return;
             }
 
             if (newPassword.length < 8) {
@@ -325,6 +336,7 @@ export class AuthController {
                     success: false,
                     message: 'New password must be at least 8 characters',
                 });
+                return;
             }
 
             await AuthService.changePassword(userId, oldPassword, newPassword);
@@ -341,6 +353,7 @@ export class AuthController {
                     success: false,
                     message: 'Current password is incorrect',
                 });
+                return;
             }
 
             next(error);
