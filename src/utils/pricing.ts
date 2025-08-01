@@ -106,7 +106,7 @@ export function normalizeModelName(model: string): string {
     }
     
     return normalizedModel
-        .replace(/^[a-z]+\./, '') // Remove provider prefixes like "anthropic." or "us."
+        .replace(/^(us|eu|ap-[a-z]+|ca-[a-z]+)\./, '') // Remove only AWS region prefixes, keep vendor prefixes  
         .replace(/-\d{8}-v\d+:\d+$/, '') // Remove version suffixes like "-20241022-v1:0"
         .replace(/-\d{8}$/, '') // Remove date suffixes like "-20241022"
         .replace(/-\d{4}-\d{2}-\d{2}$/, '') // Remove date formats like "-2024-10-22"
