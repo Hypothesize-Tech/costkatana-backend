@@ -137,12 +137,20 @@ export class UsageController {
                 promptTokens: data.promptTokens,
                 completionTokens: data.completionTokens,
                 totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
-                cost: data.cost || data.estimatedCost || calculateCost(
-                    data.promptTokens,
-                    data.completionTokens,
-                    data.service || data.provider || 'openai',
-                    data.model
-                ),
+                cost: data.cost || data.estimatedCost || (() => {
+                    try {
+                        return calculateCost(
+                            data.promptTokens,
+                            data.completionTokens,
+                            data.service || data.provider || 'openai',
+                            data.model
+                        );
+                    } catch (error: any) {
+                        console.warn(`Failed to calculate cost for ${data.service || data.provider}/${data.model}:`, error.message);
+                        // Return 0 cost but still track the usage attempt
+                        return 0;
+                    }
+                })(),
                 responseTime: data.responseTime || 0,
                 metadata: data.metadata || {},
                 tags: data.tags || [],
