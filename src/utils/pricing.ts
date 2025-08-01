@@ -94,8 +94,19 @@ export const VOLUME_DISCOUNTS: Record<string, Array<{ threshold: number; discoun
  * Normalize model name for consistent matching across different naming conventions
  */
 export function normalizeModelName(model: string): string {
-    return model.toLowerCase()
-        .replace(/^[a-z]+\./, '') // Remove provider prefixes like "anthropic."
+    let normalizedModel = model.toLowerCase();
+    
+    // Handle AWS ARNs - extract model name from ARN format
+    // Example: arn:aws:bedrock:us-east-1:148123604300:inference-profile/us.amazon.nova-pro-v1:0
+    if (normalizedModel.startsWith('arn:aws:bedrock:')) {
+        const arnParts = normalizedModel.split('/');
+        if (arnParts.length > 1) {
+            normalizedModel = arnParts[arnParts.length - 1]; // Get the last part after '/'
+        }
+    }
+    
+    return normalizedModel
+        .replace(/^[a-z]+\./, '') // Remove provider prefixes like "anthropic." or "us."
         .replace(/-\d{8}-v\d+:\d+$/, '') // Remove version suffixes like "-20241022-v1:0"
         .replace(/-\d{8}$/, '') // Remove date suffixes like "-20241022"
         .replace(/-\d{4}-\d{2}-\d{2}$/, '') // Remove date formats like "-2024-10-22"
