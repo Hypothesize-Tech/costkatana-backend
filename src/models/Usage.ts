@@ -36,6 +36,23 @@ export interface IUsage {
     optimizationId?: mongoose.Types.ObjectId;
     errorOccurred: boolean;
     errorMessage?: string;
+    // Enhanced error tracking
+    httpStatusCode?: number;
+    errorType?: 'client_error' | 'server_error' | 'network_error' | 'auth_error' | 'rate_limit' | 'timeout' | 'validation_error' | 'integration_error';
+    errorDetails?: {
+        code?: string;
+        type?: string;
+        statusText?: string;
+        requestId?: string;
+        timestamp?: Date;
+        endpoint?: string;
+        method?: string;
+        userAgent?: string;
+        clientVersion?: string;
+        [key: string]: any;
+    };
+    isClientError?: boolean; // Quick flag for 4xx errors
+    isServerError?: boolean; // Quick flag for 5xx errors
     ipAddress?: string;
     userAgent?: string;
     workflowId?: string;
@@ -122,6 +139,32 @@ const usageSchema = new Schema<IUsage>({
         default: false,
     },
     errorMessage: String,
+    // Enhanced error tracking schema
+    httpStatusCode: {
+        type: Number,
+        min: 100,
+        max: 599,
+        index: true // Index for error analysis
+    },
+    errorType: {
+        type: String,
+        enum: ['client_error', 'server_error', 'network_error', 'auth_error', 'rate_limit', 'timeout', 'validation_error', 'integration_error'],
+        index: true // Index for error categorization
+    },
+    errorDetails: {
+        type: Schema.Types.Mixed,
+        default: {}
+    },
+    isClientError: {
+        type: Boolean,
+        default: false,
+        index: true // Index for quick client error filtering
+    },
+    isServerError: {
+        type: Boolean,
+        default: false,
+        index: true // Index for quick server error filtering
+    },
     ipAddress: String,
     userAgent: String,
     // Workflow tracking fields
@@ -157,6 +200,14 @@ usageSchema.index({ 'costAllocation.client': 1 });
 usageSchema.index({ workflowId: 1, workflowSequence: 1 }); // For workflow step ordering
 usageSchema.index({ userId: 1, workflowId: 1, createdAt: -1 }); // For user workflow queries
 usageSchema.index({ workflowName: 1, createdAt: -1 }); // For workflow type analytics
+
+// Error tracking indexes for monitoring and analytics
+usageSchema.index({ errorOccurred: 1, createdAt: -1 }); // For error timeline analysis
+usageSchema.index({ httpStatusCode: 1, createdAt: -1 }); // For status code monitoring
+usageSchema.index({ errorType: 1, createdAt: -1 }); // For error categorization
+usageSchema.index({ isClientError: 1, createdAt: -1 }); // For client error tracking
+usageSchema.index({ isServerError: 1, createdAt: -1 }); // For server error tracking
+usageSchema.index({ userId: 1, errorOccurred: 1, createdAt: -1 }); // For user-specific error analysis
 
 // Text index for prompt searching
 usageSchema.index({ prompt: 'text', completion: 'text' });

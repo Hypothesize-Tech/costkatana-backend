@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import { RealtimeUpdateService } from '../services/realtime-update.service';
 import { calculateCost } from '../utils/pricing'; 
 import { sanitizeModelName } from '../utils/optimizationUtils';
+import { extractErrorDetails } from '../utils/helpers';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
@@ -128,6 +129,10 @@ export class UsageController {
                 console.log('Found projectId in metadata (legacy approach):', projectId);
             }
 
+            // Extract error details if present
+            const errorInfo = extractErrorDetails(data, req);
+            const hasError = data.errorOccurred || errorInfo.httpStatusCode || data.error || data.errorMessage;
+            
             // Ensure all required fields have values
             const usageData = {
                 userId,
@@ -160,7 +165,16 @@ export class UsageController {
                 workflowStep: data.workflowStep,
                 workflowSequence: data.workflowSequence,
                 optimizationApplied: false,
-                errorOccurred: false
+                // Enhanced error tracking
+                errorOccurred: hasError || false,
+                errorMessage: data.errorMessage || (data.error?.message) || undefined,
+                httpStatusCode: errorInfo.httpStatusCode,
+                errorType: errorInfo.errorType,
+                errorDetails: errorInfo.errorDetails,
+                isClientError: errorInfo.isClientError || false,
+                isServerError: errorInfo.isServerError || false,
+                ipAddress: req.ip || req.connection?.remoteAddress,
+                userAgent: req.headers['user-agent']
             };
 
             // Only add projectId if it exists and is valid
@@ -175,6 +189,20 @@ export class UsageController {
                 workflowStep: usageData.workflowStep,
                 workflowSequence: usageData.workflowSequence
             });
+
+            // DEBUG: Log error information if present
+            if (hasError) {
+                console.log('🚨 ERROR TRACKING - Client integration error detected:', {
+                    httpStatusCode: usageData.httpStatusCode,
+                    errorType: usageData.errorType,
+                    errorMessage: usageData.errorMessage,
+                    isClientError: usageData.isClientError,
+                    isServerError: usageData.isServerError,
+                    service: usageData.service,
+                    model: usageData.model,
+                    userAgent: usageData.userAgent
+                });
+            }
 
             // Track usage
             const usage = await UsageService.trackUsage(usageData);

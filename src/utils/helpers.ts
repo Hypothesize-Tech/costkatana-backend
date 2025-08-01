@@ -232,3 +232,99 @@ export const normalizeProvider = (provider: string): string => {
         .replace(/\s+/g, ' ') // normalize spaces
         .trim();
 };
+
+/**
+ * Classify HTTP status codes into error types
+ * @param statusCode - HTTP status code
+ * @returns Error type classification
+ */
+export const classifyHttpError = (statusCode: number): {
+    errorType: 'client_error' | 'server_error' | 'network_error' | 'auth_error' | 'rate_limit' | 'timeout' | 'validation_error' | 'integration_error';
+    isClientError: boolean;
+    isServerError: boolean;
+} => {
+    let errorType: 'client_error' | 'server_error' | 'network_error' | 'auth_error' | 'rate_limit' | 'timeout' | 'validation_error' | 'integration_error';
+    let isClientError = false;
+    let isServerError = false;
+
+    if (statusCode >= 400 && statusCode < 500) {
+        isClientError = true;
+        switch (statusCode) {
+            case 401:
+            case 403:
+                errorType = 'auth_error';
+                break;
+            case 422:
+            case 400:
+                errorType = 'validation_error';
+                break;
+            case 429:
+                errorType = 'rate_limit';
+                break;
+            case 408:
+                errorType = 'timeout';
+                break;
+            default:
+                errorType = 'client_error';
+        }
+    } else if (statusCode >= 500) {
+        isServerError = true;
+        errorType = 'server_error';
+    } else if (statusCode === 0 || statusCode < 100) {
+        errorType = 'network_error';
+    } else {
+        errorType = 'integration_error';
+    }
+
+    return { errorType, isClientError, isServerError };
+};
+
+/**
+ * Extract error details from request/response data
+ * @param data - Request data that may contain error information
+ * @param req - Express request object for additional context
+ * @returns Processed error details
+ */
+export const extractErrorDetails = (data: any, req: any) => {
+    const errorDetails: any = {};
+
+    // Extract HTTP status code
+    let httpStatusCode: number | undefined;
+    if (data.httpStatusCode || data.statusCode || data.status) {
+        httpStatusCode = data.httpStatusCode || data.statusCode || data.status;
+    }
+
+    // Extract error details from various possible sources
+    if (data.error || data.errorDetails || data.errorInfo) {
+        const error = data.error || data.errorDetails || data.errorInfo;
+        
+        errorDetails.code = error.code || error.error_code || error.errorCode;
+        errorDetails.type = error.type || error.error_type || error.errorType;
+        errorDetails.statusText = error.statusText || error.message;
+        errorDetails.requestId = error.requestId || error.request_id;
+        errorDetails.timestamp = new Date();
+        errorDetails.endpoint = data.endpoint || req.originalUrl;
+        errorDetails.method = req.method;
+        errorDetails.userAgent = req.headers['user-agent'];
+        errorDetails.clientVersion = req.headers['x-client-version'] || req.headers['user-agent'];
+
+        // Include any additional error properties
+        Object.keys(error).forEach(key => {
+            if (!errorDetails[key] && key !== 'message') {
+                errorDetails[key] = error[key];
+            }
+        });
+    }
+
+    // Classify the error if we have a status code
+    let errorClassification = null;
+    if (httpStatusCode) {
+        errorClassification = classifyHttpError(httpStatusCode);
+    }
+
+    return {
+        httpStatusCode,
+        errorDetails: Object.keys(errorDetails).length > 0 ? errorDetails : undefined,
+        ...errorClassification
+    };
+};
