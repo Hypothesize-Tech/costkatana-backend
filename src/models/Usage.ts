@@ -4,7 +4,7 @@ export interface IUsage {
     _id?: any;
     userId: mongoose.Types.ObjectId;
     projectId?: mongoose.Types.ObjectId;
-    service: 'openai' | 'aws-bedrock' | 'google-ai' | 'anthropic' | 'huggingface' | 'cohere' | 'dashboard-analytics';
+    service: 'openai' | 'aws-bedrock' | 'google-ai' | 'anthropic' | 'huggingface' | 'cohere' | 'dashboard-analytics' | string;
     model: string;
     prompt: string;
     completion?: string;
