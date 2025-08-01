@@ -612,3 +612,28 @@ export function applyOptimizations(
         appliedOptimizations
     };
 } 
+
+/**
+ * Sanitize model names for safe storage and display
+ * Removes sensitive information like AWS account IDs from ARNs
+ */
+export function sanitizeModelName(model: string): string {
+    if (!model) return model;
+    
+    // Handle AWS ARNs - extract clean model name
+    if (model.toLowerCase().startsWith('arn:aws:bedrock:')) {
+        const arnParts = model.split('/');
+        if (arnParts.length > 1) {
+            // Get the last part after '/' which contains the actual model
+            let modelName = arnParts[arnParts.length - 1];
+            
+            // Remove region prefix (us., eu., etc.) but keep vendor prefix (amazon., anthropic.)
+            modelName = modelName.replace(/^(us|eu|ap-[a-z]+|ca-[a-z]+)\./, '');
+            
+            return modelName;
+        }
+    }
+    
+    // For non-ARN models, return as-is
+    return model;
+}

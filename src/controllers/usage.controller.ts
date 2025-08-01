@@ -5,6 +5,7 @@ import { logger } from '../utils/logger';
 import jwt from 'jsonwebtoken';
 import { RealtimeUpdateService } from '../services/realtime-update.service';
 import { calculateCost } from '../utils/pricing'; 
+import { sanitizeModelName } from '../utils/optimizationUtils';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
@@ -131,7 +132,7 @@ export class UsageController {
             const usageData = {
                 userId,
                 service: data.service || data.provider || 'openai',
-                model: data.model,
+                model: sanitizeModelName(data.model),
                 prompt: data.prompt || '',
                 completion: data.completion || undefined,
                 promptTokens: data.promptTokens,
