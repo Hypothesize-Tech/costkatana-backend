@@ -28,6 +28,7 @@ import { GOOGLE_PRICING } from './pricing/google';
 import { COHERE_PRICING } from './pricing/cohere';
 import { MISTRAL_PRICING } from './pricing/mistral';
 import { OTHERS_PRICING } from './pricing/others';
+import { normalizeProvider } from './helpers';
 
 // Compile all pricing data into a single array
 export const MODEL_PRICING: ModelPricing[] = [
@@ -163,7 +164,7 @@ export function calculateCost(
     if (!pricing) {
         const modelVariations = getModelNameVariations(model);
         pricing = MODEL_PRICING.find(p => {
-            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const providerMatch = normalizeProvider(p.provider) === normalizeProvider(provider);
             const modelMatch = modelVariations.some(variant => 
                 p.modelId.toLowerCase() === variant ||
                 p.modelName.toLowerCase() === variant ||
@@ -180,7 +181,7 @@ export function calculateCost(
     if (!pricing && provider.toLowerCase().includes('bedrock')) {
         const normalizedModel = normalizeModelName(model);
         pricing = MODEL_PRICING.find(p => {
-            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const providerMatch = normalizeProvider(p.provider) === normalizeProvider(provider);
             const normalizedPricingModel = normalizeModelName(p.modelId);
             const normalizedPricingName = normalizeModelName(p.modelName);
             
@@ -235,7 +236,7 @@ export function estimateCost(
     if (!pricing) {
         const modelVariations = getModelNameVariations(model);
         pricing = MODEL_PRICING.find(p => {
-            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const providerMatch = normalizeProvider(p.provider) === normalizeProvider(provider);
             const modelMatch = modelVariations.some(variant => 
                 p.modelId.toLowerCase() === variant ||
                 p.modelName.toLowerCase() === variant ||
@@ -316,7 +317,7 @@ export function getModelPricing(provider: string, model: string): ModelPricing |
     if (!pricing && provider.toLowerCase().includes('bedrock')) {
         const normalizedModel = normalizeModelName(model);
         pricing = MODEL_PRICING.find(p => {
-            const providerMatch = p.provider.toLowerCase() === provider.toLowerCase();
+            const providerMatch = normalizeProvider(p.provider) === normalizeProvider(provider);
             const normalizedPricingModel = normalizeModelName(p.modelId);
             const normalizedPricingName = normalizeModelName(p.modelName);
             
@@ -375,7 +376,7 @@ export function findCheapestModel(provider?: string, category?: string): ModelPr
     let models = MODEL_PRICING;
 
     if (provider) {
-        models = models.filter(p => p.provider.toLowerCase() === provider.toLowerCase());
+        models = models.filter(p => normalizeProvider(p.provider) === normalizeProvider(provider));
     }
 
     if (category) {
@@ -407,7 +408,7 @@ export function compareProviders(
     if (providers && providers.length > 0) {
         modelsToCompare = MODEL_PRICING.filter(p =>
             providers.some(provider =>
-                p.provider.toLowerCase() === provider.toLowerCase()
+                normalizeProvider(p.provider) === normalizeProvider(provider)
             )
         );
     }

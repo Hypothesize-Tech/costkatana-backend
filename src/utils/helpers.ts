@@ -225,3 +225,10 @@ export const formatBytes = (bytes: number, decimals: number = 2): string => {
   
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
+
+export const normalizeProvider = (provider: string): string => {
+    return provider.toLowerCase()
+        .replace(/-/g, ' ')  // aws-bedrock -> aws bedrock
+        .replace(/\s+/g, ' ') // normalize spaces
+        .trim();
+};
