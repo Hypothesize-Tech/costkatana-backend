@@ -138,10 +138,10 @@ export class UsageController {
                 completionTokens: data.completionTokens,
                 totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
                 cost: data.cost || data.estimatedCost || calculateCost(
-                    data.service || data.provider || 'openai',
-                    data.model,
                     data.promptTokens,
-                    data.completionTokens
+                    data.completionTokens,
+                    data.service || data.provider || 'openai',
+                    data.model
                 ),
                 responseTime: data.responseTime || 0,
                 metadata: data.metadata || {},
