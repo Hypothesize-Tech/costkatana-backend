@@ -1014,7 +1014,7 @@ export class ExperimentationService {
                 if (filters.endDate) query.createdAt.$lte = filters.endDate;
             }
 
-            const experiments = await Experiment.find(query)
+            let experiments = await Experiment.find(query)
                 .sort({ createdAt: -1 })
                 .limit(filters.limit || 20)
                 .lean();
@@ -1413,13 +1413,33 @@ export class ExperimentationService {
             // Enhanced overall recommendation considering all models
             const overallRecommendation = this.generateEnhancedOverallRecommendation(results, request);
 
+            // Calculate potential cost savings
+            let costSaved = 0;
+            if (results.length > 1) {
+                const costs = results.map(r => {
+                    if (r.actualUsage) {
+                        return r.actualUsage.avgCost;
+                    } else if (r.estimatedCostPer1K) {
+                        return r.estimatedCostPer1K;
+                    }
+                    return 0;
+                }).filter(cost => cost > 0);
+                
+                if (costs.length > 1) {
+                    const maxCost = Math.max(...costs);
+                    const minCost = Math.min(...costs);
+                    costSaved = maxCost - minCost;
+                }
+            }
+
             return {
                 modelComparisons: results,
                 confidence: totalConfidence / request.models.length,
                 basedOnActualUsage: results.filter(r => !r.noUsageData).length,
                 recommendation: overallRecommendation.recommendation,
                 costComparison: overallRecommendation.costComparison,
-                useCaseAnalysis: overallRecommendation.useCaseAnalysis
+                useCaseAnalysis: overallRecommendation.useCaseAnalysis,
+                costSaved: costSaved
             };
         } catch (error) {
             logger.error('Error analyzing models from usage data:', error);
