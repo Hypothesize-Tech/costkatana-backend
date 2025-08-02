@@ -114,8 +114,15 @@ export class RequestFeedbackController {
                 return;
             }
 
-            // TODO: Add admin role check here
-            // For now, allow all authenticated users to access global analytics
+            // Check if user has admin role
+            const user = (req as any).user;
+            if (user.role !== 'admin' && user.role !== 'owner') {
+                res.status(403).json({
+                    success: false,
+                    error: 'Admin access required'
+                });
+                return;
+            }
 
             const analytics = await RequestFeedbackService.getGlobalFeedbackAnalytics();
 

@@ -6,6 +6,9 @@ import { decrypt } from '../utils/helpers';
 import { KeyVaultService } from '../services/keyVault.service';
 import { v4 as uuidv4 } from 'uuid';
 
+// In-memory rate limiting store (in production, use Redis)
+const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+
 // Extend Request interface to include gateway-specific properties
 declare global {
     namespace Express {
@@ -90,12 +93,10 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
 
         // Check rate limiting if configured
         if (proxyKey.rateLimit) {
-            // TODO: Implement rate limiting logic
-            // For now, just log it
-            logger.info('Rate limit configured for proxy key', {
-                proxyKeyId,
-                rateLimit: proxyKey.rateLimit
-            });
+            const rateLimitResult = await checkRateLimit(proxyKeyId, proxyKey.rateLimit, req, res);
+            if (!rateLimitResult.allowed) {
+                return null; // Rate limit exceeded, response already sent
+            }
         }
 
         // Check IP whitelist if configured
@@ -136,6 +137,80 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
 /**
  * Gateway authentication middleware - processes CostKatana-Auth header
  */
+// Rate limiting helper function
+async function checkRateLimit(
+    proxyKeyId: string, 
+    rateLimit: any, 
+    _req: Request, 
+    res: Response
+): Promise<{ allowed: boolean }> {
+    try {
+        const now = Date.now();
+        const windowMs = rateLimit.windowMs || 60000; // Default 1 minute
+        const maxRequests = rateLimit.maxRequests || 100; // Default 100 requests
+        
+        const key = `rate_limit:${proxyKeyId}`;
+        const rateLimitData = rateLimitStore.get(key);
+        
+        // Reset window if expired
+        if (!rateLimitData || now > rateLimitData.resetTime) {
+            rateLimitStore.set(key, {
+                count: 1,
+                resetTime: now + windowMs
+            });
+            
+            // Set rate limit headers
+            res.setHeader('X-RateLimit-Limit', maxRequests);
+            res.setHeader('X-RateLimit-Remaining', maxRequests - 1);
+            res.setHeader('X-RateLimit-Reset', new Date(now + windowMs).toISOString());
+            
+            return { allowed: true };
+        }
+        
+        // Check if limit exceeded
+        if (rateLimitData.count >= maxRequests) {
+            const resetTime = new Date(rateLimitData.resetTime);
+            
+            res.status(429).json({
+                success: false,
+                error: 'Rate limit exceeded',
+                message: `Too many requests. Limit: ${maxRequests} per ${windowMs}ms`,
+                retryAfter: Math.ceil((rateLimitData.resetTime - now) / 1000)
+            });
+            
+            // Set rate limit headers
+            res.setHeader('X-RateLimit-Limit', maxRequests);
+            res.setHeader('X-RateLimit-Remaining', 0);
+            res.setHeader('X-RateLimit-Reset', resetTime.toISOString());
+            res.setHeader('Retry-After', Math.ceil((rateLimitData.resetTime - now) / 1000));
+            
+            logger.warn('Rate limit exceeded', {
+                proxyKeyId,
+                count: rateLimitData.count,
+                limit: maxRequests,
+                resetTime: resetTime.toISOString()
+            });
+            
+            return { allowed: false };
+        }
+        
+        // Increment counter
+        rateLimitData.count++;
+        rateLimitStore.set(key, rateLimitData);
+        
+        // Set rate limit headers
+        res.setHeader('X-RateLimit-Limit', maxRequests);
+        res.setHeader('X-RateLimit-Remaining', maxRequests - rateLimitData.count);
+        res.setHeader('X-RateLimit-Reset', new Date(rateLimitData.resetTime).toISOString());
+        
+        return { allowed: true };
+    } catch (error) {
+        logger.error('Error checking rate limit:', error);
+        // Allow request on error to avoid blocking legitimate traffic
+        return { allowed: true };
+    }
+}
+
 export const gatewayAuth = async (req: any, res: Response, next: NextFunction): Promise<void> => {
     const startTime = Date.now();
     logger.info('=== GATEWAY AUTHENTICATION STARTED ===');

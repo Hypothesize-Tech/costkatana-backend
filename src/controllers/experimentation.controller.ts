@@ -383,7 +383,6 @@ export class ExperimentationController {
      */
     static async runRealTimeSimulation(req: any, res: Response): Promise<void> {
         try {
-            const userId = req.user?.id;
             const simulationRequest = req.body;
 
             // Validate request
@@ -406,7 +405,7 @@ export class ExperimentationController {
                 }
             }
 
-            const simulation = await ExperimentationService.runRealTimeWhatIfSimulation(userId, simulationRequest);
+            const simulation = await ExperimentationService.runRealTimeWhatIfSimulation(simulationRequest);
 
             res.json({
                 success: true,

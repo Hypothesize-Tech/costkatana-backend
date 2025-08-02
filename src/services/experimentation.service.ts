@@ -1808,7 +1808,6 @@ export class ExperimentationService {
      * Supports both strategic scenarios and prompt-level optimizations
      */
     static async runRealTimeWhatIfSimulation(
-        _userId: string, 
         simulationRequest: {
             prompt?: string;
             currentModel?: string;

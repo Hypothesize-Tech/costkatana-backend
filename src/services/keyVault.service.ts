@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { ProviderKey, IProviderKey, ProxyKey, IProxyKey } from '../models';
 import { encrypt, decrypt } from '../utils/helpers';
 import { logger } from '../utils/logger';
@@ -521,6 +521,38 @@ export class KeyVaultService {
     // ============================================
 
     /**
+     * Get team-based key queries for a user
+     */
+    private static async getUserTeamKeyQueries(userId: string): Promise<any[]> {
+        try {
+            // Import Team model dynamically to avoid circular dependency
+            const Team = mongoose.model('Team');
+            
+            // Find teams where user is a member
+            const teams = await Team.find({
+                $or: [
+                    { ownerId: new Types.ObjectId(userId) },
+                    { 'members.userId': new Types.ObjectId(userId) }
+                ]
+            }).select('_id').lean();
+
+            if (teams.length === 0) {
+                return [];
+            }
+
+            const teamIds = teams.map((team: any) => team._id);
+            
+            // Return query conditions for team keys
+            return [
+                { teamId: { $in: teamIds } }
+            ];
+        } catch (error) {
+            logger.error('Error getting user team key queries:', error);
+            return [];
+        }
+    }
+
+    /**
      * Get proxy keys accessible by a user (including shared keys)
      */
     static async getAccessibleProxyKeys(userId: string): Promise<IProxyKey[]> {
@@ -531,8 +563,8 @@ export class KeyVaultService {
                     { userId: new Types.ObjectId(userId) },
                     // Keys shared with the user
                     { sharedWith: new Types.ObjectId(userId) },
-                    // Team keys where user is a member (requires team lookup)
-                    // TODO: Add team membership check
+                    // Team keys where user is a member
+                    ...(await this.getUserTeamKeyQueries(userId))
                 ],
                 isActive: true
             })

@@ -25,6 +25,8 @@ import workflowRoutes from './workflow.routes';
 import keyVaultRoutes from './keyVault.routes';
 import requestFeedbackRoutes from './requestFeedback.routes';
 import trainingRoutes from './training.routes';
+import simulationTrackingRoutes from './simulationTracking.routes';
+import autoSimulationRoutes from './autoSimulation.routes';
 
 const router = Router();
 
@@ -65,5 +67,7 @@ router.use('/workflows', workflowRoutes);
 router.use('/key-vault', keyVaultRoutes);
 router.use('/v1', requestFeedbackRoutes);
 router.use('/training', trainingRoutes);
+router.use('/simulation-tracking', simulationTrackingRoutes);
+router.use('/auto-simulation', autoSimulationRoutes);
 
 export const apiRouter = router;
