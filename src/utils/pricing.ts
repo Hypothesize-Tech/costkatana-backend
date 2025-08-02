@@ -139,7 +139,7 @@ export function getModelNameVariations(model: string): string[] {
         variations.push('claude-3-haiku', 'claude-3-haiku-20240307-v1:0', 'anthropic.claude-3-haiku-20240307-v1:0');
     }
     
-    return [...new Set(variations)]; // Remove duplicates
+    return [...new Set(variations)];
 }
 
 export function calculateCost(

@@ -55,8 +55,7 @@ const WhatIfScenarioSchema = new Schema<IWhatIfScenario>({
     name: {
         type: String,
         required: true,
-        trim: true,
-        unique: true // Ensure unique names per user
+        trim: true
     },
     description: {
         type: String,

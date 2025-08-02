@@ -156,6 +156,174 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
         category: 'fast',
         features: ['text-generation', 'summarization']
     },
+
+    // Amazon Nova Models
+    'amazon-nova-micro': {
+        provider: 'AWS',
+        inputPrice: 0.035,
+        outputPrice: 0.14,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'cost-effective', 'ultra-fast']
+    },
+    'amazon-nova-lite': {
+        provider: 'AWS',
+        inputPrice: 0.06,
+        outputPrice: 0.24,
+        contextWindow: 300000,
+        category: 'multimodal',
+        features: ['text-generation', 'multimodal', 'fast']
+    },
+    'amazon-nova-pro': {
+        provider: 'AWS',
+        inputPrice: 0.8,
+        outputPrice: 3.2,
+        contextWindow: 300000,
+        category: 'balanced',
+        features: ['text-generation', 'multimodal', 'reasoning', 'complex-tasks']
+    },
+    'amazon-nova-pro-latency-optimized': {
+        provider: 'AWS',
+        inputPrice: 1.0,
+        outputPrice: 4.0,
+        contextWindow: 300000,
+        category: 'balanced',
+        features: ['text-generation', 'multimodal', 'reasoning', 'low-latency']
+    },
+    'amazon-nova-premier': {
+        provider: 'AWS',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        contextWindow: 300000,
+        category: 'premium',
+        features: ['text-generation', 'multimodal', 'reasoning', 'premium']
+    },
+
+    // Claude Models (frontend format)  
+    'claude-3-haiku': {
+        provider: 'Anthropic',
+        inputPrice: 0.25,
+        outputPrice: 1.25,
+        contextWindow: 200000,
+        category: 'fast',
+        features: ['text-generation', 'vision', 'fast']
+    },
+    'claude-3-5-haiku': {
+        provider: 'Anthropic', 
+        inputPrice: 0.8,
+        outputPrice: 4.0,
+        contextWindow: 200000,
+        category: 'fast',
+        features: ['text-generation', 'vision', 'fast']
+    },
+    'claude-3-sonnet': {
+        provider: 'Anthropic',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 200000,
+        category: 'balanced',
+        features: ['text-generation', 'vision', 'reasoning']
+    },
+    'claude-3-5-sonnet': {
+        provider: 'Anthropic',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 200000,
+        category: 'balanced',
+        features: ['text-generation', 'vision', 'reasoning']
+    },
+    'claude-3-opus': {
+        provider: 'Anthropic',
+        inputPrice: 15.0,
+        outputPrice: 75.0,
+        contextWindow: 200000,
+        category: 'premium',
+        features: ['text-generation', 'vision', 'reasoning', 'premium']
+    },
+    'claude-3-7-sonnet': {
+        provider: 'Anthropic',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 200000,
+        category: 'balanced',
+        features: ['text-generation', 'vision', 'reasoning', 'extended-thinking']
+    },
+    'claude-opus-4': {
+        provider: 'Anthropic',
+        inputPrice: 15.0,
+        outputPrice: 75.0,
+        contextWindow: 200000,
+        category: 'premium',
+        features: ['text-generation', 'vision', 'reasoning', 'premium']
+    },
+    'claude-sonnet-4': {
+        provider: 'Anthropic',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 200000,
+        category: 'balanced',
+        features: ['text-generation', 'vision', 'reasoning']
+    },
+
+    // Llama Models (frontend format)
+    'llama-3-70b-instruct': {
+        provider: 'AWS',
+        inputPrice: 0.8,
+        outputPrice: 0.8,
+        contextWindow: 8192,
+        category: 'balanced',
+        features: ['text-generation', 'instruction-following']
+    },
+    'llama-3-8b-instruct': {
+        provider: 'AWS',
+        inputPrice: 0.2,
+        outputPrice: 0.2,
+        contextWindow: 8192,
+        category: 'fast',
+        features: ['text-generation', 'instruction-following', 'fast']
+    },
+    'llama-2-70b-chat': {
+        provider: 'AWS',
+        inputPrice: 0.8,
+        outputPrice: 0.8,
+        contextWindow: 4096,
+        category: 'balanced',
+        features: ['text-generation', 'chat']
+    },
+    'llama-2-7b-chat': {
+        provider: 'AWS',
+        inputPrice: 0.15,
+        outputPrice: 0.2,
+        contextWindow: 4096,
+        category: 'fast',
+        features: ['text-generation', 'chat', 'cost-effective']
+    },
+    'llama-2-13b-chat': {
+        provider: 'AWS',
+        inputPrice: 0.25,
+        outputPrice: 0.25,
+        contextWindow: 4096,
+        category: 'fast',
+        features: ['text-generation', 'chat']
+    },
+
+    // Mistral Models
+    'mistral-7b-instruct': {
+        provider: 'AWS',
+        inputPrice: 0.15,
+        outputPrice: 0.2,
+        contextWindow: 8192,
+        category: 'fast',
+        features: ['text-generation', 'instruction-following', 'cost-effective']
+    },
+    'mistral-8x7b-instruct': {
+        provider: 'AWS',
+        inputPrice: 0.45,
+        outputPrice: 0.7,
+        contextWindow: 32768,
+        category: 'balanced',
+        features: ['text-generation', 'instruction-following', 'mixture-of-experts']
+    },
     'meta.llama2-70b-chat-v1': {
         provider: 'AWS',
         inputPrice: 1.95,
@@ -290,9 +458,15 @@ export function findCheapestModel(
     inputTokens: number,
     outputTokens: number,
     category?: string,
-    features?: string[]
+    features?: string[],
+    excludeModel?: string
 ): Array<{model: string, pricing: ModelPricing, totalCost: number}> {
     let models = Object.entries(MODEL_PRICING_DATA);
+
+    // Skip excluded model
+    if (excludeModel) {
+        models = models.filter(([modelId, _]) => modelId !== excludeModel);
+    }
 
     // Filter by category if specified
     if (category) {
@@ -313,6 +487,13 @@ export function findCheapestModel(
 
         return { model, pricing, totalCost };
     }).sort((a, b) => a.totalCost - b.totalCost);
+}
+
+export function getAvailableBedrickModels(): string[] {
+    return Object.keys(MODEL_PRICING_DATA).filter(modelId => {
+        const pricing = MODEL_PRICING_DATA[modelId];
+        return pricing.provider === 'AWS' || pricing.provider === 'Anthropic';
+    });
 }
 
 export function getModelsByUseCase(useCase: string): string[] {

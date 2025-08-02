@@ -34,6 +34,9 @@ router.post('/what-if-scenarios', ExperimentationController.createWhatIfScenario
 router.post('/what-if-scenarios/:scenarioName/analyze', ExperimentationController.runWhatIfAnalysis);
 router.delete('/what-if-scenarios/:scenarioName', ExperimentationController.deleteWhatIfScenario);
 
+// Real-time What-If Cost Simulator
+router.post('/real-time-simulation', ExperimentationController.runRealTimeSimulation);
+
 // Individual experiment operations (keep these last to avoid route conflicts)
 router.get('/:experimentId', ExperimentationController.getExperimentById);
 router.delete('/:experimentId', ExperimentationController.deleteExperiment);

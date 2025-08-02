@@ -116,9 +116,9 @@ export class ExperimentationController {
             });
         } catch (error: any) {
             logger.error('Error getting experiment history:', error);
-            res.status(500).json({
+            res.status(400).json({
                 success: false,
-                message: 'Failed to get experiment history'
+                message: 'Invalid user ID or failed to get experiment history'
             });
         }
     }
@@ -199,9 +199,9 @@ export class ExperimentationController {
             });
         } catch (error: any) {
             logger.error('Error getting experiment:', error);
-            res.status(500).json({
+            res.status(400).json({
                 success: false,
-                message: 'Failed to get experiment'
+                message: 'Invalid experiment ID or failed to get experiment'
             });
         }
     }
@@ -228,9 +228,9 @@ export class ExperimentationController {
             });
         } catch (error: any) {
             logger.error('Error deleting experiment:', error);
-            res.status(500).json({
+            res.status(400).json({
                 success: false,
-                message: 'Failed to delete experiment'
+                message: 'Invalid experiment ID or failed to delete experiment'
             });
         }
     }
@@ -307,7 +307,7 @@ export class ExperimentationController {
      */
     static async getWhatIfScenarios(req: any, res: Response): Promise<void> {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.id;
             const scenarios = await ExperimentationService.getWhatIfScenarios(userId);
 
             res.json({
@@ -333,7 +333,7 @@ export class ExperimentationController {
      */
     static async createWhatIfScenario(req: any, res: Response): Promise<void> {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.id;
             const scenarioData = req.body;
             
             const scenario = await ExperimentationService.createWhatIfScenario(userId, scenarioData);
@@ -358,7 +358,7 @@ export class ExperimentationController {
      */
     static async runWhatIfAnalysis(req: any, res: Response): Promise<void> {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.id;
             const { scenarioName } = req.params;
             
             const analysis = await ExperimentationService.runWhatIfAnalysis(userId, scenarioName);
@@ -378,12 +378,58 @@ export class ExperimentationController {
     }
 
     /**
+     * Real-time What-If Cost Simulator
+     * POST /api/experimentation/real-time-simulation
+     */
+    static async runRealTimeSimulation(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user?.id;
+            const simulationRequest = req.body;
+
+            // Validate request
+            if (!simulationRequest.simulationType) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Simulation type is required'
+                });
+                return;
+            }
+
+            // For prompt-level simulations, ensure prompt and model are provided
+            if (['prompt_optimization', 'context_trimming', 'real_time_analysis'].includes(simulationRequest.simulationType)) {
+                if (!simulationRequest.prompt || !simulationRequest.currentModel) {
+                    res.status(400).json({
+                        success: false,
+                        message: 'Prompt and current model are required for prompt-level simulations'
+                    });
+                    return;
+                }
+            }
+
+            const simulation = await ExperimentationService.runRealTimeWhatIfSimulation(userId, simulationRequest);
+
+            res.json({
+                success: true,
+                data: simulation,
+                message: 'Real-time simulation completed successfully'
+            });
+
+        } catch (error) {
+            logger.error('Error running real-time simulation:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to run real-time simulation'
+            });
+        }
+    }
+
+    /**
      * Delete what-if scenario
      * DELETE /api/experimentation/what-if-scenarios/:scenarioName
      */
     static async deleteWhatIfScenario(req: any, res: Response): Promise<void> {
         try {
-            const userId = req.user.userId;
+            const userId = req.user?.id;
             const { scenarioName } = req.params;
             
             await ExperimentationService.deleteWhatIfScenario(userId, scenarioName);

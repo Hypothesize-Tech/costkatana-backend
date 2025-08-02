@@ -398,67 +398,9 @@ export class ExperimentationService {
             logger.info(`Found ${accessibleModels.length} AWS Bedrock models from pricing data`);
             return accessibleModels;
 
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error getting AWS Bedrock models from pricing data:', error);
-            
-            // Return a subset of the most common models as fallback
-            return [
-                {
-                    provider: 'AWS Bedrock',
-                    model: 'anthropic.claude-3-5-sonnet-20241022-v1:0',
-                    modelName: 'Claude 3.5 Sonnet',
-                    pricing: { input: 3.00, output: 15.00, unit: 'PER_1M_TOKENS' },
-                    capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
-                    contextWindow: 200000,
-                    category: 'text',
-                    isLatest: true,
-                    notes: 'Claude 3.5 Sonnet on AWS Bedrock'
-                },
-                {
-                    provider: 'AWS Bedrock',
-                    model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-                    modelName: 'Claude 3.5 Haiku',
-                    pricing: { input: 0.25, output: 1.25, unit: 'PER_1M_TOKENS' },
-                    capabilities: ['text', 'vision', 'multimodal'],
-                    contextWindow: 200000,
-                    category: 'text',
-                    isLatest: true,
-                    notes: 'Claude 3.5 Haiku on AWS Bedrock'
-                },
-                {
-                    provider: 'AWS Bedrock',
-                    model: 'amazon.nova-pro-v1:0',
-                    modelName: 'Amazon Nova Pro',
-                    pricing: { input: 0.15, output: 0.60, unit: 'PER_1M_TOKENS' },
-                    capabilities: ['text', 'multimodal', 'cache-read'],
-                    contextWindow: 300000,
-                    category: 'text',
-                    isLatest: true,
-                    notes: 'Amazon Nova Pro with cache read support'
-                },
-                {
-                    provider: 'AWS Bedrock',
-                    model: 'amazon.nova-lite-v1:0',
-                    modelName: 'Amazon Nova Lite',
-                    pricing: { input: 0.06, output: 0.24, unit: 'PER_1M_TOKENS' },
-                    capabilities: ['text', 'multimodal', 'cache-read'],
-                    contextWindow: 300000,
-                    category: 'text',
-                    isLatest: true,
-                    notes: 'Amazon Nova Lite with cache read support'
-                },
-                {
-                    provider: 'AWS Bedrock',
-                    model: 'amazon.nova-micro-v1:0',
-                    modelName: 'Amazon Nova Micro',
-                    pricing: { input: 0.035, output: 0.14, unit: 'PER_1M_TOKENS' },
-                    capabilities: ['text', 'efficient', 'cache-read'],
-                    contextWindow: 128000,
-                    category: 'text',
-                    isLatest: true,
-                    notes: 'Amazon Nova Micro with cache read support'
-                }
-            ];
+            throw new Error(`Failed to load AWS Bedrock models: ${error.message}`);
         }
     }
 
@@ -1047,6 +989,12 @@ export class ExperimentationService {
         }
     ): Promise<ExperimentResult[]> {
         try {
+            // Validate ObjectId format before creating
+            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+                logger.warn(`Invalid user ID format for experiment history: ${userId}`);
+                return [];
+            }
+
             // Build query for experiments
             const query: any = {
                 userId: new mongoose.Types.ObjectId(userId)
@@ -1088,7 +1036,7 @@ export class ExperimentationService {
             return experimentResults;
         } catch (error) {
             logger.error('Error getting experiment history:', error);
-            throw error;
+            return []; // Return empty array instead of throwing to prevent 500 errors
         }
     }
 
@@ -1155,6 +1103,17 @@ export class ExperimentationService {
      */
     static async getExperimentById(experimentId: string, userId: string): Promise<ExperimentResult | null> {
         try {
+            // Validate ObjectId format before creating
+            if (!experimentId || !mongoose.Types.ObjectId.isValid(experimentId)) {
+                logger.warn(`Invalid experiment ID format: ${experimentId}`);
+                return null;
+            }
+
+            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+                logger.warn(`Invalid user ID format: ${userId}`);
+                return null;
+            }
+
             const experiment = await Experiment.findOne({
                 _id: new mongoose.Types.ObjectId(experimentId),
                 userId: new mongoose.Types.ObjectId(userId)
@@ -1178,7 +1137,7 @@ export class ExperimentationService {
             };
         } catch (error) {
             logger.error('Error getting experiment by ID:', error);
-            throw error;
+            return null; // Return null instead of throwing to prevent 500 errors
         }
     }
 
@@ -1187,15 +1146,30 @@ export class ExperimentationService {
      */
     static async deleteExperiment(experimentId: string, userId: string): Promise<void> {
         try {
-            await Experiment.deleteOne({
+            // Validate ObjectId format before creating
+            if (!experimentId || !mongoose.Types.ObjectId.isValid(experimentId)) {
+                logger.warn(`Invalid experiment ID format for deletion: ${experimentId}`);
+                return;
+            }
+
+            if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+                logger.warn(`Invalid user ID format for deletion: ${userId}`);
+                return;
+            }
+
+            const result = await Experiment.deleteOne({
                 _id: new mongoose.Types.ObjectId(experimentId),
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
-            logger.info(`Deleted experiment ${experimentId} for user ${userId}`);
+            if (result.deletedCount > 0) {
+                logger.info(`Deleted experiment ${experimentId} for user ${userId}`);
+            } else {
+                logger.warn(`No experiment found to delete: ${experimentId} for user ${userId}`);
+            }
         } catch (error) {
             logger.error('Error deleting experiment:', error);
-            throw error;
+            // Don't throw error to prevent 500 responses
         }
     }
 
@@ -1343,25 +1317,10 @@ export class ExperimentationService {
 
             // Sort by potential savings (highest first)
             return recommendations.sort((a, b) => b.potentialSavings - a.potentialSavings);
-        } catch (error) {
+        } catch (error: any) {
             logger.error('Error getting experiment recommendations:', error);
             
-            // Return fallback recommendations on error
-            return [
-                {
-                    type: 'model_comparison' as const,
-                    title: 'Model Comparison Experiment',
-                    description: 'Compare different AI models to optimize your costs',
-                    priority: 'high' as const,
-                    potentialSavings: 40.0,
-                    effort: 'low' as const,
-                    actions: [
-                        'Select models to compare',
-                        'Define evaluation criteria',
-                        'Run comparison'
-                    ]
-                }
-            ];
+            throw new Error(`Failed to get experiment recommendations: ${error.message}`);
         }
     }
 
@@ -1629,72 +1588,92 @@ export class ExperimentationService {
             }));
 
             // Then add auto-generated scenarios based on usage analysis
-            const usageAnalysis = await this.analyzeUserUsagePatterns(userId);
-            
-            if (usageAnalysis.hasData) {
-                const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
-                if (modelOptimizationScenario) {
-                    scenarios.push({
-                        id: `auto_${Date.now()}_1`,
-                        name: modelOptimizationScenario.name,
-                        description: modelOptimizationScenario.description,
-                        changes: modelOptimizationScenario.changes as any,
-                        timeframe: modelOptimizationScenario.timeframe as any,
-                        baselineData: modelOptimizationScenario.baselineData,
-                        status: 'created' as const,
-                        isUserCreated: false,
-                        createdAt: new Date(),
-                        analysis: undefined
-                    });
-                }
+            try {
+                const usageAnalysis = await this.analyzeUserUsagePatterns(userId);
+                
+                if (usageAnalysis.hasData) {
+                    try {
+                        const modelOptimizationScenario = await this.generateModelOptimizationScenario(usageAnalysis);
+                        if (modelOptimizationScenario) {
+                            scenarios.push({
+                                id: `auto_${Date.now()}_1`,
+                                name: modelOptimizationScenario.name,
+                                description: modelOptimizationScenario.description,
+                                changes: modelOptimizationScenario.changes as any,
+                                timeframe: modelOptimizationScenario.timeframe as any,
+                                baselineData: modelOptimizationScenario.baselineData,
+                                status: 'created' as const,
+                                isUserCreated: false,
+                                createdAt: new Date(),
+                                analysis: undefined
+                            });
+                        }
+                    } catch (error) {
+                        logger.warn('Failed to generate model optimization scenario:', error);
+                    }
 
-                const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
-                if (volumeScenario) {
-                    scenarios.push({
-                        id: `auto_${Date.now()}_2`,
-                        name: volumeScenario.name,
-                        description: volumeScenario.description,
-                        changes: volumeScenario.changes as any,
-                        timeframe: volumeScenario.timeframe as any,
-                        baselineData: volumeScenario.baselineData,
-                        status: 'created' as const,
-                        isUserCreated: false,
-                        createdAt: new Date(),
-                        analysis: undefined
-                    });
-                }
+                    try {
+                        const volumeScenario = await this.generateVolumeScenario(usageAnalysis);
+                        if (volumeScenario) {
+                            scenarios.push({
+                                id: `auto_${Date.now()}_2`,
+                                name: volumeScenario.name,
+                                description: volumeScenario.description,
+                                changes: volumeScenario.changes as any,
+                                timeframe: volumeScenario.timeframe as any,
+                                baselineData: volumeScenario.baselineData,
+                                status: 'created' as const,
+                                isUserCreated: false,
+                                createdAt: new Date(),
+                                analysis: undefined
+                            });
+                        }
+                    } catch (error) {
+                        logger.warn('Failed to generate volume scenario:', error);
+                    }
 
-                const cachingScenario = await this.generateCachingScenario(usageAnalysis);
-                if (cachingScenario) {
-                    scenarios.push({
-                        id: `auto_${Date.now()}_3`,
-                        name: cachingScenario.name,
-                        description: cachingScenario.description,
-                        changes: cachingScenario.changes as any,
-                        timeframe: cachingScenario.timeframe as any,
-                        baselineData: cachingScenario.baselineData,
-                        status: 'created' as const,
-                        isUserCreated: false,
-                        createdAt: new Date(),
-                        analysis: undefined
-                    });
-                }
+                    try {
+                        const cachingScenario = await this.generateCachingScenario(usageAnalysis);
+                        if (cachingScenario) {
+                            scenarios.push({
+                                id: `auto_${Date.now()}_3`,
+                                name: cachingScenario.name,
+                                description: cachingScenario.description,
+                                changes: cachingScenario.changes as any,
+                                timeframe: cachingScenario.timeframe as any,
+                                baselineData: cachingScenario.baselineData,
+                                status: 'created' as const,
+                                isUserCreated: false,
+                                createdAt: new Date(),
+                                analysis: undefined
+                            });
+                        }
+                    } catch (error) {
+                        logger.warn('Failed to generate caching scenario:', error);
+                    }
 
-                const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
-                if (batchingScenario) {
-                    scenarios.push({
-                        id: `auto_${Date.now()}_4`,
-                        name: batchingScenario.name,
-                        description: batchingScenario.description,
-                        changes: batchingScenario.changes as any,
-                        timeframe: batchingScenario.timeframe as any,
-                        baselineData: batchingScenario.baselineData,
-                        status: 'created' as const,
-                        isUserCreated: false,
-                        createdAt: new Date(),
-                        analysis: undefined
-                    });
+                    try {
+                        const batchingScenario = await this.generateBatchingScenario(usageAnalysis);
+                        if (batchingScenario) {
+                            scenarios.push({
+                                id: `auto_${Date.now()}_4`,
+                                name: batchingScenario.name,
+                                description: batchingScenario.description,
+                                changes: batchingScenario.changes as any,
+                                timeframe: batchingScenario.timeframe as any,
+                                baselineData: batchingScenario.baselineData,
+                                status: 'created' as const,
+                                isUserCreated: false,
+                                createdAt: new Date(),
+                                analysis: undefined
+                            });
+                        }
+                    } catch (error) {
+                        logger.warn('Failed to generate batching scenario:', error);
+                    }
                 }
+            } catch (error) {
+                logger.warn('Failed to analyze user usage patterns:', error);
             }
 
             return scenarios;
@@ -1709,6 +1688,21 @@ export class ExperimentationService {
      */
     static async createWhatIfScenario(userId: string, scenarioData: any): Promise<any> {
         try {
+            // Check if scenario with same name already exists for this user
+            const existingScenario = await WhatIfScenario.findOne({
+                userId: new mongoose.Types.ObjectId(userId),
+                name: scenarioData.name
+            });
+
+            if (existingScenario) {
+                // Generate a unique name by adding a timestamp
+                const timestamp = Date.now();
+                const uniqueName = `${scenarioData.name} (${timestamp})`;
+                
+                logger.info(`Scenario name "${scenarioData.name}" already exists. Using unique name: "${uniqueName}"`);
+                scenarioData.name = uniqueName;
+            }
+
             const scenario = {
                 userId: new mongoose.Types.ObjectId(userId),
                 name: scenarioData.name,
@@ -1739,14 +1733,531 @@ export class ExperimentationService {
                 analysis: savedScenario.analysis
             };
 
-        } catch (error) {
+        } catch (error: any) {
+            // Handle duplicate key error specifically
+            if (error.code === 11000 && error.keyPattern && error.keyPattern.name) {
+                logger.warn(`Duplicate scenario name "${scenarioData.name}" detected. Generating unique name.`);
+                
+                // Generate a unique name with timestamp
+                const timestamp = Date.now();
+                const uniqueName = `${scenarioData.name} (${timestamp})`;
+                
+                // Retry with unique name
+                try {
+                    const scenarioWithUniqueName = {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        name: uniqueName,
+                        description: scenarioData.description,
+                        changes: scenarioData.changes,
+                        timeframe: scenarioData.timeframe,
+                        baselineData: scenarioData.baselineData,
+                        status: 'created' as const,
+                        isUserCreated: true
+                    };
+
+                    const savedScenario = new WhatIfScenario(scenarioWithUniqueName);
+                    await savedScenario.save();
+
+                    logger.info(`Created scenario with unique name: ${uniqueName} for user: ${userId}`);
+                    
+                    return {
+                        id: (savedScenario._id as any).toString(),
+                        name: savedScenario.name,
+                        description: savedScenario.description,
+                        changes: savedScenario.changes,
+                        timeframe: savedScenario.timeframe,
+                        baselineData: savedScenario.baselineData,
+                        status: savedScenario.status,
+                        isUserCreated: savedScenario.isUserCreated,
+                        createdAt: savedScenario.createdAt,
+                        analysis: savedScenario.analysis
+                    };
+                } catch (retryError) {
+                    logger.error('Error creating scenario with unique name:', retryError);
+                    throw retryError;
+                }
+            }
+            
             logger.error('Error creating what-if scenario:', error);
             throw error;
         }
     }
 
     /**
-     * Run what-if analysis with intelligent projections
+     * Real-time What-If Cost Simulator - Enhanced Analysis
+     * Supports both strategic scenarios and prompt-level optimizations
+     */
+    static async runRealTimeWhatIfSimulation(
+        _userId: string, 
+        simulationRequest: {
+            prompt?: string;
+            currentModel?: string;
+            simulationType: 'prompt_optimization' | 'context_trimming' | 'model_comparison' | 'real_time_analysis';
+            options?: {
+                trimPercentage?: number;
+                alternativeModels?: string[];
+                optimizationGoals?: ('cost' | 'speed' | 'quality')[];
+            };
+        }
+    ): Promise<{
+        currentCost: any;
+        optimizedOptions: any[];
+        recommendations: any[];
+        potentialSavings: number;
+        confidence: number;
+    }> {
+        try {
+            const { prompt, currentModel, simulationType, options = {} } = simulationRequest;
+            
+            // Initialize results structure
+            const results = {
+                currentCost: null as any,
+                optimizedOptions: [] as any[],
+                recommendations: [] as any[],
+                potentialSavings: 0,
+                confidence: 0
+            };
+
+            // For prompt-level optimizations
+            if (prompt && currentModel) {
+                // Calculate current cost using existing tools
+                const currentAnalysis = await this.calculatePromptCost(prompt, currentModel);
+                results.currentCost = currentAnalysis;
+
+                // Run parallel optimization paths
+                const optimizationPromises = [];
+
+                // Path 1: Context trimming
+                if (simulationType === 'context_trimming' || simulationType === 'real_time_analysis') {
+                    optimizationPromises.push(this.simulateContextTrimming(prompt, currentModel, options.trimPercentage || 30));
+                }
+
+                // Path 2: Model alternatives
+                if (simulationType === 'model_comparison' || simulationType === 'real_time_analysis') {
+                    const alternativeModels = options.alternativeModels || await this.getAlternativeModels(currentModel);
+                    optimizationPromises.push(this.simulateModelAlternatives(prompt, alternativeModels, currentModel));
+                }
+
+                // Path 3: Prompt optimization
+                if (simulationType === 'prompt_optimization' || simulationType === 'real_time_analysis') {
+                    optimizationPromises.push(this.simulatePromptOptimization(prompt, currentModel));
+                }
+
+                // Execute all paths in parallel
+                const optimizationResults = await Promise.all(optimizationPromises);
+                results.optimizedOptions = optimizationResults.flat();
+
+                // Calculate savings and generate recommendations
+                results.potentialSavings = this.calculateMaxSavings(results.currentCost, results.optimizedOptions);
+                results.recommendations = this.generateRealTimeRecommendations(results.currentCost, results.optimizedOptions);
+                results.confidence = this.calculateConfidenceScore(results.optimizedOptions);
+            }
+
+            return results;
+        } catch (error) {
+            logger.error('Error in real-time what-if simulation:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Calculate cost for a specific prompt and model
+     */
+    private static async calculatePromptCost(prompt: string, model: string): Promise<any> {
+        // Use existing pricing utilities
+        const { getModelPricing } = await import('../data/modelPricing');
+        const modelPricing = getModelPricing(model);
+        
+        if (!modelPricing) {
+            throw new Error(`Pricing not found for model: ${model}`);
+        }
+
+        // Estimate tokens (simplified - could use tiktoken for accuracy)
+        const estimatedTokens = Math.ceil(prompt.length / 4); // Rough estimation
+        const estimatedCompletionTokens = Math.ceil(estimatedTokens * 0.3); // Assume 30% response
+        
+        const inputCost = (estimatedTokens / 1000000) * modelPricing.inputPrice;
+        const outputCost = (estimatedCompletionTokens / 1000000) * modelPricing.outputPrice;
+        const totalCost = inputCost + outputCost;
+
+        return {
+            model,
+            inputTokens: estimatedTokens,
+            outputTokens: estimatedCompletionTokens,
+            totalTokens: estimatedTokens + estimatedCompletionTokens,
+            inputCost,
+            outputCost,
+            totalCost,
+            provider: modelPricing.provider
+        };
+    }
+
+    /**
+     * Simulate context trimming scenarios
+     */
+    private static async simulateContextTrimming(prompt: string, model: string, trimPercentage: number): Promise<any[]> {
+        const results = [];
+        
+        // Calculate original cost once for comparison
+        const originalCost = await this.calculatePromptCost(prompt, model);
+        
+        // Generate dynamic trim scenarios based on the provided percentage
+        const trimScenarios = [
+            Math.max(10, trimPercentage - 10), // Conservative trim
+            trimPercentage,                    // Requested trim
+            Math.min(70, trimPercentage + 20)  // Aggressive trim
+        ].filter((val, index, arr) => arr.indexOf(val) === index); // Remove duplicates
+
+        for (const trim of trimScenarios) {
+            const trimmedLength = Math.ceil(prompt.length * (1 - trim / 100));
+            const trimmedPrompt = prompt.substring(0, trimmedLength) + "...";
+            
+            const trimmedCost = await this.calculatePromptCost(trimmedPrompt, model);
+            
+            const savingsPercentage = ((1 - trimmedCost.totalCost / originalCost.totalCost) * 100);
+            const risk = await this.assessOptimizationRisk(
+                'context_trimming',
+                model,
+                undefined,
+                trim,
+                prompt.length,
+                savingsPercentage
+            );
+            
+            results.push({
+                type: 'context_trimming',
+                description: `Trim context by ${trim}%`,
+                originalLength: prompt.length,
+                trimmedLength: trimmedLength,
+                savings: {
+                    tokens: trimmedCost.totalTokens,
+                    cost: trimmedCost.totalCost,
+                    percentage: savingsPercentage
+                },
+                risk,
+                implementation: 'easy'
+            });
+        }
+
+        return results;
+    }
+
+    /**
+     * Simulate alternative models
+     */
+    private static async simulateModelAlternatives(prompt: string, alternativeModels: string[], currentModel: string): Promise<any[]> {
+        const results = [];
+        
+        // Calculate current model cost once for comparison
+        let currentCost;
+        try {
+            currentCost = await this.calculatePromptCost(prompt, currentModel);
+        } catch (error) {
+            logger.error(`Could not calculate cost for current model ${currentModel}:`, error);
+            return [];
+        }
+        
+        for (const altModel of alternativeModels) {
+            try {
+                const altCost = await this.calculatePromptCost(prompt, altModel);
+                
+                const savingsPercentage = ((1 - altCost.totalCost / currentCost.totalCost) * 100);
+                const risk = await this.assessOptimizationRisk(
+                    'model_switch',
+                    currentModel,
+                    altModel,
+                    undefined,
+                    prompt.length,
+                    savingsPercentage
+                );
+                
+                results.push({
+                    type: 'model_switch',
+                    description: `Switch to ${altModel}`,
+                    model: altModel,
+                    savings: {
+                        cost: altCost.totalCost,
+                        percentage: savingsPercentage
+                    },
+                    qualityImpact: await this.estimateQualityImpact(altModel, currentModel),
+                    risk,
+                    implementation: 'moderate'
+                });
+            } catch (error) {
+                logger.warn(`Could not simulate model ${altModel}:`, error);
+            }
+        }
+
+        return results.sort((a, b) => b.savings.percentage - a.savings.percentage);
+    }
+
+    /**
+     * Simulate prompt optimization
+     */
+    private static async simulatePromptOptimization(prompt: string, model: string): Promise<any[]> {
+        // This would integrate with your OptimizationManagerTool
+        const optimizationSuggestions = [
+            {
+                type: 'prompt_optimization',
+                description: 'Remove redundant instructions',
+                estimatedReduction: 15,
+                implementation: 'easy'
+            },
+            {
+                type: 'prompt_optimization', 
+                description: 'Use more concise language',
+                estimatedReduction: 25,
+                implementation: 'moderate'
+            }
+        ];
+
+        const results = [];
+        for (const suggestion of optimizationSuggestions) {
+            const optimizedLength = Math.ceil(prompt.length * (1 - suggestion.estimatedReduction / 100));
+            const optimizedCost = await this.calculatePromptCost(prompt.substring(0, optimizedLength), model);
+            const originalCost = await this.calculatePromptCost(prompt, model);
+            
+            const savingsPercentage = ((1 - optimizedCost.totalCost / originalCost.totalCost) * 100);
+            const risk = await this.assessOptimizationRisk(
+                'prompt_optimization',
+                model,
+                undefined,
+                undefined,
+                prompt.length,
+                savingsPercentage
+            );
+            
+            results.push({
+                ...suggestion,
+                savings: {
+                    cost: optimizedCost.totalCost,
+                    percentage: savingsPercentage
+                },
+                risk
+            });
+        }
+
+        return results;
+    }
+
+    /**
+     * Get alternative models for comparison
+     */
+    private static async getAlternativeModels(currentModel: string): Promise<string[]> {
+        const { findCheapestModel, getAvailableBedrickModels } = await import('../data/modelPricing');
+        
+        try {
+            // Get all available Bedrock models
+            const availableModels = getAvailableBedrickModels();
+            
+            // If current model is not in available models, just return some alternatives
+            if (!availableModels.includes(currentModel)) {
+                return availableModels.slice(0, 4);
+            }
+            
+            // Find cheaper alternatives, excluding current model
+            const alternatives = findCheapestModel(1000, 300, undefined, undefined, currentModel);
+            
+            // Return top 4 alternatives that exist in our pricing data
+            return alternatives
+                .slice(0, 4)
+                .map(alt => alt.model)
+                .filter(model => availableModels.includes(model) && model !== currentModel);
+        } catch (error: any) {
+            logger.error('Error getting alternative models:', error);
+            throw new Error(`Failed to get alternative models: ${error.message}`);
+        }
+    }
+
+    /**
+     * Calculate maximum potential savings
+     */
+    private static calculateMaxSavings(_currentCost: any, optimizedOptions: any[]): number {
+        if (!optimizedOptions.length) return 0;
+        
+        const bestOption = optimizedOptions.reduce((best, option) => 
+            (option.savings?.percentage || 0) > (best.savings?.percentage || 0) ? option : best
+        );
+        
+        return bestOption.savings?.percentage || 0;
+    }
+
+    /**
+     * Generate real-time recommendations
+     */
+    private static generateRealTimeRecommendations(_currentCost: any, optimizedOptions: any[]): any[] {
+        const recommendations = [];
+        
+        // Sort by savings potential
+        const sortedOptions = optimizedOptions.sort((a, b) => (b.savings?.percentage || 0) - (a.savings?.percentage || 0));
+        
+        // Top 3 recommendations
+        for (let i = 0; i < Math.min(3, sortedOptions.length); i++) {
+            const option = sortedOptions[i];
+            recommendations.push({
+                priority: i === 0 ? 'high' : i === 1 ? 'medium' : 'low',
+                title: option.description,
+                savings: option.savings,
+                implementation: option.implementation,
+                risk: option.risk || 'low',
+                action: this.generateActionStep(option)
+            });
+        }
+        
+        return recommendations;
+    }
+
+    /**
+     * Generate specific action steps
+     */
+    private static generateActionStep(option: any): string {
+        switch (option.type) {
+            case 'context_trimming':
+                return `Reduce prompt length by ${option.description}`;
+            case 'model_switch':
+                return `Switch to ${option.model} model`;
+            case 'prompt_optimization':
+                return option.description;
+            default:
+                return 'Apply optimization';
+        }
+    }
+
+    /**
+     * Calculate confidence score
+     */
+    private static calculateConfidenceScore(optimizedOptions: any[]): number {
+        if (!optimizedOptions.length) return 0;
+        
+        // Base confidence on number of options and their consistency
+        const avgSavings = optimizedOptions.reduce((sum, opt) => sum + (opt.savings?.percentage || 0), 0) / optimizedOptions.length;
+        const hasMultipleOptions = optimizedOptions.length > 2;
+        const hasLowRiskOptions = optimizedOptions.some(opt => opt.risk === 'low');
+        
+        let confidence = 60; // Base confidence
+        if (avgSavings > 30) confidence += 20;
+        if (hasMultipleOptions) confidence += 10;
+        if (hasLowRiskOptions) confidence += 10;
+        
+        return Math.min(100, confidence);
+    }
+
+    /**
+     * AI-powered risk assessment for optimization strategies
+     */
+    private static async assessOptimizationRisk(
+        optimizationType: string,
+        currentModel: string,
+        newModel?: string,
+        trimPercentage?: number,
+        promptLength?: number,
+        savingsPercentage?: number
+    ): Promise<'low' | 'medium' | 'high'> {
+        try {
+            const prompt = `As an AI cost optimization expert, assess the risk level for this optimization strategy:
+
+Optimization Type: ${optimizationType}
+Current Model: ${currentModel}
+${newModel ? `New Model: ${newModel}` : ''}
+${trimPercentage ? `Context Trim Percentage: ${trimPercentage}%` : ''}
+${promptLength ? `Original Prompt Length: ${promptLength} characters` : ''}
+${savingsPercentage ? `Expected Savings: ${savingsPercentage.toFixed(1)}%` : ''}
+
+Consider factors like:
+- Model capability differences
+- Context preservation impact
+- Quality degradation risk
+- Implementation complexity
+- Business impact
+
+Return ONLY: "low", "medium", or "high" based on the risk assessment.`;
+
+            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-haiku-20240307-v1:0');
+            const riskLevel = response.trim().toLowerCase();
+            
+            if (riskLevel === 'low' || riskLevel === 'medium' || riskLevel === 'high') {
+                return riskLevel as 'low' | 'medium' | 'high';
+            }
+            
+            // Fallback logic based on optimization type
+            if (optimizationType === 'model_switch') {
+                return 'medium'; // Model switching has medium risk
+            } else if (optimizationType === 'context_trimming') {
+                return trimPercentage && trimPercentage > 40 ? 'high' : 
+                       trimPercentage && trimPercentage > 25 ? 'medium' : 'low';
+            } else if (optimizationType === 'prompt_optimization') {
+                return 'low'; // Prompt optimization is generally low risk
+            }
+            
+            return 'medium'; // Default fallback
+        } catch (error) {
+            logger.warn('AI risk assessment failed, using fallback logic:', error);
+            
+            // Enhanced fallback logic with more sophisticated risk assessment
+            if (optimizationType === 'model_switch') {
+                // Model switching risk based on model capabilities
+                if (newModel && currentModel) {
+                    const highEndModels = ['gpt-4', 'claude-3-opus', 'claude-3-sonnet'];
+                    const midEndModels = ['gpt-3.5-turbo', 'claude-3-haiku', 'amazon.nova-pro-v1'];
+                    const lowEndModels = ['amazon.nova-micro-v1', 'amazon.nova-lite-v1'];
+                    
+                    const currentTier = highEndModels.includes(currentModel) ? 'high' : 
+                                      midEndModels.includes(currentModel) ? 'mid' : 
+                                      lowEndModels.includes(currentModel) ? 'low' : 'mid';
+                    const newTier = highEndModels.includes(newModel) ? 'high' : 
+                                  midEndModels.includes(newModel) ? 'mid' : 
+                                  lowEndModels.includes(newModel) ? 'low' : 'mid';
+                    
+                    // Risk is higher when switching from high to low tier
+                    if (currentTier === 'high' && newTier === 'low') return 'high';
+                    if (currentTier === 'high' && newTier === 'mid') return 'medium';
+                    if (currentTier === 'mid' && newTier === 'low') return 'medium';
+                    return 'low';
+                }
+                return 'medium';
+            } else if (optimizationType === 'context_trimming') {
+                // Context trimming risk based on percentage and prompt length
+                if (trimPercentage && promptLength) {
+                    if (trimPercentage > 50) return 'high';
+                    if (trimPercentage > 30) return 'medium';
+                    if (promptLength > 1000 && trimPercentage > 20) return 'medium';
+                    return 'low';
+                }
+                return trimPercentage && trimPercentage > 40 ? 'high' : 
+                       trimPercentage && trimPercentage > 25 ? 'medium' : 'low';
+            } else if (optimizationType === 'prompt_optimization') {
+                // Prompt optimization is generally low risk
+                return 'low';
+            }
+            
+            return 'medium';
+        }
+    }
+
+    /**
+     * Estimate quality impact (simplified)
+     */
+    private static async estimateQualityImpact(newModel: string, currentModel: string): Promise<string> {
+        // This could be enhanced with actual model performance data
+        const qualityTiers = {
+            'gpt-4': 5,
+            'claude-3-opus': 5,
+            'gpt-4-turbo': 4,
+            'claude-3-sonnet': 4,
+            'gpt-3.5-turbo': 3,
+            'claude-3-haiku': 3
+        };
+        
+        const currentTier = qualityTiers[currentModel as keyof typeof qualityTiers] || 3;
+        const newTier = qualityTiers[newModel as keyof typeof qualityTiers] || 3;
+        
+        if (newTier >= currentTier) return 'minimal';
+        if (newTier === currentTier - 1) return 'low';
+        return 'medium';
+    }
+
+    /**
+     * Run what-if analysis with intelligent projections (Enhanced Legacy Method)
      */
     static async runWhatIfAnalysis(userId: string, scenarioName: string): Promise<any> {
         try {
@@ -2720,7 +3231,7 @@ Base your analysis on real-world AI cost optimization patterns and industry best
         // Find cheaper alternatives with similar capabilities
         const currentPricing = MODEL_PRICING.find(p => 
             p.modelId.includes(modelStats.model) || 
-            p.modelName.toLowerCase().includes(modelStats.model.toLowerCase())
+            (p.modelName && modelStats.model && p.modelName.toLowerCase().includes(modelStats.model.toLowerCase()))
         );
         
         if (!currentPricing) return modelStats.totalCost * 0.15; // Conservative estimate
