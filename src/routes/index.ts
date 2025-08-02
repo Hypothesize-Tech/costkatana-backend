@@ -27,6 +27,7 @@ import requestFeedbackRoutes from './requestFeedback.routes';
 import trainingRoutes from './training.routes';
 import simulationTrackingRoutes from './simulationTracking.routes';
 import autoSimulationRoutes from './autoSimulation.routes';
+import predictiveIntelligenceRoutes from './predictiveIntelligence.routes';
 
 const router = Router();
 
@@ -69,5 +70,6 @@ router.use('/v1', requestFeedbackRoutes);
 router.use('/training', trainingRoutes);
 router.use('/simulation-tracking', simulationTrackingRoutes);
 router.use('/auto-simulation', autoSimulationRoutes);
+router.use('/predictive-intelligence', predictiveIntelligenceRoutes);
 
 export const apiRouter = router;
