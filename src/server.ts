@@ -7,6 +7,14 @@ import { config } from './config';
 import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
+import { 
+    trackApiRequests, 
+    trackAuthEvents, 
+    trackAnalyticsEvents, 
+    trackProjectEvents, 
+    trackUserSession, 
+    trackOptimizationEvents 
+} from './middleware/mixpanel.middleware';
 import { logger, stream } from './utils/logger';
 import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
@@ -102,6 +110,14 @@ app.use(customLogger);
 
 // Sanitize input
 app.use(sanitizeInput);
+
+// Mixpanel tracking middleware
+app.use(trackApiRequests);
+app.use(trackAuthEvents);
+app.use(trackAnalyticsEvents);
+app.use(trackProjectEvents);
+app.use(trackUserSession);
+app.use(trackOptimizationEvents);
 
 // API routes
 app.use('/api', apiRouter);

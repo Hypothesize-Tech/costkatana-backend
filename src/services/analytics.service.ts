@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
+import { mixpanelService } from './mixpanel.service';
 
 interface AnalyticsQuery {
     userId: string;
@@ -66,6 +67,26 @@ export class AnalyticsService {
             };
 
             logger.debug('Analytics result:', result);
+            
+            // Track analytics access
+            if (filters.userId) {
+                mixpanelService.trackAnalyticsEvent('dashboard_viewed', {
+                    userId: filters.userId,
+                    projectId: filters.projectId,
+                    reportType: options.groupBy,
+                    dateRange: filters.startDate && filters.endDate 
+                        ? `${filters.startDate.toISOString()}-${filters.endDate.toISOString()}` 
+                        : undefined,
+                    filters: {
+                        service: filters.service,
+                        model: filters.model,
+                        groupBy: options.groupBy
+                    },
+                    page: '/analytics',
+                    component: 'analytics_service'
+                });
+            }
+            
             return result;
         } catch (error) {
             logger.error('Error getting analytics:', error);
