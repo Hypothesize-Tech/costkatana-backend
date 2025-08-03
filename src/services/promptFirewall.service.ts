@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import { retryBedrockOperation } from '../utils/bedrockRetry';
 
 export interface ThreatDetectionResult {
     isBlocked: boolean;
@@ -129,7 +130,20 @@ export class PromptFirewallService {
                 };
 
                 const command = new InvokeModelCommand(input);
-                const response = await this.bedrockClient.send(command);
+                const response = await retryBedrockOperation(
+                    () => this.bedrockClient.send(command),
+                    {
+                        maxRetries: 2,
+                        baseDelay: 500,
+                        maxDelay: 5000,
+                        backoffMultiplier: 1.5,
+                        jitterFactor: 0.2
+                    },
+                    {
+                        modelId: 'meta.llama3-2-1b-instruct-v1:0',
+                        operation: 'promptGuard'
+                    }
+                );
                 
                 const responseBody = JSON.parse(new TextDecoder().decode(response.body));
                 
@@ -190,7 +204,20 @@ export class PromptFirewallService {
                 };
 
                 const command = new InvokeModelCommand(input);
-                const response = await this.bedrockClient.send(command);
+                const response = await retryBedrockOperation(
+                    () => this.bedrockClient.send(command),
+                    {
+                        maxRetries: 2,
+                        baseDelay: 500,
+                        maxDelay: 5000,
+                        backoffMultiplier: 1.5,
+                        jitterFactor: 0.2
+                    },
+                    {
+                        modelId: 'meta.llama3-2-1b-instruct-v1:0',
+                        operation: 'llamaGuard'
+                    }
+                );
                 
                 const responseBody = JSON.parse(new TextDecoder().decode(response.body));
                 const assessment = responseBody.generation?.trim() || '';

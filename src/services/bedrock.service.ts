@@ -1,7 +1,7 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { logger } from '../utils/logger';
-import { retry } from '../utils/helpers';
+import { retryBedrockOperation } from '../utils/bedrockRetry';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -263,11 +263,20 @@ export class BedrockService {
         });
 
         try {
-            // Add exponential backoff for throttling with better error handling
-            const response = await retry(
-                () => bedrockClient.send(command), 
-                4, // Increase retry attempts
-                2000 // Start with 2 second delay
+            // Use enhanced Bedrock retry logic with exponential backoff and jitter
+            const response = await retryBedrockOperation(
+                () => bedrockClient.send(command),
+                {
+                    maxRetries: 4,
+                    baseDelay: 2000, // Start with 2 second delay
+                    maxDelay: 30000, // Cap at 30 seconds
+                    backoffMultiplier: 2, // Exponential backoff
+                    jitterFactor: 0.25 // ±25% jitter
+                },
+                {
+                    modelId: actualModelId,
+                    operation: 'invokeModel'
+                }
             );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 

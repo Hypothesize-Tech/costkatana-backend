@@ -1,6 +1,7 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { logger } from '../utils/logger';
+import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { WebScraperService } from './web-scraper.service';
 
 export interface ProviderPricing {
@@ -194,7 +195,20 @@ export class RealtimePricingService {
                 body: JSON.stringify(payload),
             });
 
-            const response = await bedrockClient.send(command);
+            const response = await retryBedrockOperation(
+                () => bedrockClient.send(command),
+                {
+                    maxRetries: 3,
+                    baseDelay: 1000,
+                    maxDelay: 15000,
+                    backoffMultiplier: 2,
+                    jitterFactor: 0.25
+                },
+                {
+                    modelId: AWS_CONFIG.bedrock.modelId,
+                    operation: 'extractPricingData'
+                }
+            );
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
             const extractedText = this.extractResponseText(responseBody, AWS_CONFIG.bedrock.modelId);
 
