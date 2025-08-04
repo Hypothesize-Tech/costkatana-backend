@@ -3,6 +3,10 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
+import { EventEmitter } from 'events';
+
+// Increase EventEmitter limit globally to prevent memory leak warnings
+EventEmitter.defaultMaxListeners = 25;
 import { config } from './config';
 import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
@@ -247,5 +251,41 @@ export const startServer = async () => {
 };
 
 startServer();
+
+// Graceful shutdown handling
+process.on('SIGTERM', async () => {
+    logger.info('🛑 SIGTERM received, shutting down gracefully');
+    try {
+        const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
+        await multiAgentFlowService.cleanup();
+        process.exit(0);
+    } catch (error) {
+        logger.error('❌ Error during graceful shutdown:', error);
+        process.exit(1);
+    }
+});
+
+process.on('SIGINT', async () => {
+    logger.info('🛑 SIGINT received, shutting down gracefully');
+    try {
+        const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
+        await multiAgentFlowService.cleanup();
+        process.exit(0);
+    } catch (error) {
+        logger.error('❌ Error during graceful shutdown:', error);
+        process.exit(1);
+    }
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+    logger.error('❌ Uncaught Exception:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    process.exit(1);
+});
 
 export default app;

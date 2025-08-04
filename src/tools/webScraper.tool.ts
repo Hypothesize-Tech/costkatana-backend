@@ -33,7 +33,7 @@ export interface ScrapingRequest {
 
 export interface ScrapingResult {
     success: boolean;
-    operation: string;
+    operation?: string;
     data: {
         url: string;
         title?: string;
@@ -51,6 +51,7 @@ export interface ScrapingResult {
         summary?: string;
         relevanceScore?: number;
     };
+    processingTime?: number;
     cached?: boolean;
     error?: string;
 }
@@ -236,9 +237,47 @@ export class WebScraperTool extends Tool {
                 });
             });
 
-            // Wait for specific element if specified
+            // LinkedIn-specific handling
+            const isLinkedIn = request.url.includes('linkedin.com');
+            if (isLinkedIn) {
+                // Wait a bit for LinkedIn to load
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                // Check if we're blocked or need to login
+                const isBlocked = await page.$('.challenge-page, .authwall, .guest-homepage');
+                if (isBlocked) {
+                    logger.warn('LinkedIn access blocked, using fallback extraction');
+                    // Try to extract what we can from the page title and meta tags
+                    const pageTitle = await page.title();
+                    const metaDescription = await page.$eval('meta[name="description"]', (el: any) => el.content).catch(() => '');
+                    
+                    return {
+                        success: true,
+                        data: {
+                            url: request.url,
+                            title: pageTitle,
+                            extractedText: `${pageTitle}\n${metaDescription}`,
+                            metadata: {
+                                scrapedAt: new Date(),
+                                loadTime: Date.now() - startTime,
+                                pageSize: 0,
+                                statusCode: response?.status() || 200
+                            }
+                        },
+                        processingTime: Date.now() - startTime,
+                        cached: false
+                    };
+                }
+            }
+
+            // Wait for specific element if specified, with fallbacks
             if (request.options?.waitFor) {
-                await page.waitForSelector(request.options.waitFor, { timeout: 10000 });
+                try {
+                    await page.waitForSelector(request.options.waitFor, { timeout: 10000 });
+                } catch (error) {
+                    logger.warn(`Selector wait failed for ${request.options.waitFor}, continuing anyway`);
+                    // Don't throw, continue with extraction
+                }
             }
 
             // Extract data based on selectors

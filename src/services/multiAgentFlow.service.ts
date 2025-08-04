@@ -7,6 +7,8 @@ import { RetryWithBackoff, RetryConfigs } from '../utils/retryWithBackoff';
 import { WebScraperTool } from '../tools/webScraper.tool';
 import { LifeUtilityTool } from '../tools/lifeUtility.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
+import { SmartTagGeneratorService } from './smartTagGenerator.service';
+import { EventEmitter } from 'events';
 
 // Multi-Agent State using LangGraph Annotation
 const MultiAgentStateAnnotation = Annotation.Root({
@@ -93,8 +95,12 @@ export class MultiAgentFlowService {
     private webScraperTool: WebScraperTool;
     private lifeUtilityTool: LifeUtilityTool;
     private trendingDetector: TrendingDetectorService;
+    private smartTagGenerator: SmartTagGeneratorService;
 
     constructor() {
+        // Increase EventEmitter limits to prevent memory leak warnings
+        EventEmitter.defaultMaxListeners = 20;
+        
         this.initializeAgents();
         this.initializeGraph();
         
@@ -102,6 +108,7 @@ export class MultiAgentFlowService {
         this.webScraperTool = new WebScraperTool();
         this.lifeUtilityTool = new LifeUtilityTool();
         this.trendingDetector = new TrendingDetectorService();
+        this.smartTagGenerator = new SmartTagGeneratorService();
         
         // Initialize retry mechanism for multi-agent operations
         this.retryExecutor = RetryWithBackoff.createBedrockRetry({
@@ -569,9 +576,18 @@ Would you like me to help you with anything else, or would you prefer to check t
                 return { agentPath: ['trending_detection_skipped'] };
             }
 
-            logger.info('🔍 Analyzing query for real-time data needs...');
+            const query = lastMessage.content;
+            logger.info(`🔍 Analyzing query with smart tags: "${query}"`);
             
-            const trendingAnalysis = await this.trendingDetector.analyzeQuery(lastMessage.content);
+            // Generate smart tags for better platform detection
+            const smartTags = await this.smartTagGenerator.generateSmartTags(query);
+            const trendingAnalysis = await this.trendingDetector.analyzeQuery(query);
+            
+            logger.info(`🏷️ Smart tags generated:`, {
+                primaryTags: smartTags.primaryTags.map(t => ({ tag: t.tag, confidence: t.confidence, platform: t.platform })),
+                recommendedPlatforms: smartTags.recommendedPlatforms,
+                optimizedQuery: smartTags.searchQuery
+            });
             
             logger.info(`🎯 Trending analysis result:`, {
                 needsWebData: trendingAnalysis.needsRealTimeData,
@@ -580,12 +596,23 @@ Would you like me to help you with anything else, or would you prefer to check t
                 sourcesCount: trendingAnalysis.suggestedSources.length
             });
 
+            // Use smart navigation strategies if available, otherwise fallback to trending analysis
+            const webSources = smartTags.navigationStrategy.length > 0 
+                ? smartTags.navigationStrategy.map(nav => nav.url)
+                : trendingAnalysis.suggestedSources;
+
             return {
-                needsWebData: trendingAnalysis.needsRealTimeData,
-                webSources: trendingAnalysis.suggestedSources,
-                agentPath: [`trending_detected_${trendingAnalysis.queryType}`],
+                needsWebData: trendingAnalysis.needsRealTimeData || smartTags.primaryTags.length > 0,
+                webSources,
+                agentPath: [`smart_detected_${trendingAnalysis.queryType}`],
                 metadata: {
                     ...(state.metadata || {}),
+                    smartTags: {
+                        primaryTags: smartTags.primaryTags,
+                        recommendedPlatforms: smartTags.recommendedPlatforms,
+                        optimizedQuery: smartTags.searchQuery,
+                        navigationStrategies: smartTags.navigationStrategy
+                    },
                     trendingAnalysis: {
                         confidence: trendingAnalysis.confidence,
                         queryType: trendingAnalysis.queryType,
@@ -596,7 +623,7 @@ Would you like me to help you with anything else, or would you prefer to check t
             };
 
         } catch (error) {
-            logger.error('❌ Trending detection failed:', error);
+            logger.error('❌ Smart tag generation failed:', error);
             return { 
                 needsWebData: false,
                 agentPath: ['trending_detection_error'], 
@@ -613,6 +640,7 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             const trendingAnalysis = state.metadata?.trendingAnalysis;
+            const smartTags = state.metadata?.smartTags;
             const sources = state.webSources || [];
             
             if (sources.length === 0) {
@@ -620,7 +648,10 @@ Would you like me to help you with anything else, or would you prefer to check t
                 return { agentPath: ['web_scraping_no_sources'] };
             }
 
-            logger.info(`🕷️ Starting web scraping from ${sources.length} sources...`);
+            logger.info(`🕷️ Starting intelligent web scraping from ${sources.length} sources...`);
+            if (smartTags?.recommendedPlatforms) {
+                logger.info(`🎯 Target platforms: ${smartTags.recommendedPlatforms.join(', ')}`);
+            }
             
             const scrapingResults = [];
             const maxSources = Math.min(sources.length, 3); // Limit to 3 sources for performance
@@ -631,20 +662,24 @@ Would you like me to help you with anything else, or would you prefer to check t
                 try {
                     logger.info(`📄 Scraping: ${source}`);
                     
-                    // Get scraping template for known sites
+                    // Get smart navigation strategy for this source
+                    const navigationStrategy = smartTags?.navigationStrategies?.find((nav: any) => nav.url === source);
+                    
+                    // Get scraping template for known sites or use smart navigation
                     const template = this.trendingDetector.getScrapingTemplate(source);
+                    const smartSelectors = navigationStrategy?.selectors;
                     
                     const scrapingRequest = {
                         operation: 'scrape' as const,
                         url: source,
-                        selectors: template?.selectors || trendingAnalysis?.extractionStrategy?.selectors || {
+                        selectors: smartSelectors || template?.selectors || trendingAnalysis?.extractionStrategy?.selectors || {
                             title: 'h1, .title, .headline',
                             content: '.content, article, .post',
                             links: 'a[href]'
                         },
                         options: {
-                            timeout: 15000, // 15 second timeout per site
-                            javascript: template?.options?.javascript ?? trendingAnalysis?.extractionStrategy?.javascript ?? false,
+                            timeout: 20000, // Increased timeout for complex platforms
+                            javascript: template?.options?.javascript ?? trendingAnalysis?.extractionStrategy?.javascript ?? true, // Default to true for better compatibility
                             waitFor: template?.options?.waitFor || trendingAnalysis?.extractionStrategy?.waitFor,
                             extractText: true
                         },
@@ -745,9 +780,12 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             // Create a concise summary using the web scraping agent
+            const userQuery = state.messages[state.messages.length - 1]?.content?.toString() || '';
+            const isLinkedInQuery = userQuery.toLowerCase().includes('linkedin');
+            
             const summaryPrompt = `You are a helpful assistant. Analyze the following web content and provide a direct, concise answer to the user's query.
 
-User Query: ${state.messages[state.messages.length - 1]?.content}
+User Query: ${userQuery}
 
 Scraped Content:
 ${combinedContent.map((item, index) => `
@@ -755,7 +793,16 @@ Source ${index + 1}: ${item.source}
 Content: ${item.content.substring(0, 2000)}...
 `).join('\n---\n')}
 
-Provide a direct, simple answer that directly addresses the user's question. Focus on the most relevant information only. Keep it concise and to the point.`;
+${isLinkedInQuery ? `
+SPECIAL INSTRUCTIONS FOR LINKEDIN QUERIES:
+- If content mentions login/authentication requirements, acknowledge this but also extract any visible profile information
+- Look for LinkedIn profile URLs, names, job titles, companies, or locations in search results
+- If you find multiple potential matches, list them clearly
+- Provide actionable next steps like "You can search directly on LinkedIn" or "Try connecting on LinkedIn"
+- Be helpful despite access limitations
+` : ''}
+
+Provide a direct, helpful answer that directly addresses the user's question. Focus on the most relevant information and provide actionable guidance. Keep it concise but informative.`;
 
             const summaryResponse = await this.retryExecutor(async () => {
                 return await this.webScrapingAgent.invoke([
@@ -1489,7 +1536,17 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
      */
     async cleanup(): Promise<void> {
         try {
+            // Cleanup web scraper tool
             await this.webScraperTool.cleanup();
+            
+            // Cleanup life utility tool if it has cleanup method
+            if (this.lifeUtilityTool && typeof this.lifeUtilityTool.cleanup === 'function') {
+                await this.lifeUtilityTool.cleanup();
+            }
+            
+            // Reset EventEmitter max listeners to default
+            EventEmitter.defaultMaxListeners = 10;
+            
             logger.info('🧹 Multi-agent flow service cleanup completed');
         } catch (error) {
             logger.error('❌ Cleanup failed:', error);
