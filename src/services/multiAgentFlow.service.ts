@@ -8,6 +8,9 @@ import { WebScraperTool } from '../tools/webScraper.tool';
 import { LifeUtilityTool } from '../tools/lifeUtility.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { SmartTagGeneratorService } from './smartTagGenerator.service';
+import { memoryService, MemoryContext } from './memory.service';
+import { memoryReaderAgent, memoryWriterAgent, MemoryAgentState } from './memoryAgents.service';
+import { userPreferenceService } from './userPreference.service';
 import { EventEmitter } from 'events';
 
 // Multi-Agent State using LangGraph Annotation
@@ -45,6 +48,19 @@ const MultiAgentStateAnnotation = Annotation.Root({
     agentPath: Annotation<string[]>({
         reducer: (current: string[], update: string[]) => current.concat(update),
         default: () => [],
+    }),
+    // Memory-related state
+    memoryContext: Annotation<MemoryAgentState | null>({
+        reducer: (x: MemoryAgentState | null, y: MemoryAgentState | null) => y ?? x,
+        default: () => null,
+    }),
+    personalizedRecommendations: Annotation<string[]>({
+        reducer: (x: string[], y: string[]) => y ?? x ?? [],
+        default: () => [],
+    }),
+    userPreferences: Annotation<any>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => null,
     }),
     riskLevel: Annotation<string>({
         reducer: (x: string, y: string) => y ?? x,
@@ -159,21 +175,26 @@ export class MultiAgentFlowService {
             .addNode("life_utility", this.lifeUtilityNode.bind(this))
             .addNode("web_scraper", this.webScrapingNode.bind(this))
             .addNode("content_summarizer", this.contentSummarizerNode.bind(this))
+            .addNode("memory_reader", this.memoryReaderNode.bind(this))
+            .addNode("memory_writer", this.memoryWriterNode.bind(this))
             .addNode("master_agent", this.masterAgentNode.bind(this))
             .addNode("cost_optimizer", this.costOptimizerNode.bind(this))
             .addNode("quality_analyst", this.qualityAnalystNode.bind(this))
             .addNode("semantic_cache", this.semanticCacheNode.bind(this))
             .addNode("failure_recovery", this.failureRecoveryNode.bind(this))
-            .addEdge("__start__", "prompt_analyzer")
+            // Start with memory reading, then prompt analysis
+            .addEdge("__start__", "memory_reader")
+            .addEdge("memory_reader", "prompt_analyzer")
             .addConditionalEdges("prompt_analyzer", this.routeAfterPromptAnalysis.bind(this), ["trending_detector", "semantic_cache", "master_agent"])
             .addConditionalEdges("trending_detector", this.routeAfterTrendingDetection.bind(this), ["life_utility", "web_scraper", "semantic_cache", "master_agent"])
             .addConditionalEdges("web_scraper", this.routeAfterWebScraping.bind(this), ["content_summarizer", "master_agent"])
             .addConditionalEdges("content_summarizer", this.routeAfterContentSummarization.bind(this), ["master_agent", "__end__"])
             .addConditionalEdges("semantic_cache", this.routeAfterCache.bind(this), ["master_agent", "__end__"])
             .addConditionalEdges("master_agent", this.routeFromMaster.bind(this), ["cost_optimizer", "quality_analyst", "failure_recovery", "__end__"])
-            .addEdge("life_utility", "__end__")
+            .addEdge("life_utility", "memory_writer")
             .addEdge("cost_optimizer", "quality_analyst")
-            .addEdge("quality_analyst", "__end__")
+            .addEdge("quality_analyst", "memory_writer")
+            .addEdge("memory_writer", "__end__")
             .addEdge("failure_recovery", "__end__");
 
         this.graph = workflow.compile();
@@ -1528,6 +1549,149 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         // Keep only last 1000 entries to prevent memory issues
         if (this.costHistory.length > 1000) {
             this.costHistory = this.costHistory.slice(-1000);
+        }
+    }
+
+    /**
+     * Memory Reader Node - Retrieves user memory and personalizes the experience
+     */
+    private async memoryReaderNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        try {
+            logger.info(`🧠 Memory Reader processing for user: ${state.userId}`);
+
+            // Create memory agent state
+            const memoryState: MemoryAgentState = {
+                userId: state.userId,
+                conversationId: state.conversationId,
+                query: state.messages[state.messages.length - 1]?.content?.toString() || '',
+                metadata: state.metadata
+            };
+
+            // Process memory reading
+            const memoryResult = await memoryReaderAgent.processMemoryRead(memoryState);
+
+            // Get personalized model recommendation
+            const recommendedModel = await userPreferenceService.getRecommendedModel(
+                state.userId, 
+                memoryState.query
+            );
+
+            // Get personalized chat mode
+            const recommendedChatMode = await userPreferenceService.getRecommendedChatMode(state.userId);
+
+            // Update state with memory context
+            const updatedMemoryContext: MemoryAgentState = {
+                ...memoryState,
+                ...memoryResult
+            };
+
+            logger.info(`✅ Memory Reader completed for user: ${state.userId}`);
+
+            return {
+                memoryContext: updatedMemoryContext,
+                personalizedRecommendations: memoryResult.personalizedRecommendations || [],
+                userPreferences: memoryResult.userPreferences,
+                chatMode: recommendedChatMode, // Override chat mode with user preference
+                agentPath: [...state.agentPath, 'memory_reader'],
+                metadata: {
+                    ...state.metadata,
+                    memoryProcessed: true,
+                    recommendedModel,
+                    hasMemoryContext: (memoryResult.memoryInsights?.length || 0) > 0,
+                    hasSimilarConversations: (memoryResult.similarConversations?.length || 0) > 0,
+                    securityFlags: memoryResult.securityFlags || []
+                }
+            };
+        } catch (error) {
+            logger.error('❌ Memory Reader failed:', error);
+            return {
+                memoryContext: null,
+                personalizedRecommendations: [],
+                agentPath: [...state.agentPath, 'memory_reader_error'],
+                metadata: {
+                    ...state.metadata,
+                    memoryError: error instanceof Error ? error.message : 'Memory processing failed'
+                }
+            };
+        }
+    }
+
+    /**
+     * Memory Writer Node - Stores conversation memory and learns from interactions
+     */
+    private async memoryWriterNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        try {
+            logger.info(`💾 Memory Writer processing for user: ${state.userId}`);
+
+            // Get the final response from messages
+            const finalMessage = state.messages[state.messages.length - 1];
+            const response = finalMessage?.content?.toString() || '';
+
+            // Create memory context for storage
+            const memoryContext: MemoryContext = {
+                userId: state.userId,
+                conversationId: state.conversationId,
+                query: state.messages[0]?.content?.toString() || '', // Original query
+                response: response,
+                metadata: {
+                    ...state.metadata,
+                    agentPath: state.agentPath,
+                    chatMode: state.chatMode,
+                    costBudget: state.costBudget,
+                    optimizationsApplied: state.optimizationsApplied,
+                    cacheHit: state.cacheHit,
+                    riskLevel: state.riskLevel,
+                    modelUsed: state.metadata?.recommendedModel || 'amazon.nova-pro-v1:0',
+                    responseTime: Date.now() - (state.metadata?.startTime || Date.now()),
+                    timestamp: new Date()
+                }
+            };
+
+            // Store conversation memory
+            await memoryService.storeConversationMemory(memoryContext);
+
+            // Create memory agent state for learning
+            const memoryAgentState: MemoryAgentState = {
+                userId: state.userId,
+                conversationId: state.conversationId,
+                query: memoryContext.query,
+                response: memoryContext.response,
+                metadata: memoryContext.metadata,
+                securityFlags: state.metadata?.securityFlags || []
+            };
+
+            // Process memory writing (learning and storage)
+            const memoryWriteResult = await memoryWriterAgent.processMemoryWrite(memoryAgentState);
+
+            // Learn from the interaction
+            await userPreferenceService.learnFromInteraction(state.userId, {
+                query: memoryContext.query,
+                modelUsed: memoryContext.metadata.modelUsed,
+                chatMode: state.chatMode,
+                responseTime: memoryContext.metadata.responseTime,
+                cost: state.metadata?.totalCost || 0
+            });
+
+            logger.info(`✅ Memory Writer completed for user: ${state.userId}`);
+
+            return {
+                agentPath: [...state.agentPath, 'memory_writer'],
+                metadata: {
+                    ...state.metadata,
+                    memoryStored: true,
+                    memoryOperations: memoryWriteResult.memoryOperations || [],
+                    learningCompleted: true
+                }
+            };
+        } catch (error) {
+            logger.error('❌ Memory Writer failed:', error);
+            return {
+                agentPath: [...state.agentPath, 'memory_writer_error'],
+                metadata: {
+                    ...state.metadata,
+                    memoryWriteError: error instanceof Error ? error.message : 'Memory storage failed'
+                }
+            };
         }
     }
 

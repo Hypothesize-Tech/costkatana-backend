@@ -19,3 +19,4 @@ export { ThreatLog, IThreatLog } from './ThreatLog';
 export { RequestFeedback, IRequestFeedback } from './RequestFeedback';
 export { RequestScore, IRequestScore } from './RequestScore';
 export { TrainingDataset, ITrainingDataset } from './TrainingDataset';
+export { UserMemory, IUserMemory, ConversationMemory, IConversationMemory, UserPreference, IUserPreference, MemoryAnalytics, IMemoryAnalytics } from './Memory';
