@@ -67,6 +67,13 @@ export class TrendingDetectorService {
         /travel\s+to|flight\s+to|train\s+to|book\s+ticket/i,
         /price\s+of|cost\s+of|track\s+price|price\s+drop/i,
         /identify\s+this|what\s+is\s+this|reverse\s+search/i,
+        
+        // Shopping/product queries
+        /do\s+you\s+have|available\s+on|find\s+me|looking\s+for/i,
+        /buy|purchase|shop|order|get\s+me/i,
+        /microphone|mic|headphones|laptop|phone|camera/i,
+        /under\s+\d+|below\s+\d+|less\s+than\s+\d+|budget\s+of/i,
+        /on\s+amazon|on\s+flipkart|on\s+myntra|e-commerce/i,
     ];
 
     // Known sources for different content types
@@ -78,6 +85,7 @@ export class TrendingDetectorService {
         ],
         pricing: [
             'https://www.amazon.com/',
+            'https://www.amazon.in/',
             'https://www.flipkart.com/',
             'https://www.ebay.com/'
         ],
@@ -245,7 +253,7 @@ Respond with JSON:
         const queryLower = query.toLowerCase();
         
         if (/trending|popular|hot|viral|top\s+\d+/.test(queryLower)) return 'trending';
-        if (/price|cost|deal|discount|sale|track\s+price/.test(queryLower)) return 'shopping';
+        if (/price|cost|deal|discount|sale|track\s+price|do\s+you\s+have|available\s+on|buy|purchase|shop|order|microphone|mic|headphones|laptop|phone|camera|under\s+\d+|below\s+\d+|less\s+than\s+\d+|budget\s+of|on\s+amazon|on\s+flipkart/.test(queryLower)) return 'shopping';
         if (/weather|temperature|forecast|climate/.test(queryLower)) return 'weather';
         if (/symptoms|headache|fever|cough|pain|health|medical/.test(queryLower)) return 'health';
         if (/travel|flight|train|bus|book\s+ticket|trip/.test(queryLower)) return 'travel';
@@ -267,13 +275,16 @@ Respond with JSON:
                 sources = [...this.sourceMapping.trending_tech];
                 break;
             case 'pricing':
+            case 'shopping':
                 sources = [...this.sourceMapping.pricing];
                 // Add specific e-commerce sites based on query
                 if (queryLower.includes('flipkart')) {
                     sources.unshift('https://www.flipkart.com/');
                 }
-                if (queryLower.includes('amazon')) {
+                if (queryLower.includes('amazon.com')) {
                     sources.unshift('https://www.amazon.com/');
+                } else if (queryLower.includes('amazon')) {
+                    sources.unshift('https://www.amazon.in/');
                 }
                 break;
             case 'weather':
@@ -370,14 +381,16 @@ Respond with JSON:
                 };
 
             case 'pricing':
+            case 'shopping':
                 return {
                     selectors: {
                         ...baseSelectors,
-                        title: '.product-title, .item-title, h1',
-                        prices: '.price, .cost, .amount, .price-current',
-                        images: '.product-image img, .item-image img'
+                        title: '.product-title, .item-title, h1, [data-cy="title"], .s-title-instructions-style h2',
+                        prices: '.price, .cost, .amount, .price-current, .a-price-whole, .a-price, ._30jeq3',
+                        images: '.product-image img, .item-image img, .s-image',
+                        content: '.product-description, .item-description, .feature-bullets, .aplus-v2'
                     },
-                    waitFor: '.price, .product-title',
+                    waitFor: '.price, .product-title, .s-result-item',
                     javascript: true
                 };
 
