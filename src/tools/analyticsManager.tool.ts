@@ -624,7 +624,7 @@ export class AnalyticsManagerTool extends Tool {
 
     private async getTokenUsage(operation: AnalyticsOperation): Promise<string> {
         try {
-            const timeRange = operation.timeRange ? 
+            let timeRange = operation.timeRange ? 
                 this.getTimeRange(operation.timeRange) : 
                 {
                     start: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000), // 90 days ago
@@ -632,6 +632,99 @@ export class AnalyticsManagerTool extends Tool {
                 };
             
             const userId = operation.userId;
+
+            // Debug logging
+            console.log('🔍 Token Usage Query Debug:', {
+                userId,
+                originalTimeRange: timeRange,
+                userIdType: typeof userId,
+                isValidObjectId: require('mongoose').Types.ObjectId.isValid(userId)
+            });
+
+            // First, let's check if there's ANY usage data for this user
+            const totalUserUsage = await Usage.countDocuments({
+                userId: new (require('mongoose')).Types.ObjectId(userId)
+            });
+
+            console.log(`📊 Total usage records for user ${userId}: ${totalUserUsage}`);
+
+            if (totalUserUsage === 0) {
+                return JSON.stringify({
+                    success: true,
+                    operation: 'token_usage',
+                    data: {
+                        message: "I don't see any token usage records for your account.",
+                        reasons: [
+                            "You're new to the platform and haven't made API calls yet",
+                            "Your API integration might not be properly set up",
+                            "Usage tracking might not be enabled"
+                        ],
+                        suggestions: [
+                            "Try making a test API call to generate usage data",
+                            "Verify your API integration is working correctly",
+                            "Check if usage tracking is enabled in your settings"
+                        ],
+                        nextSteps: "Would you like me to help you set up API tracking?",
+                        debugInfo: {
+                            totalRecords: totalUserUsage,
+                            userId: userId
+                        }
+                    }
+                }, null, 2);
+            }
+
+            // Get the actual data range for this user
+            const dataRangeQuery = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: new (require('mongoose')).Types.ObjectId(userId)
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        earliest: { $min: '$createdAt' },
+                        latest: { $max: '$createdAt' },
+                        totalRecords: { $sum: 1 }
+                    }
+                }
+            ]);
+
+            const userDataRange = dataRangeQuery[0];
+            console.log('📅 User data range:', userDataRange);
+
+            // Check if requested time range overlaps with user's data
+            const hasOverlap = timeRange.end >= userDataRange.earliest && timeRange.start <= userDataRange.latest;
+            
+            if (!hasOverlap) {
+                console.log('⚠️ No overlap between requested range and user data. Adjusting...');
+                
+                // If no overlap, use the user's actual data range or recent data
+                const now = new Date();
+                const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+                
+                // Use the most recent 30 days of user data, or their full range if less than 30 days
+                timeRange = {
+                    start: userDataRange.latest > thirtyDaysAgo ? userDataRange.earliest : thirtyDaysAgo,
+                    end: userDataRange.latest
+                };
+                
+                console.log('🔄 Adjusted time range:', timeRange);
+            }
+
+            // Get sample usage records to understand the data structure
+            const sampleUsage = await Usage.find({
+                userId: new (require('mongoose')).Types.ObjectId(userId)
+            }).limit(3).sort({ createdAt: -1 }).lean();
+
+            console.log('📋 Sample usage records:', sampleUsage.map(u => ({
+                id: u._id,
+                model: u.model,
+                service: u.service,
+                cost: u.cost,
+                totalTokens: u.totalTokens,
+                createdAt: u.createdAt
+            })));
 
             const tokenAnalysis = await Usage.aggregate([
                 {
@@ -676,23 +769,37 @@ export class AnalyticsManagerTool extends Tool {
 
             const tokenData = tokenAnalysis[0];
 
+            console.log('🔍 Token Analysis Result:', {
+                tokenAnalysisLength: tokenAnalysis.length,
+                tokenData,
+                totalUserUsage,
+                adjustedTimeRange: timeRange,
+                userDataRange: userDataRange
+            });
+
             if (!tokenData || tokenData.totalTokens === 0) {
+                console.log('⚠️ No data found in adjusted time range. This should not happen after range adjustment.');
+                
+                // This should rarely happen now due to our time range adjustment above
+                // But if it does, provide a helpful fallback
                 return JSON.stringify({
                     success: true,
                     operation: 'token_usage',
                     data: {
-                        message: "I don't see any token usage in your recent history. This could mean:",
-                        reasons: [
-                            "You're new to the platform and haven't made API calls yet",
-                            "Your API calls are in a different time period",
+                        message: `I couldn't find usage data in the expected time range. Let me check your full usage history:`,
+                        debugInfo: {
+                            totalRecords: totalUserUsage,
+                            requestedRange: operation.timeRange,
+                            adjustedRange: timeRange,
+                            userDataRange: userDataRange,
+                            userId: userId
+                        },
+                        suggestions: [
+                            "Let me try to get your complete usage history",
+                            "There might be a data processing delay",
                             "Your usage data might be in a different format"
                         ],
-                        suggestions: [
-                            "Try making a test API call to generate usage data",
-                            "Check if you have data from previous months",
-                            "Verify your API integration is working correctly"
-                        ],
-                        nextSteps: "Would you like me to help you set up API tracking or check for data in other time periods?"
+                        nextSteps: "Let me fetch your complete usage data instead."
                     }
                 }, null, 2);
             }
@@ -723,10 +830,31 @@ export class AnalyticsManagerTool extends Tool {
                 }
             };
 
+            // Check if we adjusted the time range
+            const originalTimeRange = operation.timeRange ? this.getTimeRange(operation.timeRange) : null;
+            const wasAdjusted = originalTimeRange && (
+                Math.abs(originalTimeRange.start.getTime() - timeRange.start.getTime()) > 1000 ||
+                Math.abs(originalTimeRange.end.getTime() - timeRange.end.getTime()) > 1000
+            );
+
+            let message = `Here's your token usage for ${timeRange.start.toDateString()} to ${timeRange.end.toDateString()}:`;
+            
+            if (wasAdjusted) {
+                message = `I adjusted the time range to show your available data (${timeRange.start.toDateString()} to ${timeRange.end.toDateString()}):`;
+            }
+
             return JSON.stringify({
                 success: true,
                 operation: 'token_usage',
-                data: usage,
+                data: {
+                    ...usage,
+                    message: message,
+                    timeRangeAdjusted: wasAdjusted,
+                    originalRequest: originalTimeRange ? {
+                        start: originalTimeRange.start,
+                        end: originalTimeRange.end
+                    } : null
+                },
                 summary: `You've used ${tokenData.totalTokens.toLocaleString()} tokens across ${tokenData.totalRequests} requests, costing $${tokenData.totalCost.toFixed(4)}`
             }, null, 2);
 

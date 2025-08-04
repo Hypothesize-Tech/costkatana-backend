@@ -8,7 +8,11 @@ import { ProjectManagerTool } from "../tools/projectManager.tool";
 import { ModelSelectorTool } from "../tools/modelSelector.tool";
 import { AnalyticsManagerTool } from "../tools/analyticsManager.tool";
 import { OptimizationManagerTool } from "../tools/optimizationManager.tool";
+import { WebScraperTool } from "../tools/webScraper.tool";
+import { LifeUtilityTool } from "../tools/lifeUtility.tool";
 import { vectorStoreService } from "./vectorStore.service";
+import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
+import { logger } from "../utils/logger";
 
 export interface AgentQuery {
     userId: string;
@@ -33,6 +37,7 @@ export interface AgentResponse {
         tokensUsed?: number;
         sources?: string[];
         executionTime?: number;
+        errorType?: string;
     };
     thinking?: {
         title: string;
@@ -51,6 +56,8 @@ export class AgentService {
     private initialized = false;
     private model: ChatBedrockConverse;
     private tools: Tool[];
+    private circuitBreaker: <T>(fn: () => Promise<T>) => Promise<T>;
+    private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
 
     constructor() {
         // Initialize Nova Pro for most tasks (efficient and cost-effective)
@@ -79,8 +86,19 @@ export class AgentService {
             new ProjectManagerTool(),          // Project CRUD operations and management
             new ModelSelectorTool(),           // Model recommendations and testing
             new AnalyticsManagerTool(),        // Complete analytics and reporting
-            new OptimizationManagerTool()      // Cost optimization and recommendations
+            new OptimizationManagerTool(),     // Cost optimization and recommendations
+            new WebScraperTool(),              // Real-time web scraping and data extraction
+            new LifeUtilityTool()              // Life utility services (weather, health, travel, price tracking)
         ];
+
+        // Initialize retry mechanism with circuit breaker
+        this.circuitBreaker = RetryWithBackoff.createCircuitBreaker(5, 60000); // 5 failures, 1 min reset
+        this.retryExecutor = RetryWithBackoff.createBedrockRetry({
+            ...RetryConfigs.bedrock,
+            onRetry: (error: Error, attempt: number) => {
+                logger.warn(`🔄 Agent retry attempt ${attempt}: ${error.message}`);
+            }
+        });
     }
 
     /**
@@ -97,73 +115,160 @@ export class AgentService {
 
             // Create the agent prompt template
             const prompt = ChatPromptTemplate.fromMessages([
-                SystemMessagePromptTemplate.fromTemplate(`Answer the following questions as best you can. You have access to the following tools:
+                SystemMessagePromptTemplate.fromTemplate(`You are an AI Cost Optimization Agent. Answer user questions using available tools.
 
-{tools}
+Available tools: {tools}
 
-Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-CRITICAL FORMATTING RULES:
-1. Action should contain ONLY the tool name (e.g., "project_manager")
-2. Action Input should contain ONLY the JSON parameters on a single line
-3. DO NOT include "Observation:" in your response - the system adds this automatically
-4. JSON must be valid and on one line with no line breaks
-5. Stop after Action Input and wait for the tool result
-
-Example:
-Action: project_manager
-Action Input: {{"operation": "create", "userId": "123", "projectData": {{"name": "Test"}}}}
-
-You are an AI Cost Optimization Agent with comprehensive capabilities:
-1. 🔍 **Advanced Cost Analysis**: Deep usage analysis, cost trends, anomaly detection, and forecasting
-2. 📊 **Complete Analytics**: Dashboard analytics, model performance analysis, comparative reports
-3. 📚 **Knowledge Search**: Access documentation, best practices, and optimization guides
-4. 💡 **Intelligent Optimization**: Automated cost optimization, model recommendations, prompt optimization
-5. 🎯 **Strategic Planning**: Cost forecasting, budget planning, and ROI analysis
-6. 🚀 **Full Project Management**: Complete project lifecycle management through conversation
-7. 🤖 **Smart Model Selection**: AI-powered model recommendations with testing and validation
-8. 📈 **Real-time Monitoring**: Usage monitoring, performance tracking, and alert management
-9. 🔧 **Bulk Operations**: Bulk analysis, optimization, and management across multiple projects
-
-**Key Guidelines:**
-                - ALWAYS query user's real data - never give generic answers for ANY question
-                - Use multiple tools together to provide comprehensive answers
-                - Always provide specific numbers, percentages, and actionable insights FROM THE USER'S DATA
-                - Start with user's REAL data, then provide specific, actionable guidance
-                - If no data is found, expand time ranges and query differently
-                - When data is insufficient, ask clarifying questions to better help the user
-                - Be interactive and conversational - ask follow-up questions when needed
-
-**TOOL USAGE GUIDELINES:**
-🔍 **COST/SPENDING/MODEL QUERIES** → mongodb_reader + analytics_manager
-📊 **USAGE/ANALYTICS/INSIGHTS** → analytics_manager + mongodb_reader  
-🎯 **TOKEN USAGE QUERIES** → analytics_manager (operation: token_usage)
-🎯 **OPTIMIZATION/EFFICIENCY** → optimization_manager + mongodb_reader
-🚀 **PROJECT SETUP/MANAGEMENT** → project_manager + model_selector
-🤖 **MODEL SELECTION/COMPARISON** → model_selector + analytics_manager
-⚙️ **API/SETTINGS/CONFIG** → mongodb_reader + knowledge_base_search
-📚 **HELP/GUIDANCE/EDUCATION** → knowledge_base_search + mongodb_reader
-
-**SPECIFIC QUERY ROUTING:**
-- "token usage" / "tokens" / "current usage" → analytics_manager with operation: "token_usage"
-- "spending" / "cost" / "money" → analytics_manager with operation: "dashboard"
-- "model performance" / "which models" → analytics_manager with operation: "model_performance"
-- "create project" / "setup project" → project_manager with operation: "create"
-
-Current user context: {user_context}
-
-Begin!
+MANDATORY FORMAT - You MUST follow this exact sequence:
 
 Question: {input}
+Thought: I need to [describe what data you need]
+Action: [EXACTLY one tool name from: {tool_names}]
+Action Input: [Valid JSON on single line]
+Observation: [System will add this automatically - DO NOT WRITE IT]
+Thought: Based on the observation, I now have [describe what you learned]. I can provide a complete answer.
+Final Answer: [Your complete response to the user]
+
+CRITICAL STOPPING RULES - YOU MUST FOLLOW THESE EXACTLY:
+1. After getting ANY successful tool result, you MUST immediately provide "Final Answer:"
+2. Do NOT repeat the same tool call multiple times
+3. Do NOT continue thinking after you have data to answer the question
+4. If a tool returns data, that means you have enough information to answer
+5. NEVER call the same tool with the same parameters more than once
+6. If you get "Invalid operation", try ONE different operation, then provide Final Answer
+
+COMPREHENSIVE TOOL USAGE RULES - FOLLOW THESE EXACTLY:
+
+🔍 TOKEN USAGE QUERIES → analytics_manager with "token_usage":
+- "Token usage", "tokens", "token consumption", "token breakdown"
+- "analyticsType": "Token usage"
+- "Compare my Claude vs GPT tokens"
+- "How many tokens did I use?"
+- "Token costs by model"
+
+💰 COST & SPENDING QUERIES → analytics_manager with "dashboard":
+- "Cost breakdown", "spending", "costs", "budget analysis"
+- "How much did I spend?"
+- "Cost comparison", "expense report"
+- "Compare my Claude vs GPT costs"
+- "Monthly spending"
+
+⚡ MODEL PERFORMANCE QUERIES → analytics_manager with "model_performance":
+- "Model performance", "model comparison", "model efficiency"
+- "Which model is fastest?", "accuracy comparison"
+- "Best performing models"
+- "Model benchmarks"
+
+📊 USAGE PATTERNS QUERIES → analytics_manager with "usage_patterns":
+- "Usage patterns", "usage trends", "activity patterns"
+- "When do I use AI most?", "peak usage times"
+- "Usage frequency", "request patterns"
+
+📈 COST TRENDS QUERIES → analytics_manager with "cost_trends":
+- "Cost trends", "spending trends", "cost over time"
+- "Monthly cost comparison", "cost growth"
+- "Spending patterns", "budget trends"
+
+👤 USER STATISTICS QUERIES → analytics_manager with "user_stats":
+- "User stats", "my statistics", "account summary"
+- "Overall usage summary", "total activity"
+- "Account analytics"
+
+🔬 PROJECT ANALYTICS QUERIES → analytics_manager with "project_analytics":
+- "Project analytics", "project breakdown", "project costs"
+- "Project performance", "project usage"
+- "Specific project analysis"
+
+⚠️ ANOMALY DETECTION QUERIES → analytics_manager with "anomaly_detection":
+- "Unusual spending", "cost spikes", "anomalies"
+- "Unexpected usage", "cost alerts"
+- "Spending anomalies"
+
+🔮 FORECASTING QUERIES → analytics_manager with "forecasting":
+- "Cost forecast", "future spending", "predictions"
+- "Budget projections", "usage predictions"
+- "Expected costs"
+
+📊 COMPARATIVE ANALYSIS QUERIES → analytics_manager with "comparative_analysis":
+- "Compare periods", "month over month", "year over year"
+- "Before vs after", "comparison analysis"
+- "Period comparison"
+
+🎯 SPECIAL CASES:
+- "All metrics" + "Token usage" → use "token_usage"
+- "All metrics" + "Cost breakdown" → use "dashboard"  
+- "All metrics" + "Model performance" → use "model_performance"
+- "Summary overview" + any specific type → use that specific operation
+
+EXAMPLES FOR EACH OPERATION TYPE:
+
+EXAMPLE 1 - Token Usage Query:
+Question: Execute analytics_manager with data: {{"operation":"analyze","userId":"user123","analyticsType":"Token usage","timeframe":"Last month","format":"Summary overview","specificProjects":"all projects"}}
+Thought: The user is asking for token usage analytics. I need to use the token_usage operation.
+Action: analytics_manager
+Action Input: {{"operation": "token_usage", "userId": "user123", "timeRange": "last month"}}
+Observation: {{"success": true, "operation": "token_usage", "data": {{"summary": {{"totalTokens": 150000, "totalCost": 25.50}}, "message": "Here's your token usage for last month"}}}}
+Thought: Based on the observation, I have the user's token usage data. I can provide a complete answer.
+Final Answer: Here's your token usage for last month: You used 150,000 tokens with a total cost of $25.50. This shows active usage of the platform.
+
+EXAMPLE 2 - Cost Breakdown Query:
+Question: Compare my Claude vs GPT actual costs and performance
+Thought: The user is asking for cost comparison between models. I need to use the dashboard operation for cost data.
+Action: analytics_manager
+Action Input: {{"operation": "dashboard", "userId": "user123", "timeRange": "last month"}}
+Observation: {{"success": true, "operation": "dashboard_analytics", "data": {{"summary": {{"totalCost": 125.50, "modelBreakdown": [{{"model": "claude-3", "cost": 75.30}}, {{"model": "gpt-4", "cost": 50.20}}]}}, "message": "Here's your cost breakdown"}}}}
+Thought: Based on the observation, I have the user's cost comparison data. I can provide a complete answer.
+Final Answer: Here's your Claude vs GPT cost comparison: Claude-3 cost you $75.30 while GPT-4 cost $50.20 last month. Total spending was $125.50.
+
+EXAMPLE 3 - Model Performance Query:
+Question: Which AI model performs best for my use case?
+Thought: The user is asking about model performance comparison. I need to use the model_performance operation.
+Action: analytics_manager
+Action Input: {{"operation": "model_performance", "userId": "user123", "timeRange": "last month"}}
+Observation: {{"success": true, "operation": "model_performance", "data": {{"models": [{{"model": "claude-3", "avgResponseTime": 1.2, "successRate": 98.5}}], "message": "Here's your model performance data"}}}}
+Thought: Based on the observation, I have the user's model performance data. I can provide a complete answer.
+Final Answer: Based on your usage, Claude-3 shows the best performance with 1.2s average response time and 98.5% success rate.
+
+EXAMPLE 4 - Usage Patterns Query:
+Question: Show me my usage patterns for the last month
+Thought: The user is asking for usage patterns analysis. I need to use the usage_patterns operation.
+Action: analytics_manager
+Action Input: {{"operation": "usage_patterns", "userId": "user123", "timeRange": "last month"}}
+Observation: {{"success": true, "operation": "usage_patterns", "data": {{"patterns": {{"peakHours": "2-4 PM", "avgDaily": 45}}, "message": "Here are your usage patterns"}}}}
+Thought: Based on the observation, I have the user's usage patterns data. I can provide a complete answer.
+Final Answer: Your usage patterns show peak activity between 2-4 PM with an average of 45 requests per day last month.
+
+EXAMPLE - Invalid Operation Recovery:
+Question: Execute analytics_manager with invalid operation
+Thought: I need to get analytics data.
+Action: analytics_manager
+Action Input: {{"operation": "analyze", "userId": "user123"}}
+Observation: Invalid operation: Check operation type and required fields.
+Thought: The operation was invalid. Let me try with a valid operation.
+Action: analytics_manager
+Action Input: {{"operation": "dashboard", "userId": "user123"}}
+Observation: {{"success": true, "data": {{"totalRequests": 100}}}}
+Thought: Now I have valid data. I can provide a complete answer.
+Final Answer: I found your analytics data showing 100 total requests. The initial operation type was invalid, but I was able to retrieve your dashboard analytics successfully.
+
+Current user: {user_context}
+
+Question: {input}
+
+🚨 CRITICAL OPERATION MAPPING RULES:
+- "Token usage" / "analyticsType": "Token usage" → MUST use "token_usage" operation
+- "Cost breakdown" / "Compare costs" → MUST use "dashboard" operation  
+- "Model performance" / "Which model is best" → MUST use "model_performance" operation
+- "Usage patterns" / "When do I use most" → MUST use "usage_patterns" operation
+- "Cost trends" / "Spending over time" → MUST use "cost_trends" operation
+- "User stats" / "Account summary" → MUST use "user_stats" operation
+- "Project analytics" / "Project breakdown" → MUST use "project_analytics" operation
+- "Anomalies" / "Unusual spending" → MUST use "anomaly_detection" operation
+- "Forecast" / "Future costs" → MUST use "forecasting" operation
+- "Compare periods" / "Month over month" → MUST use "comparative_analysis" operation
+
+NEVER use "dashboard" for token-related queries! NEVER use "token_usage" for cost-related queries!
+
 Thought:{agent_scratchpad}`),
                 HumanMessagePromptTemplate.fromTemplate("{input}")
             ]);
@@ -180,8 +285,10 @@ Thought:{agent_scratchpad}`),
                 agent,
                 tools: this.tools,
                 verbose: process.env.NODE_ENV === 'development',
-                maxIterations: 10,
-                earlyStoppingMethod: "generate",
+                maxIterations: 3, // Even more aggressive to prevent loops
+                earlyStoppingMethod: "force",
+                returnIntermediateSteps: true, // Need this to extract tool outputs
+                handleParsingErrors: true, // Better error handling
             });
 
             this.initialized = true;
@@ -214,21 +321,65 @@ Thought:{agent_scratchpad}`),
             // Generate thinking process for cost-related queries
             const thinking = this.generateThinkingProcess(queryData.query);
 
-            // Execute the query
-            const result = await this.agentExecutor.invoke({
-                input: queryData.query,
-                user_context: userContext
-            });
+            // Execute the query with retry, circuit breaker, and timeout
+            const result = await Promise.race([
+                this.circuitBreaker(async () => {
+                    return await this.retryExecutor(async () => {
+                        return await this.agentExecutor!.invoke({
+                            input: queryData.query,
+                            user_context: userContext
+                        });
+                    });
+                }),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Agent execution timeout after 60 seconds')), 60000)
+                )
+            ]) as any;
 
             const executionTime = Date.now() - startTime;
 
+            // Handle retry wrapper result structure
+            let actualResult = result;
+            if (result.success && result.result) {
+                // This is wrapped by retry mechanism, extract the actual result
+                actualResult = result.result;
+                console.log('🔄 Detected retry wrapper, extracting actual result');
+            }
+            
+            // Process the result to ensure we always have a proper response
+            let finalResponse = actualResult.output;
+            
+            // Debug logging to understand what we got from the agent
+            console.log('🔍 Agent Result Debug:', {
+                isWrapped: result.success && result.result,
+                hasOutput: !!actualResult.output,
+                outputLength: actualResult.output?.length || 0,
+                outputPreview: actualResult.output?.substring(0, 200) + '...',
+                hasIntermediateSteps: !!actualResult.intermediateSteps,
+                stepsCount: actualResult.intermediateSteps?.length || 0,
+                resultKeys: Object.keys(result),
+                actualResultKeys: Object.keys(actualResult)
+            });
+            
+            // If the agent hit max iterations without a proper Final Answer, extract useful info
+            if (!finalResponse || finalResponse.includes('Agent stopped due to max iterations')) {
+                console.log('⚠️ Agent output is falsy or contains max iterations, extracting from intermediate steps...');
+                finalResponse = this.extractUsefulResponse(actualResult, queryData.query);
+                console.log('📋 Extracted response:', {
+                    length: finalResponse?.length || 0,
+                    preview: finalResponse?.substring(0, 200) + '...'
+                });
+            } else {
+                console.log('✅ Agent provided proper output directly');
+            }
+
             return {
                 success: true,
-                response: result.output,
+                response: finalResponse,
                 metadata: {
                     executionTime,
                     // Note: Token counting would require additional setup with Bedrock
-                    sources: this.extractSources(result)
+                    sources: this.extractSources(actualResult)
                 },
                 thinking: thinking
             };
@@ -236,13 +387,351 @@ Thought:{agent_scratchpad}`),
         } catch (error) {
             console.error('Agent query failed:', error);
             
+            // Handle specific error types
+            let errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            let fallbackResponse = '';
+            
+            // Check if it's a max iterations or timeout error
+            if (errorMessage.includes('max iterations') || errorMessage.includes('Agent stopped due to max iterations')) {
+                errorMessage = 'The query was complex and took longer than expected to process.';
+                fallbackResponse = 'I was working on analyzing your data but the query became too complex. Could you please rephrase your question to be more specific? For example:\n\n' +
+                    '• "Show my spending for this month"\n' +
+                    '• "What are my top 3 most expensive models?"\n' +
+                    '• "How many tokens did I use last week?"';
+            } else if (errorMessage.includes('timeout')) {
+                errorMessage = 'The query took too long to process and timed out.';
+                fallbackResponse = 'Your request timed out after 60 seconds. Please try a simpler, more specific question. For example:\n\n' +
+                    '• "What did I spend this month?"\n' +
+                    '• "Show my top 5 models by cost"\n' +
+                    '• "How many requests did I make today?"';
+            }
+            
             return {
                 success: false,
-                error: error instanceof Error ? error.message : 'Unknown error occurred',
+                error: errorMessage,
+                response: fallbackResponse,
                 metadata: {
-                    executionTime: Date.now() - startTime
+                    executionTime: Date.now() - startTime,
+                    errorType: errorMessage.includes('max iterations') ? 'max_iterations' : 'general_error'
                 }
             };
+        }
+    }
+
+    /**
+     * Extract useful response from agent result even if it hit max iterations
+     */
+    private extractUsefulResponse(result: any, originalQuery: string): string {
+        try {
+            // Look for tool outputs in the agent's intermediate steps or logs
+            const intermediateSteps = result.intermediateSteps || [];
+            const logs = result.log || '';
+            
+            // Try to find the last tool output
+            let lastToolOutput = null;
+            
+            // Check intermediate steps for tool outputs
+            for (const step of intermediateSteps) {
+                if (step.observation) {
+                    try {
+                        // Try to parse the observation as JSON
+                        lastToolOutput = typeof step.observation === 'string' 
+                            ? JSON.parse(step.observation) 
+                            : step.observation;
+                        console.log('🔧 Found tool output in intermediate steps:', {
+                            success: lastToolOutput?.success,
+                            operation: lastToolOutput?.operation,
+                            hasData: !!lastToolOutput?.data
+                        });
+                    } catch (e) {
+                        // If it's not JSON, keep as string
+                        lastToolOutput = step.observation;
+                        console.log('🔧 Found non-JSON tool output:', step.observation?.substring(0, 100) + '...');
+                    }
+                }
+            }
+            
+            // If no intermediate steps, try to parse from logs
+            if (!lastToolOutput && logs) {
+                const toolOutputMatch = logs.match(/Observation: ({.*?})/s);
+                if (toolOutputMatch) {
+                    try {
+                        lastToolOutput = JSON.parse(toolOutputMatch[1]);
+                    } catch (e) {
+                        lastToolOutput = toolOutputMatch[1];
+                    }
+                }
+            }
+            
+            // If we found tool output, format it into a helpful response
+            if (lastToolOutput) {
+                if (typeof lastToolOutput === 'string') {
+                    try {
+                        lastToolOutput = JSON.parse(lastToolOutput);
+                    } catch (e) {
+                        // Keep as string
+                    }
+                }
+                
+                // PRIORITY: If we have successful tool output, use it regardless of agent completion status
+                if (lastToolOutput && typeof lastToolOutput === 'object') {
+                    console.log('🎯 Processing tool output:', {
+                        success: lastToolOutput.success,
+                        operation: lastToolOutput.operation,
+                        hasData: !!lastToolOutput.data,
+                        dataKeys: lastToolOutput.data ? Object.keys(lastToolOutput.data) : []
+                    });
+                    
+                    if (lastToolOutput.success && lastToolOutput.data) {
+                        const data = lastToolOutput.data;
+                        
+                        // Token usage response
+                        if (lastToolOutput.operation === 'token_usage') {
+                            if (data.summary) {
+                                // Successful response with data
+                                const summary = data.summary;
+                                let response = `${data.message || 'Here\'s your token usage:'}\n\n`;
+                                response += `📊 **Usage Summary:**\n`;
+                                response += `• Total tokens: ${summary.totalTokens?.toLocaleString() || 'N/A'}\n`;
+                                response += `• Prompt tokens: ${summary.promptTokens?.toLocaleString() || 'N/A'}\n`;
+                                response += `• Completion tokens: ${summary.completionTokens?.toLocaleString() || 'N/A'}\n`;
+                                response += `• Total cost: $${summary.totalCost || '0.00'}\n`;
+                                response += `• Total requests: ${summary.totalRequests || 'N/A'}\n`;
+                                response += `• Avg tokens per request: ${summary.avgTokensPerRequest || 'N/A'}\n`;
+                                response += `• Cost per token: $${summary.costPerToken || '0.00'}\n\n`;
+                                
+                                if (data.timeRangeAdjusted) {
+                                    response += `💡 **Note:** I adjusted the time range to show your available data.\n\n`;
+                                }
+                                
+                                if (data.modelBreakdown && data.modelBreakdown.length > 0) {
+                                    response += `🤖 **Top Models:**\n`;
+                                    data.modelBreakdown.slice(0, 3).forEach((model: any, index: number) => {
+                                        response += `${index + 1}. ${model.model}: ${model.totalTokens?.toLocaleString()} tokens ($${model.totalCost})\n`;
+                                    });
+                                    response += '\n';
+                                }
+                                
+                                if (data.insights && data.insights.length > 0) {
+                                    response += `💡 **Insights:**\n`;
+                                    data.insights.forEach((insight: string) => {
+                                        response += `• ${insight}\n`;
+                                    });
+                                }
+                                
+                                return response;
+                            } else if (data.message) {
+                                // No data found response
+                                return `${data.message}\n\n${data.reasons ? 'Possible reasons:\n• ' + data.reasons.join('\n• ') : ''}\n\n${data.suggestions ? 'Suggestions:\n• ' + data.suggestions.join('\n• ') : ''}\n\n${data.nextSteps || ''}`;
+                            }
+                        }
+                        
+                        // Dashboard response - handle both detailed and basic responses
+                        if (lastToolOutput.operation === 'dashboard_analytics') {
+                            if (data.summary) {
+                                const summary = data.summary;
+                                return `Here's your cost summary:\n\n• Total requests: ${summary.totalRequests || 'N/A'}\n• Total cost: $${summary.totalCost || '0.00'}\n• Average cost per request: $${summary.avgCostPerRequest || '0.00'}\n• Unique models used: ${summary.uniqueModels || 'N/A'}\n\n${data.insights ? 'Key insights:\n• ' + data.insights.join('\n• ') : ''}`;
+                            } else if (data.message && data.totalRequests) {
+                                // Handle basic dashboard response
+                                return `${data.message}\n\n📊 **Quick Stats:**\n• Total requests: ${data.totalRequests}\n\n${data.suggestion || 'Would you like me to get more detailed analytics?'}`;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+                        
+                        // Model Performance response
+                        if (lastToolOutput.operation === 'model_performance') {
+                            if (data.models && data.models.length > 0) {
+                                let response = `🚀 **Model Performance Analysis:**\n\n`;
+                                data.models.forEach((model: any, index: number) => {
+                                    response += `${index + 1}. **${model.model}**\n`;
+                                    response += `   • Avg Response Time: ${model.avgResponseTime || 'N/A'}s\n`;
+                                    response += `   • Success Rate: ${model.successRate || 'N/A'}%\n`;
+                                    response += `   • Cost Efficiency: ${model.costEfficiency || 'N/A'}\n\n`;
+                                });
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Usage Patterns response
+                        if (lastToolOutput.operation === 'usage_patterns') {
+                            if (data.patterns) {
+                                let response = `📈 **Usage Patterns Analysis:**\n\n`;
+                                response += `• Peak Hours: ${data.patterns.peakHours || 'N/A'}\n`;
+                                response += `• Average Daily Requests: ${data.patterns.avgDaily || 'N/A'}\n`;
+                                response += `• Most Active Days: ${data.patterns.activeDays || 'N/A'}\n`;
+                                response += `• Usage Trend: ${data.patterns.trend || 'N/A'}\n\n`;
+                                if (data.insights) {
+                                    response += `💡 **Insights:**\n`;
+                                    data.insights.forEach((insight: string) => {
+                                        response += `• ${insight}\n`;
+                                    });
+                                }
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Cost Trends response
+                        if (lastToolOutput.operation === 'cost_trends') {
+                            if (data.trends) {
+                                let response = `📊 **Cost Trends Analysis:**\n\n`;
+                                response += `• Monthly Growth: ${data.trends.monthlyGrowth || 'N/A'}%\n`;
+                                response += `• Average Monthly Cost: $${data.trends.avgMonthlyCost || '0.00'}\n`;
+                                response += `• Trend Direction: ${data.trends.direction || 'N/A'}\n`;
+                                if (data.projections) {
+                                    response += `• Next Month Projection: $${data.projections.nextMonth || '0.00'}\n`;
+                                }
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // User Stats response
+                        if (lastToolOutput.operation === 'user_stats') {
+                            if (data.stats) {
+                                let response = `👤 **Account Statistics:**\n\n`;
+                                response += `• Total Requests: ${data.stats.totalRequests?.toLocaleString() || 'N/A'}\n`;
+                                response += `• Total Cost: $${data.stats.totalCost || '0.00'}\n`;
+                                response += `• Active Days: ${data.stats.activeDays || 'N/A'}\n`;
+                                response += `• Favorite Model: ${data.stats.favoriteModel || 'N/A'}\n`;
+                                response += `• Account Age: ${data.stats.accountAge || 'N/A'} days\n\n`;
+                                if (data.achievements) {
+                                    response += `🏆 **Achievements:**\n`;
+                                    data.achievements.forEach((achievement: string) => {
+                                        response += `• ${achievement}\n`;
+                                    });
+                                }
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Project Analytics response
+                        if (lastToolOutput.operation === 'project_analytics') {
+                            if (data.projects && data.projects.length > 0) {
+                                let response = `🔬 **Project Analytics:**\n\n`;
+                                data.projects.forEach((project: any, index: number) => {
+                                    response += `${index + 1}. **${project.name}**\n`;
+                                    response += `   • Cost: $${project.cost || '0.00'}\n`;
+                                    response += `   • Requests: ${project.requests || 'N/A'}\n`;
+                                    response += `   • Efficiency: ${project.efficiency || 'N/A'}\n\n`;
+                                });
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Anomaly Detection response
+                        if (lastToolOutput.operation === 'anomaly_detection') {
+                            if (data.anomalies && data.anomalies.length > 0) {
+                                let response = `⚠️ **Anomalies Detected:**\n\n`;
+                                data.anomalies.forEach((anomaly: any, index: number) => {
+                                    response += `${index + 1}. **${anomaly.type}** on ${anomaly.date}\n`;
+                                    response += `   • Description: ${anomaly.description}\n`;
+                                    response += `   • Impact: ${anomaly.impact}\n`;
+                                    response += `   • Recommendation: ${anomaly.recommendation}\n\n`;
+                                });
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Forecasting response
+                        if (lastToolOutput.operation === 'forecasting') {
+                            if (data.forecast) {
+                                let response = `🔮 **Cost Forecast:**\n\n`;
+                                response += `• Next Month: $${data.forecast.nextMonth || '0.00'}\n`;
+                                response += `• Next Quarter: $${data.forecast.nextQuarter || '0.00'}\n`;
+                                response += `• Confidence Level: ${data.forecast.confidence || 'N/A'}%\n`;
+                                response += `• Growth Rate: ${data.forecast.growthRate || 'N/A'}%\n\n`;
+                                if (data.recommendations) {
+                                    response += `💡 **Recommendations:**\n`;
+                                    data.recommendations.forEach((rec: string) => {
+                                        response += `• ${rec}\n`;
+                                    });
+                                }
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Comparative Analysis response
+                        if (lastToolOutput.operation === 'comparative_analysis') {
+                            if (data.comparison) {
+                                let response = `📊 **Comparative Analysis:**\n\n`;
+                                response += `• Current Period: $${data.comparison.current || '0.00'}\n`;
+                                response += `• Previous Period: $${data.comparison.previous || '0.00'}\n`;
+                                response += `• Change: ${data.comparison.change || 'N/A'}%\n`;
+                                response += `• Trend: ${data.comparison.trend || 'N/A'}\n\n`;
+                                if (data.insights) {
+                                    response += `💡 **Key Changes:**\n`;
+                                    data.insights.forEach((insight: string) => {
+                                        response += `• ${insight}\n`;
+                                    });
+                                }
+                                return response;
+                            } else if (data.message) {
+                                return data.message;
+                            }
+                        }
+
+                        // Generic successful response
+                        if (data.summary || data.message) {
+                            return data.summary || data.message;
+                        }
+                    }
+                }
+            }
+            
+            // CRITICAL: Before falling back to error messages, check if we actually had successful tool output
+            if (lastToolOutput && lastToolOutput.success) {
+                console.log('⚠️ Had successful tool output but couldn\'t format it properly. Returning raw success message.');
+                if (lastToolOutput.summary) {
+                    return lastToolOutput.summary;
+                } else if (lastToolOutput.data && lastToolOutput.data.message) {
+                    return lastToolOutput.data.message;
+                } else {
+                    return 'I successfully retrieved your data, but encountered a formatting issue. The operation completed successfully.';
+                }
+            }
+            
+            // Comprehensive fallback response based on query type (only if no successful tool output)
+            const queryLower = originalQuery.toLowerCase();
+            
+            console.log('🚨 No successful tool output found, using fallback for query:', queryLower);
+            
+            if (queryLower.includes('token')) {
+                return "I couldn't find any token usage data for your account. This might mean you're new to the platform or haven't made API calls recently. Would you like me to help you set up API tracking?";
+            } else if (queryLower.includes('cost') || queryLower.includes('spend') || queryLower.includes('budget')) {
+                return "I couldn't find any cost data for the specified period. This might mean you haven't made any API calls yet or the data is in a different time range. Would you like me to check a different time period?";
+            } else if (queryLower.includes('model') || queryLower.includes('performance')) {
+                return "I couldn't find any model performance data for your account. This might mean you need more usage data to generate performance metrics. Try making some API calls first.";
+            } else if (queryLower.includes('pattern') || queryLower.includes('usage')) {
+                return "I couldn't find any usage patterns for your account. This typically requires at least a few days of API activity to establish patterns.";
+            } else if (queryLower.includes('trend') || queryLower.includes('forecast')) {
+                return "I couldn't generate trend analysis or forecasts. This requires historical data over multiple time periods. Try using the platform for a few weeks first.";
+            } else if (queryLower.includes('anomal') || queryLower.includes('unusual')) {
+                return "I couldn't detect any anomalies in your usage. This is actually good news! Anomaly detection requires baseline usage patterns to identify unusual activity.";
+            } else if (queryLower.includes('project')) {
+                return "I couldn't find any project-specific analytics. Make sure you have projects set up and have been using them for API calls.";
+            } else if (queryLower.includes('compare') || queryLower.includes('comparison')) {
+                return "I couldn't perform the requested comparison. This might be due to insufficient data in one or both periods being compared.";
+            } else {
+                return "I was unable to complete your request fully, but I'm here to help. Could you please rephrase your question to be more specific? For example:\n\n• 'Show my token usage this month'\n• 'What did I spend on Claude vs GPT?'\n• 'Which model performs best?'\n• 'Show my usage patterns'\n• 'Compare this month to last month'";
+            }
+            
+        } catch (error) {
+            console.error('Error extracting useful response:', error);
+            return "I encountered an issue processing your request. Please try asking a more specific question, such as 'What did I spend this month?' or 'Show my token usage.'";
         }
     }
 

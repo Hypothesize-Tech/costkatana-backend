@@ -404,6 +404,11 @@ export class ConversationalFlowService {
      */
     private async detectTaskIntent(message: string): Promise<string | null> {
         const lowerMessage = message.toLowerCase();
+        
+        // Skip conversational flow for direct agent commands
+        if (lowerMessage.startsWith('execute ') && lowerMessage.includes('with data:')) {
+            return null; // Let it go directly to handleGeneralQuery
+        }
 
         // Project creation intents
         if (lowerMessage.includes('create project') || 
@@ -805,12 +810,51 @@ export class ConversationalFlowService {
                 context
             });
 
-            return {
-                response: agentResponse.response || 'I apologize, but I couldn\'t process your request.',
-                isComplete: true,
-                requiresMcpCall: false,
-                thinking: agentResponse.thinking
-            };
+            // Debug logging to understand the response structure
+            logger.info('ConversationFlow - Agent response structure:', {
+                success: agentResponse.success,
+                hasResponse: !!agentResponse.response,
+                responseLength: agentResponse.response?.length || 0,
+                responsePreview: agentResponse.response?.substring(0, 100) + '...',
+                error: agentResponse.error
+            });
+
+            // Check if agent was successful and has a response
+            if (agentResponse.success && agentResponse.response) {
+                return {
+                    response: agentResponse.response,
+                    isComplete: true,
+                    requiresMcpCall: false,
+                    thinking: agentResponse.thinking
+                };
+            } else if (agentResponse.success && !agentResponse.response) {
+                // Agent succeeded but returned empty response - this shouldn't happen but handle gracefully
+                logger.warn('ConversationFlow - Agent succeeded but no response:', {
+                    success: agentResponse.success,
+                    metadata: agentResponse.metadata
+                });
+                
+                return {
+                    response: 'I processed your request successfully, but the response was empty. Please try asking your question again.',
+                    isComplete: true,
+                    requiresMcpCall: false,
+                    thinking: agentResponse.thinking
+                };
+            } else {
+                // Log the failure case
+                logger.warn('ConversationFlow - Agent failed:', {
+                    success: agentResponse.success,
+                    error: agentResponse.error,
+                    metadata: agentResponse.metadata
+                });
+                
+                return {
+                    response: agentResponse.error || 'I apologize, but I encountered an error processing your request. Please try rephrasing your question or being more specific about what you\'d like to know.',
+                    isComplete: true,
+                    requiresMcpCall: false,
+                    thinking: agentResponse.thinking
+                };
+            }
         } catch (error) {
             logger.error('Error handling general query:', error);
             return {

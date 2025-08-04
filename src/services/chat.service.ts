@@ -5,6 +5,8 @@ import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
 import { agentService } from './agent.service';
 import { conversationalFlowService } from './conversationFlow.service';
+import { multiAgentFlowService } from './multiAgentFlow.service';
+import { TrendingDetectorService } from './trendingDetector.service';
 
 export interface ChatMessageResponse {
     id: string;
@@ -41,6 +43,8 @@ export interface ChatSendMessageRequest {
     conversationId?: string;
     temperature?: number;
     maxTokens?: number;
+    chatMode?: 'fastest' | 'cheapest' | 'balanced';
+    useMultiAgent?: boolean;
 }
 
 export interface ChatSendMessageResponse {
@@ -61,6 +65,11 @@ export interface ChatSendMessageResponse {
         }>;
         summary?: string;
     };
+    // Multi-agent enhancements
+    optimizationsApplied?: string[];
+    cacheHit?: boolean;
+    agentPath?: string[];
+    riskLevel?: string;
 }
 
 export class ChatService {
@@ -109,53 +118,113 @@ export class ChatService {
             .limit(20) // Last 20 messages for context
             .lean();
 
-            // Use conversational flow service for human-like interaction
+            // Enhanced multi-agent or traditional flow processing
             let response: string;
             let agentThinking: any = undefined;
+            let optimizationsApplied: string[] = [];
+            let cacheHit: boolean = false;
+            let agentPath: string[] = [];
+            let riskLevel: string = 'low';
             
             try {
-                // Process message through conversational flow service
-                const flowResult = await conversationalFlowService.processMessage(
-                    conversation._id.toString(),
-                    request.userId,
-                    request.message,
-                    {
-                        previousMessages: recentMessages.map(msg => ({
-                            role: msg.role,
-                            content: msg.content
-                        })),
-                        selectedModel: request.modelId
+                // Check if multi-agent processing is requested or if query needs web scraping
+                const needsWebScraping = this.detectWebScrapingNeeds(request.message);
+                
+                if (request.useMultiAgent || request.chatMode || needsWebScraping) {
+                    // Use the new multi-agent system
+                    const multiAgentResult = await multiAgentFlowService.processMessage(
+                        conversation._id.toString(),
+                        request.userId,
+                        request.message,
+                        {
+                            chatMode: request.chatMode || 'balanced',
+                            costBudget: 0.10
+                        }
+                    );
+
+                    response = multiAgentResult.response;
+                    agentThinking = multiAgentResult.thinking;
+                    optimizationsApplied = multiAgentResult.optimizationsApplied;
+                    cacheHit = multiAgentResult.cacheHit;
+                    agentPath = multiAgentResult.agentPath;
+                    
+                    // Get predictive analytics for risk assessment
+                    try {
+                        const analytics = await multiAgentFlowService.getPredictiveCostAnalytics(request.userId);
+                        riskLevel = analytics.riskLevel;
+                    } catch (error) {
+                        logger.warn('Could not get predictive analytics:', error);
                     }
-                );
+                } else {
+                    // Use traditional conversational flow service
+                    const flowResult = await conversationalFlowService.processMessage(
+                        conversation._id.toString(),
+                        request.userId,
+                        request.message,
+                        {
+                            previousMessages: recentMessages.map(msg => ({
+                                role: msg.role,
+                                content: msg.content
+                            })),
+                            selectedModel: request.modelId
+                        }
+                    );
 
-                response = flowResult.response;
-                agentThinking = flowResult.thinking;
-
-                // If the conversational flow indicates an MCP call is needed
-                if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
+                    response = flowResult.response;
+                    agentThinking = flowResult.thinking;
+                    agentPath = ['traditional_flow'];
+                    
+                    // Debug the conversational flow result
+                    logger.info('Chat Service - Conversational flow result:', {
+                        hasResponse: !!flowResult.response,
+                        responseLength: flowResult.response?.length || 0,
+                        responsePreview: flowResult.response?.substring(0, 100) + '...',
+                        requiresMcpCall: flowResult.requiresMcpCall,
+                        mcpAction: flowResult.mcpAction,
+                        isComplete: flowResult.isComplete
+                    });
+                    
+                    // If the conversational flow indicates an MCP call is needed
+                    if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
                     try {
                         // Prepare MCP data with actual userId
                         const mcpData = { ...flowResult.mcpData, userId: request.userId };
                         
-                        // Call the appropriate agent service tool
-                        const agentResponse = await agentService.query({
-                            userId: request.userId,
-                            query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
-                            context: {
-                                conversationId: conversation._id.toString(),
-                                previousMessages: recentMessages.map(msg => ({
-                                    role: msg.role,
-                                    content: msg.content
-                                })),
-                                selectedModel: request.modelId,
-                                mcpAction: flowResult.mcpAction,
-                                mcpData: mcpData
-                            }
+                        // Call the appropriate agent service tool with timeout
+                        const agentResponse = await Promise.race([
+                            agentService.query({
+                                userId: request.userId,
+                                query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
+                                context: {
+                                    conversationId: conversation._id.toString(),
+                                    previousMessages: recentMessages.map(msg => ({
+                                        role: msg.role,
+                                        content: msg.content
+                                    })),
+                                    selectedModel: request.modelId,
+                                    mcpAction: flowResult.mcpAction,
+                                    mcpData: mcpData
+                                }
+                            }),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('Chat service timeout - agent query took too long')), 90000) // 90 second timeout
+                            )
+                        ]) as any;
+
+                        // Debug logging to understand the response structure
+                        logger.info('Chat Service - Agent response structure:', {
+                            success: agentResponse.success,
+                            hasResponse: !!agentResponse.response,
+                            responseLength: agentResponse.response?.length || 0,
+                            responsePreview: agentResponse.response?.substring(0, 200) + '...',
+                            error: agentResponse.error,
+                            thinking: !!agentResponse.thinking
                         });
 
                         if (agentResponse.success && agentResponse.response) {
-                            // Combine the flow response with the MCP result
-                            response = `${response}\n\n${agentResponse.response}`;
+                            // Use the agent response directly since it contains the complete answer
+                            // Don't combine with flow response to avoid confusion
+                            response = agentResponse.response;
                             // Merge thinking processes
                             if (agentResponse.thinking) {
                                 agentThinking = {
@@ -167,12 +236,30 @@ export class ChatService {
                                 };
                             }
                         } else {
-                            logger.warn('MCP action failed:', agentResponse.error);
-                            response += '\n\nI encountered an issue executing the task. Please try again.';
+                            logger.warn('MCP action failed - Success:', agentResponse.success, 'Response:', !!agentResponse.response, 'Error:', agentResponse.error);
+                            // If agent was successful but no response, don't treat as failure
+                            if (agentResponse.success && !agentResponse.response) {
+                                logger.info('Agent succeeded but returned empty response, treating as success');
+                                response += '\n\nTask completed successfully.';
+                            } else {
+                                response += '\n\nI encountered an issue executing the task. Please try again.';
+                            }
                         }
                     } catch (mcpError) {
                         logger.error('Error executing MCP action:', mcpError);
-                        response += '\n\nI encountered an issue executing the task. Please try again.';
+                        
+                        // Handle timeout errors specifically
+                        if (mcpError instanceof Error && mcpError.message.includes('timeout')) {
+                            logger.warn('MCP action timed out:', mcpError.message);
+                            response += '\n\n⏱️ Your query took longer than expected to process. This might be due to complex analysis or high system load. Please try:\n\n' +
+                                       '• Asking a simpler, more specific question\n' +
+                                       '• Breaking complex requests into smaller parts\n' +
+                                       '• Trying again in a few moments\n\n' +
+                                       'Example: Instead of "Analyze everything", try "What did I spend this month?"';
+                        } else {
+                            response += '\n\nI encountered an issue executing the task. Please try again.';
+                        }
+                    }
                     }
                 }
 
@@ -227,7 +314,12 @@ export class ChatService {
                 latency,
                 tokenCount: outputTokens,
                 model: request.modelId,
-                thinking: agentThinking
+                thinking: agentThinking,
+                // Multi-agent enhancements
+                optimizationsApplied,
+                cacheHit,
+                agentPath,
+                riskLevel
             };
 
         } catch (error) {
@@ -790,5 +882,13 @@ export class ChatService {
         };
 
         return descriptionMap[modelId] || 'Advanced AI model for text generation and chat';
+    }
+
+    /**
+     * Detect if a query needs web scraping using trending patterns
+     */
+    private static detectWebScrapingNeeds(message: string): boolean {
+        const trendingDetector = new TrendingDetectorService();
+        return trendingDetector.quickCheck(message);
     }
 } 

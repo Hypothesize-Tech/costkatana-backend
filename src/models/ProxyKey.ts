@@ -169,7 +169,6 @@ const proxyKeySchema = new Schema<IProxyKey>({
 });
 
 // Indexes for performance
-proxyKeySchema.index({ keyId: 1 }, { unique: true });
 proxyKeySchema.index({ userId: 1, isActive: 1 });
 proxyKeySchema.index({ providerKeyId: 1 });
 proxyKeySchema.index({ projectId: 1 });
