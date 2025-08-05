@@ -214,8 +214,8 @@ VITE_DEFAULT_PROJECT_ID=your-default-project-id
 
 # SDK Configuration
 OPENAI_API_KEY=sk-your-openai-key
-AI_COST_DASHBOARD_URL=http://localhost:8000/api
-DEFAULT_PROJECT_ID=your-project-id
+API_KEY=http://localhost:8000/api
+PROJECT_ID=your-project-id
 ```
 
 ## Authentication
