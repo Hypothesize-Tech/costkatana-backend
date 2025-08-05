@@ -399,9 +399,100 @@ export const PROVIDER_INFO = {
     }
 };
 
+// Model ID mapping for common aliases and variations
+const MODEL_ID_MAPPING: Record<string, string> = {
+    // Nova Pro variations
+    'nova-pro': 'amazon-nova-pro',
+    'amazon.nova-pro-v1:0': 'amazon-nova-pro',
+    'amazon.nova-pro-v1': 'amazon-nova-pro',
+    
+    // Nova Lite variations
+    'nova-lite': 'amazon-nova-lite',
+    'amazon.nova-lite-v1:0': 'amazon-nova-lite',
+    'amazon.nova-lite-v1': 'amazon-nova-lite',
+    
+    // Nova Micro variations
+    'nova-micro': 'amazon-nova-micro',
+    'amazon.nova-micro-v1:0': 'amazon-nova-micro',
+    'amazon.nova-micro-v1': 'amazon-nova-micro',
+    
+    // Claude variations
+    'claude-3-haiku': 'claude-3-haiku-20240307-v1:0',
+    'claude-3-sonnet': 'claude-3-sonnet-20240229-v1:0',
+    'claude-3-opus': 'claude-3-opus-20240229-v1:0',
+    'claude-3-5-sonnet': 'claude-3-5-sonnet-20241022-v2:0',
+    'claude-3-5-haiku': 'claude-3-5-haiku-20241022-v1:0',
+    'anthropic.claude-3-haiku-20240307-v1:0': 'claude-3-haiku-20240307-v1:0',
+    'anthropic.claude-3-sonnet-20240229-v1:0': 'claude-3-sonnet-20240229-v1:0',
+    'anthropic.claude-3-opus-20240229-v1:0': 'claude-3-opus-20240229-v1:0',
+    'anthropic.claude-3-5-sonnet-20241022-v2:0': 'claude-3-5-sonnet-20241022-v2:0',
+    'anthropic.claude-3-5-haiku-20241022-v1:0': 'claude-3-5-haiku-20241022-v1:0',
+    
+    // GPT variations
+    'gpt-4': 'gpt-4',
+    'gpt-4-turbo': 'gpt-4-turbo',
+    'gpt-4-turbo-preview': 'gpt-4-turbo-preview',
+    'gpt-4o': 'gpt-4o',
+    'gpt-4o-mini': 'gpt-4o-mini',
+    
+    // Gemini variations
+    'gemini-pro': 'gemini-pro',
+    'gemini-1.5-pro': 'gemini-1.5-pro',
+    'gemini-1.5-flash': 'gemini-1.5-flash',
+    
+    // Cohere variations
+    'command-r': 'cohere.command-r-v1:0',
+    'command-r-plus': 'cohere.command-r-plus-v1:0',
+    'cohere.command-r-v1:0': 'command-r',
+    'cohere.command-r-plus-v1:0': 'command-r-plus',
+    
+    // Mistral variations
+    'mistral-7b': 'mistral.mistral-7b-instruct-v0:2',
+    'mistral-large': 'mistral.mistral-large-2402-v1:0',
+    'mistral.mistral-7b-instruct-v0:2': 'mistral-7b-instruct',
+    'mistral.mistral-large-2402-v1:0': 'mistral-large-2402',
+    
+    // Llama variations
+    'llama2-13b': 'meta.llama2-13b-chat-v1:0',
+    'llama2-70b': 'meta.llama2-70b-chat-v1:0',
+    'llama3-8b': 'meta.llama3-8b-instruct-v1:0',
+    'llama3-70b': 'meta.llama3-70b-instruct-v1:0',
+    'meta.llama2-13b-chat-v1:0': 'llama2-13b-chat',
+    'meta.llama2-70b-chat-v1:0': 'llama2-70b-chat',
+    'meta.llama3-8b-instruct-v1:0': 'llama3-8b-instruct',
+    'meta.llama3-70b-instruct-v1:0': 'llama3-70b-instruct'
+};
+
 // Utility functions
 export function getModelPricing(modelId: string): ModelPricing | null {
-    return MODEL_PRICING_DATA[modelId] || null;
+    // First try the original model ID
+    let pricing = MODEL_PRICING_DATA[modelId];
+    if (pricing) {
+        return pricing;
+    }
+    
+    // Then try mapped model ID
+    const mappedModelId = MODEL_ID_MAPPING[modelId];
+    if (mappedModelId) {
+        pricing = MODEL_PRICING_DATA[mappedModelId];
+        if (pricing) {
+            return pricing;
+        }
+    }
+    
+    // Finally try case-insensitive search for Nova models
+    if (modelId.toLowerCase().includes('nova')) {
+        const lowerModelId = modelId.toLowerCase();
+        if (lowerModelId.includes('pro')) {
+            return MODEL_PRICING_DATA['amazon-nova-pro'];
+        } else if (lowerModelId.includes('lite')) {
+            return MODEL_PRICING_DATA['amazon-nova-lite'];
+        } else if (lowerModelId.includes('micro')) {
+            return MODEL_PRICING_DATA['amazon-nova-micro'];
+        }
+    }
+    
+    return null;
 }
 
 export function getProviderModels(provider: string): Array<{model: string, pricing: ModelPricing}> {

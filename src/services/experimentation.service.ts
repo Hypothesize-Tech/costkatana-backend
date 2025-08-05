@@ -2089,16 +2089,23 @@ export class ExperimentationService {
     }
 
     /**
-     * Calculate maximum potential savings
+     * Calculate maximum potential savings (in actual cost, not percentage)
      */
     private static calculateMaxSavings(_currentCost: any, optimizedOptions: any[]): number {
         if (!optimizedOptions.length) return 0;
         
-        const bestOption = optimizedOptions.reduce((best, option) => 
-            (option.savings?.percentage || 0) > (best.savings?.percentage || 0) ? option : best
-        );
+        // Filter out options with negative savings (increased costs)
+        const savingsOptions = optimizedOptions.filter(option => (option.savings?.cost || 0) > 0);
         
-        return bestOption.savings?.percentage || 0;
+        if (!savingsOptions.length) return 0;
+        
+        const bestOption = savingsOptions.reduce((best, option) => {
+            const currentSavings = option.savings?.cost || 0;
+            const bestSavings = best.savings?.cost || 0;
+            return currentSavings > bestSavings ? option : best;
+        });
+        
+        return bestOption.savings?.cost || 0;
     }
 
     /**
@@ -2107,12 +2114,14 @@ export class ExperimentationService {
     private static generateRealTimeRecommendations(_currentCost: any, optimizedOptions: any[]): any[] {
         const recommendations = [];
         
-        // Sort by savings potential
-        const sortedOptions = optimizedOptions.sort((a, b) => (b.savings?.percentage || 0) - (a.savings?.percentage || 0));
+        // Filter out options with negative savings (increased costs) and sort by actual cost savings
+        const validOptions = optimizedOptions
+            .filter(option => (option.savings?.cost || 0) > 0)
+            .sort((a, b) => (b.savings?.cost || 0) - (a.savings?.cost || 0));
         
         // Top 3 recommendations
-        for (let i = 0; i < Math.min(3, sortedOptions.length); i++) {
-            const option = sortedOptions[i];
+        for (let i = 0; i < Math.min(3, validOptions.length); i++) {
+            const option = validOptions[i];
             recommendations.push({
                 priority: i === 0 ? 'high' : i === 1 ? 'medium' : 'low',
                 title: option.description,
