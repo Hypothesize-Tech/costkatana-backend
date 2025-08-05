@@ -1,7 +1,9 @@
 import { Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { OptimizationService } from '../services/optimization.service';
 import { optimizationRequestSchema, paginationSchema } from '../utils/validators';
 import { logger } from '../utils/logger';
+import { Optimization } from '../models';
 
 export class OptimizationController {
     static async createOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
@@ -269,34 +271,89 @@ export class OptimizationController {
                     startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
             }
 
-            const result = await OptimizationService.getOptimizations(
-                { userId, startDate, endDate },
-                { page: 1, limit: 1000 }
-            );
+            // Calculate summary from database directly for accurate totals
+            const [summaryStats] = await Optimization.aggregate([
+                {
+                    $match: {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        createdAt: { $gte: startDate, $lte: endDate }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: 1 },
+                        totalSaved: { $sum: '$costSaved' },
+                        totalTokensSaved: { $sum: '$tokensSaved' },
+                        avgImprovement: { $avg: '$improvementPercentage' },
+                        applied: {
+                            $sum: { $cond: [{ $eq: ['$applied', true] }, 1, 0] }
+                        }
+                    }
+                }
+            ]);
 
-            if (!result || !result.data) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Optimization summary not found',
+            if (!summaryStats) {
+                res.json({
+                    success: true,
+                    data: {
+                        total: 0,
+                        totalSaved: 0,
+                        totalTokensSaved: 0,
+                        avgImprovement: 0,
+                        applied: 0,
+                        applicationRate: 0,
+                        byCategory: {},
+                        topOptimizations: [],
+                    },
                 });
                 return;
             }
 
+            // Get category breakdown
+            const categoryStats = await Optimization.aggregate([
+                {
+                    $match: {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        createdAt: { $gte: startDate, $lte: endDate }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$category',
+                        count: { $sum: 1 },
+                        avgSavings: { $avg: '$costSaved' }
+                    }
+                }
+            ]);
+
+            // Get top optimizations
+            const topOptimizations = await Optimization.find({
+                userId: new mongoose.Types.ObjectId(userId),
+                createdAt: { $gte: startDate, $lte: endDate }
+            })
+            .sort({ costSaved: -1 })
+            .limit(5)
+            .select('originalPrompt optimizedPrompt costSaved tokensSaved improvementPercentage category')
+            .lean();
+
             const summary = {
-                total: result.pagination.total,
-                totalSaved: result.data.reduce((sum, o) => sum + (o.costSaved || 0), 0),
-                totalTokensSaved: result.data.reduce((sum, o) => sum + (o.tokensSaved || 0), 0),
-                avgImprovement: result.data.length > 0
-                    ? result.data.reduce((sum, o) => sum + (o.improvementPercentage || 0), 0) / result.data.length
+                total: summaryStats.total,
+                totalSaved: summaryStats.totalSaved,
+                totalTokensSaved: summaryStats.totalTokensSaved,
+                avgImprovement: summaryStats.avgImprovement || 0,
+                applied: summaryStats.applied,
+                applicationRate: summaryStats.total > 0
+                    ? (summaryStats.applied / summaryStats.total) * 100
                     : 0,
-                applied: result.data.filter(o => o.applied).length,
-                applicationRate: result.data.length > 0
-                    ? (result.data.filter(o => o.applied).length / result.data.length) * 100
-                    : 0,
-                byCategory: OptimizationController.groupByCategory(result.data),
-                topOptimizations: result.data
-                    .sort((a, b) => (b.costSaved || 0) - (a.costSaved || 0))
-                    .slice(0, 5),
+                byCategory: categoryStats.reduce((acc: any, cat: any) => {
+                    acc[cat._id] = {
+                        count: cat.count,
+                        avgSavings: cat.avgSavings
+                    };
+                    return acc;
+                }, {}),
+                topOptimizations,
             };
 
             res.json({
@@ -576,30 +633,5 @@ export class OptimizationController {
         }
     }
 
-    private static groupByCategory(optimizations: any[]) {
-        const categories: Record<string, any> = {};
 
-        for (const opt of optimizations) {
-            if (!categories[opt.category]) {
-                categories[opt.category] = {
-                    count: 0,
-                    totalSaved: 0,
-                    avgImprovement: 0,
-                };
-            }
-
-            categories[opt.category].count++;
-            categories[opt.category].totalSaved += opt.costSaved;
-            categories[opt.category].avgImprovement += opt.improvementPercentage;
-        }
-
-        // Calculate averages
-        for (const category in categories) {
-            if (categories[category].count > 0) {
-                categories[category].avgImprovement /= categories[category].count;
-            }
-        }
-
-        return categories;
-    }
 }
