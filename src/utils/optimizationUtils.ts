@@ -411,13 +411,26 @@ export function generateOptimizationSuggestions(
     const startTime = Date.now();
 
     const originalTokens = estimateTokens(prompt, provider);
-    const originalCost = calculateCost(originalTokens, 150, providerEnumToString(provider), model);
+    let originalCost = 0;
+    try {
+        originalCost = calculateCost(originalTokens, 150, providerEnumToString(provider), model);
+    } catch (error) {
+        console.warn(`Failed to calculate cost for ${provider}/${model}, using fallback pricing`);
+        // Use fallback pricing (GPT-4o-mini rates as default)
+        originalCost = (originalTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
+    }
 
     // Prompt compression suggestions
     const compressionResult = compressPrompt(prompt, 'medium');
     if (compressionResult.compressionRatio < 0.9) {
         const compressedTokens = estimateTokens(compressionResult.compressedPrompt, provider);
-        const compressedCost = calculateCost(compressedTokens, 150, providerEnumToString(provider), model);
+        let compressedCost = 0;
+        try {
+            compressedCost = calculateCost(compressedTokens, 150, providerEnumToString(provider), model);
+        } catch (error) {
+            console.warn(`Failed to calculate compressed cost for ${provider}/${model}, using fallback pricing`);
+            compressedCost = (compressedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
+        }
         const savings = originalCost - compressedCost;
 
         suggestions.push({
@@ -439,7 +452,13 @@ export function generateOptimizationSuggestions(
         const jsonCompressionResult = compressJsonInPrompt(prompt);
         if (jsonCompressionResult.compressionRatio < 0.95) {
             const jsonCompressedTokens = estimateTokens(jsonCompressionResult.compressedPrompt, provider);
-            const jsonCompressedCost = calculateCost(jsonCompressedTokens, 150, providerEnumToString(provider), model);
+            let jsonCompressedCost = 0;
+            try {
+                jsonCompressedCost = calculateCost(jsonCompressedTokens, 150, providerEnumToString(provider), model);
+            } catch (error) {
+                console.warn(`Failed to calculate JSON compressed cost for ${provider}/${model}, using fallback pricing`);
+                jsonCompressedCost = (jsonCompressedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
+            }
             const jsonSavings = originalCost - jsonCompressedCost;
 
             suggestions.push({
@@ -462,7 +481,13 @@ export function generateOptimizationSuggestions(
         const contextTrimResult = trimConversationContext(conversationHistory, originalTokens * 0.7, provider);
         if (contextTrimResult.trimmedMessages.length < contextTrimResult.originalMessages.length) {
             const contextTokens = estimateConversationTokens(contextTrimResult.trimmedMessages, provider);
-            const contextCost = calculateCost(contextTokens, 150, providerEnumToString(provider), model);
+            let contextCost = 0;
+            try {
+                contextCost = calculateCost(contextTokens, 150, providerEnumToString(provider), model);
+            } catch (error) {
+                console.warn(`Failed to calculate context cost for ${provider}/${model}, using fallback pricing`);
+                contextCost = (contextTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
+            }
             const contextSavings = originalCost - contextCost;
 
             suggestions.push({
@@ -517,7 +542,13 @@ function suggestAlternativeModel(
     const currentPricing = getModelPricing(providerEnumToString(provider), currentModel);
     if (!currentPricing) return null;
 
-    const currentCost = calculateCost(tokenCount, 150, providerEnumToString(provider), currentModel);
+    let currentCost = 0;
+    try {
+        currentCost = calculateCost(tokenCount, 150, providerEnumToString(provider), currentModel);
+    } catch (error) {
+        console.warn(`Failed to calculate current cost for ${provider}/${currentModel}, using fallback pricing`);
+        currentCost = (tokenCount / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
+    }
 
     // Model alternatives by provider
     const alternatives: Record<AIProvider, string[]> = {
@@ -540,7 +571,13 @@ function suggestAlternativeModel(
 
     for (const altModel of modelAlternatives) {
         if (altModel !== currentModel) {
-            const altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
+            let altCost = 0;
+            try {
+                altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
+            } catch (error) {
+                console.warn(`Failed to calculate alternative cost for ${provider}/${altModel}, skipping`);
+                continue;
+            }
             const savings = currentCost - altCost;
 
             if (savings > 0 && (!bestAlternative || savings > bestAlternative.savings)) {

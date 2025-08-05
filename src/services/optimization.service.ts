@@ -170,12 +170,18 @@ export class OptimizationService {
             );
 
             // Run the enhanced optimization using internal utilities
-            const optimizationResult: OptimizationResult = generateOptimizationSuggestions(
-                request.prompt,
-                provider,
-                request.model,
-                request.conversationHistory
-            );
+            let optimizationResult: OptimizationResult;
+            try {
+                optimizationResult = generateOptimizationSuggestions(
+                    request.prompt,
+                    provider,
+                    request.model,
+                    request.conversationHistory
+                );
+            } catch (error) {
+                logger.error('Failed to generate optimization suggestions:', error);
+                throw new Error(`Optimization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            }
 
             // Get the best optimization suggestion
             const bestSuggestion = optimizationResult.suggestions[0];
