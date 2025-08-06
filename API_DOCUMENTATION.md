@@ -639,6 +639,6 @@ Real-time AI analysis and recommendations via WebSocket:
 For API support:
 - 📧 **Email**: abdul@hypothesize.tech
 - 📖 **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/Hypothesize-Tech/ai-cost-optimizer-backend/issues)
 
-**Latest Update**: January 2024 - AI Intelligence v2.0 with personalized recommendations and predictive analytics.
+**Latest Update**: August 2025 - AI Intelligence v2.0 with personalized recommendations and predictive analytics.
