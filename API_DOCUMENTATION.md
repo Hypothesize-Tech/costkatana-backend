@@ -637,7 +637,7 @@ Real-time AI analysis and recommendations via WebSocket:
 ## 💬 **Support & Feedback**
 
 For API support:
-- 📧 **Email**: api-support@costkatana.com
+- 📧 **Email**: abdul@hypothesize.tech
 - 📖 **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/issues)
 
