@@ -576,7 +576,7 @@ X-RateLimit-AI-Remaining: 15
 
 ### **Connection**
 ```javascript
-const ws = new WebSocket('wss://api.costkatana.com/ws?token=jwt_token');
+const ws = new WebSocket('wss://https://cost-katana-backend.store/ws?token=jwt_token');
 ```
 
 ### **AI Events**
