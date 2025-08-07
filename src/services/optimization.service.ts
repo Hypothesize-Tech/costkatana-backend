@@ -215,34 +215,30 @@ export class OptimizationService {
                 };
             }
 
-            // Get the best optimization suggestion
-            let bestSuggestion = optimizationResult.suggestions[0];
-            if (!bestSuggestion) {
-                // Create a minimal fallback suggestion
-                bestSuggestion = {
-                    id: 'minimal-fallback',
-                    type: 'compression',
-                    explanation: 'Basic prompt compression applied',
-                    estimatedSavings: 5,
-                    confidence: 0.5,
-                    optimizedPrompt: request.prompt.replace(/\s+/g, ' ').trim(),
-                    compressionDetails: {
-                        technique: 'pattern_replacement',
-                        originalSize: request.prompt.length,
-                        compressedSize: request.prompt.replace(/\s+/g, ' ').trim().length,
-                        compressionRatio: 0.95,
-                        reversible: false
-                    }
-                };
+            // Apply the optimizations to get the actual optimized prompt
+            let optimizedPrompt = request.prompt;
+            let appliedOptimizations: string[] = [];
+            
+            if (optimizationResult.suggestions.length > 0) {
+                // Apply the best suggestion (usually compression)
+                const bestSuggestion = optimizationResult.suggestions[0];
+                if (bestSuggestion.optimizedPrompt) {
+                    optimizedPrompt = bestSuggestion.optimizedPrompt;
+                    appliedOptimizations.push(bestSuggestion.id);
+                } else if (bestSuggestion.type === 'compression') {
+                    // Apply basic compression if no optimized prompt is provided
+                    optimizedPrompt = request.prompt.replace(/\s+/g, ' ').trim();
+                    appliedOptimizations.push('compression');
+                }
             }
 
             // Get token count and cost for optimized prompt
             let optimizedTokens;
             try {
-                optimizedTokens = estimateTokens(bestSuggestion.optimizedPrompt || request.prompt, provider);
+                optimizedTokens = estimateTokens(optimizedPrompt, provider);
             } catch (error) {
                 logger.warn(`Failed to estimate tokens for optimized prompt, using fallback: ${error}`);
-                optimizedTokens = (bestSuggestion.optimizedPrompt || request.prompt).length / 4; // Rough estimate
+                optimizedTokens = optimizedPrompt.length / 4; // Rough estimate
             }
             
             let optimizedSimpleEstimate;
@@ -279,33 +275,37 @@ export class OptimizationService {
             const improvementPercentage = totalOriginalTokens > 0 ? (tokensSaved / totalOriginalTokens) * 100 : 0;
 
             // Determine category based on optimization type
-            const category = this.determineCategoryFromType(bestSuggestion.type);
+            const optimizationType = optimizationResult.suggestions.length > 0 ? optimizationResult.suggestions[0].type : 'compression';
+            const category = this.determineCategoryFromType(optimizationType);
 
             // Build metadata based on optimization type
             const metadata: any = {
                 analysisTime: optimizationResult.metadata.processingTime,
-                confidence: bestSuggestion.confidence,
-                optimizationType: bestSuggestion.type,
-                appliedTechniques: optimizationResult.appliedOptimizations,
+                confidence: optimizationResult.suggestions.length > 0 ? optimizationResult.suggestions[0].confidence : 0.5,
+                optimizationType: optimizationType,
+                appliedTechniques: appliedOptimizations,
             };
 
             // Add type-specific metadata
-            if (bestSuggestion.compressionDetails) {
-                metadata.compressionDetails = bestSuggestion.compressionDetails;
-            }
-            if (bestSuggestion.contextTrimDetails) {
-                metadata.contextTrimDetails = bestSuggestion.contextTrimDetails;
-            }
-            if (bestSuggestion.fusionDetails) {
-                metadata.fusionDetails = bestSuggestion.fusionDetails;
+            if (optimizationResult.suggestions.length > 0) {
+                const bestSuggestion = optimizationResult.suggestions[0];
+                if (bestSuggestion.compressionDetails) {
+                    metadata.compressionDetails = bestSuggestion.compressionDetails;
+                }
+                if (bestSuggestion.contextTrimDetails) {
+                    metadata.contextTrimDetails = bestSuggestion.contextTrimDetails;
+                }
+                if (bestSuggestion.fusionDetails) {
+                    metadata.fusionDetails = bestSuggestion.fusionDetails;
+                }
             }
 
             // Create optimization record
             const optimization = await Optimization.create({
                 userId: request.userId,
                 originalPrompt: request.prompt,
-                optimizedPrompt: bestSuggestion.optimizedPrompt || request.prompt,
-                optimizationTechniques: optimizationResult.appliedOptimizations,
+                optimizedPrompt: optimizedPrompt,
+                optimizationTechniques: appliedOptimizations,
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
                 tokensSaved,
@@ -353,13 +353,13 @@ export class OptimizationService {
                     userId: request.userId,
                     type: 'optimization_available',
                     title: 'Significant Optimization Available',
-                    message: `You can save ${improvementPercentage.toFixed(1)}% on tokens using ${bestSuggestion.type} optimization.`,
+                    message: `You can save ${improvementPercentage.toFixed(1)}% on tokens using ${optimizationType} optimization.`,
                     severity: 'medium',
                     data: {
                         optimizationId: optimization._id,
                         savings: costSaved,
                         percentage: improvementPercentage,
-                        optimizationType: bestSuggestion.type,
+                        optimizationType: optimizationType,
                     },
                 });
             }
@@ -369,7 +369,7 @@ export class OptimizationService {
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
                 savings: improvementPercentage,
-                type: bestSuggestion.type,
+                type: optimizationType,
             });
 
             return optimization;

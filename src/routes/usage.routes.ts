@@ -47,6 +47,9 @@ router.get('/realtime/summary', authenticate, asyncHandler(UsageController.getRe
 router.get('/realtime/requests', authenticate, asyncHandler(UsageController.getRealTimeRequests));
 router.get('/analytics', authenticate, asyncHandler(UsageController.getUsageAnalytics));
 
+// CLI-specific analytics endpoint
+router.get('/analytics/cli', authenticate, asyncHandler(UsageController.getCLIAnalytics));
+
 // Property analytics routes
 router.get('/properties/analytics', authenticate, asyncHandler(UsageController.getPropertyAnalytics));
 router.get('/properties/available', authenticate, asyncHandler(UsageController.getAvailableProperties));

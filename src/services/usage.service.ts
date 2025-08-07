@@ -873,6 +873,222 @@ export class UsageService {
         }
     }
 
+    // CLI-specific analytics method
+    static async getCLIAnalytics(userId: string, options: {
+        days?: number;
+        project?: string;
+        user?: string;
+    } = {}) {
+        try {
+            const { days = 30, project } = options;
+            
+            // Calculate date range
+            const endDate = new Date();
+            const startDate = new Date(endDate.getTime() - (days * 24 * 60 * 60 * 1000));
+            const previousStartDate = new Date(startDate.getTime() - (days * 24 * 60 * 60 * 1000));
+
+            // Build match criteria
+            const match: any = { 
+                userId: new mongoose.Types.ObjectId(userId),
+                createdAt: { $gte: startDate, $lte: endDate }
+            };
+
+            if (project) {
+                // Check if project is a valid ObjectId, otherwise treat as project name
+                if (mongoose.Types.ObjectId.isValid(project)) {
+                    match.projectId = new mongoose.Types.ObjectId(project);
+                } else {
+                    // Treat as project name and look up the project ID
+                    const projectDoc = await mongoose.model('Project').findOne({ 
+                        name: project, 
+                        userId: new mongoose.Types.ObjectId(userId) 
+                    });
+                    if (projectDoc) {
+                        match.projectId = projectDoc._id;
+                    } else {
+                        // If project not found, return empty results
+                        return {
+                            totalCost: { currentPeriod: 0, previousPeriod: 0, change: 0, budget: 0 },
+                            tokenUsage: { total: 0, input: 0, output: 0, inputPercentage: 0, outputPercentage: 0 },
+                            topModelsBySpend: [],
+                            teamUsage: [],
+                            insights: [{ type: 'warning', message: `Project "${project}" not found` }]
+                        };
+                    }
+                }
+            }
+
+            // Get current period data
+            const currentPeriodData = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: null,
+                        totalCost: { $sum: '$cost' },
+                        totalTokens: { $sum: '$totalTokens' },
+                        totalRequests: { $sum: 1 },
+                        inputTokens: { $sum: '$promptTokens' },
+                        outputTokens: { $sum: '$completionTokens' }
+                    }
+                }
+            ]);
+
+            // Get previous period data for comparison
+            const previousMatch = { 
+                ...match,
+                createdAt: { $gte: previousStartDate, $lt: startDate }
+            };
+            const previousPeriodData = await Usage.aggregate([
+                { $match: previousMatch },
+                {
+                    $group: {
+                        _id: null,
+                        totalCost: { $sum: '$cost' },
+                        totalTokens: { $sum: '$totalTokens' },
+                        totalRequests: { $sum: 1 }
+                    }
+                }
+            ]);
+
+            // Get top models by spend
+            const topModelsData = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: '$model',
+                        totalCost: { $sum: '$cost' },
+                        requests: { $sum: 1 },
+                        totalTokens: { $sum: '$totalTokens' },
+                        avgCostPerRequest: { $avg: '$cost' }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 10 }
+            ]);
+
+            // Get team member usage
+            const teamUsageData = await Usage.aggregate([
+                { $match: match },
+                {
+                    $lookup: {
+                        from: 'users',
+                        localField: 'userId',
+                        foreignField: '_id',
+                        as: 'user'
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$userId',
+                        name: { $first: { $arrayElemAt: ['$user.name', 0] } },
+                        email: { $first: { $arrayElemAt: ['$user.email', 0] } },
+                        totalCost: { $sum: '$cost' },
+                        requests: { $sum: 1 },
+                        topModel: { $first: '$model' },
+                        lastActive: { $max: '$createdAt' }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 10 }
+            ]);
+
+            // Calculate totals
+            const currentPeriod = currentPeriodData[0] || { totalCost: 0, totalTokens: 0, totalRequests: 0, inputTokens: 0, outputTokens: 0 };
+            const previousPeriod = previousPeriodData[0] || { totalCost: 0, totalTokens: 0, totalRequests: 0 };
+            
+            const totalCost = currentPeriod.totalCost || 0;
+            const previousTotalCost = previousPeriod.totalCost || 0;
+            const change = previousTotalCost > 0 ? ((totalCost - previousTotalCost) / previousTotalCost) * 100 : 0;
+
+            // Calculate token percentages
+            const totalTokens = currentPeriod.totalTokens || 0;
+            const inputTokens = currentPeriod.inputTokens || 0;
+            const outputTokens = currentPeriod.outputTokens || 0;
+            const inputPercentage = totalTokens > 0 ? (inputTokens / totalTokens) * 100 : 0;
+            const outputPercentage = totalTokens > 0 ? (outputTokens / totalTokens) * 100 : 0;
+
+            // Calculate model percentages
+            const totalModelCost = topModelsData.reduce((sum, model) => sum + model.totalCost, 0);
+            const topModelsBySpend = topModelsData.map(model => ({
+                model: model._id,
+                totalCost: model.totalCost,
+                requests: model.requests,
+                percentage: totalModelCost > 0 ? (model.totalCost / totalModelCost) * 100 : 0,
+                details: {
+                    avgCostPerRequest: model.avgCostPerRequest,
+                    totalTokens: model.totalTokens,
+                    successRate: 95.0 // Default success rate
+                }
+            }));
+
+            // Calculate team percentages
+            const totalTeamCost = teamUsageData.reduce((sum, member) => sum + member.totalCost, 0);
+            const teamUsage = teamUsageData.map(member => ({
+                name: member.name || member.email || 'Unknown User',
+                email: member.email,
+                totalCost: member.totalCost,
+                requests: member.requests,
+                percentage: totalTeamCost > 0 ? (member.totalCost / totalTeamCost) * 100 : 0,
+                details: {
+                    topModel: member.topModel,
+                    avgCostPerRequest: member.totalCost / member.requests,
+                    lastActive: member.lastActive
+                }
+            }));
+
+            // Generate insights
+            const insights = [];
+            if (change > 10) {
+                insights.push({
+                    type: 'warning',
+                    message: `Cost increased by ${change.toFixed(1)}% compared to previous period`
+                });
+            } else if (change < -10) {
+                insights.push({
+                    type: 'success',
+                    message: `Cost decreased by ${Math.abs(change).toFixed(1)}% compared to previous period`
+                });
+            }
+
+            if (inputPercentage > 80) {
+                insights.push({
+                    type: 'suggestion',
+                    message: 'High input token usage - consider optimizing prompts for cost reduction'
+                });
+            }
+
+            if (topModelsBySpend.length > 0 && topModelsBySpend[0].totalCost > totalCost * 0.5) {
+                insights.push({
+                    type: 'suggestion',
+                    message: `${topModelsBySpend[0].model} accounts for over 50% of costs - consider alternatives`
+                });
+            }
+
+            return {
+                project: project || null,
+                totalCost: {
+                    currentPeriod: totalCost,
+                    previousPeriod: previousTotalCost,
+                    change: change,
+                    budget: 0 // TODO: Get from user settings
+                },
+                tokenUsage: {
+                    total: totalTokens,
+                    input: inputTokens,
+                    output: outputTokens,
+                    inputPercentage: inputPercentage,
+                    outputPercentage: outputPercentage
+                },
+                topModelsBySpend: topModelsBySpend,
+                teamUsage: teamUsage,
+                insights: insights
+            };
+        } catch (error) {
+            logger.error('Error getting CLI analytics:', error);
+            throw error;
+        }
+    }
+
     // Add a method to sync historical data
     static async syncHistoricalData(userId: string, days: number = 30): Promise<void> {
         try {

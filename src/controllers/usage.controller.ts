@@ -721,6 +721,36 @@ export class UsageController {
         }
     }
 
+    static async getCLIAnalytics(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+        try {
+            const userId = req.user?.id || req.userId;
+            
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required',
+                });
+            }
+
+            const { days = 30, project, user } = req.query;
+            const daysNum = parseInt(days as string) || 30;
+
+            const analytics = await UsageService.getCLIAnalytics(userId, {
+                days: daysNum,
+                project: project as string,
+                user: user as string
+            });
+
+            res.json({
+                success: true,
+                data: analytics
+            });
+        } catch (error: any) {
+            logger.error('Get CLI analytics error:', error);
+            next(error);
+        }
+    }
+
     static async getPropertyAnalytics(req: any, res: Response, next: NextFunction): Promise<Response | void> {
         try {
             const userId = req.user?.id || req.userId;
