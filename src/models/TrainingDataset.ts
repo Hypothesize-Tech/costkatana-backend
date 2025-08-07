@@ -58,28 +58,27 @@ export interface ITrainingDataset extends Document {
     updatedAt: Date;
 }
 
-const trainingDatasetSchema: Schema = new Schema({
-    name: { 
-        type: String, 
-        required: true, 
-        maxlength: 100 
-    },
-    description: { 
-        type: String, 
-        maxlength: 500 
-    },
-    userId: { 
-        type: Schema.Types.ObjectId, 
-        ref: 'User', 
+const trainingDatasetSchema = new Schema<ITrainingDataset>({
+    name: {
+        type: String,
         required: true,
-        index: true
+        trim: true,
+        maxlength: 100
+    },
+    description: {
+        type: String,
+        maxlength: 500
+    },
+    userId: {
+        type: Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     },
     
-    // Configuration
+    // Dataset configuration
     targetUseCase: { 
         type: String, 
-        required: true,
-        index: true
+        required: true
     },
     targetModel: { 
         type: String, 
@@ -88,8 +87,7 @@ const trainingDatasetSchema: Schema = new Schema({
     
     // Request selection
     requestIds: [{ 
-        type: String,
-        index: true
+        type: String
     }],
     minScore: { 
         type: Number, 
@@ -147,17 +145,17 @@ const trainingDatasetSchema: Schema = new Schema({
     status: { 
         type: String, 
         enum: ['draft', 'ready', 'exported', 'training', 'completed'],
-        default: 'draft',
-        index: true
+        default: 'draft'
     }
 }, { 
     timestamps: true 
 });
 
-// Indexes for efficient queries
-trainingDatasetSchema.index({ userId: 1, status: 1, updatedAt: -1 });
-trainingDatasetSchema.index({ targetUseCase: 1, userId: 1 });
+// 1. Primary user queries
 trainingDatasetSchema.index({ userId: 1, createdAt: -1 });
+
+// 2. Status queries
+trainingDatasetSchema.index({ userId: 1, status: 1 });
 
 // Methods
 trainingDatasetSchema.methods.calculateStats = async function() {

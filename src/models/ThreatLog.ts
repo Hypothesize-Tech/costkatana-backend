@@ -1,4 +1,4 @@
-import { Schema, model, Document, ObjectId } from 'mongoose';
+import mongoose, { Document, Schema, model, ObjectId } from 'mongoose';
 
 export interface IThreatLog extends Document {
     _id: ObjectId;
@@ -19,13 +19,11 @@ export interface IThreatLog extends Document {
 const threatLogSchema = new Schema<IThreatLog>({
     requestId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     userId: {
         type: Schema.Types.ObjectId,
-        ref: 'User',
-        index: true
+        ref: 'User'
     },
     threatCategory: {
         type: String,
@@ -49,8 +47,7 @@ const threatLogSchema = new Schema<IThreatLog>({
             'harassment_and_bullying',
             'harmful_content',
             'unknown'
-        ],
-        index: true
+        ]
     },
     confidence: {
         type: Number,
@@ -61,8 +58,7 @@ const threatLogSchema = new Schema<IThreatLog>({
     stage: {
         type: String,
         required: true,
-        enum: ['prompt-guard', 'llama-guard'],
-        index: true
+        enum: ['prompt-guard', 'llama-guard']
     },
     reason: {
         type: String,
@@ -85,7 +81,6 @@ const threatLogSchema = new Schema<IThreatLog>({
     },
     promptHash: {
         type: String,
-        index: true,
         sparse: true
     },
     ipAddress: {
@@ -100,16 +95,16 @@ const threatLogSchema = new Schema<IThreatLog>({
     timestamps: true
 });
 
-// Indexes for analytics queries
-threatLogSchema.index({ timestamp: -1, threatCategory: 1 });
+// 1. Primary queries by user and time
 threatLogSchema.index({ userId: 1, timestamp: -1 });
-threatLogSchema.index({ stage: 1, timestamp: -1 });
-threatLogSchema.index({ confidence: -1, timestamp: -1 });
 
-// Compound index for cost savings analytics
-threatLogSchema.index({ threatCategory: 1, costSaved: -1, timestamp: -1 });
+// 2. Time-based queries
+threatLogSchema.index({ timestamp: -1 });
 
-// TTL index to automatically delete old logs after 1 year
+// 3. Threat category analysis
+threatLogSchema.index({ threatCategory: 1, timestamp: -1 });
+
+// 4. TTL index to automatically delete old logs after 1 year
 threatLogSchema.index({ timestamp: 1 }, { expireAfterSeconds: 365 * 24 * 60 * 60 });
 
 export const ThreatLog = model<IThreatLog>('ThreatLog', threatLogSchema);

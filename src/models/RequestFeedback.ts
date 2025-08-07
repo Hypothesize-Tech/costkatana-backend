@@ -34,13 +34,11 @@ const requestFeedbackSchema = new Schema<IRequestFeedback>({
     requestId: {
         type: String,
         required: true,
-        index: true,
         unique: true
     },
     userId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     rating: {
         type: Boolean,
@@ -74,11 +72,13 @@ const requestFeedbackSchema = new Schema<IRequestFeedback>({
     timestamps: true
 });
 
-// Indexes for analytics queries
+// 1. Primary user queries
 requestFeedbackSchema.index({ userId: 1, createdAt: -1 });
+
+// 2. Rating analysis
 requestFeedbackSchema.index({ rating: 1, createdAt: -1 });
+
+// 3. Provider analysis
 requestFeedbackSchema.index({ provider: 1, rating: 1 });
-requestFeedbackSchema.index({ modelName: 1, rating: 1 });
-requestFeedbackSchema.index({ feature: 1, rating: 1 });
 
 export const RequestFeedback = mongoose.model<IRequestFeedback>('RequestFeedback', requestFeedbackSchema);

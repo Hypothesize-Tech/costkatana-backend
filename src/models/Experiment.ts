@@ -34,8 +34,7 @@ const ExperimentSchema = new Schema<IExperiment>({
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
-        required: true,
-        index: true
+        required: true
     },
     name: {
         type: String,
@@ -99,9 +98,10 @@ const ExperimentSchema = new Schema<IExperiment>({
     timestamps: true
 });
 
-// Indexes for efficient querying
+// 1. Primary user queries
 ExperimentSchema.index({ userId: 1, createdAt: -1 });
-ExperimentSchema.index({ userId: 1, type: 1 });
+
+// 2. Status queries
 ExperimentSchema.index({ userId: 1, status: 1 });
 
 export const Experiment = mongoose.model<IExperiment>('Experiment', ExperimentSchema); 

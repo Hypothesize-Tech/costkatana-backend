@@ -143,13 +143,11 @@ const usageSchema = new Schema<IUsage>({
     httpStatusCode: {
         type: Number,
         min: 100,
-        max: 599,
-        index: true // Index for error analysis
+        max: 599
     },
     errorType: {
         type: String,
-        enum: ['client_error', 'server_error', 'network_error', 'auth_error', 'rate_limit', 'timeout', 'validation_error', 'integration_error'],
-        index: true // Index for error categorization
+        enum: ['client_error', 'server_error', 'network_error', 'auth_error', 'rate_limit', 'timeout', 'validation_error', 'integration_error']
     },
     errorDetails: {
         type: Schema.Types.Mixed,
@@ -157,24 +155,20 @@ const usageSchema = new Schema<IUsage>({
     },
     isClientError: {
         type: Boolean,
-        default: false,
-        index: true // Index for quick client error filtering
+        default: false
     },
     isServerError: {
         type: Boolean,
-        default: false,
-        index: true // Index for quick server error filtering
+        default: false
     },
     ipAddress: String,
     userAgent: String,
     // Workflow tracking fields
     workflowId: {
-        type: String,
-        index: true  // Index for efficient workflow grouping
+        type: String
     },
     workflowName: {
-        type: String,
-        index: true  // Index for workflow type filtering
+        type: String
     },
     workflowStep: {
         type: String
@@ -187,29 +181,22 @@ const usageSchema = new Schema<IUsage>({
     timestamps: true,
 });
 
-// Compound indexes for efficient querying
-usageSchema.index({ projectId: 1, createdAt: -1 });
+// 1. Primary user queries (most common)
+usageSchema.index({ userId: 1, createdAt: -1 });
+
+// 2. Time-based queries
+usageSchema.index({ createdAt: -1 });
+
+// 3. Service filtering
 usageSchema.index({ service: 1, createdAt: -1 });
-usageSchema.index({ model: 1, createdAt: -1 });
+
+// 4. Cost analysis
 usageSchema.index({ cost: -1 });
-usageSchema.index({ 'costAllocation.department': 1 });
-usageSchema.index({ 'costAllocation.team': 1 });
-usageSchema.index({ 'costAllocation.client': 1 });
 
-// Workflow indexes for efficient workflow queries
-usageSchema.index({ workflowId: 1, workflowSequence: 1 }); // For workflow step ordering
-usageSchema.index({ userId: 1, workflowId: 1, createdAt: -1 }); // For user workflow queries
-usageSchema.index({ workflowName: 1, createdAt: -1 }); // For workflow type analytics
+// 5. Error tracking (only if actually used)
+usageSchema.index({ errorOccurred: 1, createdAt: -1 });
 
-// Error tracking indexes for monitoring and analytics
-usageSchema.index({ errorOccurred: 1, createdAt: -1 }); // For error timeline analysis
-usageSchema.index({ httpStatusCode: 1, createdAt: -1 }); // For status code monitoring
-usageSchema.index({ errorType: 1, createdAt: -1 }); // For error categorization
-usageSchema.index({ isClientError: 1, createdAt: -1 }); // For client error tracking
-usageSchema.index({ isServerError: 1, createdAt: -1 }); // For server error tracking
-usageSchema.index({ userId: 1, errorOccurred: 1, createdAt: -1 }); // For user-specific error analysis
-
-// Text index for prompt searching
+// 6. Text search for prompts (if needed)
 usageSchema.index({ prompt: 'text', completion: 'text' });
 
 // Virtual for cost per token
@@ -242,13 +229,5 @@ usageSchema.statics.getUserSummary = async function (userId: string, startDate?:
         }
     ]);
 };
-
-// Create indexes for better query performance
-usageSchema.index({ userId: 1, createdAt: -1 }); // For user-based time range queries
-usageSchema.index({ userId: 1, tags: 1, createdAt: -1 }); // For tag-based analytics
-usageSchema.index({ userId: 1, service: 1, model: 1, createdAt: -1 }); // For service/model analysis
-usageSchema.index({ createdAt: -1 }); // For time-based operations
-usageSchema.index({ tags: 1 }); // For tag operations
-usageSchema.index({ userId: 1, cost: -1 }); // For cost-based sorting
 
 export const Usage = mongoose.model<IUsage>('Usage', usageSchema);

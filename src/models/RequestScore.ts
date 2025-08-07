@@ -22,14 +22,12 @@ export interface IRequestScore extends Document {
 const requestScoreSchema: Schema = new Schema({
     requestId: { 
         type: String, 
-        required: true,
-        index: true
+        required: true
     },
     userId: { 
         type: Schema.Types.ObjectId, 
         ref: 'User', 
-        required: true,
-        index: true
+        required: true
     },
     score: { 
         type: Number, 
@@ -65,11 +63,14 @@ const requestScoreSchema: Schema = new Schema({
     timestamps: true 
 });
 
-// Compound indexes for efficient queries
-requestScoreSchema.index({ userId: 1, score: -1, scoredAt: -1 });
-requestScoreSchema.index({ requestId: 1, userId: 1 }, { unique: true }); // One score per user per request
+// 1. Primary user queries
+requestScoreSchema.index({ userId: 1, scoredAt: -1 });
+
+// 2. Unique constraint for one score per user per request
+requestScoreSchema.index({ requestId: 1, userId: 1 }, { unique: true });
+
+// 3. Training candidate queries
 requestScoreSchema.index({ isTrainingCandidate: 1, score: -1 });
-requestScoreSchema.index({ userId: 1, isTrainingCandidate: 1, score: -1 });
 
 // Pre-save middleware to calculate efficiency metrics
 requestScoreSchema.pre('save', function(next) {
