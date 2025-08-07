@@ -1,4 +1,4 @@
-import mongoose, { Document, Schema, model, ObjectId } from 'mongoose';
+import { Document, Schema, model, ObjectId } from 'mongoose';
 
 export interface IThreatLog extends Document {
     _id: ObjectId;
