@@ -17,6 +17,21 @@ router.get('/provider/:provider', PricingController.getProviderPricing);
 // Compare pricing across providers (public)
 router.post('/compare', PricingController.comparePricing);
 
+// Get all available models for comparison (public)
+router.get('/models', PricingController.getAvailableModels);
+
+// Compare two specific models (public)
+router.post('/models/compare', PricingController.compareModels);
+
+// Cost Calculator Tool (public)
+router.post('/tools/cost-calculator', PricingController.calculateCosts);
+
+// Performance Benchmark Tool (public)
+router.post('/tools/performance-benchmark', PricingController.runPerformanceBenchmark);
+
+// Token Analyzer Tool (public)
+router.post('/tools/token-analyzer', PricingController.analyzeTokens);
+
 // Get cache status (public)
 router.get('/cache-status', PricingController.getCacheStatus);
 
@@ -34,8 +49,5 @@ router.get('/test-scraping/:provider', PricingController.testScraping);
 
 // Trigger web scraping for providers (admin only)
 router.post('/scrape', PricingController.triggerScraping);
-
-// Get scraping status (admin only)
-router.get('/scrape/status', PricingController.getScrapingStatus);
 
 export { router as pricingRoutes }; 

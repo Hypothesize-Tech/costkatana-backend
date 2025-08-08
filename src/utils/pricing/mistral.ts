@@ -2,7 +2,7 @@ import { ModelPricing, PricingUnit } from '../pricing';
 
 export const MISTRAL_PRICING: ModelPricing[] = [
     {
-        modelId: 'mistral-large-latest',
+        modelId: 'mistral.mistral-large-2402-v1:0',
         modelName: 'Mistral Large',
         provider: 'Mistral AI',
         inputPrice: 6.50,
@@ -15,7 +15,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Latest Mistral Large model - most capable'
     },
     {
-        modelId: 'mistral-small-latest',
+        modelId: 'mistral.mistral-small-2402-v1:0',
         modelName: 'Mistral Small',
         provider: 'Mistral AI',
         inputPrice: 2.00,
@@ -28,7 +28,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Latest Mistral Small model - fast and efficient'
     },
     {
-        modelId: 'mixtral-8x7b-instruct-v0.1',
+        modelId: 'mistral.mixtral-8x7b-instruct-v0:1',
         modelName: 'Mixtral 8x7B Instruct',
         provider: 'Mistral AI',
         inputPrice: 0.14,
@@ -41,7 +41,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Mixtral 8x7B Instruct model'
     },
     {
-        modelId: 'mistral-7b-instruct-v0.2',
+        modelId: 'mistral.mistral-7b-instruct-v0:2',
         modelName: 'Mistral 7B Instruct',
         provider: 'Mistral AI',
         inputPrice: 0.14,

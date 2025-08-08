@@ -2,7 +2,7 @@ import { ModelPricing, PricingUnit } from '../pricing';
 
 export const ANTHROPIC_PRICING: ModelPricing[] = [
     {
-        modelId: 'claude-3-5-sonnet-20241022-v1:0',
+        modelId: 'claude-3-5-sonnet-20240620-v1:0',
         modelName: 'Claude 3.5 Sonnet',
         provider: 'Anthropic',
         inputPrice: 3.00,
@@ -15,7 +15,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         notes: 'Latest Claude 3.5 Sonnet with enhanced reasoning capabilities'
     },
     {
-        modelId: 'claude-3-5-haiku-20241022-v1:0',
+        modelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
         modelName: 'Claude 3.5 Haiku',
         provider: 'Anthropic',
         inputPrice: 0.25,
@@ -25,7 +25,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude 3.5 Haiku - fast and efficient'
+        notes: 'Latest Claude 3.5 Haiku - fast and efficient (inference profile)'
     },
     {
         modelId: 'claude-3-opus-20240229-v1:0',

@@ -2,7 +2,7 @@ import { ModelPricing, PricingUnit } from '../pricing';
 
 export const COHERE_PRICING: ModelPricing[] = [
     {
-        modelId: 'command-r-plus',
+        modelId: 'cohere.command-r-plus-v1:0',
         modelName: 'Command R+',
         provider: 'Cohere',
         inputPrice: 3.00,
@@ -15,7 +15,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         notes: 'Latest Command R+ model with multilingual support'
     },
     {
-        modelId: 'command-r',
+        modelId: 'cohere.command-r-v1:0',
         modelName: 'Command R',
         provider: 'Cohere',
         inputPrice: 0.50,
@@ -28,7 +28,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         notes: 'Command R model with multilingual support'
     },
     {
-        modelId: 'command-light',
+        modelId: 'cohere.command-light-text-v14',
         modelName: 'Command Light',
         provider: 'Cohere',
         inputPrice: 0.10,
@@ -41,7 +41,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         notes: 'Command Light model - fast and efficient'
     },
     {
-        modelId: 'embed-english-v3',
+        modelId: 'cohere.embed-english-v3',
         modelName: 'Embed English v3',
         provider: 'Cohere',
         inputPrice: 0.10,
@@ -54,7 +54,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         notes: 'Cohere Embed English v3'
     },
     {
-        modelId: 'embed-multilingual-v3',
+        modelId: 'cohere.embed-multilingual-v3',
         modelName: 'Embed Multilingual v3',
         provider: 'Cohere',
         inputPrice: 0.10,

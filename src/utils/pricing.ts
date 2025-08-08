@@ -124,10 +124,10 @@ export function getModelNameVariations(model: string): string[] {
     
     // Add common variations for Claude models
     if (normalized.includes('claude-3-5-haiku')) {
-        variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0');
+        variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0', 'us.anthropic.claude-3-5-haiku-20241022-v1:0');
     }
     if (normalized.includes('claude-3-5-sonnet')) {
-        variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20241022-v1:0', 'anthropic.claude-3-5-sonnet-20241022-v1:0');
+        variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20240620-v1:0', 'anthropic.claude-3-5-sonnet-20240620-v1:0');
     }
     if (normalized.includes('claude-3-opus')) {
         variations.push('claude-3-opus', 'claude-3-opus-20240229-v1:0', 'anthropic.claude-3-opus-20240229-v1:0');

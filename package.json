@@ -31,7 +31,7 @@
     "license": "MIT",
     "dependencies": {
         "@aws-sdk/client-bedrock": "^3.848.0",
-        "@aws-sdk/client-bedrock-runtime": "^3.500.0",
+        "@aws-sdk/client-bedrock-runtime": "^3.863.0",
         "@aws-sdk/client-cloudwatch": "^3.500.0",
         "@aws-sdk/client-s3": "^3.500.0",
         "@aws-sdk/s3-request-presigner": "^3.837.0",
