@@ -1,4 +1,5 @@
 import express, { Application, Request, Response } from 'express';
+import { cacheMiddleware } from './middleware/cache.middleware';
 import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
@@ -123,6 +124,7 @@ app.use(trackAnalyticsEvents);
 app.use(trackProjectEvents);
 app.use(trackUserSession);
 app.use(trackOptimizationEvents);
+app.use(cacheMiddleware);
 
 // API routes
 app.use('/api', apiRouter);

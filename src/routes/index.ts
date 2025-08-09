@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import metricsRouter from './metrics.route';
 import authRouter from './auth.routes';
 import userRouter from './user.routes';
 import usageRouter from './usage.routes';
@@ -32,7 +33,6 @@ import predictiveIntelligenceRoutes from './predictiveIntelligence.routes';
 import cacheRoutes from './cache.routes';
 import budgetRoutes from './budget.routes';
 import trackingRoutes from './tracking.routes';
-
 const router = Router();
 
 // Health check
@@ -68,6 +68,7 @@ router.use('/api-keys', apiKeyRoutes);
 router.use('/onboarding', onboardingRoutes);
 router.use('/monitoring', monitoringRoutes);
 router.use('/gateway', gatewayRoutes);
+router.use('/metrics', metricsRouter);
 router.use('/workflows', workflowRoutes);
 router.use('/memory', memoryRoutes);
 router.use('/key-vault', keyVaultRoutes);

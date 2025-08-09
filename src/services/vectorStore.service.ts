@@ -1,5 +1,45 @@
-import { HNSWLib } from "@langchain/community/vectorstores/hnswlib";
-import { BedrockEmbeddings } from "@langchain/aws";
+import { HNSWLib } from '@langchain/community/vectorstores/hnswlib';
+import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { redisService } from './redis.service';
+
+const SIMILARITY_THRESHOLD = 0.9;
+
+// This is a simplified in-memory vector store. For production, use a persistent solution.
+let vectorStore: HNSWLib;
+
+const initializeVectorStore = async () => {
+  const embeddings = new BedrockEmbeddings({
+    region: process.env.AWS_REGION || 'us-east-1',
+  });
+  vectorStore = await HNSWLib.fromTexts(
+    ['initialization'],
+    [[]],
+    embeddings
+  );
+};
+
+initializeVectorStore();
+
+export const saveEmbedding = async (key: string, embedding: number[], response: any) => {
+  if (!vectorStore) return;
+    await vectorStore.addVectors([embedding], [{ pageContent: '', metadata: { key } }]);
+  await redisService.client.set(`response:${key}`, JSON.stringify(response));
+};
+
+export const findSimilar = async (embedding: number[]): Promise<any | null> => {
+  if (!vectorStore) return null;
+
+  const results = await vectorStore.similaritySearchVectorWithScore(embedding, 1);
+
+  if (results.length > 0 && results[0][1] >= SIMILARITY_THRESHOLD) {
+    const similarKey = results[0][0].metadata.key;
+    const cachedResponse = await redisService.client.get(`response:${similarKey}`);
+    return cachedResponse ? JSON.parse(cachedResponse) : null;
+  }
+
+  return null;
+};
+
 import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import * as fs from 'fs';

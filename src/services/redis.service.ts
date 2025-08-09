@@ -1,8 +1,10 @@
 import { createClient, RedisClientType } from 'redis';
+import dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { ChatBedrockConverse } from '@langchain/aws';
 
+dotenv.config();
 
 interface CacheEntry {
     key: string;
@@ -44,7 +46,7 @@ interface CacheStats {
 
 export class RedisService {
     private static instance: RedisService;
-    private client!: RedisClientType;
+    public client!: RedisClientType;
     private readerClient!: RedisClientType;
     private embeddingModel: ChatBedrockConverse;
     private _isConnected: boolean = false;
