@@ -8,14 +8,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
+    python-is-python3 \
     pip && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy package files and install dependencies
 COPY package*.json ./
-# Use npm install instead of ci for more resilience, and skip Chromium download
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PYTHON=python3
 RUN npm install
 
 # Copy the rest of the source code
@@ -29,9 +28,11 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install system dependencies for Puppeteer
+# Install system dependencies for Puppeteer and Python
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dumb-init \
+    python3 \
+    python-is-python3 \
     # Use the system-provided chromium
     chromium \
     # Additional dependencies for chromium
@@ -80,7 +81,6 @@ RUN addgroup --gid 1001 nodejs && \
 # Copy package files and install production dependencies
 COPY package*.json ./
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PYTHON=python3
 RUN npm install --omit=dev && npm cache clean --force
 
 # Copy built application from the builder stage
