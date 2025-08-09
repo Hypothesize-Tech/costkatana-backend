@@ -1,0 +1,175 @@
+### Test CostKatana-Project-Id and CostKatana-Auth-Method Headers
+
+### 1. Test with Project ID Header (Gateway Auth)
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: test-project-123
+CostKatana-Auth-Method: gateway
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! This request should be tracked with project ID test-project-123"
+    }
+  ],
+  "max_tokens": 50
+}
+
+### 2. Test with Project ID Header (Standard Auth Override)
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: test-project-456
+CostKatana-Auth-Method: standard
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello! This request uses standard auth method and project ID test-project-456"
+    }
+  ],
+  "max_tokens": 50
+}
+
+### 3. Test Multi-tenant Request with Project ID
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: tenant-acme-corp
+CostKatana-Cache-Enabled: true
+CostKatana-Retry-Enabled: true
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Generate a business report for Acme Corporation"
+    }
+  ],
+  "max_tokens": 100
+}
+
+### 4. Test A/B Testing Scenario - Variant A
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: experiment-variant-a
+CostKatana-Properties: {"experiment":"prompt-optimization","variant":"A","model-type":"standard"}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant. Be concise."
+    },
+    {
+      "role": "user",
+      "content": "Explain machine learning in simple terms"
+    }
+  ],
+  "max_tokens": 100
+}
+
+### 5. Test A/B Testing Scenario - Variant B
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: experiment-variant-b
+CostKatana-Properties: {"experiment":"prompt-optimization","variant":"B","model-type":"standard"}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a detailed assistant. Provide comprehensive answers."
+    },
+    {
+      "role": "user",
+      "content": "Explain machine learning in simple terms"
+    }
+  ],
+  "max_tokens": 200
+}
+
+### 6. Test Environment-specific Request - Development
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: dev-environment
+CostKatana-Auth-Method: gateway
+CostKatana-Properties: {"environment":"development","deployment-type":"automated"}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Deploy to development environment"
+    }
+  ],
+  "max_tokens": 75
+}
+
+### 7. Test Environment-specific Request - Production
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+CostKatana-Project-Id: prod-environment
+CostKatana-Auth-Method: standard
+CostKatana-Properties: {"environment":"production","deployment-type":"automated"}
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Deploy to production environment"
+    }
+  ],
+  "max_tokens": 75
+}
+
+### 8. Test Legacy Request (without new headers - should still work)
+POST {{baseUrl}}/api/gateway/v1/chat/completions
+Content-Type: application/json
+CostKatana-Auth: Bearer {{apiKey}}
+CostKatana-Target-Url: https://api.openai.com/v1
+
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": "This is a legacy request without project ID or auth method headers"
+    }
+  ],
+  "max_tokens": 50
+}
+
+### 9. Test Usage Tracking with Project ID
+GET {{baseUrl}}/api/usage?projectId=test-project-123
+Authorization: Bearer {{authToken}}
+
+### 10. Test Analytics by Project ID
+GET {{baseUrl}}/api/analytics?projectId=experiment-variant-a
+Authorization: Bearer {{authToken}}
+
+### Variables (set these in your environment)
+# @baseUrl = http://localhost:3000
+# @apiKey = dak_your_api_key_here
+# @authToken = your_jwt_token_here
