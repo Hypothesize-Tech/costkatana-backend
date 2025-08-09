@@ -3,13 +3,18 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies, including those for Puppeteer
 RUN apk add --no-cache \
     python3 \
     make \
     g++ \
     py3-pip \
-    libc6-compat
+    libc6-compat \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont
 
 # Copy package files and install dependencies to leverage Docker cache
 COPY package*.json ./
