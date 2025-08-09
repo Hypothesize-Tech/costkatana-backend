@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package*.json ./
 # Use npm install instead of ci for more resilience, and skip Chromium download
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PYTHON python3
+ENV PYTHON=python3
 RUN npm install
 
 # Copy the rest of the source code
@@ -80,7 +80,7 @@ RUN addgroup --gid 1001 nodejs && \
 # Copy package files and install production dependencies
 COPY package*.json ./
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PYTHON python3
+ENV PYTHON=python3
 RUN npm install --omit=dev && npm cache clean --force
 
 # Copy built application from the builder stage
