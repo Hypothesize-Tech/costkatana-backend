@@ -53,6 +53,13 @@ declare global {
                 failoverEnabled?: boolean;
                 failoverPolicy?: string;
                 isFailoverRequest?: boolean;
+                // New cache-related properties
+                semanticCacheEnabled?: boolean;
+                deduplicationEnabled?: boolean;
+                similarityThreshold?: number;
+                inputTokens?: number;
+                outputTokens?: number;
+                cost?: number;
             };
         }
     }
@@ -459,6 +466,12 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     context.securityEnabled = req.headers['costkatana-llm-security-enabled'] === 'true';
     context.omitRequest = req.headers['costkatana-omit-request'] === 'true';
     context.omitResponse = req.headers['costkatana-omit-response'] === 'true';
+    
+    // Process cache-specific headers
+    context.semanticCacheEnabled = req.headers['costkatana-semantic-cache-enabled'] !== 'false';
+    context.deduplicationEnabled = req.headers['costkatana-deduplication-enabled'] !== 'false';
+    const similarityThreshold = parseFloat(req.headers['costkatana-similarity-threshold'] as string);
+    context.similarityThreshold = !isNaN(similarityThreshold) ? similarityThreshold : 0.85;
     
     // Process firewall headers
     context.firewallEnabled = req.headers['costkatana-firewall-enabled'] === 'true';

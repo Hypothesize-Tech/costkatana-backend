@@ -1,46 +1,29 @@
 import { Router } from 'express';
 import { WorkflowController } from '../controllers/workflow.controller';
 import { authenticate } from '../middleware/auth.middleware';
-import { validateParams } from '../middleware/validation.middleware';
+import { asyncHandler } from '../middleware/error.middleware';
 
 const router = Router();
 
-// All workflow routes require authentication
+// All routes require authentication
 router.use(authenticate);
 
-/**
- * @route GET /api/workflows
- * @desc Get user workflows with pagination
- * @access Private
- */
-router.get('/', WorkflowController.getUserWorkflows);
+// Workflow Templates
+router.post('/templates', asyncHandler(WorkflowController.createTemplate));
+router.get('/templates/:templateId', asyncHandler(WorkflowController.getTemplate));
 
-/**
- * @route GET /api/workflows/analytics
- * @desc Get workflow analytics for user
- * @access Private
- */
-router.get('/analytics', WorkflowController.getWorkflowAnalytics);
+// Workflow Execution
+router.post('/templates/:templateId/execute', asyncHandler(WorkflowController.executeWorkflow));
+router.get('/executions/:executionId', asyncHandler(WorkflowController.getExecution));
+router.get('/executions/:executionId/trace', asyncHandler(WorkflowController.getWorkflowTrace));
 
-/**
- * @route GET /api/workflows/:workflowId
- * @desc Get specific workflow details
- * @access Private
- */
-router.get('/:workflowId', validateParams, WorkflowController.getWorkflowDetails);
+// Workflow Control
+router.post('/executions/:executionId/pause', asyncHandler(WorkflowController.pauseWorkflow));
+router.post('/executions/:executionId/resume', asyncHandler(WorkflowController.resumeWorkflow));
+router.post('/executions/:executionId/cancel', asyncHandler(WorkflowController.cancelWorkflow));
 
-/**
- * @route GET /api/workflows/:workflowId/steps
- * @desc Get workflow steps
- * @access Private
- */
-router.get('/:workflowId/steps', validateParams, WorkflowController.getWorkflowSteps);
-
-/**
- * @route POST /api/workflows/compare
- * @desc Compare multiple workflows
- * @access Private
- */
-router.post('/compare', WorkflowController.compareWorkflows);
+// Analytics and Observability
+router.get('/workflows/:workflowId/metrics', asyncHandler(WorkflowController.getWorkflowMetrics));
+router.get('/observability/dashboard', asyncHandler(WorkflowController.getObservabilityDashboard));
 
 export default router;

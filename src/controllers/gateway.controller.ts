@@ -4,9 +4,8 @@ import { logger } from '../utils/logger';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
+import { redisService } from '../services/redis.service';
 import https from 'https';
-
-import crypto from 'crypto';
 
 // Create a connection pool for better performance
 const httpsAgent = new https.Agent({
@@ -24,16 +23,7 @@ interface CacheEntry {
     ttl?: number;
     userScope?: string;
 }
-
-interface CacheBucket {
-    entries: CacheEntry[];
-    currentIndex: number;
-}
-
-// Enhanced in-memory cache with user scoping and buckets
-const responseCache = new Map<string, CacheEntry>();
-const cacheBuckets = new Map<string, CacheBucket>();
-const DEFAULT_CACHE_TTL = 604800000; // 7 days (as per documentation)
+const DEFAULT_CACHE_TTL = 604800; // 7 days in seconds for Redis
 
 // Smart Retry defaults (as per documentation)
 const DEFAULT_RETRY_COUNT = 3;
@@ -294,163 +284,101 @@ export class GatewayController {
     }
 
     /**
-     * Check if response exists in cache with enhanced TTL and bucket support
+     * Check if response exists in cache using Redis with semantic matching
      */
     private static async checkCache(req: Request): Promise<CacheEntry | null> {
         const context = req.gatewayContext!;
-        const cacheKey = GatewayController.generateCacheKey(req);
         
-        // Check if we're using bucket-based caching for response variety
-        if (context.cacheBucketMaxSize && context.cacheBucketMaxSize > 1) {
-            return GatewayController.checkCacheBucket(cacheKey, context);
-        }
-        
-        // Standard single-response caching
-        const cached = responseCache.get(cacheKey);
-        
-        if (cached) {
-            // Use custom TTL if provided, otherwise use entry's TTL or default
-            const ttl = context.cacheTTL || cached.ttl || DEFAULT_CACHE_TTL;
-            
-            if (Date.now() - cached.timestamp < ttl) {
-                logger.info('Cache hit', { 
-                    cacheKey: cacheKey.substring(0, 8) + '...', 
-                    userScope: context.cacheUserScope,
-                    age: Date.now() - cached.timestamp,
-                    ttl
-                });
-                return cached;
+        try {
+            // Extract prompt from request body
+            const prompt = GatewayController.extractPromptFromRequest(req.body);
+            if (!prompt) {
+                logger.info('No prompt found in request, skipping cache');
+                return null;
             }
             
-            // Remove expired cache entry
-            responseCache.delete(cacheKey);
-            logger.info('Cache expired and removed', { cacheKey: cacheKey.substring(0, 8) + '...' });
+            // Check Redis cache with semantic matching
+            const cacheResult = await redisService.checkCache(prompt, {
+                userId: context.cacheUserScope ? context.userId : undefined,
+                model: req.body?.model,
+                provider: context.provider,
+                enableSemantic: context.semanticCacheEnabled !== false,
+                enableDeduplication: context.deduplicationEnabled !== false,
+                similarityThreshold: context.similarityThreshold || 0.85
+            });
+            
+            if (cacheResult.hit) {
+                logger.info('Redis cache hit', { 
+                    strategy: cacheResult.strategy,
+                    similarity: cacheResult.similarity,
+                    userId: context.userId
+                });
+                
+                // Convert to CacheEntry format
+                return {
+                    response: cacheResult.data,
+                    timestamp: Date.now(),
+                    headers: {},
+                    ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
+                    userScope: context.userId
+                };
+            }
+        } catch (error) {
+            logger.error('Redis cache check failed:', error);
         }
         
         return null;
     }
 
-    /**
-     * Check cache bucket for response variety
-     */
-    private static checkCacheBucket(cacheKey: string, context: any): CacheEntry | null {
-        const bucket = cacheBuckets.get(cacheKey);
-        
-        if (!bucket || bucket.entries.length === 0) {
-            return null;
-        }
-        
-        // Check if any entries are still valid
-        const ttl = context.cacheTTL || DEFAULT_CACHE_TTL;
-        const validEntries = bucket.entries.filter(entry => 
-            Date.now() - entry.timestamp < ttl
-        );
-        
-        if (validEntries.length === 0) {
-            // All entries expired, remove bucket
-            cacheBuckets.delete(cacheKey);
-            return null;
-        }
-        
-        // Update bucket with valid entries
-        if (validEntries.length !== bucket.entries.length) {
-            bucket.entries = validEntries;
-            bucket.currentIndex = bucket.currentIndex % validEntries.length;
-        }
-        
-        // Return next entry in rotation
-        const selectedEntry = bucket.entries[bucket.currentIndex];
-        bucket.currentIndex = (bucket.currentIndex + 1) % bucket.entries.length;
-        
-        logger.info('Cache bucket hit', { 
-            cacheKey: cacheKey.substring(0, 8) + '...', 
-            bucketSize: bucket.entries.length,
-            selectedIndex: bucket.currentIndex - 1
-        });
-        
-        return selectedEntry;
-    }
+
+
+
+
+
+
+
 
     /**
-     * Generate cache key based on request content and user scope
-     */
-    private static generateCacheKey(req: Request): string {
-        const context = req.gatewayContext!;
-        const cacheableData = {
-            targetUrl: context.targetUrl,
-            body: req.body,
-            method: req.method,
-            path: req.path,
-            modelOverride: context.modelOverride,
-            userScope: context.cacheUserScope // Include user scope in cache key
-        };
-        
-        return crypto
-            .createHash('md5')
-            .update(JSON.stringify(cacheableData))
-            .digest('hex');
-    }
-
-    /**
-     * Cache the response with enhanced bucket and TTL support
+     * Cache the response with Redis and in-memory fallback
      */
     private static async cacheResponse(req: Request, response: any): Promise<void> {
         const context = req.gatewayContext!;
-        const cacheKey = GatewayController.generateCacheKey(req);
         
-        const cacheEntry: CacheEntry = {
-            response,
-            timestamp: Date.now(),
-            headers: {},
-            ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
-            userScope: context.cacheUserScope
-        };
-        
-        // Check if we're using bucket-based caching for response variety
-        if (context.cacheBucketMaxSize && context.cacheBucketMaxSize > 1) {
-            GatewayController.cacheToBucket(cacheKey, cacheEntry, context.cacheBucketMaxSize);
-        } else {
-            // Standard single-response caching
-            responseCache.set(cacheKey, cacheEntry);
+        try {
+            // Extract prompt for Redis caching
+            const prompt = GatewayController.extractPromptFromRequest(req.body);
+            
+            if (prompt) {
+                // Calculate tokens and cost for cache metadata
+                const inputTokens = req.gatewayContext?.inputTokens || 0;
+                const outputTokens = req.gatewayContext?.outputTokens || 0;
+                const cost = req.gatewayContext?.cost || 0;
+                
+                // Store in Redis with semantic embedding
+                await redisService.storeCache(prompt, response, {
+                    userId: context.cacheUserScope ? context.userId : undefined,
+                    model: req.body?.model,
+                    provider: context.provider,
+                    ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
+                    tokens: inputTokens + outputTokens,
+                    cost,
+                    enableSemantic: context.semanticCacheEnabled !== false,
+                    enableDeduplication: context.deduplicationEnabled !== false
+                });
+                
+                logger.info('Response cached in Redis', { 
+                    userId: context.userId,
+                    model: req.body?.model,
+                    provider: context.provider,
+                    ttl: context.cacheTTL || DEFAULT_CACHE_TTL
+                });
+            }
+        } catch (error) {
+            logger.error('Failed to cache in Redis:', error);
         }
-        
-        logger.info('Response cached', { 
-            cacheKey: cacheKey.substring(0, 8) + '...', 
-            userScope: context.cacheUserScope,
-            ttl: cacheEntry.ttl,
-            bucketMode: !!context.cacheBucketMaxSize
-        });
     }
 
-    /**
-     * Cache response to bucket for variety
-     */
-    private static cacheToBucket(cacheKey: string, entry: CacheEntry, maxSize: number): void {
-        let bucket = cacheBuckets.get(cacheKey);
-        
-        if (!bucket) {
-            bucket = {
-                entries: [],
-                currentIndex: 0
-            };
-            cacheBuckets.set(cacheKey, bucket);
-        }
-        
-        // Add new entry to bucket
-        bucket.entries.push(entry);
-        
-        // If bucket exceeds max size, remove oldest entry
-        if (bucket.entries.length > maxSize) {
-            bucket.entries.shift(); // Remove first (oldest) entry
-            bucket.currentIndex = Math.max(0, bucket.currentIndex - 1);
-        }
-        
-        logger.info('Response cached to bucket', {
-            cacheKey: cacheKey.substring(0, 8) + '...',
-            bucketSize: bucket.entries.length,
-            maxSize
-        });
-    }
+
 
     /**
      * Check budget constraints before making request
@@ -1039,7 +967,7 @@ export class GatewayController {
             service: 'CostKATANA Gateway',
             timestamp: new Date().toISOString(),
             version: '1.0.0',
-            cacheSize: responseCache.size
+            cache: 'Redis Only'
         });
     }
 
@@ -1048,8 +976,9 @@ export class GatewayController {
      */
     static async getStats(_req: Request, res: Response): Promise<void> {
         try {
+            const redisStats = await redisService.getCacheStats();
             const stats = {
-                cacheSize: responseCache.size,
+                cache: redisStats,
                 uptime: process.uptime(),
                 memoryUsage: process.memoryUsage(),
                 timestamp: new Date().toISOString()
@@ -1069,45 +998,21 @@ export class GatewayController {
     }
 
     /**
-     * Get cache statistics and status
+     * Get cache statistics and status (Redis only)
      */
     static async getCacheStats(_req: Request, res: Response): Promise<void> {
         try {
-            const cacheStats = {
-                singleResponseCache: {
-                    size: responseCache.size,
-                    entries: Array.from(responseCache.entries()).map(([key, entry]) => ({
-                        key: key.substring(0, 8) + '...',
-                        timestamp: entry.timestamp,
-                        age: Date.now() - entry.timestamp,
-                        ttl: entry.ttl,
-                        userScope: entry.userScope,
-                        expired: Date.now() - entry.timestamp > (entry.ttl || DEFAULT_CACHE_TTL)
-                    }))
-                },
-                bucketCache: {
-                    size: cacheBuckets.size,
-                    buckets: Array.from(cacheBuckets.entries()).map(([key, bucket]) => ({
-                        key: key.substring(0, 8) + '...',
-                        entryCount: bucket.entries.length,
-                        currentIndex: bucket.currentIndex,
-                        entries: bucket.entries.map(entry => ({
-                            timestamp: entry.timestamp,
-                            age: Date.now() - entry.timestamp,
-                            ttl: entry.ttl,
-                            userScope: entry.userScope
-                        }))
-                    }))
-                },
-                config: {
-                    defaultTTL: DEFAULT_CACHE_TTL,
-                    defaultTTLHours: DEFAULT_CACHE_TTL / (1000 * 60 * 60)
-                }
-            };
+            const redisStats = await redisService.getCacheStats();
 
             res.json({
                 success: true,
-                data: cacheStats
+                data: {
+                    redis: redisStats,
+                    config: {
+                        defaultTTL: DEFAULT_CACHE_TTL,
+                        defaultTTLHours: DEFAULT_CACHE_TTL / (60 * 60)
+                    }
+                }
             });
         } catch (error) {
             logger.error('Failed to get cache stats:', error);
@@ -1119,72 +1024,21 @@ export class GatewayController {
     }
 
     /**
-     * Clear cache entries (for testing/debugging)
+     * Clear cache entries (Redis only)
      */
     static async clearCache(req: Request, res: Response): Promise<void> {
         try {
-            const { userScope, expired } = req.query;
-            let clearedCount = 0;
-
-            if (expired === 'true') {
-                // Clear only expired entries
-                const now = Date.now();
-                
-                // Clear expired single response cache entries
-                for (const [key, entry] of responseCache.entries()) {
-                    const ttl = entry.ttl || DEFAULT_CACHE_TTL;
-                    if (now - entry.timestamp > ttl) {
-                        responseCache.delete(key);
-                        clearedCount++;
-                    }
-                }
-                
-                // Clear expired bucket entries
-                for (const [key, bucket] of cacheBuckets.entries()) {
-                    const validEntries = bucket.entries.filter(entry => {
-                        const ttl = entry.ttl || DEFAULT_CACHE_TTL;
-                        return now - entry.timestamp <= ttl;
-                    });
-                    
-                    if (validEntries.length === 0) {
-                        cacheBuckets.delete(key);
-                        clearedCount++;
-                    } else if (validEntries.length !== bucket.entries.length) {
-                        bucket.entries = validEntries;
-                        bucket.currentIndex = bucket.currentIndex % validEntries.length;
-                        clearedCount += bucket.entries.length - validEntries.length;
-                    }
-                }
-            } else if (userScope) {
-                // Clear entries for specific user scope
-                for (const [key, entry] of responseCache.entries()) {
-                    if (entry.userScope === userScope) {
-                        responseCache.delete(key);
-                        clearedCount++;
-                    }
-                }
-                
-                for (const [key, bucket] of cacheBuckets.entries()) {
-                    const validEntries = bucket.entries.filter(entry => entry.userScope !== userScope);
-                    if (validEntries.length === 0) {
-                        cacheBuckets.delete(key);
-                        clearedCount++;
-                    } else if (validEntries.length !== bucket.entries.length) {
-                        bucket.entries = validEntries;
-                        bucket.currentIndex = bucket.currentIndex % validEntries.length;
-                        clearedCount += bucket.entries.length - validEntries.length;
-                    }
-                }
-            } else {
-                // Clear all cache
-                clearedCount = responseCache.size + cacheBuckets.size;
-                responseCache.clear();
-                cacheBuckets.clear();
-            }
+            const { userScope, model, provider } = req.query;
+            
+            const clearedCount = await redisService.clearCache({
+                userId: userScope as string,
+                model: model as string,
+                provider: provider as string
+            });
 
             res.json({
                 success: true,
-                message: `Cache cleared successfully`,
+                message: `Redis cache cleared successfully`,
                 clearedEntries: clearedCount
             });
         } catch (error) {

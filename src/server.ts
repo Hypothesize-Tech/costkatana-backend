@@ -25,6 +25,7 @@ import { intelligenceService } from './services/intelligence.service';
 import { initializeCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
+import { redisService } from './services/redis.service';
 
 // Create Express app
 const app: Application = express();
@@ -196,6 +197,14 @@ export const startServer = async () => {
         logger.info('Starting server...');
         await connectDatabase();
         logger.info('MongoDB connected');
+
+        // Initialize Redis
+        try {
+            await redisService.connect();
+            logger.info('✅ Redis connected successfully');
+        } catch (error) {
+            logger.warn('⚠️ Redis connection failed, using in-memory cache as fallback:', error);
+        }
 
         // Initialize default tips
         await intelligenceService.initializeDefaultTips();
