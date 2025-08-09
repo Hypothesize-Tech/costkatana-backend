@@ -8,7 +8,17 @@ const router = Router();
 // All routes require authentication
 router.use(authenticate);
 
+// List workflows - returns workflow executions in list format
+router.get('/', asyncHandler(WorkflowController.getWorkflowsList));
+
+// Analytics - returns dashboard format with analytics
+router.get('/analytics', asyncHandler(WorkflowController.getWorkflowAnalytics));
+
+// Observability Dashboard - comprehensive dashboard data
+router.get('/dashboard', asyncHandler(WorkflowController.getObservabilityDashboard));
+
 // Workflow Templates
+router.get('/templates', asyncHandler(WorkflowController.listTemplates));
 router.post('/templates', asyncHandler(WorkflowController.createTemplate));
 router.get('/templates/:templateId', asyncHandler(WorkflowController.getTemplate));
 
@@ -22,8 +32,7 @@ router.post('/executions/:executionId/pause', asyncHandler(WorkflowController.pa
 router.post('/executions/:executionId/resume', asyncHandler(WorkflowController.resumeWorkflow));
 router.post('/executions/:executionId/cancel', asyncHandler(WorkflowController.cancelWorkflow));
 
-// Analytics and Observability
+// Workflow Metrics
 router.get('/workflows/:workflowId/metrics', asyncHandler(WorkflowController.getWorkflowMetrics));
-router.get('/observability/dashboard', asyncHandler(WorkflowController.getObservabilityDashboard));
 
 export default router;

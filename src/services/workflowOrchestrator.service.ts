@@ -224,7 +224,6 @@ export class WorkflowOrchestratorService extends EventEmitter {
             startTime: new Date(),
             steps: template.steps.map(step => ({
                 ...step,
-                id: uuidv4(),
                 status: 'pending'
             })),
             input,

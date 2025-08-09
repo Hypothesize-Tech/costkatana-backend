@@ -50,6 +50,7 @@ export class RedisService {
     private _isConnected: boolean = false;
     private inMemoryCache: Map<string, { value: string; expiry: number }> = new Map();
     private isLocalDev: boolean = false;
+    private connectionInProgress: boolean = false;
     
     // Cache prefixes
     private readonly CACHE_PREFIX = 'cache:';
@@ -91,23 +92,38 @@ export class RedisService {
     }
 
     private setupEventHandlers(): void {
-        this.client.on('error', (err) => {
-            logger.error('Redis Client Error:', err);
-            this._isConnected = false;
-        });
+        if (!this.isLocalDev) {
+            this.client.on('error', (err: any) => {
+                // Reduce error logging severity for timeout errors which are common
+                if (err && err.message && err.message.includes('Connection timeout')) {
+                    logger.warn('Redis client timeout error - will retry automatically');
+                } else {
+                    logger.error('Redis Client Error:', err);
+                }
+                // Only set to disconnected for non-timeout errors
+                if (!(err && err.message && err.message.includes('Connection timeout'))) {
+                    this._isConnected = false;
+                }
+            });
 
-        this.client.on('connect', () => {
-            logger.info('Redis Client Connected');
-            this._isConnected = true;
-        });
+            this.client.on('connect', () => {
+                logger.info('Redis Client Connected');
+                this._isConnected = true;
+            });
 
-        this.client.on('ready', () => {
-            logger.info('Redis Client Ready');
-        });
+            this.client.on('ready', () => {
+                logger.info('Redis Client Ready');
+            });
 
-        this.readerClient.on('error', (err) => {
-            logger.error('Redis Reader Client Error:', err);
-        });
+            this.readerClient.on('error', (err: any) => {
+                // Reduce error logging severity for timeout errors which are common
+                if (err && err.message && err.message.includes('Connection timeout')) {
+                    logger.warn('Redis reader client timeout error - will retry automatically');
+                } else {
+                    logger.error('Redis Reader Client Error:', err);
+                }
+            });
+        }
     }
 
     /**
@@ -161,7 +177,29 @@ export class RedisService {
             connect: async () => {},
             disconnect: async () => {},
             isOpen: true,
-            isReady: true
+            isReady: true,
+            on: () => {},
+            setEx: async (key: string, ttl: number, value: string) => {
+                this.inMemoryCache.set(key, {
+                    value,
+                    expiry: Date.now() + ttl * 1000
+                });
+                return 'OK';
+            },
+            ttl: async (key: string) => {
+                const entry = this.inMemoryCache.get(key);
+                if (entry && entry.expiry > Date.now()) {
+                    return Math.floor((entry.expiry - Date.now()) / 1000);
+                }
+                return -2; // Key does not exist
+            },
+            hGet: async () => null,
+            hGetAll: async () => ({}),
+            hIncrBy: async () => 0,
+            hIncrByFloat: async () => 0,
+            expire: async () => 1,
+            quit: async () => {},
+            info: async () => '',
         };
     }
 
@@ -189,10 +227,12 @@ export class RedisService {
                     host: process.env.REDIS_HOST || 'localhost',
                     port: parseInt(process.env.REDIS_PORT || '6379'),
                     tls: process.env.REDIS_TLS === 'true' ? true : undefined,
-                    connectTimeout: 3000,
+                    servername: process.env.REDIS_HOST,
+                    connectTimeout: 5000, // Increased timeout
                     reconnectStrategy: (retries: number) => {
-                        if (retries > 1) return false;
-                        return 1000;
+                        // More gradual reconnection strategy
+                        if (retries > 3) return false; // Allow up to 3 retries
+                        return Math.min(retries * 1000, 3000); // Exponential backoff with max 3s
                     }
                 },
                 password: process.env.REDIS_PASSWORD || undefined,
@@ -206,12 +246,12 @@ export class RedisService {
             });
 
             // Handle connection errors - fallback immediately
-            this.client.on('error', (err) => {
+            this.client.on('error', (err: any) => {
                 logger.warn('Redis client error:', err.message);
                 this.fallbackToInMemory();
             });
 
-            this.readerClient.on('error', (err) => {
+            this.readerClient.on('error', (err: any) => {
                 logger.warn('Redis reader client error:', err.message);
             });
 
@@ -236,10 +276,41 @@ export class RedisService {
     private fallbackToInMemory(): void {
         if (!this.isLocalDev) {
             logger.info('🔄 Switching to in-memory cache mode');
+            
+            // Attempt to gracefully close existing clients if they exist
+            try {
+                // Remove all event listeners to prevent late errors from showing up
+                if (this.client) {
+                    this.client.removeAllListeners();
+                    
+                    if (typeof this.client.quit === 'function') {
+                        this.client.quit().catch(err => 
+                            logger.debug('Error while closing Redis client:', err)
+                        );
+                    }
+                }
+                
+                if (this.readerClient) {
+                    this.readerClient.removeAllListeners();
+                    
+                    if (typeof this.readerClient.quit === 'function') {
+                        this.readerClient.quit().catch(err => 
+                            logger.debug('Error while closing Redis reader client:', err)
+                        );
+                    }
+                }
+            } catch (err) {
+                logger.debug('Error during Redis client cleanup:', err);
+            }
+            
+            // Switch to in-memory mode
             this.isLocalDev = true;
             this.client = this.createMockClient();
             this.readerClient = this.createMockClient();
             this._isConnected = true;
+            
+            // Log success message
+            logger.info('✅ Successfully switched to in-memory cache mode');
         }
     }
 
@@ -249,27 +320,54 @@ export class RedisService {
             return;
         }
 
+        // Prevent multiple concurrent connection attempts
+        if (this.connectionInProgress) {
+            logger.info('Redis connection already in progress, skipping duplicate attempt');
+            return;
+        }
+
         try {
-            // Try to connect with a short timeout
-            const connectWithTimeout = async (client: any, name: string) => {
-                return Promise.race([
-                    client.connect(),
-                    new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error(`${name} connection timeout`)), 2000)
-                    )
-                ]);
+            this.connectionInProgress = true;
+
+            // Simplified connection approach - let node-redis handle retries
+            const connectIfNeeded = async (client: any, name: string) => {
+                if (client.isOpen) {
+                    logger.info(`${name} is already open`);
+                    return;
+                }
+                
+                if (client.isReady) {
+                    logger.info(`${name} is already ready`);
+                    return;
+                }
+                
+                logger.info(`Connecting to ${name}...`);
+                
+                try {
+                    // Let node-redis manage retry internally
+                    await client.connect();
+                    logger.info(`✅ ${name} connected successfully`);
+                } catch (error) {
+                    const connectErr = error as Error;
+                    if (connectErr && connectErr.message && connectErr.message.includes('Socket already opened')) {
+                        logger.info(`${name} socket already opened, considering connected`);
+                        return;
+                    }
+                    throw error;
+                }
             };
 
-            await Promise.all([
-                connectWithTimeout(this.client, 'Redis client'),
-                connectWithTimeout(this.readerClient, 'Redis reader')
-            ]);
+            // Connect clients sequentially
+            await connectIfNeeded(this.client, 'Redis client');
+            await connectIfNeeded(this.readerClient, 'Redis reader');
             
             this._isConnected = true;
             logger.info('✅ Redis connected successfully');
         } catch (error) {
             logger.warn('❌ Redis connection failed, using in-memory cache:', error);
             this.fallbackToInMemory();
+        } finally {
+            this.connectionInProgress = false;
         }
     }
 
