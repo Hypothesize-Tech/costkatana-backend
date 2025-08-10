@@ -572,12 +572,6 @@ X-RateLimit-AI-Remaining: 15
 | ChatGPT Integration | 500 | 100 |
 | Magic Link | 10 | 5 |
 
-## 🔌 **WebSocket Events**
-
-### **Connection**
-```javascript
-const ws = new WebSocket('wss://https://cost-katana-backend.store/ws?token=jwt_token');
-```
 
 ### **AI Events**
 Real-time AI analysis and recommendations via WebSocket:
