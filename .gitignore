@@ -68,3 +68,5 @@ docs/_build/
 # PM2
 ecosystem.config.js
 .pm2/
+# Large binaries
+bin/otelcol-contrib
