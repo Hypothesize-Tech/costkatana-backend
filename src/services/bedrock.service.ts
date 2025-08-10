@@ -2,6 +2,10 @@ import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { logger } from '../utils/logger';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { recordGenAIUsage } from '../utils/genaiTelemetry';
+import { calculateCost } from '../utils/pricing';
+import { estimateTokens } from '../utils/tokenCounter';
+import { AIProvider } from '../types/aiCostTracker.types';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -206,8 +210,12 @@ export class BedrockService {
     }
 
     public static async invokeModel(prompt: string, model: string): Promise<any> {
+        const startTime = Date.now();
         let payload: any;
         let responsePath: string;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let result: string = '';
 
         // Check model type and create appropriate payload
         if (model.includes('claude-3') || model.includes('claude-v3')) {
@@ -263,6 +271,14 @@ export class BedrockService {
         });
 
         try {
+            // Calculate input tokens
+            try {
+                inputTokens = estimateTokens(prompt, AIProvider.AWSBedrock);
+            } catch (e) {
+                // Fallback to estimation
+                inputTokens = Math.ceil(prompt.length / 4);
+            }
+
             // Use enhanced Bedrock retry logic with exponential backoff and jitter
             const response = await retryBedrockOperation(
                 () => bedrockClient.send(command),
@@ -282,25 +298,76 @@ export class BedrockService {
 
             // Extract text based on response format
             if (responsePath === 'content') {
-                return responseBody.content[0].text;
+                result = responseBody.content[0].text;
             } else if (responsePath === 'nova') {
-                return responseBody.output?.message?.content?.[0]?.text || responseBody.message?.content?.[0]?.text || '';
+                result = responseBody.output?.message?.content?.[0]?.text || responseBody.message?.content?.[0]?.text || '';
             } else if (responsePath === 'titan') {
-                return responseBody.results?.[0]?.outputText || '';
+                result = responseBody.results?.[0]?.outputText || '';
             } else if (responsePath === 'llama') {
-                return responseBody.generation || responseBody.outputs?.[0]?.text || '';
+                result = responseBody.generation || responseBody.outputs?.[0]?.text || '';
             } else if (responsePath === 'cohere') {
-                return responseBody.text || responseBody.generations?.[0]?.text || '';
+                result = responseBody.text || responseBody.generations?.[0]?.text || '';
             } else if (responsePath === 'ai21') {
-                return responseBody.completions?.[0]?.data?.text || responseBody.outputs?.[0]?.text || '';
+                result = responseBody.completions?.[0]?.data?.text || responseBody.outputs?.[0]?.text || '';
+            } else {
+                result = responseBody.completion || responseBody.text || '';
             }
-            return responseBody.completion || responseBody.text || '';
-        } catch (error) {
+
+            // Calculate output tokens
+            try {
+                outputTokens = estimateTokens(result, AIProvider.AWSBedrock);
+            } catch (e) {
+                // Fallback to estimation
+                outputTokens = Math.ceil(result.length / 4);
+            }
+
+            // Extract usage from response if available
+            if (responseBody.usage) {
+                inputTokens = responseBody.usage.input_tokens || inputTokens;
+                outputTokens = responseBody.usage.output_tokens || outputTokens;
+            } else if (responseBody.amazon_bedrock_invocationMetrics) {
+                inputTokens = responseBody.amazon_bedrock_invocationMetrics.inputTokenCount || inputTokens;
+                outputTokens = responseBody.amazon_bedrock_invocationMetrics.outputTokenCount || outputTokens;
+            }
+
+            // Calculate cost
+            const costUSD = calculateCost(inputTokens, outputTokens, 'aws-bedrock', model);
+
+            // Record telemetry
+            recordGenAIUsage({
+                provider: 'aws-bedrock',
+                operationName: 'chat.completions',
+                model: actualModelId,
+                promptTokens: inputTokens,
+                completionTokens: outputTokens,
+                costUSD,
+                prompt,
+                completion: result,
+                temperature: AWS_CONFIG.bedrock.temperature,
+                maxTokens: AWS_CONFIG.bedrock.maxTokens,
+                latencyMs: Date.now() - startTime,
+            });
+
+            return result;
+        } catch (error: any) {
             logger.error('Error invoking Bedrock model:', { 
                 originalModel: model, 
                 actualModelId, 
                 error 
             });
+
+            // Record error in telemetry
+            recordGenAIUsage({
+                provider: 'aws-bedrock',
+                operationName: 'chat.completions',
+                model: actualModelId,
+                promptTokens: inputTokens,
+                completionTokens: 0,
+                costUSD: 0,
+                error,
+                latencyMs: Date.now() - startTime,
+            });
+
             throw error;
         }
     }

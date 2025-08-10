@@ -1,0 +1,345 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "costkatana-genai",
+    "title": "Cost Katana - GenAI Cost & Token Usage",
+    "tags": ["cost-katana", "genai", "llm", "cost"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0},
+        "type": "stat",
+        "title": "Total LLM Cost (24h)",
+        "targets": [
+          {
+            "expr": "sum(increase(costkatana_llm_cost[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0},
+        "type": "stat",
+        "title": "Total Tokens Used (24h)",
+        "targets": [
+          {
+            "expr": "sum(increase(gen_ai_client_token_usage{token_type=\"total\"}[24h]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1000000, "color": "yellow"},
+                {"value": 10000000, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0},
+        "type": "stat",
+        "title": "Average Cost per Request",
+        "targets": [
+          {
+            "expr": "sum(increase(costkatana_llm_cost[24h])) / sum(increase(gen_ai_client_token_usage{token_type=\"total\"}[24h])) * 1000",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 4,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 0.01, "color": "yellow"},
+                {"value": 0.1, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0},
+        "type": "gauge",
+        "title": "Cost Trend (vs Yesterday)",
+        "targets": [
+          {
+            "expr": "(sum(increase(costkatana_llm_cost[24h])) - sum(increase(costkatana_llm_cost[24h] offset 24h))) / sum(increase(costkatana_llm_cost[24h] offset 24h)) * 100",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": -100,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": -50, "color": "green"},
+                {"value": 0, "color": "yellow"},
+                {"value": 50, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 10, "w": 12, "x": 0, "y": 6},
+        "type": "timeseries",
+        "title": "LLM Cost Over Time",
+        "targets": [
+          {
+            "expr": "sum(rate(costkatana_llm_cost[5m])) by (provider)",
+            "legendFormat": "{{provider}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "fillOpacity": 20,
+              "stacking": {
+                "mode": "normal"
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 10, "w": 12, "x": 12, "y": 6},
+        "type": "timeseries",
+        "title": "Token Usage by Type",
+        "targets": [
+          {
+            "expr": "sum(rate(gen_ai_client_token_usage{token_type=\"prompt\"}[5m])) by (provider, model)",
+            "legendFormat": "Prompt - {{provider}}/{{model}}",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(gen_ai_client_token_usage{token_type=\"completion\"}[5m])) by (provider, model)",
+            "legendFormat": "Completion - {{provider}}/{{model}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+        "type": "piechart",
+        "title": "Cost by Model",
+        "targets": [
+          {
+            "expr": "sum(increase(costkatana_llm_cost[24h])) by (model)",
+            "legendFormat": "{{model}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "displayLabels": ["name", "percent"],
+          "pieType": "donut"
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+        "type": "piechart",
+        "title": "Cost by Tenant",
+        "targets": [
+          {
+            "expr": "sum(increase(costkatana_llm_cost[24h])) by (tenant_id)",
+            "legendFormat": "{{tenant_id}}",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "displayLabels": ["name", "value"],
+          "pieType": "pie"
+        }
+      },
+      {
+        "id": 9,
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+        "type": "bargauge",
+        "title": "Top 5 Most Expensive Operations",
+        "targets": [
+          {
+            "expr": "topk(5, sum(increase(costkatana_llm_cost[24h])) by (operation))",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "orientation": "horizontal",
+          "displayMode": "gradient"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD"
+          }
+        }
+      },
+      {
+        "id": 10,
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+        "type": "table",
+        "title": "High-Cost LLM Calls (>$0.01)",
+        "targets": [
+          {
+            "expr": "costkatana_cost_usd >= 0.01",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {},
+              "indexByName": {},
+              "renameByName": {
+                "gen_ai_request_model": "Model",
+                "costkatana_cost_usd": "Cost ($)",
+                "gen_ai_usage_total_tokens": "Tokens",
+                "tenant_id": "Tenant",
+                "user_id": "User",
+                "Time": "Timestamp"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 11,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+        "type": "timeseries",
+        "title": "LLM Operation Latency",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(gen_ai_client_operation_duration_bucket[5m])) by (le, provider))",
+            "legendFormat": "P95 - {{provider}}",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(gen_ai_client_operation_duration_bucket[5m])) by (le, provider))",
+            "legendFormat": "P50 - {{provider}}",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ms",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth"
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+        "type": "stat",
+        "title": "Cost Savings Potential",
+        "description": "Estimated savings if using cheaper models for simple queries",
+        "targets": [
+          {
+            "expr": "sum(increase(costkatana_llm_cost{model=~\".*gpt-4.*|.*claude-3-opus.*\"}[24h])) * 0.7",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "currencyUSD",
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 5, "color": "yellow"},
+                {"value": 20, "color": "orange"}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "tenant_id",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(gen_ai_client_token_usage, tenant_id)",
+          "multi": true,
+          "includeAll": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "provider",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(gen_ai_client_token_usage, provider)",
+          "multi": true,
+          "includeAll": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        }
+      ]
+    }
+  },
+  "overwrite": true
+}

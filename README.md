@@ -379,6 +379,188 @@ We welcome contributions to enhance the AI-powered features!
 - [ ] Advanced compliance reporting
 - [ ] White-label AI solutions
 
+## 🔭 **Observability**
+
+### **Enterprise-Grade OpenTelemetry Integration**
+
+Cost Katana now includes **complete observability** with OpenTelemetry, transforming it into a fully observable platform with real-time insights into performance, costs, and system health.
+
+#### 🚀 Quick Setup
+
+```bash
+# 1. Install OpenTelemetry Collector (one-time)
+npm run otel:install
+
+# 2. Configure telemetry in .env
+OTEL_SERVICE_NAME=cost-katana-api
+OTLP_HTTP_TRACES_URL=http://localhost:4318/v1/traces
+OTLP_HTTP_METRICS_URL=http://localhost:4318/v1/metrics
+
+# 3. Start the collector
+npm run otel:run
+
+# 4. Verify setup
+npm run telemetry:verify
+```
+
+#### ✨ What's New
+
+##### **Complete Request Tracing**
+- Every API request traced end-to-end (API → Database → AI Provider → Response)
+- Automatic correlation across all services with trace IDs
+- Parent-child span relationships for nested operations
+- Full timing breakdown showing exactly where time is spent
+
+##### **AI/LLM Cost Tracking**
+- **Exact cost attribution** per request, model, and user
+- Token usage tracking (prompt vs completion)
+- Cost breakdown by department/team
+- Real-time cost anomaly detection
+- Historical cost analysis stored in MongoDB
+
+##### **Performance Metrics**
+- Request rates (RPM) with real-time updates
+- Latency percentiles (P50, P95, P99)
+- Error rates and error categorization
+- Service dependency mapping
+- Slow query detection
+
+##### **MongoDB Storage**
+- All telemetry data persisted for historical analysis
+- 30-day automatic retention (configurable)
+- Rich querying capabilities
+- Dashboard-ready aggregations
+
+#### 📊 New API Endpoints
+
+```typescript
+GET /api/telemetry                    // Query all telemetry data
+GET /api/telemetry/traces/:id         // Full trace details
+GET /api/telemetry/metrics            // Aggregated metrics
+GET /api/telemetry/dashboard          // Complete dashboard data
+GET /api/telemetry/dependencies       // Service dependency map
+GET /api/telemetry/health            // System health status
+```
+
+#### 🔧 Environment Variables
+
+```bash
+# Required
+OTEL_SERVICE_NAME=cost-katana-api
+OTLP_HTTP_TRACES_URL=http://localhost:4318/v1/traces
+OTLP_HTTP_METRICS_URL=http://localhost:4318/v1/metrics
+
+# Optional (Production)
+OTEL_EXPORTER_OTLP_HEADERS={"Authorization":"Bearer TOKEN"}
+OTEL_EXPORTER_OTLP_CERTIFICATE=base64_encoded_cert
+OTEL_EXPORTER_OTLP_INSECURE=false
+CK_CAPTURE_MODEL_TEXT=false          # Privacy: don't capture prompts
+CK_TELEMETRY_REGION=us               # Regional compliance (us/eu/ap)
+TELEMETRY_ENABLED=true               # Enable/disable telemetry
+ENABLE_COLLECTOR_WATCHDOG=true       # Auto-restart on failure
+```
+
+#### 🎯 Deployment Modes
+
+##### **Mode A: Direct to APM Vendor** (Recommended for Production)
+```bash
+# Grafana Cloud
+OTLP_HTTP_TRACES_URL=https://otlp-gateway.grafana.net/otlp/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS={"Authorization":"Basic base64_credentials"}
+
+# Datadog
+OTLP_HTTP_TRACES_URL=https://trace.agent.datadoghq.com:4318/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS={"DD-API-KEY":"your_api_key"}
+
+# New Relic
+OTLP_HTTP_TRACES_URL=https://otlp.nr-data.net:4318/v1/traces
+OTEL_EXPORTER_OTLP_HEADERS={"Api-Key":"your_license_key"}
+```
+
+##### **Mode B: Local Collector** (Development/Testing)
+```bash
+npm run otel:install  # Download collector binary
+npm run otel:run     # Start collector
+npm run otel:stop    # Stop collector
+```
+
+##### **Mode C: Docker Stack** (Optional Visualization)
+```bash
+# Tempo for traces
+docker run -d -p 3200:3200 grafana/tempo
+
+# Prometheus for metrics
+docker run -d -p 9090:9090 prom/prometheus
+
+# Grafana for dashboards
+docker run -d -p 3000:3000 grafana/grafana
+```
+
+#### 📈 What You Get
+
+##### **For Developers**
+- 🔍 **Instant debugging** with trace IDs
+- 📊 **Performance bottleneck identification**
+- 💰 **Exact cost tracking** per operation
+- 🚨 **Proactive error detection**
+
+##### **For Business**
+- 💵 **Cost optimization insights** with AI model recommendations
+- 📈 **SLA monitoring** with real-time metrics
+- 🔐 **Complete audit trails** for compliance
+- 📊 **Department-level cost attribution**
+
+##### **For Enterprise**
+- 🌍 **Multi-region support** with data residency
+- 🔒 **Privacy-first** with PII redaction
+- 📡 **Vendor-agnostic** integration
+- ⚡ **Scalable architecture** ready for growth
+
+#### 🛠️ Useful Commands
+
+```bash
+# Telemetry management
+npm run telemetry:verify    # Verify setup is working
+npm run telemetry:validate  # Validate configuration
+npm run telemetry:test      # Generate test telemetry
+
+# Collector management
+npm run otel:install        # Install collector
+npm run otel:run           # Start collector
+npm run otel:stop          # Stop collector
+npm run otel:restart       # Restart collector
+```
+
+#### 📊 Sample Dashboard Data
+
+```json
+{
+  "current": {
+    "requests_per_minute": 145,
+    "error_rate": 0.5,
+    "avg_latency_ms": 234,
+    "p95_latency_ms": 567
+  },
+  "costs": {
+    "total_24h": 98.47,
+    "by_model": {
+      "gpt-4": 45.23,
+      "claude-3": 32.18,
+      "embeddings": 21.06
+    }
+  },
+  "top_errors": [
+    {
+      "trace_id": "abc-123",
+      "error": "Rate limit exceeded",
+      "count": 5
+    }
+  ]
+}
+```
+
+See [OBSERVABILITY.md](OBSERVABILITY.md) for complete documentation.
+
 ## 💬 **Support**
 
 ### **Get Help**

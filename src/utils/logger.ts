@@ -1,6 +1,7 @@
 import winston from 'winston';
 import path from 'path';
 import { config } from '../config';
+import { trace } from '@opentelemetry/api';
 
 const { combine, timestamp, printf, colorize, errors } = winston.format;
 
@@ -27,9 +28,28 @@ const safeStringify = (obj: any): string => {
     });
 };
 
+// Format to inject trace context
+const traceFormat = winston.format((info) => {
+    const span = trace.getActiveSpan();
+    if (span) {
+        const spanContext = span.spanContext();
+        info.trace_id = spanContext.traceId;
+        info.span_id = spanContext.spanId;
+        info.trace_flags = spanContext.traceFlags;
+    }
+    return info;
+});
+
 // Custom format for console logging
-const consoleFormat = printf(({ level, message, timestamp, stack, ...metadata }) => {
-    let msg = `${timestamp} [${level}]: ${message}`;
+const consoleFormat = printf(({ level, message, timestamp, stack, trace_id, span_id, ...metadata }) => {
+    let msg = `${timestamp} [${level}]`;
+    
+    // Add trace context if available
+    if (trace_id && span_id) {
+        msg += ` [trace_id=${trace_id} span_id=${span_id}]`;
+    }
+    
+    msg += `: ${message}`;
 
     if (Object.keys(metadata).length > 0) {
         try {
@@ -55,6 +75,7 @@ export const logger = winston.createLogger({
     format: combine(
         errors({ stack: true }),
         timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+        traceFormat(),
     ),
     transports: [
         // Console transport

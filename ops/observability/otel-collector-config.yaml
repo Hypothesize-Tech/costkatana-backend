@@ -1,0 +1,280 @@
+# OpenTelemetry Collector Configuration for Cost Katana
+# Enterprise-grade configuration with security, privacy, and performance optimizations
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 16
+        max_concurrent_streams: 100
+        keepalive:
+          server_parameters:
+            max_connection_idle: 11s
+            max_connection_age: 30s
+            max_connection_age_grace: 5s
+            time: 30s
+            timeout: 20s
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:*"
+            - "https://*.costkatana.com"
+        max_request_body_size: 16777216  # 16MB
+
+processors:
+  # Batch processor for efficiency
+  batch:
+    send_batch_size: 8192
+    timeout: 200ms
+    send_batch_max_size: 10000
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Attributes processor for data enrichment and redaction
+  attributes/redact:
+    actions:
+      # Redact sensitive model text by default
+      - key: gen_ai.request.prompt
+        action: delete
+      - key: gen_ai.response.completion
+        action: delete
+      - key: gen_ai.request.messages
+        action: delete
+      
+      # Keep redacted versions if they exist
+      - key: gen_ai.request.prompt.redacted
+        action: upsert
+      - key: gen_ai.response.completion.redacted
+        action: upsert
+      
+      # Add environment information
+      - key: deployment.environment
+        value: development
+        action: insert
+      
+      # Ensure service namespace
+      - key: service.namespace
+        value: cost-katana
+        action: insert
+
+  # Transform processor for dropping HTTP bodies and headers
+  transform/security:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # Remove HTTP request/response bodies
+          - delete_key(attributes, "http.request.body")
+          - delete_key(attributes, "http.response.body")
+          # Remove authorization headers
+          - delete_key(attributes, "http.request.header.authorization")
+          - delete_key(attributes, "http.request.header.x-api-key")
+          # Keep only essential headers
+          - keep_keys(attributes, ["http.method", "http.route", "http.status_code", "http.target", "http.scheme"])
+    
+    metric_statements:
+      - context: datapoint
+        statements:
+          # Round cost values to 4 decimal places
+          - set(value, Round(value, 4)) where IsMatch(metric.name, ".*cost.*")
+
+  # Tail sampling for intelligent trace retention
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 100000
+    expected_new_traces_per_sec: 1000
+    policies:
+      # Always sample errors
+      - name: errors-policy
+        type: status_code
+        status_code: {status_codes: [ERROR]}
+        
+      # Always sample high-cost operations (>= $0.01)
+      - name: high-cost-policy
+        type: numeric_attribute
+        numeric_attribute: {key: costkatana.cost.usd, min_value: 0.01}
+        
+      # Sample slow requests (> p95 latency)
+      - name: latency-policy
+        type: latency
+        latency: {threshold_ms: 2000}
+        
+      # Probabilistic sampling for everything else
+      - name: probabilistic-policy
+        type: probabilistic
+        probabilistic: {sampling_percentage: 10}
+        
+      # Always sample specific routes
+      - name: important-routes
+        type: string_attribute
+        string_attribute:
+          key: http.route
+          values: ["/api/auth/.*", "/api/projects/.*", "/api/optimize/.*"]
+          enabled_regex_matching: true
+
+
+
+  # Resource detection for cloud metadata
+  resource:
+    attributes:
+      - key: host.name
+        value: localhost
+        action: upsert
+      - key: service.instance.id
+        value: localhost-local
+        action: insert
+
+  # Filter processor for noise reduction
+  filter/health:
+    error_mode: ignore
+    traces:
+      span:
+        - 'attributes["http.target"] == "/health"'
+        - 'attributes["http.target"] == "/metrics"'
+        - 'attributes["http.target"] == "/"'
+        - 'attributes["http.user_agent"] != nil and IsMatch(attributes["http.user_agent"], ".*ELB-HealthChecker.*")'
+
+  # Routing processor for regional data residency
+  routing/tenant:
+    from_attribute: tenant.region
+    table:
+      - value: us
+        exporters: [otlphttp/us]
+      - value: eu
+        exporters: [otlphttp/eu]
+      - value: ap
+        exporters: [otlphttp/ap]
+    default_exporters: [otlphttp/default]
+
+exporters:
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    namespace: costkatana
+    const_labels:
+      environment: development
+    enable_open_metrics: true
+    
+  # Logging exporter for development
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # OTLP HTTP exporters for different regions/vendors
+  otlphttp/default:
+    endpoint: http://localhost:4318
+    compression: gzip
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+
+  otlphttp/us:
+    endpoint: http://localhost:4318
+    compression: gzip
+    tls:
+      insecure: true
+
+  otlphttp/eu:
+    endpoint: http://localhost:4318
+    compression: gzip
+    tls:
+      insecure: true
+
+  otlphttp/ap:
+    endpoint: http://localhost:4318
+    compression: gzip
+    tls:
+      insecure: true
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+    
+  # Performance profiler
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+    
+  # Memory ballast for stable performance
+  memory_ballast:
+    size_in_percentage: 20
+
+service:
+  extensions: [health_check, pprof, zpages, memory_ballast]
+  
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - filter/health
+        - attributes/redact
+        - transform/security
+        - batch
+        - tail_sampling
+        - resource
+      exporters: [otlphttp/default, logging]
+    
+    # Traces with routing for multi-region
+    traces/routed:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - filter/health
+        - attributes/redact
+        - transform/security
+        - batch
+        - tail_sampling
+        - resource
+        - routing/tenant
+      exporters: [logging]
+    
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - transform/security
+        - batch
+        - resource
+      exporters: [prometheus, otlphttp/default, logging]
+    
+    # Logs pipeline (if needed in future)
+    logs:
+      receivers: [otlp]
+      processors:
+        - memory_limiter
+        - attributes/redact
+        - batch
+        - resource
+      exporters: [otlphttp/default, logging]
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: otel-collector
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

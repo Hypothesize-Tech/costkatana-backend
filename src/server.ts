@@ -1,3 +1,11 @@
+// Import and initialize OpenTelemetry before any other imports
+import { startTelemetry, shutdownTelemetry } from './observability/otel';
+
+// Start telemetry as early as possible
+(async () => {
+    await startTelemetry();
+})();
+
 import express, { Application, Request, Response } from 'express';
 import { cacheMiddleware } from './middleware/cache.middleware';
 import cors from 'cors';
@@ -28,6 +36,8 @@ import { initializeCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
 import { redisService } from './services/redis.service';
+import { otelBaggageMiddleware } from './middleware/otelBaggage';
+import { requestMetricsMiddleware } from './middleware/requestMetrics';
 
 // Create Express app
 const app: Application = express();
@@ -114,6 +124,10 @@ const customLogger = morgan('combined', {
 
 // Apply custom logging
 app.use(customLogger);
+
+// OpenTelemetry middleware - apply early to capture all requests
+app.use(otelBaggageMiddleware);
+app.use(requestMetricsMiddleware);
 
 // Sanitize input
 app.use(sanitizeInput);
@@ -273,6 +287,7 @@ process.on('SIGTERM', async () => {
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
         await multiAgentFlowService.cleanup();
+        await shutdownTelemetry();
         process.exit(0);
     } catch (error) {
         logger.error('❌ Error during graceful shutdown:', error);
@@ -285,6 +300,7 @@ process.on('SIGINT', async () => {
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
         await multiAgentFlowService.cleanup();
+        await shutdownTelemetry();
         process.exit(0);
     } catch (error) {
         logger.error('❌ Error during graceful shutdown:', error);
