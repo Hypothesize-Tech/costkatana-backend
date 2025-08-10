@@ -35,7 +35,8 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             modelId,
             conversationId,
             temperature,
-            maxTokens
+            maxTokens,
+            req
         });
 
         res.json({

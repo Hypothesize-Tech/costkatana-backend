@@ -1,4 +1,4 @@
-import { BedrockService } from './bedrock.service';
+import { BedrockService } from './tracedBedrock.service';
 import { logger } from '../utils/logger';
 import { ExperimentationService } from './experimentation.service';
 import { Conversation, IConversation, ChatMessage } from '../models';
@@ -45,6 +45,7 @@ export interface ChatSendMessageRequest {
     maxTokens?: number;
     chatMode?: 'fastest' | 'cheapest' | 'balanced';
     useMultiAgent?: boolean;
+    req?: any; // Express Request object for tracing context
 }
 
 export interface ChatSendMessageResponse {
@@ -267,7 +268,7 @@ export class ChatService {
                 // Fallback to direct Bedrock call if conversational flow is unavailable
                 logger.warn('Conversational flow service unavailable, falling back to Bedrock:', error);
                 const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
-                response = await BedrockService.invokeModel(contextualPrompt, request.modelId);
+                response = await BedrockService.invokeModel(contextualPrompt, request.modelId, request.req);
             }
 
             const latency = Date.now() - startTime;

@@ -33,6 +33,7 @@ import predictiveIntelligenceRoutes from './predictiveIntelligence.routes';
 import cacheRoutes from './cache.routes';
 import budgetRoutes from './budget.routes';
 import trackingRoutes from './tracking.routes';
+import traceRoutes from './trace.routes';
 const router = Router();
 
 // Health check
@@ -80,5 +81,6 @@ router.use('/predictive-intelligence', predictiveIntelligenceRoutes);
 router.use('/cache', cacheRoutes);
 router.use('/budget', budgetRoutes);
 router.use('/tracking', trackingRoutes);
+router.use('/v1', traceRoutes);
 
 export const apiRouter = router;

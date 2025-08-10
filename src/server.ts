@@ -12,6 +12,7 @@ import { config } from './config';
 import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
+import { traceInterceptor } from './middleware/trace.middleware';
 import { 
     trackApiRequests, 
     trackAuthEvents, 
@@ -125,6 +126,9 @@ app.use(trackProjectEvents);
 app.use(trackUserSession);
 app.use(trackOptimizationEvents);
 app.use(cacheMiddleware);
+
+// Trace interceptor middleware
+app.use(traceInterceptor);
 
 // API routes
 app.use('/api', apiRouter);
