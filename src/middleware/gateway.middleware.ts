@@ -5,6 +5,7 @@ import { AuthService } from '../services/auth.service';
 import { decrypt } from '../utils/helpers';
 import { KeyVaultService } from '../services/keyVault.service';
 import { v4 as uuidv4 } from 'uuid';
+import { GuardrailsService } from '../services/guardrails.service';
 
 // In-memory rate limiting store (in production, use Redis)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
@@ -597,7 +598,31 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
         workflowStep: context.workflowStep
     });
 
-    next();
+    // Apply guardrails checking if user is authenticated
+    if (context.userId) {
+        GuardrailsService.checkRequestGuardrails(
+            context.userId,
+            'request',
+            1,
+            req.body?.model
+        ).then(violation => {
+            if (violation && violation.action === 'block') {
+                res.status(429).json({
+                    success: false,
+                    error: 'Usage limit exceeded',
+                    violation,
+                    upgradeUrl: 'https://costkatana.com/pricing'
+                });
+                return;
+            }
+            next();
+        }).catch(error => {
+            logger.error('Error checking guardrails:', error);
+            next(); // Don't block on errors
+        });
+    } else {
+        next();
+    }
 };
 
 /**

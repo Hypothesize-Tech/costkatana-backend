@@ -590,17 +590,47 @@ export class UserController {
             const userId = req.user!.id;
             const { plan } = updateSubscriptionSchema.parse(req.body);
 
-            if (!['free', 'pro', 'enterprise'].includes(plan)) {
+            if (!['free', 'plus', 'pro', 'enterprise'].includes(plan)) {
                 res.status(400).json({
                     success: false,
                     message: 'Invalid subscription plan',
                 });
+                return;
             }
 
             const limits = {
-                free: { apiCalls: 1000, optimizations: 10 },
-                pro: { apiCalls: 10000, optimizations: 100 },
-                enterprise: { apiCalls: -1, optimizations: -1 }, // Unlimited
+                free: { 
+                    apiCalls: 10000, 
+                    optimizations: 10,
+                    tokensPerMonth: 1000000,
+                    logsPerMonth: 15000,
+                    projects: 5,
+                    workflows: 10
+                },
+                plus: { 
+                    apiCalls: 50000, 
+                    optimizations: 100,
+                    tokensPerMonth: 10000000,
+                    logsPerMonth: -1, // Unlimited
+                    projects: -1,
+                    workflows: 100
+                },
+                pro: { 
+                    apiCalls: 100000, 
+                    optimizations: 1000,
+                    tokensPerMonth: 15000000,
+                    logsPerMonth: -1,
+                    projects: -1,
+                    workflows: 100
+                },
+                enterprise: { 
+                    apiCalls: -1, 
+                    optimizations: -1,
+                    tokensPerMonth: -1,
+                    logsPerMonth: -1,
+                    projects: -1,
+                    workflows: -1
+                }
             };
 
             const user: any = await User.findByIdAndUpdate(

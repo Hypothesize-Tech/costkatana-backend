@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { logger } from './logger';
 import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
+import { GuardrailsService } from '../services/guardrails.service';
 
 export const initializeCronJobs = () => {
     logger.info('Initializing cron jobs...');
@@ -65,6 +66,59 @@ export const initializeCronJobs = () => {
             logger.info('Monthly usage reset completed');
         } catch (error) {
             logger.error('Monthly usage reset failed:', error);
+        }
+    });
+
+    // Monthly usage reset - runs at midnight on the 1st of each month
+    cron.schedule('0 0 1 * *', async () => {
+        logger.info('Running monthly usage reset...');
+        try {
+            await GuardrailsService.resetMonthlyUsage();
+            logger.info('Monthly usage reset completed');
+        } catch (error) {
+            logger.error('Monthly usage reset failed:', error);
+        }
+    });
+
+    // Hourly usage check for free tier throttling - runs every hour
+    cron.schedule('0 * * * *', async () => {
+        logger.info('Running hourly usage check for guardrails...');
+        try {
+            // Check users approaching limits
+            const { User } = await import('../models/User');
+            const freeUsers = await User.find({
+                'subscription.plan': 'free',
+                isActive: true
+            }).select('_id usage subscription');
+
+            for (const user of freeUsers) {
+                const usage = user.usage?.currentMonth;
+                const limits = user.subscription?.limits;
+                
+                if (!usage || !limits) continue;
+
+                // Check if approaching limits (80% threshold)
+                const tokenPercentage = (usage.totalTokens / limits.tokensPerMonth) * 100;
+                const requestPercentage = (usage.apiCalls / limits.apiCalls) * 100;
+
+                if (tokenPercentage >= 80 || requestPercentage >= 80) {
+                    logger.warn(`User ${user._id} approaching limits`, {
+                        tokenPercentage: tokenPercentage.toFixed(2),
+                        requestPercentage: requestPercentage.toFixed(2)
+                    });
+
+                    // The GuardrailsService will handle sending alerts
+                    await GuardrailsService.checkRequestGuardrails(
+                        user._id.toString(),
+                        'token',
+                        0
+                    );
+                }
+            }
+
+            logger.info(`Hourly usage check completed for ${freeUsers.length} free tier users`);
+        } catch (error) {
+            logger.error('Hourly usage check failed:', error);
         }
     });
 

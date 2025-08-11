@@ -11,6 +11,9 @@ router.use(authenticate);
 // List workflows - returns workflow executions in list format
 router.get('/', asyncHandler(WorkflowController.getWorkflowsList));
 
+// List workflow executions (alias for the root route)
+router.get('/executions', asyncHandler(WorkflowController.getWorkflowsList));
+
 // Analytics - returns dashboard format with analytics
 router.get('/analytics', asyncHandler(WorkflowController.getWorkflowAnalytics));
 
@@ -33,6 +36,6 @@ router.post('/executions/:executionId/resume', asyncHandler(WorkflowController.r
 router.post('/executions/:executionId/cancel', asyncHandler(WorkflowController.cancelWorkflow));
 
 // Workflow Metrics
-router.get('/workflows/:workflowId/metrics', asyncHandler(WorkflowController.getWorkflowMetrics));
+router.get('/:workflowId/metrics', asyncHandler(WorkflowController.getWorkflowMetrics));
 
 export default router;

@@ -35,6 +35,7 @@ import budgetRoutes from './budget.routes';
 import trackingRoutes from './tracking.routes';
 import traceRoutes from './trace.routes';
 import telemetryRoutes from './telemetry.routes';
+import guardrailsRoutes from './guardrails.routes';
 
 const router = Router();
 
@@ -85,5 +86,6 @@ router.use('/budget', budgetRoutes);
 router.use('/tracking', trackingRoutes);
 router.use('/v1', traceRoutes);
 router.use('/telemetry', telemetryRoutes);
+router.use('/guardrails', guardrailsRoutes);
 
 export const apiRouter = router;

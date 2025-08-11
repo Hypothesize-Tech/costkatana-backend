@@ -33,12 +33,23 @@ export interface IUser {
         lastDigestSent?: Date;
     };
     subscription: {
-        plan: 'free' | 'pro' | 'enterprise';
+        plan: 'free' | 'plus' | 'pro' | 'enterprise';
         startDate: Date;
         endDate?: Date;
+        seats?: number; // Number of seats for plus/pro plans
         limits: {
             apiCalls: number;
             optimizations: number;
+            tokensPerMonth: number;
+            logsPerMonth: number;
+            projects: number;
+            workflows: number;
+        };
+        billing?: {
+            amount: number;
+            currency: string;
+            interval: 'monthly' | 'yearly';
+            nextBillingDate?: Date;
         };
     };
     usage: {
@@ -161,7 +172,7 @@ const userSchema = new Schema<IUser>({
     subscription: {
         plan: {
             type: String,
-            enum: ['free', 'pro', 'enterprise'],
+            enum: ['free', 'plus', 'pro', 'enterprise'],
             default: 'free',
         },
         startDate: {
@@ -169,15 +180,51 @@ const userSchema = new Schema<IUser>({
             default: Date.now,
         },
         endDate: Date,
+        seats: {
+            type: Number,
+            default: 1,
+        },
         limits: {
             apiCalls: {
                 type: Number,
-                default: 1000,
+                default: 10000, // Free tier: 10K requests/month
             },
             optimizations: {
                 type: Number,
                 default: 10,
             },
+            tokensPerMonth: {
+                type: Number,
+                default: 1000000, // Free tier: 1M tokens/month
+            },
+            logsPerMonth: {
+                type: Number,
+                default: 15000, // Free tier: 15K logs/month
+            },
+            projects: {
+                type: Number,
+                default: 5, // Free tier: 5 projects
+            },
+            workflows: {
+                type: Number,
+                default: 10, // Free tier: 10 workflows
+            },
+        },
+        billing: {
+            amount: {
+                type: Number,
+                default: 0,
+            },
+            currency: {
+                type: String,
+                default: 'USD',
+            },
+            interval: {
+                type: String,
+                enum: ['monthly', 'yearly'],
+                default: 'monthly',
+            },
+            nextBillingDate: Date,
         },
     },
     usage: {
