@@ -153,6 +153,14 @@ export class WebhookDeliveryService {
         const inMemoryData = new Map<string, any>();
         const inMemoryQueue = new Map<string, any[]>();
         
+        // Queue stats counters
+        const queueStats = {
+            waiting: 0,
+            active: 0,
+            completed: 0,
+            failed: 0
+        };
+        
         // Create a mock Redis client
         const mockRedisClient = {
             // Basic methods
@@ -194,21 +202,74 @@ export class WebhookDeliveryService {
                     id: jobId,
                     name,
                     data,
-                    opts: options || {}
+                    opts: options || {},
+                    status: 'waiting'
                 };
                 
                 inMemoryQueue.get(queueName)!.push(job);
+                queueStats.waiting++; // Increment waiting count
                 
                 // Process job immediately or with delay
                 const delay = options?.delay || 0;
+                const processJob = async () => {
+                    try {
+                        queueStats.waiting--; // Decrement waiting count
+                        queueStats.active++; // Increment active count
+                        job.status = 'active';
+                        
+                        await this.processDelivery(data);
+                        
+                        queueStats.active--; // Decrement active count
+                        queueStats.completed++; // Increment completed count
+                        job.status = 'completed';
+                    } catch (error) {
+                        queueStats.active--; // Decrement active count
+                        queueStats.failed++; // Increment failed count
+                        job.status = 'failed';
+                        logger.error('Error processing job in memory fallback', { error });
+                    }
+                };
+                
                 if (delay > 0) {
-                    setTimeout(() => this.processDelivery(data), delay);
+                    setTimeout(processJob, delay);
                 } else {
                     // Process immediately but asynchronously
-                    setTimeout(() => this.processDelivery(data), 0);
+                    setTimeout(processJob, 0);
                 }
                 
                 return job;
+            },
+            // Add queue stats methods that return actual counts
+            getWaitingCount: async () => {
+                // Get actual count from database
+                try {
+                    const count = await WebhookDelivery.countDocuments({ status: 'pending' });
+                    return count + queueStats.waiting;
+                } catch (error) {
+                    return queueStats.waiting;
+                }
+            },
+            getActiveCount: async () => {
+                // For active deliveries, just use our in-memory counter
+                return queueStats.active;
+            },
+            getCompletedCount: async () => {
+                // Get actual count from database
+                try {
+                    const count = await WebhookDelivery.countDocuments({ status: 'success' });
+                    return count + queueStats.completed;
+                } catch (error) {
+                    return queueStats.completed;
+                }
+            },
+            getFailedCount: async () => {
+                // Get actual count from database
+                try {
+                    const count = await WebhookDelivery.countDocuments({ status: 'failed' });
+                    return count + queueStats.failed;
+                } catch (error) {
+                    return queueStats.failed;
+                }
             },
             // Add other Queue methods as needed
             close: async () => {}
