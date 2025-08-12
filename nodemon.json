@@ -1,9 +1,11 @@
 {
-    "watch": ["src"],
-    "ext": "ts",
-    "ignore": ["src/**/*.spec.ts", "src/**/*.test.ts"],
-    "exec": "node --max-old-space-size=4096 --expose-gc -r ts-node/register -r tsconfig-paths/register ./src/server.ts",
-    "env": {
-      "NODE_ENV": "development"
-    }
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+  "execMap": { 
+    "ts": "node -r ts-node/register" 
+  },
+  "events": {
+    "start": "node -r ts-node/register -r ./src/observability/register.ts src/server.ts"
+  }
 }

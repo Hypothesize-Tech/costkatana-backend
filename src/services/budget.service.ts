@@ -1,6 +1,8 @@
 import { logger } from '../utils/logger';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
+import { webhookEventEmitter } from './webhookEventEmitter.service';
+import { WEBHOOK_EVENTS } from '../types/webhook.types';
 
 interface BudgetStatus {
   overall: {
@@ -63,7 +65,7 @@ export class BudgetService {
       };
 
       // Generate alerts based on usage
-      const alerts = this.generateAlerts(overall, projectUsage);
+      const alerts = this.generateAlerts(overall, projectUsage, userId);
 
       // Generate recommendations
       const recommendations = this.generateRecommendations(overall, projectUsage);
@@ -163,7 +165,7 @@ export class BudgetService {
     });
   }
 
-  private static generateAlerts(overall: any, projects: any[]): Array<{
+  private static generateAlerts(overall: any, projects: any[], userId: string): Array<{
     type: string;
     message: string;
     severity: 'low' | 'medium' | 'high';
@@ -185,12 +187,46 @@ export class BudgetService {
         severity: 'high' as const,
         timestamp: now,
       });
+      
+      // Emit webhook event for budget exceeded or warning
+      if (overall.usagePercentage >= 100) {
+        webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_EXCEEDED, userId, {
+          cost: { amount: overall.cost, currency: 'USD' },
+          metrics: {
+            current: overall.used,
+            threshold: overall.budget,
+            changePercentage: overall.usagePercentage - 100,
+            unit: 'tokens'
+          }
+        });
+      } else {
+        webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_WARNING, userId, {
+          cost: { amount: overall.cost, currency: 'USD' },
+          metrics: {
+            current: overall.used,
+            threshold: overall.budget,
+            changePercentage: overall.usagePercentage,
+            unit: 'tokens'
+          }
+        });
+      }
     } else if (overall.usagePercentage >= 75) {
       alerts.push({
         type: 'budget_warning',
         message: `Warning: You've used ${overall.usagePercentage.toFixed(1)}% of your monthly budget`,
         severity: 'medium' as const,
         timestamp: now,
+      });
+      
+      // Emit webhook event for budget warning
+      webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_WARNING, userId, {
+        cost: { amount: overall.cost, currency: 'USD' },
+        metrics: {
+          current: overall.used,
+          threshold: overall.budget,
+          changePercentage: overall.usagePercentage,
+          unit: 'tokens'
+        }
       });
     } else if (overall.usagePercentage >= 50) {
       alerts.push({
@@ -228,6 +264,20 @@ export class BudgetService {
         severity: 'medium' as const,
         timestamp: now,
       });
+      
+      // Emit webhook event for cost alert
+      try {
+        logger.info('Emitting cost alert webhook', { userId, cost: overall.cost });
+        webhookEventEmitter.emitCostAlert(
+          userId,
+          undefined, // No specific project
+          overall.cost,
+          50, // threshold
+          'USD'
+        );
+      } catch (error) {
+        logger.error('Failed to emit cost alert webhook', { error });
+      }
     }
 
     return alerts;

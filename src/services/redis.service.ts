@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { logger } from '../utils/logger';
 import { ChatBedrockConverse } from '@langchain/aws';
+import { resolveRedisUrl, getRedisOptions, getRedisErrorDiagnostic } from '../config/redis';
 
 dotenv.config();
 
@@ -224,37 +225,43 @@ export class RedisService {
      */
     private setupRedisClients(): void {
         try {
-            const redisConfig = {
+            // Get Redis URL and options from centralized configuration
+            const redisUrl = resolveRedisUrl();
+            const redisOptions = getRedisOptions(false);
+            
+            // Convert to node-redis format
+            const nodeRedisConfig = {
+                url: redisUrl,
                 socket: {
-                    host: process.env.REDIS_HOST || 'localhost',
-                    port: parseInt(process.env.REDIS_PORT || '6379'),
-                    tls: process.env.REDIS_TLS === 'true' ? true : undefined,
-                    servername: process.env.REDIS_HOST,
-                    connectTimeout: 5000, // Increased timeout
                     reconnectStrategy: (retries: number) => {
-                        // More gradual reconnection strategy
                         if (retries > 3) return false; // Allow up to 3 retries
                         return Math.min(retries * 1000, 3000); // Exponential backoff with max 3s
-                    }
+                    },
+                    connectTimeout: redisOptions.connectTimeout || 5000,
+                    // Fix the TLS type issue - must be boolean or undefined for node-redis
+                    tls: redisOptions.tls ? true : undefined
                 },
-                password: process.env.REDIS_PASSWORD || undefined,
+                password: redisOptions.password,
+                username: redisOptions.username,
                 database: parseInt(process.env.REDIS_DB || '0'),
             };
 
-            this.client = createClient(redisConfig);
+            this.client = createClient(nodeRedisConfig);
             this.readerClient = createClient({
-                ...redisConfig,
+                ...nodeRedisConfig,
                 readonly: true,
             });
 
             // Handle connection errors - fallback immediately
             this.client.on('error', (err: any) => {
-                logger.warn('Redis client error:', err.message);
+                const diagnostic = getRedisErrorDiagnostic(err);
+                logger.warn(`Redis client error: ${diagnostic}`);
                 this.fallbackToInMemory();
             });
 
             this.readerClient.on('error', (err: any) => {
-                logger.warn('Redis reader client error:', err.message);
+                const diagnostic = getRedisErrorDiagnostic(err);
+                logger.warn(`Redis reader client error: ${diagnostic}`);
             });
 
             // Handle successful connections
@@ -267,7 +274,9 @@ export class RedisService {
             });
 
         } catch (error) {
-            logger.warn('Failed to setup Redis clients, using in-memory cache:', error);
+            const diagnostic = getRedisErrorDiagnostic(error);
+            logger.warn(`Failed to setup Redis clients: ${diagnostic}`);
+            logger.warn('Falling back to in-memory cache');
             this.fallbackToInMemory();
         }
     }
@@ -331,6 +340,11 @@ export class RedisService {
         try {
             this.connectionInProgress = true;
 
+            // Get Redis URL from centralized configuration
+            const redisUrl = resolveRedisUrl();
+            const maskedUrl = redisUrl.replace(/\/\/([^@]*@)?/, '//');
+            logger.info(`🔌 Connecting to Redis at ${maskedUrl}`);
+
             // Simplified connection approach - let node-redis handle retries
             const connectIfNeeded = async (client: any, name: string) => {
                 if (client.isOpen) {
@@ -366,7 +380,9 @@ export class RedisService {
             this._isConnected = true;
             logger.info('✅ Redis connected successfully');
         } catch (error) {
-            logger.warn('❌ Redis connection failed, using in-memory cache:', error);
+            const diagnostic = getRedisErrorDiagnostic(error);
+            logger.warn(`❌ Redis connection failed: ${diagnostic}`);
+            logger.warn('Falling back to in-memory cache');
             this.fallbackToInMemory();
         } finally {
             this.connectionInProgress = false;

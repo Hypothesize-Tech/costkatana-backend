@@ -47,6 +47,22 @@ export const config = {
     encryption: {
         key: process.env.ENCRYPTION_KEY || 'default-encryption-key-change-this',
     },
+    redis: {
+        host: process.env.REDIS_HOST || '127.0.0.1',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD,
+        db: parseInt(process.env.REDIS_DB || '0', 10),
+        url: process.env.REDIS_URL,
+        // Connection options for BullMQ
+        prefix: 'bull',
+        enableOfflineQueue: true,
+        // BullMQ requires maxRetriesPerRequest to be null
+        maxRetriesPerRequest: null,
+        connectTimeout: 5000,
+        disconnectTimeout: 2000,
+        lazyConnect: true,
+        tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
+    },
 };
 
 export * from './database';

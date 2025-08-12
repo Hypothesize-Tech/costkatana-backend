@@ -1,10 +1,6 @@
-// Import and initialize OpenTelemetry before any other imports
-import { startTelemetry, shutdownTelemetry } from './observability/otel';
-
-// Start telemetry as early as possible
-(async () => {
-    await startTelemetry();
-})();
+// OpenTelemetry is now initialized via register.ts before any imports
+// This ensures all instrumentation is loaded before modules are imported
+import { shutdownTelemetry } from './observability/otel';
 
 import express, { Application, Request, Response } from 'express';
 import { cacheMiddleware } from './middleware/cache.middleware';
@@ -238,6 +234,41 @@ export const startServer = async () => {
             logger.warn('⚠️  AIOps Agent initialization failed, will initialize on first request:', error);
         }
         
+        // Redis configuration is now handled by config/redis.ts
+        
+        // Initialize Webhook Delivery Service
+        try {
+            const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
+            logger.info('🪝 Webhook delivery service initialized successfully');
+            
+            // Process pending deliveries with increased delay and retry mechanism
+            const retryProcessingWithBackoff = async (attempt = 1, maxAttempts = 3) => {
+                try {
+                    // Increasing delay with each attempt
+                    const delayMs = attempt * 5000;
+                    await new Promise(resolve => setTimeout(resolve, delayMs));
+                    
+                    logger.info(`🪝 Attempting to process pending webhook deliveries (attempt ${attempt}/${maxAttempts})`);
+                    await webhookDeliveryService.processPendingDeliveries();
+                    logger.info('🪝 Successfully processed pending webhook deliveries');
+                } catch (err) {
+                    logger.warn(`⚠️ Error processing pending webhook deliveries (attempt ${attempt}/${maxAttempts}):`, err);
+                    
+                    // Retry with backoff if not reached max attempts
+                    if (attempt < maxAttempts) {
+                        logger.info(`🪝 Will retry processing pending webhook deliveries in ${(attempt + 1) * 5} seconds`);
+                        retryProcessingWithBackoff(attempt + 1, maxAttempts);
+                    }
+                }
+            };
+            
+            // Start the retry process
+            retryProcessingWithBackoff();
+            
+        } catch (error) {
+            logger.warn('⚠️ Webhook delivery service initialization failed:', error);
+        }
+        
         initializeCronJobs();
 
         const server = app.listen(PORT, () => {
@@ -286,7 +317,9 @@ process.on('SIGTERM', async () => {
     logger.info('🛑 SIGTERM received, shutting down gracefully');
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
+        const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
         await multiAgentFlowService.cleanup();
+        await webhookDeliveryService.shutdown();
         await shutdownTelemetry();
         process.exit(0);
     } catch (error) {

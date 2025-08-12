@@ -11,8 +11,9 @@
 5. [Magic Link Onboarding](#magic-link-onboarding)
 6. [Usage Tracking](#usage-tracking)
 7. [Analytics & Reporting](#analytics--reporting)
-8. [Error Handling](#error-handling)
-9. [Rate Limiting](#rate-limiting)
+8. [Webhooks](#webhooks)
+9. [Error Handling](#error-handling)
+10. [Rate Limiting](#rate-limiting)
 
 ## 🌟 **Overview**
 
@@ -625,6 +626,17 @@ Real-time AI analysis and recommendations via WebSocket:
 2. **Sanitize AI responses**: Before displaying to users
 3. **Rotate API keys**: Regular rotation for security
 4. **Audit AI interactions**: Log all AI service calls
+
+## 🪝 **Webhooks**
+
+For comprehensive webhook documentation, including:
+- Complete API reference
+- Event types and payloads
+- Security and signature verification
+- Integration examples
+- Best practices
+
+See [WEBHOOK_DOCUMENTATION.md](./WEBHOOK_DOCUMENTATION.md)
 
 ---
 

@@ -36,6 +36,7 @@ import trackingRoutes from './tracking.routes';
 import traceRoutes from './trace.routes';
 import telemetryRoutes from './telemetry.routes';
 import guardrailsRoutes from './guardrails.routes';
+import webhookRoutes from './webhook.routes';
 
 const router = Router();
 
@@ -87,5 +88,6 @@ router.use('/tracking', trackingRoutes);
 router.use('/v1', traceRoutes);
 router.use('/telemetry', telemetryRoutes);
 router.use('/guardrails', guardrailsRoutes);
+router.use('/webhooks', webhookRoutes);
 
 export const apiRouter = router;
