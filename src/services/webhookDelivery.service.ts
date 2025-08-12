@@ -147,10 +147,11 @@ export class WebhookDeliveryService {
      * Create an in-memory fallback for Redis
      */
     private createInMemoryFallback(): void {
-        logger.info('🔄 Creating in-memory fallback for Redis');
+        logger.info('🔄 Creating in-memory fallback for Redis and BullMQ');
         
         // Create a simple in-memory implementation
         const inMemoryData = new Map<string, any>();
+        const inMemoryQueue = new Map<string, any[]>();
         
         // Create a mock Redis client
         const mockRedisClient = {
@@ -180,11 +181,69 @@ export class WebhookDeliveryService {
         this.redisClient = mockRedisClient as unknown as Redis;
         this.bullConnection = mockRedisClient as unknown as Redis;
         
+        // Create mock BullMQ Queue and Worker implementations
+        this.deliveryQueue = {
+            add: async (name: string, data: WebhookDeliveryJob, options?: any) => {
+                const queueName = 'webhook-deliveries';
+                if (!inMemoryQueue.has(queueName)) {
+                    inMemoryQueue.set(queueName, []);
+                }
+                
+                const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                const job = {
+                    id: jobId,
+                    name,
+                    data,
+                    opts: options || {}
+                };
+                
+                inMemoryQueue.get(queueName)!.push(job);
+                
+                // Process job immediately or with delay
+                const delay = options?.delay || 0;
+                if (delay > 0) {
+                    setTimeout(() => this.processDelivery(data), delay);
+                } else {
+                    // Process immediately but asynchronously
+                    setTimeout(() => this.processDelivery(data), 0);
+                }
+                
+                return job;
+            },
+            // Add other Queue methods as needed
+            close: async () => {}
+        } as unknown as Queue<WebhookDeliveryJob>;
+        
+        // Mock Worker (doesn't need to do anything since we process jobs directly)
+        this.deliveryWorker = {
+            on: (_event: string, _callback: any) => {
+                // Unused parameters prefixed with underscore to avoid linting warnings
+                return this.deliveryWorker;
+            },
+            close: async () => {}
+        } as unknown as Worker<WebhookDeliveryJob>;
+        
         logger.info('✅ In-memory fallback created successfully');
     }
     
     private async initializeQueue() {
         try {
+            // Skip initialization if we already have a queue (likely from in-memory fallback)
+            if (this.deliveryQueue) {
+                logger.debug('Queue already initialized, skipping BullMQ initialization');
+                return;
+            }
+            
+            // Check if we're in local development without Redis
+            const inLocalDev = process.env.NODE_ENV === 'development' && 
+                (!process.env.REDIS_HOST && !process.env.REDIS_URL);
+            
+            if (inLocalDev || !this.bullConnection) {
+                logger.info('Using in-memory queue implementation for local development');
+                this.createInMemoryFallback();
+                return;
+            }
+            
             const queueOptions: any = {
                 defaultJobOptions: {
                     attempts: 1, // We handle retries manually
@@ -239,10 +298,11 @@ export class WebhookDeliveryService {
                 logger.error('Webhook delivery worker error', { error: err });
             });
 
-            logger.info('Webhook delivery queue initialized');
+            logger.info('Webhook delivery queue initialized with BullMQ');
         } catch (error) {
             logger.error('Failed to initialize webhook delivery queue', { error });
-            // Don't throw error, just log it
+            // Create in-memory fallback on error
+            this.createInMemoryFallback();
         }
     }
 
