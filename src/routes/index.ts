@@ -37,6 +37,7 @@ import traceRoutes from './trace.routes';
 import telemetryRoutes from './telemetry.routes';
 import guardrailsRoutes from './guardrails.routes';
 import webhookRoutes from './webhook.routes';
+import mfaRoutes from './mfa.routes';
 
 const router = Router();
 
@@ -89,5 +90,6 @@ router.use('/v1', traceRoutes);
 router.use('/telemetry', telemetryRoutes);
 router.use('/guardrails', guardrailsRoutes);
 router.use('/webhooks', webhookRoutes);
+router.use('/mfa', mfaRoutes);
 
 export const apiRouter = router;

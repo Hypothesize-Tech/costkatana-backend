@@ -4,6 +4,7 @@ import { config } from '../config';
 import { generateToken } from '../utils/helpers';
 import { logger } from '../utils/logger';
 import { ActivityService } from './activity.service';
+import { MFAService } from './mfa.service';
 
 interface TokenPayload extends JwtPayload {
     id: string;
@@ -107,6 +108,30 @@ export class AuthService {
         return decoded as TokenPayload;
     }
 
+    static generateMFAToken(userId: string): string {
+        const payload = {
+            userId,
+            type: 'mfa',
+            exp: Math.floor(Date.now() / 1000) + (10 * 60), // 10 minutes
+        };
+        
+        return jwt.sign(payload, config.jwt.secret as Secret);
+    }
+
+    static verifyMFAToken(token: string): { userId: string } {
+        try {
+            const payload = jwt.verify(token, config.jwt.secret as Secret) as any;
+            
+            if (payload.type !== 'mfa') {
+                throw new Error('Invalid token type');
+            }
+            
+            return { userId: payload.userId };
+        } catch (error) {
+            throw new Error('Invalid MFA token');
+        }
+    }
+
     static parseApiKey(apiKey: string): { userId: string; keyId: string; secret: string } | null {
         // Parse API key format: dak_userId_keyId_secret
         const parts = apiKey.split('_');
@@ -157,7 +182,7 @@ export class AuthService {
         }
     }
 
-    static async login(email: string, password: string): Promise<{ user: IUser; tokens: AuthTokens }> {
+    static async login(email: string, password: string, deviceInfo?: { userAgent: string; ipAddress: string }): Promise<{ user: IUser; tokens?: AuthTokens; requiresMFA?: boolean; mfaToken?: string }> {
         try {
             // Find user
             const user = await User.findOne({ email });
@@ -179,6 +204,39 @@ export class AuthService {
                 throw new Error('Account is deactivated');
             }
 
+            // Check if MFA is enabled
+            if (user.mfa.enabled && user.mfa.methods.length > 0) {
+                // Check if device is trusted
+                let isTrustedDevice = false;
+                if (deviceInfo) {
+                    const deviceId = MFAService.generateDeviceId(deviceInfo.userAgent, deviceInfo.ipAddress);
+                    isTrustedDevice = await MFAService.isTrustedDevice(user._id.toString(), deviceId);
+                }
+
+                if (!isTrustedDevice) {
+                    // Generate temporary MFA token for verification
+                    const mfaToken = this.generateMFAToken(user._id.toString());
+                    
+                    logger.info(`MFA required for user: ${user.email}`);
+                    
+                    return {
+                        user,
+                        requiresMFA: true,
+                        mfaToken,
+                    };
+                }
+            }
+
+            // Complete login (no MFA required or trusted device)
+            return this.completeLogin(user);
+        } catch (error: unknown) {
+            logger.error('Error in login:', error);
+            throw error;
+        }
+    }
+
+    static async completeLogin(user: any): Promise<{ user: any; tokens: AuthTokens }> {
+        try {
             // Update last login
             user.lastLogin = new Date();
             await user.save();
@@ -197,7 +255,7 @@ export class AuthService {
 
             return { user, tokens };
         } catch (error: unknown) {
-            logger.error('Error in login:', error);
+            logger.error('Error completing login:', error);
             throw error;
         }
     }

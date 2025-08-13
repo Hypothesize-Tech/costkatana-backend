@@ -78,6 +78,7 @@ export class AuthController {
                         role: user.role,
                     },
                     accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
                 },
             });
         } catch (error: unknown) {
@@ -101,8 +102,30 @@ export class AuthController {
             // Validate input
             const { email, password } = loginSchema.parse(req.body);
 
+            // Get device info
+            const userAgent = req.headers['user-agent'] || 'Unknown';
+            const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
+
             // Login user
-            const { user, tokens } = await AuthService.login(email, password);
+            const result = await AuthService.login(email, password, { userAgent, ipAddress });
+
+            // Check if MFA is required
+            if (result.requiresMFA) {
+                res.json({
+                    success: true,
+                    message: 'MFA verification required',
+                    data: {
+                        requiresMFA: true,
+                        mfaToken: result.mfaToken,
+                        userId: (result.user as any)._id,
+                        availableMethods: result.user.mfa.methods,
+                    },
+                });
+                return;
+            }
+
+            // Complete login (no MFA required)
+            const { user, tokens } = result as { user: any; tokens: any };
 
             // Set refresh token as httpOnly cookie
             res.cookie('refreshToken', tokens.refreshToken, {
@@ -117,7 +140,7 @@ export class AuthController {
                 message: 'Login successful',
                 data: {
                     user: {
-                        id: (user as any)._id,
+                        id: user._id,
                         email: user.email,
                         name: user.name,
                         role: user.role,
@@ -125,6 +148,7 @@ export class AuthController {
                         subscription: user.subscription,
                     },
                     accessToken: tokens.accessToken,
+                    refreshToken: tokens.refreshToken,
                 },
             });
         } catch (error: any) {

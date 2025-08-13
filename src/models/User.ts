@@ -66,6 +66,32 @@ export interface IUser {
     resetPasswordToken?: string;
     resetPasswordExpires?: Date;
     lastLogin?: Date;
+    mfa: {
+        enabled: boolean;
+        methods: Array<'email' | 'totp'>;
+        email: {
+            enabled: boolean;
+            code?: string;
+            codeExpires?: Date;
+            attempts: number;
+            lastAttempt?: Date;
+        };
+        totp: {
+            enabled: boolean;
+            secret?: string;
+            backupCodes: string[];
+            lastUsed?: Date;
+        };
+        trustedDevices: Array<{
+            deviceId: string;
+            deviceName: string;
+            userAgent: string;
+            ipAddress: string;
+            createdAt: Date;
+            lastUsed: Date;
+            expiresAt: Date;
+        }>;
+    };
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
@@ -259,6 +285,70 @@ const userSchema = new Schema<IUser>({
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     lastLogin: Date,
+    mfa: {
+        enabled: {
+            type: Boolean,
+            default: false,
+        },
+        methods: [{
+            type: String,
+            enum: ['email', 'totp'],
+        }],
+        email: {
+            enabled: {
+                type: Boolean,
+                default: false,
+            },
+            code: String,
+            codeExpires: Date,
+            attempts: {
+                type: Number,
+                default: 0,
+            },
+            lastAttempt: Date,
+        },
+        totp: {
+            enabled: {
+                type: Boolean,
+                default: false,
+            },
+            secret: String,
+            backupCodes: [{
+                type: String,
+            }],
+            lastUsed: Date,
+        },
+        trustedDevices: [{
+            deviceId: {
+                type: String,
+                required: true,
+            },
+            deviceName: {
+                type: String,
+                required: true,
+            },
+            userAgent: {
+                type: String,
+                required: true,
+            },
+            ipAddress: {
+                type: String,
+                required: true,
+            },
+            createdAt: {
+                type: Date,
+                default: Date.now,
+            },
+            lastUsed: {
+                type: Date,
+                default: Date.now,
+            },
+            expiresAt: {
+                type: Date,
+                required: true,
+            },
+        }],
+    },
 }, {
     timestamps: true,
 });
