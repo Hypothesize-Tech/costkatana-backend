@@ -7,15 +7,25 @@ export interface ThreatDetectionResult {
     threatCategory?: string;
     confidence: number;
     reason: string;
-    stage: 'prompt-guard' | 'llama-guard';
+    stage: 'prompt-guard' | 'llama-guard' | 'rag-guard' | 'tool-guard';
     details?: any;
+    matchedPatterns?: string[];
+    riskScore?: number;
+    containmentAction?: 'block' | 'sandbox' | 'human_review' | 'allow';
+    provenanceSource?: string;
 }
 
 export interface FirewallConfig {
     enableBasicFirewall: boolean;
     enableAdvancedFirewall: boolean;
+    enableRAGSecurity: boolean;
+    enableToolSecurity: boolean;
     promptGuardThreshold: number; // 0.0 to 1.0
     llamaGuardThreshold: number; // 0.0 to 1.0
+    ragSecurityThreshold: number; // 0.0 to 1.0
+    toolSecurityThreshold: number; // 0.0 to 1.0
+    sandboxHighRisk: boolean;
+    requireHumanApproval: boolean;
 }
 
 export interface FirewallAnalytics {
@@ -56,7 +66,13 @@ export class PromptFirewallService {
         prompt: string,
         config: FirewallConfig,
         requestId: string,
-        estimatedCost: number = 0.01
+        estimatedCost: number = 0.01,
+        context?: {
+            retrievedChunks?: string[];
+            toolCalls?: any[];
+            userId?: string;
+            provenanceSource?: string;
+        }
     ): Promise<ThreatDetectionResult> {
         try {
             this.initialize();
@@ -66,7 +82,7 @@ export class PromptFirewallService {
                 const promptGuardResult = await this.runPromptGuard(prompt, config.promptGuardThreshold);
                 
                 if (promptGuardResult.isBlocked) {
-                    await this.logThreatDetection(requestId, promptGuardResult, estimatedCost);
+                    await this.logThreatDetection(requestId, promptGuardResult, estimatedCost, context?.userId, prompt);
                     return promptGuardResult;
                 }
             }
@@ -76,7 +92,7 @@ export class PromptFirewallService {
                 const llamaGuardResult = await this.runLlamaGuard(prompt, config.llamaGuardThreshold);
                 
                 if (llamaGuardResult.isBlocked) {
-                    await this.logThreatDetection(requestId, llamaGuardResult, estimatedCost);
+                    await this.logThreatDetection(requestId, llamaGuardResult, estimatedCost, context?.userId, prompt);
                     return llamaGuardResult;
                 }
             }
@@ -429,12 +445,299 @@ export class PromptFirewallService {
     }
 
     /**
+     * Stage 3: RAG Security - Analyze retrieved chunks for data exfiltration attempts
+     * (Not used directly in basic firewall - used by LLMSecurityService)
+     */
+    static async runRAGSecurityCheck(
+        prompt: string,
+        retrievedChunks: string[],
+        threshold: number,
+        provenanceSource?: string
+    ): Promise<ThreatDetectionResult> {
+        try {
+            const ragPatterns = [
+                // Data exfiltration attempts
+                /(?:show|list|extract|get|find|display)\s+(?:all\s+)?(?:sensitive|confidential|private|secret)\s+(?:data|information|files|documents)/i,
+                /(?:dump|export|download|copy)\s+(?:entire\s+)?(?:database|knowledge|content)/i,
+                /(?:what\s+)?(?:personal|private|sensitive)\s+(?:data|information)\s+(?:do\s+you\s+have|is\s+available)/i,
+                /(?:show|tell)\s+me\s+(?:everything|all)\s+(?:about|from)/i,
+                
+                // System prompt extraction
+                /(?:what\s+is\s+your\s+)?(?:system\s+)?(?:prompt|instructions)/i,
+                /(?:show|display|reveal)\s+(?:your\s+)?(?:initial\s+)?(?:system\s+)?(?:prompt|instructions)/i,
+                /(?:how\s+were\s+you\s+)?(?:programmed|configured|set\s+up)/i,
+                
+                // RAG-specific attacks
+                /(?:ignore\s+)?(?:knowledge\s+base|vector\s+store|embeddings|chunks)/i,
+                /(?:retrieve|search)\s+(?:from\s+)?(?:different|other|all)\s+(?:sources|documents|files)/i,
+                /(?:access\s+)?(?:source\s+)?(?:documents|files)\s+(?:directly|raw)/i,
+                
+                // Cross-context injection
+                /(?:override|replace|modify)\s+(?:retrieved|context|knowledge)/i,
+                /(?:inject|insert|add)\s+(?:new\s+)?(?:context|information|data)/i
+            ];
+
+            let riskScore = 0;
+            const matchedPatterns: string[] = [];
+
+            // Check prompt for RAG-specific threats
+            for (const pattern of ragPatterns) {
+                if (pattern.test(prompt)) {
+                    riskScore += 0.3;
+                    matchedPatterns.push(pattern.source);
+                }
+            }
+
+            // Analyze retrieved chunks for sensitive content
+            let sensitiveContentScore = 0;
+            const sensitivePatterns = [
+                /(?:password|secret|key|token|credential)/i,
+                /(?:ssn|social\s+security|tax\s+id)/i,
+                /(?:credit\s+card|card\s+number|cvv)/i,
+                /(?:api\s+key|private\s+key|auth\s+token)/i,
+                /(?:internal|confidential|proprietary)/i
+            ];
+
+            for (const chunk of retrievedChunks) {
+                for (const pattern of sensitivePatterns) {
+                    if (pattern.test(chunk)) {
+                        sensitiveContentScore += 0.2;
+                        matchedPatterns.push(`sensitive_content: ${pattern.source}`);
+                    }
+                }
+            }
+
+            const totalScore = Math.min(1.0, riskScore + sensitiveContentScore);
+            const isBlocked = totalScore > threshold;
+
+            let containmentAction: 'block' | 'sandbox' | 'human_review' | 'allow' = 'allow';
+            if (isBlocked) {
+                if (totalScore > 0.8) {
+                    containmentAction = 'block';
+                } else if (totalScore > 0.6) {
+                    containmentAction = 'human_review';
+                } else {
+                    containmentAction = 'sandbox';
+                }
+            }
+
+            return {
+                isBlocked,
+                threatCategory: isBlocked ? 'data_exfiltration' : undefined,
+                confidence: totalScore,
+                reason: isBlocked 
+                    ? `RAG security threat detected: potential data exfiltration or context manipulation`
+                    : 'No RAG security threats detected',
+                stage: 'rag-guard',
+                matchedPatterns,
+                riskScore: totalScore,
+                containmentAction,
+                provenanceSource,
+                details: {
+                    promptRiskScore: riskScore,
+                    sensitiveContentScore,
+                    retrievedChunksCount: retrievedChunks.length,
+                    method: 'rag_security_patterns'
+                }
+            };
+
+        } catch (error) {
+            logger.warn('RAG security check failed, allowing request', error as Error);
+            return {
+                isBlocked: false,
+                confidence: 0.0,
+                reason: 'RAG security check failed - allowing request',
+                stage: 'rag-guard',
+                containmentAction: 'allow'
+            };
+        }
+    }
+
+    /**
+     * Stage 4: Tool Security - Validate tool calls and arguments
+     * (Not used directly in basic firewall - used by LLMSecurityService)
+     */
+    static async runToolSecurityCheck(
+        toolCalls: any[],
+        threshold: number,
+        _userId?: string
+    ): Promise<ThreatDetectionResult> {
+        try {
+            // Define allowed tools and their security policies
+            interface ToolSecurityPolicy {
+                allowedOperations?: string[];
+                forbiddenOperations?: string[];
+                maxDocuments?: number;
+                maxCostThreshold?: number;
+                allowedDomains?: string[];
+                forbiddenDomains?: string[];
+                maxRequests?: number;
+                maxCostImpact?: number;
+                requiresApproval: boolean;
+            }
+
+            const toolSecurityPolicies: Record<string, ToolSecurityPolicy> = {
+                'mongodb_reader': {
+                    allowedOperations: ['find', 'findOne', 'countDocuments', 'aggregate'],
+                    forbiddenOperations: ['drop', 'remove', 'deleteOne', 'deleteMany', 'updateOne', 'updateMany'],
+                    maxDocuments: 100,
+                    requiresApproval: false
+                },
+                'analytics_manager': {
+                    allowedOperations: ['dashboard', 'token_usage', 'model_performance', 'usage_patterns'],
+                    maxCostThreshold: 10.0,
+                    requiresApproval: false
+                },
+                'web_scraper': {
+                    allowedDomains: ['github.com', 'stackoverflow.com', 'docs.python.org', 'nodejs.org'],
+                    forbiddenDomains: ['localhost', '127.0.0.1', '0.0.0.0', 'internal', 'admin'],
+                    maxRequests: 5,
+                    requiresApproval: true
+                },
+                'optimization_manager': {
+                    maxCostImpact: 100.0,
+                    requiresApproval: false
+                },
+                'project_manager': {
+                    allowedOperations: ['list', 'get', 'analyze'],
+                    forbiddenOperations: ['delete', 'purge', 'reset'],
+                    requiresApproval: false
+                }
+            };
+
+            let riskScore = 0;
+            const violations: string[] = [];
+            let requiresHumanApproval = false;
+
+            for (const toolCall of toolCalls) {
+                const toolName = toolCall.function?.name || toolCall.name;
+                const toolArgs = toolCall.function?.arguments || toolCall.arguments;
+
+                // Check if tool is whitelisted
+                if (!toolSecurityPolicies[toolName as keyof typeof toolSecurityPolicies]) {
+                    riskScore += 0.4;
+                    violations.push(`Unknown/unauthorized tool: ${toolName}`);
+                    requiresHumanApproval = true;
+                    continue;
+                }
+
+                const policy = toolSecurityPolicies[toolName as keyof typeof toolSecurityPolicies];
+
+                // Parse arguments safely
+                let args: any = {};
+                try {
+                    args = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
+                } catch (error) {
+                    riskScore += 0.3;
+                    violations.push(`Invalid arguments for tool: ${toolName}`);
+                    continue;
+                }
+
+                // Tool-specific validations
+                switch (toolName) {
+                    case 'mongodb_reader':
+                        if (policy.forbiddenOperations?.includes(args.operation)) {
+                            riskScore += 0.6;
+                            violations.push(`Forbidden MongoDB operation: ${args.operation}`);
+                        }
+                        if (args.query && this.containsDangerousMongoDB(JSON.stringify(args.query))) {
+                            riskScore += 0.8;
+                            violations.push('Potentially dangerous MongoDB query detected');
+                        }
+                        break;
+
+                    case 'web_scraper':
+                        const url = args.url || '';
+                        if (policy.forbiddenDomains?.some((domain: string) => url.includes(domain))) {
+                            riskScore += 0.7;
+                            violations.push(`Access to forbidden domain in URL: ${url}`);
+                        }
+                        if (!policy.allowedDomains?.some((domain: string) => url.includes(domain))) {
+                            riskScore += 0.5;
+                            violations.push(`Access to non-whitelisted domain: ${url}`);
+                            requiresHumanApproval = true;
+                        }
+                        break;
+
+                    case 'project_manager':
+                        if (policy.forbiddenOperations?.includes(args.operation)) {
+                            riskScore += 0.7;
+                            violations.push(`Forbidden project operation: ${args.operation}`);
+                        }
+                        break;
+                }
+
+                // Check if tool requires approval
+                if (policy.requiresApproval) {
+                    requiresHumanApproval = true;
+                }
+            }
+
+            const isBlocked = riskScore > threshold;
+
+            let containmentAction: 'block' | 'sandbox' | 'human_review' | 'allow' = 'allow';
+            if (isBlocked) {
+                containmentAction = 'block';
+            } else if (requiresHumanApproval || riskScore > threshold * 0.7) {
+                containmentAction = 'human_review';
+            } else if (riskScore > threshold * 0.5) {
+                containmentAction = 'sandbox';
+            }
+
+            return {
+                isBlocked,
+                threatCategory: isBlocked ? 'unauthorized_tool_access' : undefined,
+                confidence: riskScore,
+                reason: isBlocked 
+                    ? `Tool security violations detected: ${violations.join(', ')}`
+                    : requiresHumanApproval 
+                        ? 'Tool calls require human approval'
+                        : 'All tool calls authorized',
+                stage: 'tool-guard',
+                matchedPatterns: violations,
+                riskScore,
+                containmentAction,
+                details: {
+                    toolCallsCount: toolCalls.length,
+                    violations,
+                    requiresHumanApproval,
+                    method: 'tool_security_validation'
+                }
+            };
+
+        } catch (error) {
+            logger.warn('Tool security check failed, blocking request', error as Error);
+            return {
+                isBlocked: true,
+                confidence: 1.0,
+                reason: 'Tool security check failed - blocking for safety',
+                stage: 'tool-guard',
+                containmentAction: 'block'
+            };
+        }
+    }
+
+    /**
+     * Check for dangerous MongoDB operations
+     */
+    private static containsDangerousMongoDB(queryString: string): boolean {
+        const dangerousOperations = [
+            '$eval', '$where', '$function', '$accumulator',
+            '$javascript', '$code', 'ObjectId.', 'function()'
+        ];
+        
+        return dangerousOperations.some(op => queryString.includes(op));
+    }
+
+    /**
      * Log threat detection for analytics
      */
     private static async logThreatDetection(
         requestId: string,
         result: ThreatDetectionResult,
-        estimatedCost: number
+        estimatedCost: number,
+        userId?: string,
+        originalPrompt?: string
     ): Promise<void> {
         try {
             // Import ThreatLog model dynamically to avoid circular dependencies
@@ -442,13 +745,16 @@ export class PromptFirewallService {
             
             const threatLog = new ThreatLog({
                 requestId,
+                userId: userId ? new (await import('mongoose')).Types.ObjectId(userId) : undefined,
                 threatCategory: result.threatCategory,
                 confidence: result.confidence,
                 stage: result.stage,
                 reason: result.reason,
                 details: result.details,
                 costSaved: estimatedCost,
-                timestamp: new Date()
+                timestamp: new Date(),
+                promptHash: originalPrompt ? this.hashPrompt(originalPrompt) : undefined,
+                promptPreview: originalPrompt ? this.sanitizePromptForPreview(originalPrompt) : undefined
             });
 
             await threatLog.save();
@@ -565,8 +871,14 @@ export class PromptFirewallService {
         return {
             enableBasicFirewall: true,
             enableAdvancedFirewall: false,
+            enableRAGSecurity: true,
+            enableToolSecurity: true,
             promptGuardThreshold: 0.5, // 50% confidence threshold
-            llamaGuardThreshold: 0.8   // 80% confidence threshold
+            llamaGuardThreshold: 0.8,   // 80% confidence threshold
+            ragSecurityThreshold: 0.6,  // 60% confidence threshold for RAG threats
+            toolSecurityThreshold: 0.7, // 70% confidence threshold for tool security
+            sandboxHighRisk: true,       // Sandbox high-risk requests instead of blocking
+            requireHumanApproval: false  // Require human approval for certain operations
         };
     }
 
@@ -587,6 +899,26 @@ export class PromptFirewallService {
             config.enableBasicFirewall = true; // Advanced requires basic
         }
         
+        // RAG security
+        if (headers['costkatana-firewall-rag'] === 'false') {
+            config.enableRAGSecurity = false;
+        }
+        
+        // Tool security
+        if (headers['costkatana-firewall-tools'] === 'false') {
+            config.enableToolSecurity = false;
+        }
+        
+        // Sandboxing
+        if (headers['costkatana-firewall-sandbox'] === 'false') {
+            config.sandboxHighRisk = false;
+        }
+        
+        // Human approval
+        if (headers['costkatana-firewall-human-approval'] === 'true') {
+            config.requireHumanApproval = true;
+        }
+        
         // Custom thresholds (optional)
         if (headers['costkatana-firewall-prompt-threshold']) {
             const threshold = parseFloat(headers['costkatana-firewall-prompt-threshold']);
@@ -602,6 +934,52 @@ export class PromptFirewallService {
             }
         }
         
+        if (headers['costkatana-firewall-rag-threshold']) {
+            const threshold = parseFloat(headers['costkatana-firewall-rag-threshold']);
+            if (!isNaN(threshold) && threshold >= 0 && threshold <= 1) {
+                config.ragSecurityThreshold = threshold;
+            }
+        }
+        
+        if (headers['costkatana-firewall-tool-threshold']) {
+            const threshold = parseFloat(headers['costkatana-firewall-tool-threshold']);
+            if (!isNaN(threshold) && threshold >= 0 && threshold <= 1) {
+                config.toolSecurityThreshold = threshold;
+            }
+        }
+        
         return config;
+    }
+
+    /**
+     * Hash prompt for privacy and deduplication
+     */
+    private static hashPrompt(prompt: string): string {
+        const crypto = require('crypto');
+        return crypto.createHash('sha256').update(prompt).digest('hex');
+    }
+
+    /**
+     * Sanitize prompt for preview (remove sensitive info, limit length)
+     */
+    private static sanitizePromptForPreview(prompt: string): string {
+        if (!prompt) return '';
+        
+        // Remove potential sensitive patterns
+        let sanitized = prompt
+            .replace(/\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/g, '[CREDIT_CARD_REDACTED]')
+            .replace(/\b\d{3}-\d{2}-\d{4}\b/g, '[SSN_REDACTED]')
+            .replace(/password\s*[:=]\s*\S+/gi, 'password:[REDACTED]')
+            .replace(/api[_\s]?key\s*[:=]\s*\S+/gi, 'api_key:[REDACTED]')
+            .replace(/token\s*[:=]\s*\S+/gi, 'token:[REDACTED]')
+            .replace(/email\s*[:=]\s*\S+@\S+\.\S+/gi, 'email:[REDACTED]')
+            .replace(/phone\s*[:=]\s*[\d\s\-\(\)]+/gi, 'phone:[REDACTED]');
+
+        // Limit to 200 characters and add ellipsis if truncated
+        if (sanitized.length > 200) {
+            sanitized = sanitized.substring(0, 197) + '...';
+        }
+
+        return sanitized;
     }
 }

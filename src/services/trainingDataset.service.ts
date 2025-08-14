@@ -2,6 +2,7 @@ import { TrainingDataset, ITrainingDataset } from '../models/TrainingDataset';
 import { RequestScore } from '../models/RequestScore';
 import { Usage } from '../models/Usage';
 import { logger } from '../utils/logger';
+import { PIIDetectionService } from './piiDetection.service';
 import mongoose from 'mongoose';
 
 export interface CreateDatasetData {
@@ -12,6 +13,9 @@ export interface CreateDatasetData {
     minScore?: number;
     maxTokens?: number;
     maxCost?: number;
+    version?: string;
+    parentDatasetId?: string;
+    versionNotes?: string;
     filters?: {
         dateRange?: { start: Date; end: Date };
         providers?: string[];
@@ -19,6 +23,11 @@ export interface CreateDatasetData {
         features?: string[];
         costRange?: { min: number; max: number };
         tokenRange?: { min: number; max: number };
+    };
+    splitConfig?: {
+        trainPercentage?: number;
+        devPercentage?: number;
+        testPercentage?: number;
     };
 }
 
@@ -34,11 +43,46 @@ export class TrainingDatasetService {
      */
     static async createDataset(userId: string, datasetData: CreateDatasetData): Promise<ITrainingDataset> {
         try {
+            // Handle versioning
+            let version = datasetData.version || '1.0.0';
+            let parentDatasetId = datasetData.parentDatasetId ? 
+                new mongoose.Types.ObjectId(datasetData.parentDatasetId) : undefined;
+
+            // If creating a new version, validate parent exists
+            if (parentDatasetId) {
+                const parentDataset = await TrainingDataset.findOne({
+                    _id: parentDatasetId,
+                    userId: new mongoose.Types.ObjectId(userId)
+                });
+                if (!parentDataset) {
+                    throw new Error('Parent dataset not found or access denied');
+                }
+            }
+
+            // Configure splits
+            const splitConfig = datasetData.splitConfig || {};
+            const trainPercentage = splitConfig.trainPercentage || 80;
+            const devPercentage = splitConfig.devPercentage || 10;
+            const testPercentage = splitConfig.testPercentage || 10;
+
+            // Validate split percentages
+            if (trainPercentage + devPercentage + testPercentage !== 100) {
+                throw new Error('Split percentages must sum to 100');
+            }
+
             const dataset = new TrainingDataset({
                 ...datasetData,
                 userId: new mongoose.Types.ObjectId(userId),
+                version,
+                parentDatasetId,
                 minScore: datasetData.minScore || 4,
                 requestIds: [],
+                items: [],
+                splits: {
+                    train: { percentage: trainPercentage, count: 0, itemIds: [] },
+                    dev: { percentage: devPercentage, count: 0, itemIds: [] },
+                    test: { percentage: testPercentage, count: 0, itemIds: [] }
+                },
                 stats: {
                     totalRequests: 0,
                     averageScore: 0,
@@ -47,13 +91,29 @@ export class TrainingDatasetService {
                     averageTokensPerRequest: 0,
                     averageCostPerRequest: 0,
                     providerBreakdown: {},
-                    modelBreakdown: {}
+                    modelBreakdown: {},
+                    piiStats: {
+                        totalWithPII: 0,
+                        piiTypeBreakdown: {}
+                    }
+                },
+                lineage: {
+                    derivedDatasets: [],
+                    relatedFineTuneJobs: []
                 },
                 status: 'draft'
             });
 
             const savedDataset = await dataset.save();
-            logger.info(`Created training dataset: ${savedDataset.name} for user ${userId}`);
+
+            // Update parent dataset's lineage if this is a new version
+            if (parentDatasetId) {
+                await TrainingDataset.findByIdAndUpdate(parentDatasetId, {
+                    $push: { 'lineage.derivedDatasets': (savedDataset._id as any).toString() }
+                });
+            }
+
+            logger.info(`Created training dataset: ${savedDataset.name} v${version} for user ${userId}`);
             
             return savedDataset;
         } catch (error) {
@@ -89,6 +149,154 @@ export class TrainingDatasetService {
             logger.error('Error getting dataset:', error);
             throw error;
         }
+    }
+
+    /**
+     * Add items to dataset with ground truth labels and PII detection
+     */
+    static async addDatasetItems(
+        userId: string, 
+        datasetId: string, 
+        items: Array<{
+            requestId: string;
+            input: string;
+            expectedOutput?: string;
+            criteria?: string[];
+            tags?: string[];
+        }>
+    ): Promise<ITrainingDataset> {
+        try {
+            const dataset = await this.getDataset(userId, datasetId);
+            if (!dataset) {
+                throw new Error('Dataset not found');
+            }
+
+            logger.info(`Processing ${items.length} items for PII detection and validation`);
+
+            // Process each item with PII detection
+            const processedItems = [];
+            for (const item of items) {
+                // Run PII detection
+                const piiResult = await PIIDetectionService.detectPII(item.input, true);
+
+                // Create dataset item
+                const datasetItem = {
+                    requestId: item.requestId,
+                    input: item.input,
+                    expectedOutput: item.expectedOutput,
+                    criteria: item.criteria || [],
+                    tags: item.tags || [],
+                    piiFlags: {
+                        hasPII: piiResult.hasPII,
+                        piiTypes: piiResult.piiTypes,
+                        confidence: piiResult.confidence
+                    },
+                    metadata: {
+                        piiDetectionResult: piiResult,
+                        addedAt: new Date(),
+                        riskLevel: piiResult.riskLevel
+                    }
+                };
+
+                processedItems.push(datasetItem);
+            }
+
+            // Add items to dataset
+            dataset.items.push(...processedItems);
+
+            // Assign items to splits
+            await this.assignItemsToSplits(dataset, processedItems);
+
+            // Recalculate statistics
+            await this.recalculateDatasetStats(dataset);
+
+            const updatedDataset = await dataset.save();
+            logger.info(`Added ${items.length} items to dataset ${datasetId}`);
+
+            return updatedDataset;
+        } catch (error) {
+            logger.error('Error adding dataset items:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Create a new version of an existing dataset
+     */
+    static async createDatasetVersion(
+        userId: string, 
+        parentDatasetId: string, 
+        versionData: {
+            version: string;
+            versionNotes?: string;
+            description?: string;
+        }
+    ): Promise<ITrainingDataset> {
+        try {
+            const parentDataset = await this.getDataset(userId, parentDatasetId);
+            if (!parentDataset) {
+                throw new Error('Parent dataset not found');
+            }
+
+            // Create new dataset as a version
+            const newDatasetData: CreateDatasetData = {
+                name: parentDataset.name,
+                description: versionData.description || parentDataset.description,
+                targetUseCase: parentDataset.targetUseCase,
+                targetModel: parentDataset.targetModel,
+                version: versionData.version,
+                parentDatasetId: parentDatasetId,
+                versionNotes: versionData.versionNotes,
+                minScore: parentDataset.minScore,
+                maxTokens: parentDataset.maxTokens,
+                maxCost: parentDataset.maxCost,
+                filters: parentDataset.filters,
+                splitConfig: {
+                    trainPercentage: parentDataset.splits.train.percentage,
+                    devPercentage: parentDataset.splits.dev.percentage,
+                    testPercentage: parentDataset.splits.test.percentage
+                }
+            };
+
+            return await this.createDataset(userId, newDatasetData);
+        } catch (error) {
+            logger.error('Error creating dataset version:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Assign items to train/dev/test splits
+     */
+    private static async assignItemsToSplits(
+        dataset: ITrainingDataset, 
+        items: any[]
+    ): Promise<void> {
+        // Shuffle items for random distribution
+        const shuffledItems = [...items].sort(() => Math.random() - 0.5);
+        
+        const totalItems = shuffledItems.length;
+        const trainCount = Math.floor(totalItems * dataset.splits.train.percentage / 100);
+        const devCount = Math.floor(totalItems * dataset.splits.dev.percentage / 100);
+
+        // Assign splits
+        shuffledItems.forEach((item, index) => {
+            if (index < trainCount) {
+                item.split = 'train';
+                dataset.splits.train.itemIds.push(item.requestId);
+            } else if (index < trainCount + devCount) {
+                item.split = 'dev';
+                dataset.splits.dev.itemIds.push(item.requestId);
+            } else {
+                item.split = 'test';
+                dataset.splits.test.itemIds.push(item.requestId);
+            }
+        });
+
+        // Update counts
+        dataset.splits.train.count = dataset.splits.train.itemIds.length;
+        dataset.splits.dev.count = dataset.splits.dev.itemIds.length;
+        dataset.splits.test.count = dataset.splits.test.itemIds.length;
     }
 
     /**
@@ -173,9 +381,41 @@ export class TrainingDatasetService {
                 .map(usage => usage.metadata?.requestId)
                 .filter((id): id is string => Boolean(id));
 
-            // Update dataset with selected requests
+            // Convert usage records to dataset items
+            const datasetItems = await Promise.all(usageRecords.map(async (usage) => {
+                const score = scores.find(s => s.requestId === usage.metadata?.requestId);
+                
+                // Run PII detection
+                const piiResult = await PIIDetectionService.detectPII(usage.prompt, true);
+
+                return {
+                    requestId: usage.metadata?.requestId || usage._id.toString(),
+                    input: usage.prompt,
+                    expectedOutput: usage.completion || '',
+                    criteria: [],
+                    tags: [],
+                    piiFlags: {
+                        hasPII: piiResult.hasPII,
+                        piiTypes: piiResult.piiTypes,
+                        confidence: piiResult.confidence
+                    },
+                    metadata: {
+                        originalUsageId: usage._id.toString(),
+                        score: score?.score,
+                        piiDetectionResult: piiResult,
+                        addedAt: new Date(),
+                        riskLevel: piiResult.riskLevel
+                    }
+                };
+            }));
+
+            // Add items to dataset
+            dataset.items = datasetItems;
             dataset.requestIds = validRequestIds;
             dataset.status = 'ready';
+
+            // Assign items to splits
+            await this.assignItemsToSplits(dataset, datasetItems);
 
             // Calculate statistics
             await this.calculateDatasetStats(dataset, usageRecords, scores);
@@ -384,6 +624,16 @@ export class TrainingDatasetService {
             modelBreakdown[usage.model] = (modelBreakdown[usage.model] || 0) + 1;
         });
 
+        // Calculate PII statistics
+        const itemsWithPII = dataset.items.filter(item => item.piiFlags?.hasPII);
+        const piiTypeBreakdown: Record<string, number> = {};
+        
+        itemsWithPII.forEach(item => {
+            item.piiFlags?.piiTypes.forEach(type => {
+                piiTypeBreakdown[type] = (piiTypeBreakdown[type] || 0) + 1;
+            });
+        });
+
         dataset.stats = {
             totalRequests,
             averageScore,
@@ -392,7 +642,11 @@ export class TrainingDatasetService {
             averageTokensPerRequest: totalRequests > 0 ? totalTokens / totalRequests : 0,
             averageCostPerRequest: totalRequests > 0 ? totalCost / totalRequests : 0,
             providerBreakdown,
-            modelBreakdown
+            modelBreakdown,
+            piiStats: {
+                totalWithPII: itemsWithPII.length,
+                piiTypeBreakdown
+            }
         };
     }
 
@@ -400,7 +654,7 @@ export class TrainingDatasetService {
      * Recalculate dataset statistics
      */
     private static async recalculateDatasetStats(dataset: ITrainingDataset): Promise<void> {
-        if (dataset.requestIds.length === 0) {
+        if (dataset.items.length === 0) {
             dataset.stats = {
                 totalRequests: 0,
                 averageScore: 0,
@@ -409,7 +663,11 @@ export class TrainingDatasetService {
                 averageTokensPerRequest: 0,
                 averageCostPerRequest: 0,
                 providerBreakdown: {},
-                modelBreakdown: {}
+                modelBreakdown: {},
+                piiStats: {
+                    totalWithPII: 0,
+                    piiTypeBreakdown: {}
+                }
             };
             return;
         }

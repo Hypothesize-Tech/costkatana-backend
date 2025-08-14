@@ -27,6 +27,8 @@ import memoryRoutes from './memory.routes';
 import keyVaultRoutes from './keyVault.routes';
 import requestFeedbackRoutes from './requestFeedback.routes';
 import trainingRoutes from './training.routes';
+import fineTuneJobRoutes from './fineTuneJob.routes';
+import evaluationJobRoutes from './evaluationJob.routes';
 import simulationTrackingRoutes from './simulationTracking.routes';
 import autoSimulationRoutes from './autoSimulation.routes';
 import predictiveIntelligenceRoutes from './predictiveIntelligence.routes';
@@ -38,6 +40,8 @@ import telemetryRoutes from './telemetry.routes';
 import guardrailsRoutes from './guardrails.routes';
 import webhookRoutes from './webhook.routes';
 import mfaRoutes from './mfa.routes';
+import moderationRoutes from './moderation.routes';
+import { securityRoutes } from './security.routes';
 
 const router = Router();
 
@@ -80,6 +84,8 @@ router.use('/memory', memoryRoutes);
 router.use('/key-vault', keyVaultRoutes);
 router.use('/v1', requestFeedbackRoutes);
 router.use('/training', trainingRoutes);
+router.use('/fine-tune', fineTuneJobRoutes);
+router.use('/evaluations', evaluationJobRoutes);
 router.use('/simulation-tracking', simulationTrackingRoutes);
 router.use('/auto-simulation', autoSimulationRoutes);
 router.use('/predictive-intelligence', predictiveIntelligenceRoutes);
@@ -91,5 +97,7 @@ router.use('/telemetry', telemetryRoutes);
 router.use('/guardrails', guardrailsRoutes);
 router.use('/webhooks', webhookRoutes);
 router.use('/mfa', mfaRoutes);
+router.use('/moderation', moderationRoutes);
+router.use('/security', securityRoutes);
 
 export const apiRouter = router;

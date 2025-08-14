@@ -95,19 +95,44 @@ export class GatewayController {
             if (context.firewallEnabled || context.firewallAdvanced) {
                 const firewallResult = await GatewayController.checkFirewall(req);
                 if (firewallResult.isBlocked) {
-                    res.status(400).json({
+                    // Determine response code based on containment action
+                    let statusCode = 400;
+                    let errorCode = 'PROMPT_BLOCKED_BY_FIREWALL';
+                    
+                    if (firewallResult.containmentAction === 'human_review') {
+                        statusCode = 202; // Accepted, but requires review
+                        errorCode = 'PROMPT_REQUIRES_REVIEW';
+                    }
+
+                    const response: any = {
                         success: false,
                         error: {
-                            code: 'PROMPT_BLOCKED_BY_FIREWALL',
-                            message: 'The request was blocked by the CostKATANA security firewall due to a detected threat.',
-                            details: `${firewallResult.reason}. View threat category and details in your CostKATANA dashboard for request ID: ${req.headers['x-request-id'] || 'unknown'}`
+                            code: errorCode,
+                            message: firewallResult.containmentAction === 'human_review'
+                                ? 'The request requires human review due to security considerations.'
+                                : 'The request was blocked by the CostKATANA security system due to a detected threat.',
+                            details: `${firewallResult.reason}. View threat category and details in your CostKATANA security dashboard for request ID: ${req.headers['x-request-id'] || 'unknown'}`
                         },
-                        threat: {
+                        security: {
                             category: firewallResult.threatCategory,
                             confidence: firewallResult.confidence,
-                            stage: firewallResult.stage
+                            riskScore: firewallResult.riskScore,
+                            stage: firewallResult.stage,
+                            containmentAction: firewallResult.containmentAction,
+                            matchedPatterns: firewallResult.matchedPatterns?.length || 0
                         }
-                    });
+                    };
+
+                    // Add human review information if applicable
+                    if (firewallResult.humanReviewId) {
+                        response.humanReview = {
+                            reviewId: firewallResult.humanReviewId,
+                            status: 'pending',
+                            message: 'Your request is pending human review. You will be notified once reviewed.'
+                        };
+                    }
+
+                    res.status(statusCode).json(response);
                     return;
                 }
             }
@@ -223,14 +248,17 @@ export class GatewayController {
             // Process the response
             const processedResponse = await GatewayController.processResponse(req, response);
 
-            // Cache the response if caching is enabled
+            // Apply output moderation if enabled
+            const moderatedResponse = await GatewayController.moderateOutput(req, processedResponse);
+
+            // Cache the response if caching is enabled (cache the moderated response)
             if (context.cacheEnabled) {
-                await GatewayController.cacheResponse(req, processedResponse);
+                await GatewayController.cacheResponse(req, moderatedResponse.response);
                 res.setHeader('CostKatana-Cache-Status', 'MISS');
             }
 
             // Track usage and costs
-            await GatewayController.trackUsage(req, processedResponse, retryAttempts);
+            await GatewayController.trackUsage(req, moderatedResponse.response, retryAttempts);
 
             // Return the response
             res.status(response.status);
@@ -253,7 +281,16 @@ export class GatewayController {
                 }
             });
 
-            res.send(processedResponse);
+            // Add moderation headers
+            if (moderatedResponse.moderationApplied) {
+                res.setHeader('CostKatana-Moderation-Applied', 'true');
+                res.setHeader('CostKatana-Moderation-Action', moderatedResponse.action);
+                if (moderatedResponse.violationCategories.length > 0) {
+                    res.setHeader('CostKatana-Moderation-Categories', moderatedResponse.violationCategories.join(','));
+                }
+            }
+
+            res.send(moderatedResponse.response);
 
         } catch (error) {
             logger.error('Gateway proxy error:', error);
@@ -774,6 +811,237 @@ export class GatewayController {
     }
 
     /**
+     * Apply output moderation to AI response
+     */
+    private static async moderateOutput(req: Request, responseData: any): Promise<{
+        response: any;
+        moderationApplied: boolean;
+        action: string;
+        violationCategories: string[];
+        isBlocked: boolean;
+    }> {
+        const context = req.gatewayContext!;
+
+        try {
+            // Check if output moderation is enabled via headers
+            const outputModerationEnabled = req.headers['costkatana-output-moderation-enabled'] === 'true';
+            
+            // Default moderation config (can be customized via headers)
+            const moderationConfig = {
+                enableOutputModeration: outputModerationEnabled,
+                toxicityThreshold: parseFloat(req.headers['costkatana-toxicity-threshold'] as string || '0.7'),
+                enablePIIDetection: req.headers['costkatana-pii-detection-enabled'] !== 'false',
+                enableToxicityCheck: req.headers['costkatana-toxicity-check-enabled'] !== 'false',
+                enableHateSpeechCheck: req.headers['costkatana-hate-speech-check-enabled'] !== 'false',
+                enableSexualContentCheck: req.headers['costkatana-sexual-content-check-enabled'] !== 'false',
+                enableViolenceCheck: req.headers['costkatana-violence-check-enabled'] !== 'false',
+                enableSelfHarmCheck: req.headers['costkatana-self-harm-check-enabled'] !== 'false',
+                action: (req.headers['costkatana-moderation-action'] as string || 'block') as 'allow' | 'annotate' | 'redact' | 'block'
+            };
+
+            if (!moderationConfig.enableOutputModeration) {
+                // Return original response without moderation
+                return {
+                    response: responseData,
+                    moderationApplied: false,
+                    action: 'allow',
+                    violationCategories: [],
+                    isBlocked: false
+                };
+            }
+
+            // Extract content from response
+            const responseContent = GatewayController.extractContentFromResponse(responseData);
+            
+            if (!responseContent) {
+                logger.debug('No content found to moderate in response');
+                return {
+                    response: responseData,
+                    moderationApplied: false,
+                    action: 'allow',
+                    violationCategories: [],
+                    isBlocked: false
+                };
+            }
+
+            // Apply output moderation
+            const { OutputModerationService } = await import('../services/outputModerationService');
+            const moderationResult = await OutputModerationService.moderateOutput(
+                responseContent,
+                moderationConfig,
+                context.requestId || 'unknown',
+                GatewayController.inferModelFromRequest(req)
+            );
+
+            logger.info('Output moderation completed', {
+                requestId: context.requestId,
+                isBlocked: moderationResult.isBlocked,
+                action: moderationResult.action,
+                violationCategories: moderationResult.violationCategories
+            });
+
+            // Handle different moderation actions
+            let finalResponse = responseData;
+            
+            if (moderationResult.isBlocked) {
+                switch (moderationResult.action) {
+                    case 'block':
+                        finalResponse = {
+                            error: 'Content blocked by moderation',
+                            message: 'The AI response was blocked due to policy violations.',
+                            details: `Violation categories: ${moderationResult.violationCategories.join(', ')}`,
+                            costKatanaNote: 'Response blocked by CostKATANA output moderation system'
+                        };
+                        break;
+                        
+                    case 'redact':
+                        if (moderationResult.sanitizedContent) {
+                            // Replace original content with sanitized version
+                            finalResponse = GatewayController.replaceContentInResponse(responseData, moderationResult.sanitizedContent);
+                        }
+                        break;
+                        
+                    case 'annotate':
+                        // Add annotation to response
+                        if (typeof finalResponse === 'object') {
+                            finalResponse.costKatanaModerationNote = `This response was flagged for: ${moderationResult.violationCategories.join(', ')}`;
+                        }
+                        break;
+                        
+                    default: // allow
+                        break;
+                }
+            }
+
+            return {
+                response: finalResponse,
+                moderationApplied: true,
+                action: moderationResult.action,
+                violationCategories: moderationResult.violationCategories,
+                isBlocked: moderationResult.isBlocked
+            };
+
+        } catch (error) {
+            logger.error('Output moderation error:', error);
+            // In case of moderation error, return original response (fail-open)
+            return {
+                response: responseData,
+                moderationApplied: false,
+                action: 'allow',
+                violationCategories: [],
+                isBlocked: false
+            };
+        }
+    }
+
+    /**
+     * Extract text content from AI response for moderation
+     */
+    private static extractContentFromResponse(responseData: any): string | null {
+        try {
+            if (!responseData) return null;
+            
+            // Handle different response formats
+            if (typeof responseData === 'string') {
+                return responseData;
+            }
+            
+            // OpenAI/Anthropic format
+            if (responseData.choices && responseData.choices[0]?.message?.content) {
+                return responseData.choices[0].message.content;
+            }
+            
+            // Anthropic format
+            if (responseData.content && Array.isArray(responseData.content) && responseData.content[0]?.text) {
+                return responseData.content[0].text;
+            }
+            
+            // Direct content field
+            if (responseData.content) {
+                return typeof responseData.content === 'string' ? responseData.content : JSON.stringify(responseData.content);
+            }
+            
+            // Text completion format
+            if (responseData.text) {
+                return responseData.text;
+            }
+            
+            // Completion format
+            if (responseData.completion) {
+                return responseData.completion;
+            }
+            
+            // If we can't find specific content fields, stringify the whole response
+            return JSON.stringify(responseData);
+            
+        } catch (error) {
+            logger.warn('Error extracting content from response:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Replace content in AI response structure
+     */
+    private static replaceContentInResponse(responseData: any, newContent: string): any {
+        try {
+            if (!responseData || typeof responseData !== 'object') {
+                return newContent;
+            }
+            
+            const modifiedResponse = JSON.parse(JSON.stringify(responseData)); // Deep clone
+            
+            // Handle different response formats
+            if (modifiedResponse.choices && modifiedResponse.choices[0]?.message) {
+                modifiedResponse.choices[0].message.content = newContent;
+            } else if (modifiedResponse.content && Array.isArray(modifiedResponse.content) && modifiedResponse.content[0]) {
+                modifiedResponse.content[0].text = newContent;
+            } else if (modifiedResponse.content) {
+                modifiedResponse.content = newContent;
+            } else if (modifiedResponse.text) {
+                modifiedResponse.text = newContent;
+            } else if (modifiedResponse.completion) {
+                modifiedResponse.completion = newContent;
+            } else {
+                // If we can't identify the structure, return the new content with a note
+                return {
+                    ...modifiedResponse,
+                    content: newContent,
+                    costKatanaModerationNote: 'Content was modified by output moderation'
+                };
+            }
+            
+            return modifiedResponse;
+            
+        } catch (error) {
+            logger.warn('Error replacing content in response:', error);
+            return responseData;
+        }
+    }
+
+    /**
+     * Infer model from request for moderation purposes
+     */
+    private static inferModelFromRequest(req: Request): string | undefined {
+        try {
+            if (req.body?.model) {
+                return req.body.model;
+            }
+            
+            // Try to infer from URL path
+            const url = req.gatewayContext?.targetUrl || '';
+            if (url.includes('claude')) return 'claude';
+            if (url.includes('gpt-4')) return 'gpt-4';
+            if (url.includes('gpt-3.5')) return 'gpt-3.5';
+            if (url.includes('llama')) return 'llama';
+            
+            return 'unknown';
+        } catch (error) {
+            return 'unknown';
+        }
+    }
+
+    /**
      * Track usage and costs for the request
      */
     private static async trackUsage(req: Request, response: any, retryAttempts?: number): Promise<void> {
@@ -1051,14 +1319,14 @@ export class GatewayController {
     }
 
     /**
-     * Check request through firewall
+     * Check request through comprehensive security system
      */
     private static async checkFirewall(req: Request): Promise<any> {
         const context = req.gatewayContext!;
         
         try {
-            // Import PromptFirewallService dynamically to avoid circular dependencies
-            const { PromptFirewallService } = await import('../services/promptFirewall.service');
+            // Import LLMSecurityService dynamically to avoid circular dependencies
+            const { LLMSecurityService } = await import('../services/llmSecurity.service');
             
             // Extract prompt from request body
             const prompt = GatewayController.extractPromptFromRequest(req.body);
@@ -1068,17 +1336,13 @@ export class GatewayController {
                     isBlocked: false,
                     confidence: 0.0,
                     reason: 'No prompt content found to analyze',
-                    stage: 'prompt-guard'
+                    stage: 'prompt-guard',
+                    containmentAction: 'allow'
                 };
             }
 
-            // Build firewall configuration from context
-            const firewallConfig = {
-                enableBasicFirewall: context.firewallEnabled || false,
-                enableAdvancedFirewall: context.firewallAdvanced || false,
-                promptGuardThreshold: context.firewallPromptThreshold || 0.5,
-                llamaGuardThreshold: context.firewallLlamaThreshold || 0.8
-            };
+            // Extract tool calls if present (for comprehensive tool security)
+            const toolCalls = GatewayController.extractToolCallsFromRequest(req.body);
 
             // Estimate cost for this request (for analytics)
             const estimatedCost = GatewayController.estimateRequestCost(req.body, null);
@@ -1087,31 +1351,67 @@ export class GatewayController {
             const requestId = req.headers['x-request-id'] as string || 
                              `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-            // Run firewall check
-            const result = await PromptFirewallService.checkPrompt(
+            // Run comprehensive security check
+            const securityCheck = await LLMSecurityService.performSecurityCheck(
                 prompt,
-                firewallConfig,
                 requestId,
-                estimatedCost
+                context.userId,
+                {
+                    toolCalls,
+                    provenanceSource: context.targetUrl,
+                    estimatedCost
+                }
             );
 
-            // Add user ID to the result for logging
+            const result = securityCheck.result;
+
+            // Handle different containment actions
+            if (result.containmentAction === 'human_review') {
+                // For human review, we'll block the request but provide special handling
+                return {
+                    ...result,
+                    isBlocked: true,
+                    reason: `Request requires human approval. Review ID: ${securityCheck.humanReviewId}`,
+                    humanReviewId: securityCheck.humanReviewId
+                };
+            } else if (result.containmentAction === 'sandbox') {
+                // For sandbox, we could implement request sandboxing
+                // For now, we'll allow but log as sandboxed
+                logger.info('Request sandboxed - proceeding with monitoring', {
+                    requestId,
+                    userId: context.userId,
+                    threatCategory: result.threatCategory,
+                    riskScore: result.riskScore
+                });
+                
+                // Allow the request but mark it as sandboxed
+                return {
+                    ...result,
+                    isBlocked: false,
+                    reason: 'Request allowed in sandbox mode - monitoring enabled'
+                };
+            }
+
+            // Standard block/allow behavior
             if (context.userId && result.isBlocked) {
-                // Log with user context for better analytics
-                logger.info('Firewall blocked request', {
+                // Enhanced logging with new security data
+                logger.info('Security system blocked request', {
                     requestId,
                     userId: context.userId,
                     threatCategory: result.threatCategory,
                     confidence: result.confidence,
+                    riskScore: result.riskScore,
                     stage: result.stage,
-                    costSaved: estimatedCost
+                    containmentAction: result.containmentAction,
+                    costSaved: estimatedCost,
+                    matchedPatterns: result.matchedPatterns
                 });
             }
 
             return result;
 
         } catch (error) {
-            logger.error('Error in firewall check', error as Error, {
+            logger.error('Error in security check', error as Error, {
                 userId: context.userId,
                 targetUrl: context.targetUrl
             });
@@ -1120,8 +1420,9 @@ export class GatewayController {
             return {
                 isBlocked: false,
                 confidence: 0.0,
-                reason: 'Firewall check failed - allowing request',
-                stage: 'prompt-guard'
+                reason: 'Security check failed - allowing request',
+                stage: 'prompt-guard',
+                containmentAction: 'allow'
             };
         }
     }
@@ -1175,6 +1476,49 @@ export class GatewayController {
         } catch (error) {
             logger.error('Error extracting prompt from request', error as Error);
             return null;
+        }
+    }
+
+    /**
+     * Extract tool calls from various request formats
+     */
+    private static extractToolCallsFromRequest(requestBody: any): any[] | undefined {
+        if (!requestBody) return undefined;
+
+        try {
+            // OpenAI format - tools can be in different places
+            if (requestBody.tools && Array.isArray(requestBody.tools)) {
+                return requestBody.tools;
+            }
+
+            // Function calling in messages
+            if (requestBody.messages && Array.isArray(requestBody.messages)) {
+                const toolCalls: any[] = [];
+                
+                requestBody.messages.forEach((msg: any) => {
+                    if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+                        toolCalls.push(...msg.tool_calls);
+                    }
+                });
+                
+                return toolCalls.length > 0 ? toolCalls : undefined;
+            }
+
+            // Anthropic function calling
+            if (requestBody.tools && Array.isArray(requestBody.tools)) {
+                return requestBody.tools;
+            }
+
+            // Google AI function calling
+            if (requestBody.function_declarations && Array.isArray(requestBody.function_declarations)) {
+                return requestBody.function_declarations;
+            }
+
+            return undefined;
+
+        } catch (error) {
+            logger.warn('Error extracting tool calls from request', error as Error);
+            return undefined;
         }
     }
 

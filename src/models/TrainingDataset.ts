@@ -5,6 +5,11 @@ export interface ITrainingDataset extends Document {
     description?: string;
     userId: mongoose.Types.ObjectId;
     
+    // Versioning
+    version: string; // e.g., "1.0.0", "1.2.3"
+    parentDatasetId?: mongoose.Types.ObjectId; // For dataset lineage
+    versionNotes?: string; // Description of changes in this version
+    
     // Dataset configuration
     targetUseCase: string; // e.g., 'support-ticket-classifier', 'content-generator'
     targetModel: string; // e.g., 'gpt-3.5-turbo', 'claude-haiku'
@@ -34,6 +39,41 @@ export interface ITrainingDataset extends Document {
         };
     };
     
+    // Dataset items with ground-truth labels
+    items: Array<{
+        requestId: string;
+        input: string;
+        expectedOutput?: string; // Ground-truth label/expected completion
+        criteria?: string[]; // Evaluation criteria
+        tags?: string[]; // Custom tags
+        piiFlags?: {
+            hasPII: boolean;
+            piiTypes: string[]; // email, phone, ssn, etc.
+            confidence: number; // 0-1 confidence score
+        };
+        metadata?: Record<string, any>;
+        split?: 'train' | 'dev' | 'test'; // Dataset split
+    }>;
+    
+    // Dataset splits
+    splits: {
+        train: {
+            percentage: number;
+            count: number;
+            itemIds: string[];
+        };
+        dev: {
+            percentage: number;
+            count: number;
+            itemIds: string[];
+        };
+        test: {
+            percentage: number;
+            count: number;
+            itemIds: string[];
+        };
+    };
+    
     // Dataset statistics
     stats: {
         totalRequests: number;
@@ -44,6 +84,10 @@ export interface ITrainingDataset extends Document {
         averageCostPerRequest: number;
         providerBreakdown: Record<string, number>;
         modelBreakdown: Record<string, number>;
+        piiStats: {
+            totalWithPII: number;
+            piiTypeBreakdown: Record<string, number>;
+        };
     };
     
     // Export information
@@ -53,6 +97,17 @@ export interface ITrainingDataset extends Document {
     
     // Status
     status: 'draft' | 'ready' | 'exported' | 'training' | 'completed';
+    
+    // Lineage tracking
+    lineage: {
+        createdFrom?: {
+            type: 'dataset' | 'experiment' | 'evaluation';
+            id: string;
+            version?: string;
+        };
+        derivedDatasets: string[]; // Dataset IDs that were created from this one
+        relatedFineTuneJobs: string[]; // Fine-tune job IDs using this dataset
+    };
     
     createdAt: Date;
     updatedAt: Date;
@@ -73,6 +128,22 @@ const trainingDatasetSchema = new Schema<ITrainingDataset>({
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true
+    },
+    
+    // Versioning
+    version: {
+        type: String,
+        required: true,
+        default: '1.0.0'
+    },
+    parentDatasetId: {
+        type: Schema.Types.ObjectId,
+        ref: 'TrainingDataset',
+        required: false
+    },
+    versionNotes: {
+        type: String,
+        maxlength: 1000
     },
     
     // Dataset configuration
@@ -117,6 +188,45 @@ const trainingDatasetSchema = new Schema<ITrainingDataset>({
         }
     },
     
+    // Dataset items with ground-truth labels
+    items: [{
+        requestId: { type: String, required: true },
+        input: { type: String, required: true },
+        expectedOutput: { type: String },
+        criteria: [String],
+        tags: [String],
+        piiFlags: {
+            hasPII: { type: Boolean, default: false },
+            piiTypes: [String],
+            confidence: { type: Number, min: 0, max: 1, default: 0 }
+        },
+        metadata: { type: Map, of: Schema.Types.Mixed, default: {} },
+        split: { 
+            type: String, 
+            enum: ['train', 'dev', 'test'], 
+            required: false 
+        }
+    }],
+    
+    // Dataset splits
+    splits: {
+        train: {
+            percentage: { type: Number, default: 80 },
+            count: { type: Number, default: 0 },
+            itemIds: [String]
+        },
+        dev: {
+            percentage: { type: Number, default: 10 },
+            count: { type: Number, default: 0 },
+            itemIds: [String]
+        },
+        test: {
+            percentage: { type: Number, default: 10 },
+            count: { type: Number, default: 0 },
+            itemIds: [String]
+        }
+    },
+    
     // Statistics
     stats: {
         totalRequests: { type: Number, default: 0 },
@@ -126,7 +236,11 @@ const trainingDatasetSchema = new Schema<ITrainingDataset>({
         averageTokensPerRequest: { type: Number, default: 0 },
         averageCostPerRequest: { type: Number, default: 0 },
         providerBreakdown: { type: Map, of: Number, default: {} },
-        modelBreakdown: { type: Map, of: Number, default: {} }
+        modelBreakdown: { type: Map, of: Number, default: {} },
+        piiStats: {
+            totalWithPII: { type: Number, default: 0 },
+            piiTypeBreakdown: { type: Map, of: Number, default: {} }
+        }
     },
     
     // Export info
@@ -141,11 +255,25 @@ const trainingDatasetSchema = new Schema<ITrainingDataset>({
         default: 0 
     },
     
-    // Status
+        // Status
     status: { 
-        type: String, 
+        type: String,
         enum: ['draft', 'ready', 'exported', 'training', 'completed'],
         default: 'draft'
+    },
+    
+    // Lineage tracking
+    lineage: {
+        createdFrom: {
+            type: {
+                type: String,
+                enum: ['dataset', 'experiment', 'evaluation']
+            },
+            id: String,
+            version: String
+        },
+        derivedDatasets: [String],
+        relatedFineTuneJobs: [String]
     }
 }, { 
     timestamps: true 
@@ -156,6 +284,12 @@ trainingDatasetSchema.index({ userId: 1, createdAt: -1 });
 
 // 2. Status queries
 trainingDatasetSchema.index({ userId: 1, status: 1 });
+
+// 3. Version queries
+trainingDatasetSchema.index({ name: 1, version: 1, userId: 1 });
+
+// 4. Lineage queries
+trainingDatasetSchema.index({ 'lineage.createdFrom.id': 1 });
 
 // Methods
 trainingDatasetSchema.methods.calculateStats = async function() {

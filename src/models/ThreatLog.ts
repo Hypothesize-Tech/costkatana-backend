@@ -12,6 +12,7 @@ export interface IThreatLog extends Document {
     costSaved: number;
     timestamp: Date;
     promptHash?: string; // SHA-256 hash of the blocked prompt for analysis
+    promptPreview?: string; // First 200 chars of sanitized prompt for analysis
     ipAddress?: string;
     userAgent?: string;
 }
@@ -46,6 +47,10 @@ const threatLogSchema = new Schema<IThreatLog>({
             'intellectual_property_violations',
             'harassment_and_bullying',
             'harmful_content',
+            'unauthorized_tool_access',
+            'rag_security_violation',
+            'context_manipulation',
+            'system_prompt_extraction',
             'unknown'
         ]
     },
@@ -58,7 +63,7 @@ const threatLogSchema = new Schema<IThreatLog>({
     stage: {
         type: String,
         required: true,
-        enum: ['prompt-guard', 'llama-guard']
+        enum: ['prompt-guard', 'llama-guard', 'rag-guard', 'tool-guard', 'output-guard']
     },
     reason: {
         type: String,
@@ -81,6 +86,11 @@ const threatLogSchema = new Schema<IThreatLog>({
     },
     promptHash: {
         type: String,
+        sparse: true
+    },
+    promptPreview: {
+        type: String,
+        maxlength: 200,
         sparse: true
     },
     ipAddress: {

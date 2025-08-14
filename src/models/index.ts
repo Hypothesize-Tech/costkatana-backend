@@ -19,5 +19,7 @@ export { ThreatLog, IThreatLog } from './ThreatLog';
 export { RequestFeedback, IRequestFeedback } from './RequestFeedback';
 export { RequestScore, IRequestScore } from './RequestScore';
 export { TrainingDataset, ITrainingDataset } from './TrainingDataset';
+export { FineTuneJob, IFineTuneJob } from './FineTuneJob';
+export { EvaluationJob, IEvaluationJob } from './EvaluationJob';
 export { UserMemory, IUserMemory, ConversationMemory, IConversationMemory, UserPreference, IUserPreference, MemoryAnalytics, IMemoryAnalytics } from './Memory';
 export { Telemetry, ITelemetry } from './Telemetry';

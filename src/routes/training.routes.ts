@@ -68,4 +68,27 @@ router.get('/datasets/:datasetId/preview', asyncHandler(TrainingDatasetControlle
 // Export dataset in specified format
 router.post('/datasets/:datasetId/export', asyncHandler(TrainingDatasetController.exportDataset));
 
+// ============================================
+// NEW DATASET FEATURES
+// ============================================
+
+// Dataset versioning
+router.post('/datasets/:datasetId/versions', asyncHandler(TrainingDatasetController.createDatasetVersion));
+router.get('/datasets/:datasetId/versions', asyncHandler(TrainingDatasetController.getDatasetVersions));
+router.get('/datasets/:datasetId/lineage', asyncHandler(TrainingDatasetController.getDatasetLineage));
+
+// Dataset items management with ground truth labels
+router.post('/datasets/:datasetId/items', asyncHandler(TrainingDatasetController.addDatasetItems));
+
+// PII detection and analysis
+router.post('/datasets/:datasetId/analyze-pii', asyncHandler(TrainingDatasetController.analyzePII));
+router.post('/datasets/:datasetId/sanitize-pii', asyncHandler(TrainingDatasetController.sanitizePII));
+
+// Dataset splits management
+router.post('/datasets/:datasetId/split', asyncHandler(TrainingDatasetController.updateSplits));
+router.get('/datasets/:datasetId/splits/:splitType', asyncHandler(TrainingDatasetController.getSplitData));
+
+// Dataset validation and quality checks
+router.post('/datasets/:datasetId/validate', asyncHandler(TrainingDatasetController.validateDataset));
+
 export default router;
