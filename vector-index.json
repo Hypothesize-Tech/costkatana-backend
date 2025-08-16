@@ -1,0 +1,38 @@
+{
+  "name": "semantic_search_index",
+  "type": "vectorSearch",
+  "definition": {
+    "fields": [
+      {
+        "type": "vector",
+        "path": "semantic_embedding",
+        "numDimensions": 1536,
+        "similarity": "cosine"
+      },
+      {
+        "type": "filter",
+        "path": "tenant_id"
+      },
+      {
+        "type": "filter",
+        "path": "workspace_id"
+      },
+      {
+        "type": "filter",
+        "path": "timestamp"
+      },
+      {
+        "type": "filter",
+        "path": "status"
+      },
+      {
+        "type": "filter",
+        "path": "operation_name"
+      },
+      {
+        "type": "filter",
+        "path": "cost_usd"
+      }
+    ]
+  }
+}

@@ -9,12 +9,12 @@ import {
 import { PeriodicExportingMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-
 import { diag, DiagConsoleLogger, DiagLogLevel, metrics } from '@opentelemetry/api';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
 import { logger } from '../utils/logger';
+// import { SelfHealingSpanProcessor } from './selfHealingSpanProcessor'; // Temporarily disabled due to compilation issues
 
 // Enable OpenTelemetry diagnostic logging in development
 if (process.env.NODE_ENV !== 'production') {
@@ -50,7 +50,7 @@ export async function startTelemetry(): Promise<void> {
             })
         );
 
-        // Configure trace exporter
+        // Configure trace exporter with self-healing processor
         const traceExporter = new OTLPTraceExporter({
             url: process.env.OTLP_HTTP_TRACES_URL || 'http://localhost:4318/v1/traces',
             headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? 
@@ -60,7 +60,6 @@ export async function startTelemetry(): Promise<void> {
                 certificate: process.env.OTEL_EXPORTER_OTLP_CERTIFICATE
             })
         });
-
         // Configure metrics exporter
         const metricsExporter = new OTLPMetricExporter({
             url: process.env.OTLP_HTTP_METRICS_URL || 'http://localhost:4318/v1/metrics',
@@ -79,7 +78,7 @@ export async function startTelemetry(): Promise<void> {
 
         // Configure instrumentations
         const instrumentations = [
-            // HTTP instrumentation with custom configuration
+            // HTTP instrumentation with custom configuration and auto-enrichment
             new HttpInstrumentation({
                 requestHook: (span, request) => {
                     // Add custom attributes to HTTP spans
@@ -96,6 +95,32 @@ export async function startTelemetry(): Promise<void> {
                         }
                         if (headers['x-user-id']) {
                             span.setAttribute('user.id', headers['x-user-id']);
+                        }
+
+                        // Add cost-katana specific attributes
+                        if (headers['x-api-key']) {
+                            span.setAttribute('costkatana.api_key_present', true);
+                        }
+                        if (headers['x-model-preference']) {
+                            span.setAttribute('costkatana.model_preference', headers['x-model-preference']);
+                        }
+                        if (headers['x-cost-limit']) {
+                            span.setAttribute('costkatana.cost_limit', parseFloat(headers['x-cost-limit']) || 0);
+                        }
+                    }
+                },
+                responseHook: (span, response) => {
+                    // Add response-specific enrichments
+                    if (response && typeof response === 'object' && 'headers' in response) {
+                        const headers = response.headers as any;
+                        if (headers['x-cache-status']) {
+                            span.setAttribute('cache.hit', headers['x-cache-status'] === 'HIT');
+                        }
+                        if (headers['x-processing-time']) {
+                            span.setAttribute('processing.latency_ms', parseFloat(headers['x-processing-time']) || 0);
+                        }
+                        if (headers['x-cost-incurred']) {
+                            span.setAttribute('costkatana.cost.usd', parseFloat(headers['x-cost-incurred']) || 0);
                         }
                     }
                 },

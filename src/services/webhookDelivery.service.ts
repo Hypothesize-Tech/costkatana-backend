@@ -356,7 +356,14 @@ export class WebhookDeliveryService {
             });
             
             this.deliveryWorker.on('error', (err) => {
-                logger.error('Webhook delivery worker error', { error: err });
+                // Don't log Redis connection timeouts as errors - they're expected when Redis is unavailable
+                if (err.message && err.message.includes('connect ETIMEDOUT')) {
+                    logger.debug('Webhook delivery worker Redis connection timeout (expected when Redis unavailable)', { 
+                        message: err.message 
+                    });
+                } else {
+                    logger.error('Webhook delivery worker error', { error: err });
+                }
             });
 
             logger.info('Webhook delivery queue initialized with BullMQ');

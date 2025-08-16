@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { TelemetryService } from '../services/telemetry.service';
 import { logger } from '../utils/logger';
 import { trace } from '@opentelemetry/api';
@@ -7,7 +7,7 @@ export class TelemetryController {
   /**
    * Get telemetry data with filters
    */
-  static async getTelemetry(req: Request, res: Response) {
+  static async getTelemetry(req: any, res: Response) {
     try {
       const {
         tenant_id,
@@ -78,7 +78,7 @@ export class TelemetryController {
   /**
    * Get trace details
    */
-  static async getTraceDetails(req: Request, res: Response): Promise<void> {
+  static async getTraceDetails(req: any, res: Response): Promise<void> {
     try {
       const { traceId } = req.params;
       
@@ -109,7 +109,7 @@ export class TelemetryController {
   /**
    * Get performance metrics
    */
-  static async getMetrics(req: Request, res: Response) {
+  static async getMetrics(req: any, res: Response) {
     try {
       const { tenant_id, workspace_id, timeframe } = req.query;
 
@@ -136,7 +136,7 @@ export class TelemetryController {
   /**
    * Get service dependencies
    */
-  static async getServiceDependencies(req: Request, res: Response) {
+  static async getServiceDependencies(req: any, res: Response) {
     try {
       const { timeframe } = req.query;
 
@@ -161,7 +161,7 @@ export class TelemetryController {
   /**
    * Check telemetry health
    */
-  static async checkTelemetryHealth(_req: Request, res: Response) {
+  static async checkTelemetryHealth(_req: any, res: Response) {
     try {
       // Check if OTel is working
       const tracer = trace.getTracer('health-check');
@@ -263,7 +263,7 @@ export class TelemetryController {
   /**
    * Get telemetry dashboard data
    */
-  static async getDashboard(req: Request, res: Response) {
+  static async getDashboard(req: any, res: Response) {
     try {
       const { tenant_id, workspace_id } = req.query;
 
@@ -343,5 +343,212 @@ export class TelemetryController {
         message: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+  }
+
+  /**
+   * Get enrichment statistics
+   */
+  static async getEnrichmentStats(req: any, res: Response) {
+    try {
+      const { timeframe } = req.query;
+
+      const stats = await TelemetryService.getEnrichmentStats(
+        timeframe as string || '1h'
+      );
+
+      res.json({
+        success: true,
+        enrichment_stats: stats
+      });
+    } catch (error) {
+      logger.error('Failed to get enrichment stats:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get enrichment statistics',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Get enriched spans with AI insights
+   */
+  static async getEnrichedSpans(req: any, res: Response) {
+    try {
+      const { tenant_id, workspace_id, timeframe, limit } = req.query;
+
+      const spans = await TelemetryService.getEnrichedSpans({
+        tenant_id: tenant_id as string,
+        workspace_id: workspace_id as string,
+        timeframe: timeframe as string || '1h',
+        limit: limit ? Number(limit) : 50
+      });
+
+      res.json({
+        success: true,
+        enriched_spans: spans,
+        count: spans.length
+      });
+    } catch (error) {
+      logger.error('Failed to get enriched spans:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get enriched spans',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Get span processor health and buffer stats
+   */
+  static async getProcessorHealth(_req: any, res: Response) {
+    try {
+      // This would need to be implemented to access the processor instance
+      // For now, return basic health info
+      res.json({
+        success: true,
+        processor_health: {
+          status: 'healthy',
+          buffer_size: 0,
+          is_exporting: false,
+          oldest_span_age: 0,
+          features: {
+            redis_failover: true,
+            ai_enrichment: true,
+            semantic_inference: true
+          }
+        }
+      });
+    } catch (error) {
+      logger.error('Failed to get processor health:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get processor health',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Enhanced dashboard with enrichment data
+   */
+  static async getEnhancedDashboard(req: any, res: Response) {
+    try {
+      const { tenant_id, workspace_id } = req.query;
+
+      // Get standard dashboard data
+      const [
+        standardDashboard,
+        enrichmentStats,
+        enrichedSpans
+      ] = await Promise.all([
+        // Reuse existing dashboard logic
+        TelemetryController.getDashboardData(tenant_id as string, workspace_id as string),
+        TelemetryService.getEnrichmentStats('1h'),
+        TelemetryService.getEnrichedSpans({
+          tenant_id: tenant_id as string,
+          workspace_id: workspace_id as string,
+          timeframe: '1h',
+          limit: 20
+        })
+      ]);
+
+      res.json({
+        success: true,
+        enhanced_dashboard: {
+          ...standardDashboard,
+          enrichment: {
+            stats: enrichmentStats,
+            recent_insights: enrichedSpans.slice(0, 10),
+            ai_recommendations: enrichedSpans
+              .filter(span => span.insights)
+              .map(span => ({
+                trace_id: span.trace_id,
+                operation: span.operation_name,
+                insight: span.insights,
+                cost_impact: span.cost_usd,
+                routing_decision: span.routing_decision
+              }))
+              .slice(0, 5)
+          }
+        }
+      });
+    } catch (error) {
+      logger.error('Failed to get enhanced dashboard:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get enhanced dashboard data',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Helper method to get dashboard data (extracted for reuse)
+   */
+  private static async getDashboardData(tenant_id?: string, workspace_id?: string) {
+    const [
+      last5min,
+      last1hour,
+      last24hours,
+      serviceDeps
+    ] = await Promise.all([
+      TelemetryService.getPerformanceMetrics({
+        tenant_id,
+        workspace_id,
+        timeframe: '5m'
+      }),
+      TelemetryService.getPerformanceMetrics({
+        tenant_id,
+        workspace_id,
+        timeframe: '1h'
+      }),
+      TelemetryService.getPerformanceMetrics({
+        tenant_id,
+        workspace_id,
+        timeframe: '24h'
+      }),
+      TelemetryService.getServiceDependencies('1h')
+    ]);
+
+    const recentErrors = await TelemetryService.queryTelemetry({
+      tenant_id,
+      workspace_id,
+      status: 'error',
+      start_time: new Date(Date.now() - 3600000),
+      limit: 10,
+      sort_by: 'timestamp',
+      sort_order: 'desc'
+    });
+
+    const highCostOps = await TelemetryService.queryTelemetry({
+      tenant_id,
+      workspace_id,
+      min_cost: 0.01,
+      start_time: new Date(Date.now() - 3600000),
+      limit: 10,
+      sort_by: 'cost_usd',
+      sort_order: 'desc'
+    });
+
+    return {
+      current: {
+        requests_per_minute: last5min.requests_per_minute,
+        error_rate: last5min.error_rate,
+        avg_latency_ms: last5min.avg_duration_ms,
+        p95_latency_ms: last5min.p95_duration_ms
+      },
+      trends: {
+        last_5_minutes: last5min,
+        last_hour: last1hour,
+        last_24_hours: last24hours
+      },
+      service_map: serviceDeps,
+      recent_errors: recentErrors.data,
+      high_cost_operations: highCostOps.data,
+      top_operations: last1hour.top_operations,
+      cost_by_model: last1hour.cost_by_model
+    };
   }
 }

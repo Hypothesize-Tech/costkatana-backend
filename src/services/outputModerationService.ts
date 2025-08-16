@@ -210,20 +210,45 @@ Respond with JSON only:
 
         try {
             const response = await retryBedrockOperation(async () => {
-                const command = new InvokeModelCommand({
-                    modelId: process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-haiku-20240307-v1:0',
-                    body: JSON.stringify({
+                const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+                
+                let requestBody;
+                if (modelId.includes('nova')) {
+                    // Nova Pro format
+                    requestBody = JSON.stringify({
+                        messages: [{ role: "user", content: [{ text: moderationPrompt }] }],
+                        inferenceConfig: {
+                            max_new_tokens: 500,
+                            temperature: 0.1
+                        }
+                    });
+                } else {
+                    // Claude format (fallback)
+                    requestBody = JSON.stringify({
                         anthropic_version: "bedrock-2023-05-31",
                         max_tokens: 500,
                         messages: [{ role: "user", content: moderationPrompt }]
-                    }),
+                    });
+                }
+
+                const command = new InvokeModelCommand({
+                    modelId,
+                    body: requestBody,
                     contentType: 'application/json'
                 });
                 return this.bedrockClient.send(command);
             });
 
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-            const analysis = JSON.parse(responseBody.content[0].text);
+            const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+            let responseText;
+            if (modelId.includes('nova')) {
+                responseText = responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
+            } else {
+                responseText = responseBody.content?.[0]?.text || '';
+            }
+            
+            const analysis = JSON.parse(responseText);
 
             return {
                 isBlocked: analysis.isViolation || false,

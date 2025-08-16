@@ -283,20 +283,46 @@ export class EvaluationJobService {
                 const prompt = `Given the input: "${item.input}", provide a response:`;
                 
                 const response = await retryBedrockOperation(async () => {
-                    const command = new InvokeModelCommand({
-                        modelId: modelId || process.env.AWS_BEDROCK_MODEL_ID ,
-                        body: JSON.stringify({
+                    const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+                    
+                    let requestBody;
+                    if (finalModelId.includes('nova')) {
+                        // Nova Pro format
+                        requestBody = JSON.stringify({
+                            messages: [{ role: "user", content: [{ text: prompt }] }],
+                            inferenceConfig: {
+                                max_new_tokens: 200,
+                                temperature: 0.1
+                            }
+                        });
+                    } else {
+                        // Claude format (fallback)
+                        requestBody = JSON.stringify({
                             anthropic_version: "bedrock-2023-05-31",
                             max_tokens: 200,
                             messages: [{ role: "user", content: prompt }]
-                        }),
+                        });
+                    }
+
+                    const command = new InvokeModelCommand({
+                        modelId: finalModelId,
+                        body: requestBody,
                         contentType: 'application/json'
                     });
                     return this.bedrockClient.send(command);
                 });
 
                 const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-                predictions.push(responseBody.content[0].text);
+                
+                let responseText;
+                const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+                if (finalModelId.includes('nova')) {
+                    responseText = responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
+                } else {
+                    responseText = responseBody.content?.[0]?.text || '';
+                }
+                
+                predictions.push(responseText);
 
             } catch (error) {
                 logger.warn(`Failed to generate prediction for item ${item.requestId}:`, error);

@@ -15,6 +15,7 @@ router.get('/dashboard', TelemetryController.getDashboard);
 
 // Query telemetry data
 router.get('/', TelemetryController.getTelemetry);
+router.get('/query', TelemetryController.getTelemetry);
 
 // Get trace details
 router.get('/traces/:traceId', TelemetryController.getTraceDetails);
@@ -24,5 +25,11 @@ router.get('/metrics', TelemetryController.getMetrics);
 
 // Get service dependencies
 router.get('/dependencies', TelemetryController.getServiceDependencies);
+
+// Enhanced telemetry endpoints with AI enrichment
+router.get('/enrichment/stats', TelemetryController.getEnrichmentStats);
+router.get('/enrichment/spans', TelemetryController.getEnrichedSpans);
+router.get('/enrichment/health', TelemetryController.getProcessorHealth);
+router.get('/dashboard/enhanced', TelemetryController.getEnhancedDashboard);
 
 export default router;

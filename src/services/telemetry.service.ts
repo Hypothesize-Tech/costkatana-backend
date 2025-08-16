@@ -129,20 +129,20 @@ export class TelemetryService {
         error_message: span.attributes['error.message'],
         error_stack: span.attributes['error.stack'],
         
-        // GenAI attributes
+        // GenAI attributes (including enriched ones)
         gen_ai_system: span.attributes['gen_ai.system'],
         gen_ai_model: span.attributes['gen_ai.request.model'],
         gen_ai_operation: span.attributes['gen_ai.operation.name'],
         prompt_tokens: span.attributes['gen_ai.usage.prompt_tokens'],
         completion_tokens: span.attributes['gen_ai.usage.completion_tokens'],
         total_tokens: span.attributes['gen_ai.usage.total_tokens'],
-        cost_usd: span.attributes['costkatana.cost.usd'],
+        cost_usd: span.attributes['costkatana.cost.usd'] || span.attributes['costkatana.price_usd'],
         temperature: span.attributes['gen_ai.request.temperature'],
         max_tokens: span.attributes['gen_ai.request.max_tokens'],
         
-        // Performance metrics
+        // Performance metrics (including enriched ones)
         database_latency_ms: span.attributes['db.latency_ms'],
-        cache_latency_ms: span.attributes['cache.latency_ms'],
+        cache_latency_ms: span.attributes['cache.latency_ms'] || span.attributes['processing.latency_ms'],
         external_api_latency_ms: span.attributes['http.latency_ms'],
         processing_latency_ms: span.attributes['processing.latency_ms'],
         queue_wait_ms: span.attributes['queue.wait_ms'],
@@ -193,8 +193,26 @@ export class TelemetryService {
           attributes: link.attributes
         })),
         
-        // Store remaining attributes
-        attributes: this.filterCustomAttributes(span.attributes)
+        // Store remaining attributes (including enriched ones)
+        attributes: {
+          ...this.filterCustomAttributes(span.attributes),
+          // Extract enriched attributes
+          ...(span.attributes['costkatana.insights'] && {
+            enriched_insights: span.attributes['costkatana.insights']
+          }),
+          ...(span.attributes['costkatana.routing_decision'] && {
+            routing_decision: span.attributes['costkatana.routing_decision']
+          }),
+          ...(span.attributes['cache.hit'] !== undefined && {
+            cache_hit: span.attributes['cache.hit']
+          }),
+          ...(span.attributes['request.priority'] && {
+            request_priority: span.attributes['request.priority']
+          }),
+          ...(span.attributes['processing.type'] && {
+            processing_type: span.attributes['processing.type']
+          })
+        }
       };
 
       const telemetry = new Telemetry(telemetryData);
@@ -635,5 +653,213 @@ export class TelemetryService {
     
     const index = Math.ceil((percentile / 100) * sortedArray.length) - 1;
     return sortedArray[Math.max(0, index)];
+  }
+
+  /**
+   * Get enrichment statistics
+   */
+  static async getEnrichmentStats(timeframe = '1h') {
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - this.getTimeframeMs(timeframe));
+
+      const pipeline = [
+        {
+          $match: {
+            timestamp: { $gte: start, $lte: now }
+          }
+        },
+        {
+          $facet: {
+            // Enrichment coverage
+            enrichment_stats: [
+              {
+                $group: {
+                  _id: null,
+                  total_spans: { $sum: 1 },
+                  enriched_spans: {
+                    $sum: {
+                      $cond: [
+                        { $ifNull: ['$attributes.enriched_insights', false] },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  cache_hit_spans: {
+                    $sum: {
+                      $cond: [
+                        { $eq: ['$attributes.cache_hit', true] },
+                        1,
+                        0
+                      ]
+                    }
+                  },
+                  routing_decisions: {
+                    $sum: {
+                      $cond: [
+                        { $ifNull: ['$attributes.routing_decision', false] },
+                        1,
+                        0
+                      ]
+                    }
+                  }
+                }
+              }
+            ],
+            // Processing types
+            processing_types: [
+              {
+                $match: {
+                  'attributes.processing_type': { $exists: true }
+                }
+              },
+              {
+                $group: {
+                  _id: '$attributes.processing_type',
+                  count: { $sum: 1 },
+                  avg_duration: { $avg: '$duration_ms' },
+                  avg_cost: { $avg: { $ifNull: ['$cost_usd', 0] } }
+                }
+              }
+            ],
+            // Request priorities
+            priorities: [
+              {
+                $match: {
+                  'attributes.request_priority': { $exists: true }
+                }
+              },
+              {
+                $group: {
+                  _id: '$attributes.request_priority',
+                  count: { $sum: 1 },
+                  avg_duration: { $avg: '$duration_ms' }
+                }
+              }
+            ]
+          }
+        }
+      ];
+
+      const [result] = await Telemetry.aggregate(pipeline as any);
+      
+      const stats = result.enrichment_stats[0] || {};
+      const enrichmentRate = stats.total_spans > 0 
+        ? (stats.enriched_spans / stats.total_spans) * 100 
+        : 0;
+
+      return {
+        timeframe,
+        total_spans: stats.total_spans || 0,
+        enriched_spans: stats.enriched_spans || 0,
+        enrichment_rate: enrichmentRate,
+        cache_hit_spans: stats.cache_hit_spans || 0,
+        routing_decisions: stats.routing_decisions || 0,
+        processing_types: result.processing_types || [],
+        request_priorities: result.priorities || []
+      };
+    } catch (error) {
+      logger.error('Failed to get enrichment stats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get spans with enrichment insights
+   */
+  static async getEnrichedSpans({
+    tenant_id,
+    workspace_id,
+    timeframe = '1h',
+    limit = 50
+  }: {
+    tenant_id?: string;
+    workspace_id?: string;
+    timeframe?: string;
+    limit?: number;
+  }) {
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - this.getTimeframeMs(timeframe));
+
+      const matchStage: any = {
+        timestamp: { $gte: start, $lte: now },
+        'attributes.enriched_insights': { $exists: true }
+      };
+      
+      if (tenant_id) matchStage.tenant_id = tenant_id;
+      if (workspace_id) matchStage.workspace_id = workspace_id;
+
+      const spans = await Telemetry.find(matchStage)
+        .sort({ timestamp: -1 })
+        .limit(limit)
+        .select({
+          trace_id: 1,
+          span_id: 1,
+          operation_name: 1,
+          duration_ms: 1,
+          cost_usd: 1,
+          status: 1,
+          timestamp: 1,
+          'attributes.enriched_insights': 1,
+          'attributes.routing_decision': 1,
+          'attributes.cache_hit': 1,
+          'attributes.processing_type': 1,
+          'attributes.request_priority': 1
+        })
+        .lean();
+
+      return spans.map(span => ({
+        trace_id: span.trace_id,
+        span_id: span.span_id,
+        operation_name: span.operation_name,
+        duration_ms: span.duration_ms,
+        cost_usd: span.cost_usd,
+        status: span.status,
+        timestamp: span.timestamp,
+        insights: span.attributes?.enriched_insights,
+        routing_decision: span.attributes?.routing_decision,
+        cache_hit: span.attributes?.cache_hit,
+        processing_type: span.attributes?.processing_type,
+        request_priority: span.attributes?.request_priority
+      }));
+    } catch (error) {
+      logger.error('Failed to get enriched spans:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Auto-vectorize new telemetry data
+   */
+  static async autoVectorizeSpan(spanData: any): Promise<void> {
+    try {
+      // Import here to avoid circular dependency
+      const { embeddingsService } = await import('./embeddings.service');
+      
+      // Generate embedding and cost narrative
+      const [embeddingResult, costNarrative] = await Promise.all([
+        embeddingsService.generateTelemetryEmbedding(spanData),
+        embeddingsService.generateCostNarrative(spanData)
+      ]);
+
+      // Update the span with vector data
+      await Telemetry.updateOne(
+        { trace_id: spanData.trace_id, span_id: spanData.span_id },
+        {
+          $set: {
+            semantic_embedding: embeddingResult.embedding,
+            semantic_content: embeddingResult.text,
+            cost_narrative: costNarrative
+          }
+        }
+      );
+
+      logger.info(`Auto-vectorized span: ${spanData.span_id}`);
+    } catch (error) {
+      logger.warn(`Failed to auto-vectorize span ${spanData.span_id}:`, error);
+      // Don't throw - vectorization failure shouldn't break telemetry storage
+    }
   }
 }

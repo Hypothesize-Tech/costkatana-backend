@@ -82,6 +82,11 @@ export interface ITelemetry extends Document {
   // Custom attributes
   attributes?: Record<string, any>;
   
+  // Vector embeddings for semantic search
+  semantic_embedding?: number[];
+  semantic_content?: string; // The text that was embedded
+  cost_narrative?: string; // AI-generated cost story
+  
   // Resource attributes
   resource_attributes?: {
     service_version?: string;
@@ -201,6 +206,11 @@ const TelemetrySchema = new Schema<ITelemetry>({
   // Custom attributes
   attributes: { type: Schema.Types.Mixed },
   
+  // Vector embeddings for semantic search
+  semantic_embedding: [Number], // Array of numbers for vector embedding
+  semantic_content: String, // The text that was embedded
+  cost_narrative: String, // AI-generated cost story
+  
   // Resource attributes
   resource_attributes: {
     service_version: String,
@@ -245,5 +255,36 @@ TelemetrySchema.index({ error_type: 1, timestamp: -1 });
 
 // TTL index to automatically delete old telemetry data after 30 days
 TelemetrySchema.index({ timestamp: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+
+// Vector search index for semantic queries (MongoDB Atlas Vector Search)
+// Note: This needs to be created manually in MongoDB Atlas or via MongoDB CLI
+// For Atlas Vector Search, create index via Atlas UI or mongosh:
+/*
+db.telemetries.createSearchIndex({
+  "name": "semantic_search_index",
+  "definition": {
+    "fields": [
+      {
+        "type": "vector",
+        "path": "semantic_embedding",
+        "numDimensions": 1536,
+        "similarity": "cosine"
+      },
+      {
+        "type": "filter",
+        "path": "tenant_id"
+      },
+      {
+        "type": "filter", 
+        "path": "workspace_id"
+      },
+      {
+        "type": "filter",
+        "path": "timestamp"
+      }
+    ]
+  }
+});
+*/
 
 export const Telemetry = mongoose.model<ITelemetry>('Telemetry', TelemetrySchema);

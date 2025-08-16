@@ -145,20 +145,45 @@ Respond with JSON: {"hasPII": boolean, "confidence": 0-1, "piiTypes": ["email", 
 
         try {
             const response = await retryBedrockOperation(async () => {
-                const command = new InvokeModelCommand({
-                    modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
-                    body: JSON.stringify({
+                const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+                
+                let requestBody;
+                if (modelId.includes('nova')) {
+                    // Nova Pro format
+                    requestBody = JSON.stringify({
+                        messages: [{ role: "user", content: [{ text: prompt }] }],
+                        inferenceConfig: {
+                            max_new_tokens: 500,
+                            temperature: 0.1
+                        }
+                    });
+                } else {
+                    // Claude format (fallback)
+                    requestBody = JSON.stringify({
                         anthropic_version: "bedrock-2023-05-31",
                         max_tokens: 500,
                         messages: [{ role: "user", content: prompt }]
-                    }),
+                    });
+                }
+
+                const command = new InvokeModelCommand({
+                    modelId,
+                    body: requestBody,
                     contentType: 'application/json'
                 });
                 return this.bedrockClient.send(command);
             });
 
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-            const aiAnalysis = JSON.parse(responseBody.content[0].text);
+            const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+            let responseText;
+            if (modelId.includes('nova')) {
+                responseText = responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
+            } else {
+                responseText = responseBody.content?.[0]?.text || '';
+            }
+            
+            const aiAnalysis = JSON.parse(responseText);
 
             return {
                 hasPII: aiAnalysis.hasPII,

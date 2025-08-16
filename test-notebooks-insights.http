@@ -1,0 +1,173 @@
+### Notebooks & AI Insights API Testing
+### Make sure the backend server is running: npm start
+
+### 1. Get Notebook Templates
+GET http://localhost:8000/api/notebooks/notebooks/templates
+Content-Type: application/json
+
+###
+
+### 2. Create Cost Spike Investigation Notebook
+POST http://localhost:8000/api/notebooks/notebooks
+Content-Type: application/json
+
+{
+  "title": "Cost Spike Investigation - Jan 2025",
+  "description": "Investigating the cost spike that occurred on January 15th",
+  "template_type": "cost_spike"
+}
+
+###
+
+### 3. Create Model Performance Analysis Notebook
+POST http://localhost:8000/api/notebooks/notebooks
+Content-Type: application/json
+
+{
+  "title": "AI Model Performance Comparison",
+  "description": "Comparing Claude vs Nova Pro performance and costs",
+  "template_type": "model_performance"
+}
+
+###
+
+### 4. Create Usage Patterns Notebook
+POST http://localhost:8000/api/notebooks/notebooks
+Content-Type: application/json
+
+{
+  "title": "Usage Pattern Discovery",
+  "description": "Finding patterns in our API usage over the last month",
+  "template_type": "usage_patterns"
+}
+
+###
+
+### 5. Get All Notebooks
+GET http://localhost:8000/api/notebooks/notebooks
+Content-Type: application/json
+
+###
+
+### 6. Get Specific Notebook (replace with actual ID from step 2)
+GET http://localhost:8000/api/notebooks/notebooks/notebook_1737041234567_abc123def
+Content-Type: application/json
+
+###
+
+### 7. Execute Notebook (replace with actual ID)
+POST http://localhost:8000/api/notebooks/notebooks/notebook_1737041234567_abc123def/execute
+Content-Type: application/json
+
+###
+
+### 8. Get Execution Results (replace with actual execution ID)
+GET http://localhost:8000/api/notebooks/executions/exec_1737041234567_xyz789
+Content-Type: application/json
+
+###
+
+### 9. Get AI Insights - 24 Hours
+GET http://localhost:8000/api/notebooks/insights?timeframe=24h
+Content-Type: application/json
+
+###
+
+### 10. Get AI Insights - 7 Days
+GET http://localhost:8000/api/notebooks/insights?timeframe=7d
+Content-Type: application/json
+
+###
+
+### 11. Get Anomaly Detection Results
+GET http://localhost:8000/api/notebooks/insights/anomalies?timeframe=24h
+Content-Type: application/json
+
+###
+
+### 12. Get Cost Optimization Recommendations
+GET http://localhost:8000/api/notebooks/insights/optimizations?timeframe=24h
+Content-Type: application/json
+
+###
+
+### 13. Get Predictive Forecasts
+GET http://localhost:8000/api/notebooks/insights/forecasts?timeframe=24h
+Content-Type: application/json
+
+###
+
+### 14. Update Notebook (replace with actual ID)
+PUT http://localhost:8000/api/notebooks/notebooks/notebook_1737041234567_abc123def
+Content-Type: application/json
+
+{
+  "title": "Updated Cost Spike Investigation",
+  "description": "Updated analysis with additional insights",
+  "cells": [
+    {
+      "id": "cell_1",
+      "type": "markdown",
+      "content": "# Updated Cost Spike Investigation\n\nThis analysis has been updated with new findings."
+    },
+    {
+      "id": "cell_2", 
+      "type": "query",
+      "content": "What are my most expensive operations in the last 48 hours?",
+      "metadata": { "timeframe": "48h", "limit": 25 }
+    }
+  ]
+}
+
+###
+
+### 15. Delete Notebook (replace with actual ID)
+DELETE http://localhost:8000/api/notebooks/notebooks/notebook_1737041234567_abc123def
+Content-Type: application/json
+
+###
+
+### 16. Test AI Insights with Different Timeframes
+GET http://localhost:8000/api/notebooks/insights?timeframe=1h
+Content-Type: application/json
+
+###
+
+GET http://localhost:8000/api/notebooks/insights?timeframe=30d
+Content-Type: application/json
+
+###
+
+### 17. Test Anomaly Detection for Different Periods
+GET http://localhost:8000/api/notebooks/insights/anomalies?timeframe=1h
+Content-Type: application/json
+
+###
+
+GET http://localhost:8000/api/notebooks/insights/anomalies?timeframe=7d
+Content-Type: application/json
+
+###
+
+### 18. Test Cost Optimizations for Different Periods
+GET http://localhost:8000/api/notebooks/insights/optimizations?timeframe=7d
+Content-Type: application/json
+
+###
+
+### 19. Test Predictive Forecasts
+GET http://localhost:8000/api/notebooks/insights/forecasts?timeframe=7d
+Content-Type: application/json
+
+###
+
+### 20. Create Custom Notebook (No Template)
+POST http://localhost:8000/api/notebooks/notebooks
+Content-Type: application/json
+
+{
+  "title": "Custom Analysis Notebook",
+  "description": "A custom notebook for specific analysis needs"
+}
+
+###
