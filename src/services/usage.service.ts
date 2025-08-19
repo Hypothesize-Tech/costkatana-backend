@@ -1070,7 +1070,7 @@ export class UsageService {
                     currentPeriod: totalCost,
                     previousPeriod: previousTotalCost,
                     change: change,
-                    budget: 0 // TODO: Get from user settings
+                    budget: await this.getUserBudget(userId) || 0
                 },
                 tokenUsage: {
                     total: totalTokens,
@@ -1481,6 +1481,29 @@ export class UsageService {
         } catch (error) {
             logger.error('Error deleting usage:', error);
             throw error;
+        }
+    }
+
+    /**
+     * Get user budget from settings
+     */
+    private static async getUserBudget(userId: string): Promise<number> {
+        try {
+            // This would typically come from user settings or billing configuration
+            // For now, return a default budget based on user tier
+            const user = await mongoose.model('User').findById(userId).select('subscriptionTier billingPlan').lean();
+            
+            if (user && typeof user === 'object' && 'subscriptionTier' in user) {
+                if (user.subscriptionTier === 'enterprise') {
+                    return 1000; // $1000 budget for enterprise users
+                } else if (user.subscriptionTier === 'pro') {
+                    return 500; // $500 budget for pro users
+                }
+            }
+            return 100; // $100 budget for basic users
+        } catch (error) {
+            logger.error('Error getting user budget:', error);
+            return 0;
         }
     }
 

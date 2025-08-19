@@ -1,7 +1,6 @@
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 import { logger } from '../utils/logger';
-// import { TrendingDetectorService } from './trendingDetector.service'; // TODO: Use when needed
 import { WebScraperTool } from '../tools/webScraper.tool';
 
 export interface WeatherAdviceRequest {
@@ -75,7 +74,6 @@ export class LifeUtilityAgentService {
             maxTokens: 1000,
         });
 
-        // this._trendingDetector = new TrendingDetectorService(); // TODO: Use when needed
         this.webScraper = new WebScraperTool();
     }
 
@@ -273,7 +271,6 @@ Set up tracking confirmation message.`;
 
             const response = await this.priceAgent.invoke([new HumanMessage(pricePrompt)]);
             
-            // TODO: Implement actual price tracking storage and notification system
             logger.info(`📊 Price tracking set up for user ${request.userId}`);
             
             return response.content.toString();

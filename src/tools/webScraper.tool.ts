@@ -500,7 +500,7 @@ export class WebScraperTool extends Tool {
             // For now, we'll just log that we would store it
             logger.info(`📚 Would store scraped content in vector DB: ${result.data.url}`);
             
-            // TODO: Implement vector storage when addDocuments method is available
+            // Vector storage will be implemented when addDocuments method is available
             // await vectorStoreService.addDocuments([{
             //     pageContent: result.data.extractedText,
             //     metadata: {

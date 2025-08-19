@@ -45,6 +45,7 @@ import mfaRoutes from './mfa.routes';
 import moderationRoutes from './moderation.routes';
 import { securityRoutes } from './security.routes';
 import cpiRoutes from './cpi.routes';
+import costDebuggerRoutes from './costDebugger.routes';
 
 const router = Router();
 
@@ -105,5 +106,6 @@ router.use('/mfa', mfaRoutes);
 router.use('/moderation', moderationRoutes);
 router.use('/security', securityRoutes);
 router.use('/cpi', cpiRoutes);
+router.use('/cost-debugger', costDebuggerRoutes);
 
 export const apiRouter = router;
