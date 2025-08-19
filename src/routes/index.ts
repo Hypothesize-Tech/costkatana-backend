@@ -46,6 +46,7 @@ import moderationRoutes from './moderation.routes';
 import { securityRoutes } from './security.routes';
 import cpiRoutes from './cpi.routes';
 import costDebuggerRoutes from './costDebugger.routes';
+import unexplainedCostRoutes from './unexplainedCost.routes';
 
 const router = Router();
 
@@ -107,5 +108,6 @@ router.use('/moderation', moderationRoutes);
 router.use('/security', securityRoutes);
 router.use('/cpi', cpiRoutes);
 router.use('/cost-debugger', costDebuggerRoutes);
+router.use('/unexplained-costs', unexplainedCostRoutes);
 
 export const apiRouter = router;

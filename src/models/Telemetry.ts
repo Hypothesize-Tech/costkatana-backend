@@ -87,6 +87,48 @@ export interface ITelemetry extends Document {
   semantic_content?: string; // The text that was embedded
   cost_narrative?: string; // AI-generated cost story
   
+  // Cost Attribution Fields for Unexplained Cost Analysis
+  cost_attribution?: {
+    system_prompt_tokens?: number;
+    system_prompt_cost?: number;
+    tool_calls_count?: number;
+    tool_calls_cost?: number;
+    context_window_tokens?: number;
+    context_window_cost?: number;
+    retry_attempts?: number;
+    retry_cost?: number;
+    cache_miss_cost?: number;
+    model_switching_cost?: number;
+    network_latency_cost?: number;
+    database_inefficiency_cost?: number;
+    total_explained_cost?: number;
+    unexplained_cost?: number;
+    cost_anomaly_score?: number;
+  };
+  
+  // Cost Analysis Metadata
+  cost_analysis?: {
+    baseline_comparison?: {
+      expected_cost?: number;
+      deviation_percentage?: number;
+      deviation_reason?: string;
+    };
+    cost_drivers?: Array<{
+      driver_type: 'system_prompt' | 'tool_calls' | 'context_window' | 'retries' | 'cache_miss' | 'model_switching' | 'network' | 'database';
+      cost_impact: number;
+      percentage_of_total: number;
+      explanation: string;
+      optimization_potential: number;
+    }>;
+    cost_story?: string; // AI-generated explanation of why this cost occurred
+    optimization_recommendations?: Array<{
+      type: 'immediate' | 'short_term' | 'long_term';
+      description: string;
+      potential_savings: number;
+      implementation_effort: 'low' | 'medium' | 'high';
+    }>;
+  };
+  
   // Resource attributes
   resource_attributes?: {
     service_version?: string;
@@ -210,6 +252,57 @@ const TelemetrySchema = new Schema<ITelemetry>({
   semantic_embedding: [Number], // Array of numbers for vector embedding
   semantic_content: String, // The text that was embedded
   cost_narrative: String, // AI-generated cost story
+  
+  // Cost Attribution Fields for Unexplained Cost Analysis
+  cost_attribution: {
+    system_prompt_tokens: Number,
+    system_prompt_cost: Number,
+    tool_calls_count: Number,
+    tool_calls_cost: Number,
+    context_window_tokens: Number,
+    context_window_cost: Number,
+    retry_attempts: Number,
+    retry_cost: Number,
+    cache_miss_cost: Number,
+    model_switching_cost: Number,
+    network_latency_cost: Number,
+    database_inefficiency_cost: Number,
+    total_explained_cost: Number,
+    unexplained_cost: Number,
+    cost_anomaly_score: Number
+  },
+  
+  // Cost Analysis Metadata
+  cost_analysis: {
+    baseline_comparison: {
+      expected_cost: Number,
+      deviation_percentage: Number,
+      deviation_reason: String
+    },
+    cost_drivers: [{
+      driver_type: {
+        type: String,
+        enum: ['system_prompt', 'tool_calls', 'context_window', 'retries', 'cache_miss', 'model_switching', 'network', 'database']
+      },
+      cost_impact: Number,
+      percentage_of_total: Number,
+      explanation: String,
+      optimization_potential: Number
+    }],
+    cost_story: String, // AI-generated explanation of why this cost occurred
+    optimization_recommendations: [{
+      type: {
+        type: String,
+        enum: ['immediate', 'short_term', 'long_term']
+      },
+      description: String,
+      potential_savings: Number,
+      implementation_effort: {
+        type: String,
+        enum: ['low', 'medium', 'high']
+      }
+    }]
+  },
   
   // Resource attributes
   resource_attributes: {

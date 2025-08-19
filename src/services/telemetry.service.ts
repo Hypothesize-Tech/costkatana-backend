@@ -388,10 +388,19 @@ export class TelemetryService {
       
       if (tenant_id) matchStage.tenant_id = tenant_id;
       if (workspace_id) matchStage.workspace_id = workspace_id;
+      
+      // Adjust limits based on timeframe to prevent memory issues
+      const isLongTimeframe = timeframe === '30d' || timeframe === '90d';
+      const maxRecords = isLongTimeframe ? 50000 : 100000; // Lower limit for longer timeframes
+      
+      // For very long timeframes, we'll rely on the limit instead of sampling
+      // to ensure compatibility across all MongoDB versions
 
-      // Main aggregation pipeline
+      // Main aggregation pipeline - optimized for memory efficiency
       const pipeline = [
         { $match: matchStage },
+        // Add a limit stage to prevent memory issues with very large datasets
+        { $limit: maxRecords }, // Dynamic limit based on timeframe
         {
           $facet: {
             // Basic metrics
@@ -411,9 +420,8 @@ export class TelemetryService {
                 }
               }
             ],
-            // Percentiles
+            // Percentiles - optimized for memory efficiency
             percentiles: [
-              { $sort: { duration_ms: 1 } },
               {
                 $group: {
                   _id: null,
@@ -421,7 +429,7 @@ export class TelemetryService {
                 }
               }
             ],
-            // Top operations
+            // Top operations - optimized for memory efficiency
             operations: [
               {
                 $group: {
@@ -436,7 +444,7 @@ export class TelemetryService {
               { $sort: { count: -1 } },
               { $limit: 10 }
             ],
-            // Top errors
+            // Top errors - optimized for memory efficiency
             errors: [
               { $match: { status: 'error' } },
               {
@@ -465,13 +473,77 @@ export class TelemetryService {
         }
       ];
 
-      const [result] = await Telemetry.aggregate(pipeline as any);
+      let result: any;
+      try {
+        logger.info(`Executing aggregation pipeline for timeframe: ${timeframe}, maxRecords: ${maxRecords}`);
+        
+        // Add timeout to MongoDB aggregation to prevent hanging
+        const aggregationPromise = Telemetry.aggregate(pipeline as any);
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('MongoDB aggregation timeout after 20 seconds')), 20000);
+        });
+        
+        const aggregationResult = await Promise.race([aggregationPromise, timeoutPromise]);
+        result = (aggregationResult as any)[0] || {};
+        logger.info(`Aggregation completed successfully with ${result.basic?.[0]?.total_requests || 0} records`);
+      } catch (error: any) {
+        // Handle memory limit errors gracefully
+        if (error.message && error.message.includes('memory limit')) {
+          logger.warn(`Memory limit exceeded for timeframe ${timeframe}, using fallback aggregation`);
+                     // Fallback to simpler aggregation without percentiles
+           const fallbackPipeline = [
+             { $match: matchStage },
+             { $limit: Math.floor(maxRecords * 0.1) }, // Much smaller limit based on timeframe
+            {
+              $group: {
+                _id: null,
+                total_requests: { $sum: 1 },
+                total_errors: {
+                  $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] }
+                },
+                avg_duration_ms: { $avg: '$duration_ms' },
+                total_cost_usd: { $sum: { $ifNull: ['$cost_usd', 0] } },
+                avg_cost_usd: { $avg: { $ifNull: ['$cost_usd', 0] } },
+                total_tokens: { $sum: { $ifNull: ['$total_tokens', 0] } },
+                avg_tokens: { $avg: { $ifNull: ['$total_tokens', 0] } }
+              }
+            }
+          ];
+          
+                     const [fallbackResult] = await Telemetry.aggregate(fallbackPipeline as any);
+           logger.info(`Fallback aggregation completed with ${fallbackResult?.total_requests || 0} records`);
+           result = {
+             basic: [fallbackResult],
+             percentiles: [{ durations: [] }],
+             operations: [],
+             errors: [],
+             models: []
+           };
+        } else {
+          throw error;
+        }
+      }
       
-      // Calculate percentiles
-      const durations = result.percentiles[0]?.durations || [];
-      const p50 = this.calculatePercentile(durations, 50);
-      const p95 = this.calculatePercentile(durations, 95);
-      const p99 = this.calculatePercentile(durations, 99);
+      // Calculate percentiles - sort in memory after grouping for memory efficiency
+      const durations = result.percentiles?.[0]?.durations || [];
+      // Only sort if we have a reasonable number of data points to avoid memory issues
+      let sortedDurations = durations;
+      if (durations.length > 0 && durations.length <= 10000) {
+        sortedDurations = [...durations].sort((a, b) => a - b);
+      } else if (durations.length > 10000) {
+        // For very large datasets, use sampling for percentiles
+        const sampleSize = Math.min(10000, Math.floor(durations.length * 0.1));
+        const step = Math.floor(durations.length / sampleSize);
+        const sampledDurations = [];
+        for (let i = 0; i < durations.length; i += step) {
+          sampledDurations.push(durations[i]);
+        }
+        sortedDurations = sampledDurations.sort((a, b) => a - b);
+      }
+      
+      const p50 = this.calculatePercentile(sortedDurations, 50);
+      const p95 = this.calculatePercentile(sortedDurations, 95);
+      const p99 = this.calculatePercentile(sortedDurations, 99);
       
       // Calculate requests per minute
       const timeframeMinutes = this.getTimeframeMs(timeframe) / 60000;
