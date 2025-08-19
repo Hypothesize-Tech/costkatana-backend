@@ -5,6 +5,8 @@ import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
+import { IntelligentRoutingService } from '../services/intelligentRouting.service';
+import { CPIOptimizationStrategy } from '../types/cpi.types';
 import https from 'https';
 
 // Create a connection pool for better performance
@@ -42,6 +44,73 @@ export class GatewayController {
      * Main gateway proxy handler - routes requests to AI providers
      */
     static async proxyRequest(req: Request, res: Response): Promise<void> {
+        // Check if intelligent routing is enabled
+        if (req.headers['x-costkatana-intelligent-routing'] === 'true') {
+            await this.handleIntelligentRouting(req, res);
+            return;
+        }
+
+        // Fall back to standard routing
+        await this.handleStandardRouting(req, res);
+    }
+
+    /**
+     * Handle intelligent routing using CPI system
+     */
+    private static async handleIntelligentRouting(req: Request, res: Response): Promise<void> {
+        try {
+            const context = req.gatewayContext!;
+            
+            logger.info('=== INTELLIGENT ROUTING REQUEST STARTED ===', {
+                requestId: context.requestId,
+                userId: context.userId,
+                intelligentRouting: true
+            });
+
+            // Parse optimization strategy from headers
+            const strategy = this.parseOptimizationStrategy(req);
+            
+            // Get intelligent routing decision
+            const routingDecision = await IntelligentRoutingService.getRoutingDecision(
+                req.body,
+                strategy,
+                (context as any).availableProviders
+            );
+
+            logger.info('Intelligent routing decision made', {
+                selectedProvider: routingDecision.selectedProvider,
+                selectedModel: routingDecision.selectedModel,
+                cpiScore: routingDecision.confidence,
+                reasoning: routingDecision.reasoning
+            });
+
+            // Update context with selected provider
+            context.targetUrl = this.getProviderUrl(routingDecision.selectedProvider);
+            (context as any).selectedModel = routingDecision.selectedModel;
+            (context as any).routingDecision = routingDecision;
+
+            // Add routing headers
+            res.setHeader('CostKatana-Intelligent-Routing', 'true');
+            res.setHeader('CostKatana-Selected-Provider', routingDecision.selectedProvider);
+            res.setHeader('CostKatana-Selected-Model', routingDecision.selectedModel);
+            res.setHeader('CostKatana-CPI-Score', routingDecision.confidence.toString());
+            res.setHeader('CostKatana-Routing-Confidence', routingDecision.confidence.toString());
+
+            // Proceed with standard routing using the selected provider
+            await this.handleStandardRouting(req, res);
+
+        } catch (error) {
+            logger.error('Intelligent routing failed, falling back to standard routing:', error);
+            
+            // Fall back to standard routing
+            await this.handleStandardRouting(req, res);
+        }
+    }
+
+    /**
+     * Handle standard routing (existing logic)
+     */
+    private static async handleStandardRouting(req: Request, res: Response): Promise<void> {
         const context = req.gatewayContext!;
         
                     logger.info('=== GATEWAY PROXY REQUEST STARTED ===', {
@@ -1574,5 +1643,47 @@ export class GatewayController {
                 message: 'Failed to get firewall analytics'
             });
         }
+    }
+
+    /**
+     * Parse optimization strategy from request headers
+     */
+    private static parseOptimizationStrategy(req: Request): CPIOptimizationStrategy {
+        const strategyHeader = req.headers['x-costkatana-optimization-strategy'];
+        
+        if (strategyHeader) {
+            try {
+                return JSON.parse(strategyHeader as string);
+            } catch (error) {
+                logger.warn('Invalid optimization strategy header, using default');
+            }
+        }
+
+        // Default balanced strategy
+        return {
+            strategy: 'balanced',
+            weightings: {
+                cost: 0.3,
+                performance: 0.3,
+                quality: 0.2,
+                reliability: 0.2
+            },
+            constraints: {}
+        };
+    }
+
+    /**
+     * Get provider URL based on provider name
+     */
+    private static getProviderUrl(provider: string): string {
+        const providerUrls: Record<string, string> = {
+            'openai': 'https://api.openai.com/v1',
+            'anthropic': 'https://api.anthropic.com',
+            'aws-bedrock': 'https://bedrock-runtime.us-east-1.amazonaws.com',
+            'google-ai': 'https://generativelanguage.googleapis.com',
+            'cohere': 'https://api.cohere.ai'
+        };
+
+        return providerUrls[provider] || 'https://api.openai.com/v1';
     }
 }

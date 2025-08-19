@@ -38,6 +38,10 @@ declare global {
                 outputTokens?: number;
                 cost?: number;
                 isFailoverRequest?: boolean;
+                // CPI system properties
+                availableProviders?: string[];
+                selectedModel?: string;
+                routingDecision?: any;
             };
         }
     }

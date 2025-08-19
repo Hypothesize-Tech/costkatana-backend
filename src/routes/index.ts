@@ -44,6 +44,7 @@ import webhookRoutes from './webhook.routes';
 import mfaRoutes from './mfa.routes';
 import moderationRoutes from './moderation.routes';
 import { securityRoutes } from './security.routes';
+import cpiRoutes from './cpi.routes';
 
 const router = Router();
 
@@ -103,5 +104,6 @@ router.use('/webhooks', webhookRoutes);
 router.use('/mfa', mfaRoutes);
 router.use('/moderation', moderationRoutes);
 router.use('/security', securityRoutes);
+router.use('/cpi', cpiRoutes);
 
 export const apiRouter = router;
