@@ -127,7 +127,7 @@ export function getModelNameVariations(model: string): string[] {
         variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0', 'us.anthropic.claude-3-5-haiku-20241022-v1:0');
     }
     if (normalized.includes('claude-3-5-sonnet')) {
-        variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20240620-v1:0', 'anthropic.claude-3-5-sonnet-20240620-v1:0');
+        variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20241022-v1:0', 'anthropic.claude-sonnet-4-20250514-v1:0');
     }
     if (normalized.includes('claude-3-opus')) {
         variations.push('claude-3-opus', 'claude-3-opus-20240229-v1:0', 'anthropic.claude-3-opus-20240229-v1:0');
@@ -137,6 +137,142 @@ export function getModelNameVariations(model: string): string[] {
     }
     if (normalized.includes('claude-3-haiku')) {
         variations.push('claude-3-haiku', 'claude-3-haiku-20240307-v1:0', 'anthropic.claude-3-haiku-20240307-v1:0');
+    }
+    
+    // Add common variations for Cohere models
+    if (normalized.includes('command-a')) {
+        variations.push('command-a', 'command-a-03-2025');
+    }
+    if (normalized.includes('command-r7b')) {
+        variations.push('command-r7b', 'command-r7b-12-2024');
+    }
+    if (normalized.includes('command-r-plus')) {
+        variations.push('command-r-plus', 'command-r-plus-04-2024');
+    }
+    if (normalized.includes('command-r')) {
+        variations.push('command-r', 'command-r-08-2024', 'command-r-03-2024');
+    }
+    
+    // Add common variations for Google models
+    if (normalized.includes('gemini-2.5-pro')) {
+        variations.push('gemini-2.5-pro', 'gemini-2.5-pro-2025');
+    }
+    if (normalized.includes('gemini-2.5-flash')) {
+        variations.push('gemini-2.5-flash', 'gemini-2.5-flash-2025');
+    }
+    if (normalized.includes('gemini-2.0-flash')) {
+        variations.push('gemini-2.0-flash', 'gemini-2.0-flash-2025');
+    }
+    if (normalized.includes('gemini-1.5-pro')) {
+        variations.push('gemini-1.5-pro', 'gemini-1.5-pro-2024');
+    }
+    if (normalized.includes('gemini-1.5-flash')) {
+        variations.push('gemini-1.5-flash', 'gemini-1.5-flash-2024');
+    }
+    if (normalized.includes('gemini-1.0-pro')) {
+        variations.push('gemini-1.0-pro', 'gemini-pro', 'gemini-1.0-pro-2023');
+    }
+    if (normalized.includes('gemini-1.0-pro-vision')) {
+        variations.push('gemini-1.0-pro-vision', 'gemini-pro-vision', 'gemini-1.0-pro-vision-2023');
+    }
+    if (normalized.includes('gemma')) {
+        variations.push('gemma', 'gemma-2', 'gemma-3', 'gemma-3n');
+    }
+    if (normalized.includes('imagen')) {
+        variations.push('imagen-3', 'imagen-4', 'imagen-generation', 'imagen-editing');
+    }
+    if (normalized.includes('veo')) {
+        variations.push('veo-2', 'veo-3', 'veo-generation', 'veo-preview');
+    }
+    
+    // Add common variations for Mistral AI models
+    if (normalized.includes('mistral-medium')) {
+        variations.push('mistral-medium', 'mistral-medium-2508', 'mistral-medium-latest');
+    }
+    if (normalized.includes('magistral-medium')) {
+        variations.push('magistral-medium', 'magistral-medium-2507', 'magistral-medium-latest');
+    }
+    if (normalized.includes('codestral')) {
+        variations.push('codestral', 'codestral-2508', 'codestral-latest');
+    }
+    if (normalized.includes('voxtral-mini')) {
+        variations.push('voxtral-mini', 'voxtral-mini-2507', 'voxtral-mini-latest');
+    }
+    if (normalized.includes('devstral-medium')) {
+        variations.push('devstral-medium', 'devstral-medium-2507', 'devstral-medium-latest');
+    }
+    if (normalized.includes('mistral-ocr')) {
+        variations.push('mistral-ocr', 'mistral-ocr-2505', 'mistral-ocr-latest');
+    }
+    if (normalized.includes('mistral-large')) {
+        variations.push('mistral-large', 'mistral-large-2411', 'mistral-large-latest');
+    }
+    if (normalized.includes('pixtral-large')) {
+        variations.push('pixtral-large', 'pixtral-large-2411', 'pixtral-large-latest');
+    }
+    if (normalized.includes('mistral-small')) {
+        variations.push('mistral-small', 'mistral-small-2506', 'mistral-small-2503', 'mistral-small-2501', 'mistral-small-2407');
+    }
+    if (normalized.includes('mistral-embed')) {
+        variations.push('mistral-embed');
+    }
+    if (normalized.includes('codestral-embed')) {
+        variations.push('codestral-embed', 'codestral-embed-2505');
+    }
+    if (normalized.includes('mistral-moderation')) {
+        variations.push('mistral-moderation', 'mistral-moderation-2411', 'mistral-moderation-latest');
+    }
+    if (normalized.includes('magistral-small')) {
+        variations.push('magistral-small', 'magistral-small-2507', 'magistral-small-latest');
+    }
+    if (normalized.includes('voxtral-small')) {
+        variations.push('voxtral-small', 'voxtral-small-2507', 'voxtral-small-latest');
+    }
+    if (normalized.includes('devstral-small')) {
+        variations.push('devstral-small', 'devstral-small-2507', 'devstral-small-latest', 'devstral-small-2505');
+    }
+    if (normalized.includes('pixtral-12b')) {
+        variations.push('pixtral-12b', 'pixtral-12b-2409');
+    }
+    if (normalized.includes('open-mistral-nemo')) {
+        variations.push('open-mistral-nemo', 'open-mistral-nemo-2407');
+    }
+    if (normalized.includes('mistral-nemo')) {
+        variations.push('mistral-nemo');
+    }
+    if (normalized.includes('open-mistral-7b')) {
+        variations.push('open-mistral-7b');
+    }
+    if (normalized.includes('open-mixtral-8x7b')) {
+        variations.push('open-mixtral-8x7b');
+    }
+    if (normalized.includes('open-mixtral-8x22b')) {
+        variations.push('open-mixtral-8x22b');
+    }
+    
+    // Add common variations for Grok AI models
+    if (normalized.includes('grok-4')) {
+        variations.push('grok-4', 'grok-4-0709', 'grok-4-latest');
+    }
+    if (normalized.includes('grok-3')) {
+        variations.push('grok-3', 'grok-3-latest');
+    }
+    if (normalized.includes('grok-3-mini')) {
+        variations.push('grok-3-mini', 'grok-3-mini-latest');
+    }
+    if (normalized.includes('grok-2-image')) {
+        variations.push('grok-2-image', 'grok-2-image-1212', 'grok-2-image-latest');
+    }
+    
+    // Add common variations for Meta Llama 4 models
+    if (normalized.includes('llama-4-scout')) {
+        variations.push('llama-4-scout');
+    }
+    if (normalized.includes('llama-4-maverick')) {
+        variations.push('llama-4-maverick');
+    }
+    if (normalized.includes('llama-4-behemoth')) {
+        variations.push('llama-4-behemoth', 'llama-4-behemoth-preview');
     }
     
     return [...new Set(variations)];

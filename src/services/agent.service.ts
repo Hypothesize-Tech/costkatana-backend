@@ -746,7 +746,7 @@ Thought:{agent_scratchpad}`),
         vectorStoreStats: any;
     } {
         const isMasterAgent = process.env.AGENT_TYPE === 'master';
-        const currentModel = isMasterAgent ? 'anthropic.claude-3-5-sonnet-20241022-v2:0' : (process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0');
+        const currentModel = isMasterAgent ? 'anthropic.claude-sonnet-4-20250514-v1:0' : (process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0');
         
         return {
             initialized: this.initialized,

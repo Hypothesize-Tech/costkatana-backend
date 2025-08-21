@@ -437,7 +437,7 @@ export class ExperimentationService {
         // Map frontend model names to WORKING Bedrock model IDs (compatible with on-demand throughput)
         const modelMap: Record<string, string> = {
             // Claude models (use older stable versions that support on-demand)
-            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v1:0',
             'claude-3-5-haiku': 'anthropic.claude-3-haiku-20240307-v1:0',
             'claude-3-opus': 'anthropic.claude-3-opus-20240229-v1:0',
             'claude-3-sonnet': 'anthropic.claude-3-sonnet-20240229-v1:0',
@@ -473,8 +473,8 @@ export class ExperimentationService {
         if (providerMatch) return providerMatch;
 
         // Fallback to a known working model
-        logger.warn(`Unknown model ${modelName} from ${provider}, falling back to Claude 3.5 Sonnet`);
-        return 'anthropic.claude-3-5-sonnet-20240620-v1:0'; // Known working fallback
+        logger.warn(`Unknown model ${modelName} from ${provider}, falling back to Claude Sonnet 4`);
+        return 'anthropic.claude-sonnet-4-20250514-v1:0'; // Known working fallback
     }
 
     /**
@@ -512,7 +512,7 @@ export class ExperimentationService {
                 await new Promise(resolve => setTimeout(resolve, 20000));
                 evaluationResponse = await this.invokeWithExponentialBackoff(
                     evaluationPrompt,
-                    'anthropic.claude-3-5-sonnet-20240620-v1:0'
+                    'anthropic.claude-sonnet-4-20250514-v1:0'
                 );
             }
 
@@ -659,7 +659,7 @@ export class ExperimentationService {
                 await new Promise(resolve => setTimeout(resolve, 30000));
                 analysisResponse = await this.invokeWithExponentialBackoff(
                     analysisPrompt,
-                    'anthropic.claude-3-5-sonnet-20240620-v1:0'
+                    'anthropic.claude-sonnet-4-20250514-v1:0'
                 );
             }
 

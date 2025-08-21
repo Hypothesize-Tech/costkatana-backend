@@ -38,6 +38,41 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
     },
 
     // OpenAI Models
+    // === GPT-5 Models (Latest) ===
+    'gpt-5': {
+        provider: 'OpenAI',
+        inputPrice: 1.25,
+        outputPrice: 10.0,
+        contextWindow: 128000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'advanced-intelligence']
+    },
+    'gpt-5-mini': {
+        provider: 'OpenAI',
+        inputPrice: 0.25,
+        outputPrice: 2.0,
+        contextWindow: 128000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'efficient']
+    },
+    'gpt-5-nano': {
+        provider: 'OpenAI',
+        inputPrice: 0.05,
+        outputPrice: 0.4,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'fast', 'cost-effective']
+    },
+    'gpt-5-chat-latest': {
+        provider: 'OpenAI',
+        inputPrice: 1.25,
+        outputPrice: 10.0,
+        contextWindow: 128000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'advanced']
+    },
+
+    // === GPT-4o Models ===
     'gpt-3.5-turbo': {
         provider: 'OpenAI',
         inputPrice: 0.5,
@@ -88,13 +123,90 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
     },
 
     // Google Models
+    // Gemini 2.5 Models
+    'gemini-2.5-pro': {
+        provider: 'Google',
+        inputPrice: 1.25,
+        outputPrice: 10.0,
+        contextWindow: 2000000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'coding', 'complex-problems', 'multimodal']
+    },
+    'gemini-2.5-flash': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 1000000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'multimodal', 'live-api']
+    },
+    'gemini-2.5-flash-lite': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 1000000,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'high-throughput', 'multimodal']
+    },
+    'gemini-2.5-flash-audio': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 1000000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'audio', 'multimodal']
+    },
+    'gemini-2.5-flash-lite-audio-preview': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 1000000,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'audio', 'multimodal', 'preview']
+    },
+    'gemini-2.5-flash-native-audio-output': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 1000000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'audio-output', 'multimodal']
+    },
+
+    // Gemini 2.0 Models
+    'gemini-2.0-flash': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 1000000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'multimodal', 'next-generation']
+    },
+    'gemini-2.0-flash-lite': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 1000000,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'cost-efficient', 'low-latency']
+    },
+    'gemini-2.0-flash-audio': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 1000000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'audio', 'multimodal']
+    },
+
+    // Gemini 1.5 Models
     'gemini-1.5-pro': {
         provider: 'Google',
         inputPrice: 3.5,
         outputPrice: 10.5,
         contextWindow: 2097152,
         category: 'premium',
-        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'vision']
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'vision', 'long-context']
     },
     'gemini-1.5-flash': {
         provider: 'Google',
@@ -102,9 +214,35 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
         outputPrice: 0.3,
         contextWindow: 1048576,
         category: 'fast',
-        features: ['chat', 'text-generation', 'analysis']
+        features: ['chat', 'text-generation', 'analysis', 'multimodal']
     },
-    'gemini-pro': {
+    'gemini-1.5-flash-large-context': {
+        provider: 'Google',
+        inputPrice: 0.075,
+        outputPrice: 0.3,
+        contextWindow: 2097152,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'multimodal', 'long-context']
+    },
+    'gemini-1.5-flash-8b-large-context': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 2097152,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'multimodal', 'long-context', '8b-parameter']
+    },
+    'gemini-1.5-pro-large-context': {
+        provider: 'Google',
+        inputPrice: 3.5,
+        outputPrice: 10.5,
+        contextWindow: 2097152,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'vision', 'long-context']
+    },
+
+    // Gemini 1.0 Models (Legacy)
+    'gemini-1.0-pro': {
         provider: 'Google',
         inputPrice: 0.5,
         outputPrice: 1.5,
@@ -112,28 +250,262 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
         category: 'balanced',
         features: ['chat', 'text-generation', 'analysis']
     },
-
-    // Cohere Models
-    'command-r-plus': {
-        provider: 'Cohere',
-        inputPrice: 3.0,
-        outputPrice: 15.0,
-        contextWindow: 128000,
-        category: 'premium',
-        features: ['chat', 'text-generation', 'analysis', 'reasoning']
-    },
-    'command-r': {
-        provider: 'Cohere',
+    'gemini-1.0-pro-vision': {
+        provider: 'Google',
         inputPrice: 0.5,
         outputPrice: 1.5,
+        contextWindow: 32768,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'vision', 'multimodal']
+    },
+
+    // Gemma Models (Open Source)
+    'gemma-2': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'summarization', 'extraction', 'open-source']
+    },
+    'gemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'summarization', 'extraction', 'open-source']
+    },
+
+    // Gemma Specialized Models
+    'shieldgemma-2': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'safety-evaluation', 'instruction-tuned', 'open-source']
+    },
+    'paligemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'vision-language', 'multimodal', 'open-source']
+    },
+    'codegemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'code-generation', 'coding-tasks', 'open-source']
+    },
+    'txgemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'therapeutic-predictions', 'medical-ai', 'open-source']
+    },
+    'medgemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'medical-text', 'medical-image', 'healthcare-ai', 'open-source']
+    },
+    'medsiglip': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'medical-embeddings', 'medical-ai', 'open-source']
+    },
+    't5gemma': {
+        provider: 'Google',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['text-generation', 'encoder-decoder', 'research', 'open-source']
+    },
+
+    // Embeddings Models
+    'multimodal-embeddings': {
+        provider: 'Google',
+        inputPrice: 0.0001,
+        outputPrice: 0.0001,
+        contextWindow: 128000,
+        category: 'embeddings',
+        features: ['embeddings', 'text', 'images', 'semantic-search', 'classification']
+    },
+
+    // Imagen Models (Image Generation)
+    'imagen-4-generation': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-generation', 'high-quality', 'text-to-image']
+    },
+    'imagen-4-fast-generation': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-generation', 'fast', 'text-to-image', 'lower-latency']
+    },
+    'imagen-4-ultra-generation': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-generation', 'ultra-quality', 'text-to-image', 'best-prompt-adherence']
+    },
+    'imagen-3-generation': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-generation', 'text-to-image']
+    },
+    'imagen-3-editing-customization': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-editing', 'image-customization', 'mask-editing', 'reference-based']
+    },
+    'imagen-3-fast-generation': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-generation',
+        features: ['image-generation', 'fast', 'text-to-image', 'lower-latency']
+    },
+    'imagen-captioning-vqa': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'image-analysis',
+        features: ['image-captioning', 'visual-question-answering', 'image-understanding']
+    },
+
+    // Veo Models (Video Generation)
+    'veo-3': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'video-generation',
+        features: ['video-generation', 'high-quality', 'text-to-video', 'image-to-video']
+    },
+    'veo-3-fast': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'video-generation',
+        features: ['video-generation', 'fast', 'text-to-video', 'image-to-video', 'lower-latency']
+    },
+    'virtual-try-on': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'video-generation',
+        features: ['virtual-try-on', 'clothing', 'fashion', 'product-visualization']
+    },
+    'veo-3-preview': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'video-generation',
+        features: ['video-generation', 'preview', 'text-to-video', 'image-to-video']
+    },
+    'veo-3-fast-preview': {
+        provider: 'Google',
+        inputPrice: 0.02,
+        outputPrice: 0.02,
+        contextWindow: 128000,
+        category: 'video-generation',
+        features: ['video-generation', 'fast', 'preview', 'text-to-video', 'image-to-video', 'lower-latency']
+    },
+
+    // Cohere Models
+    'command-a-03-2025': {
+        provider: 'Cohere',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        contextWindow: 256000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'agentic', 'multilingual']
+    },
+    'command-r7b-12-2024': {
+        provider: 'Cohere',
+        inputPrice: 0.0375,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'fast',
+        features: ['chat', 'text-generation', 'analysis', 'rag', 'tool-use']
+    },
+    'command-a-reasoning-08-2025': {
+        provider: 'Cohere',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        contextWindow: 256000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'agentic', 'multilingual']
+    },
+    'command-a-vision-07-2025': {
+        provider: 'Cohere',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        contextWindow: 128000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'vision', 'multimodal', 'enterprise']
+    },
+    'command-r-plus-04-2024': {
+        provider: 'Cohere',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        contextWindow: 128000,
+        category: 'premium',
+        features: ['chat', 'text-generation', 'analysis', 'reasoning', 'enterprise']
+    },
+    'command-r-08-2024': {
+        provider: 'Cohere',
+        inputPrice: 0.15,
+        outputPrice: 0.6,
         contextWindow: 128000,
         category: 'balanced',
-        features: ['chat', 'text-generation', 'analysis']
+        features: ['chat', 'text-generation', 'analysis', 'rag', 'tools']
+    },
+    'command-r-03-2024': {
+        provider: 'Cohere',
+        inputPrice: 0.15,
+        outputPrice: 0.6,
+        contextWindow: 128000,
+        category: 'balanced',
+        features: ['chat', 'text-generation', 'analysis', 'rag', 'tools']
     },
     'command': {
         provider: 'Cohere',
-        inputPrice: 1.0,
-        outputPrice: 2.0,
+        inputPrice: 0.15,
+        outputPrice: 0.6,
         contextWindow: 4096,
         category: 'balanced',
         features: ['chat', 'text-generation']
@@ -333,30 +705,381 @@ export const MODEL_PRICING_DATA: Record<string, ModelPricing> = {
         features: ['chat', 'text-generation', 'code-generation']
     },
 
-    // Mistral Models
-    'mistral-large-latest': {
+    // Mistral AI Models
+    // Premier Models
+    'mistral-medium-2508': {
         provider: 'Mistral',
-        inputPrice: 4.0,
-        outputPrice: 12.0,
-        contextWindow: 32768,
-        category: 'premium',
-        features: ['chat', 'text-generation', 'reasoning', 'code-generation']
+        inputPrice: 0.4,
+        outputPrice: 2.0,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'analysis', 'reasoning', 'enterprise']
     },
     'mistral-medium-latest': {
         provider: 'Mistral',
-        inputPrice: 2.7,
-        outputPrice: 8.1,
-        contextWindow: 32768,
-        category: 'balanced',
-        features: ['chat', 'text-generation', 'reasoning']
+        inputPrice: 0.4,
+        outputPrice: 2.0,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'analysis', 'reasoning', 'enterprise']
     },
-    'mistral-small-latest': {
+    'magistral-medium-2507': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 5.0,
+        contextWindow: 40000,
+        category: 'reasoning',
+        features: ['chat', 'text-generation', 'reasoning', 'thinking', 'domain-specific', 'multilingual']
+    },
+    'magistral-medium-latest': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 5.0,
+        contextWindow: 40000,
+        category: 'reasoning',
+        features: ['chat', 'text-generation', 'reasoning', 'thinking', 'domain-specific', 'multilingual']
+    },
+    'codestral-2508': {
+        provider: 'Mistral',
+        inputPrice: 0.3,
+        outputPrice: 0.9,
+        contextWindow: 256000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'programming', 'multilingual-code', 'fill-in-middle', 'code-correction', 'test-generation']
+    },
+    'codestral-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.3,
+        outputPrice: 0.9,
+        contextWindow: 256000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'programming', 'multilingual-code', 'fill-in-middle', 'code-correction', 'test-generation']
+    },
+    'voxtral-mini-2507': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 0,
+        category: 'audio',
+        features: ['audio', 'transcription', 'efficient']
+    },
+    'voxtral-mini-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 0,
+        category: 'audio',
+        features: ['audio', 'transcription', 'efficient']
+    },
+    'devstral-medium-2507': {
+        provider: 'Mistral',
+        inputPrice: 0.4,
+        outputPrice: 2.0,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing']
+    },
+    'devstral-medium-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.4,
+        outputPrice: 2.0,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing']
+    },
+    'mistral-ocr-2505': {
         provider: 'Mistral',
         inputPrice: 1.0,
         outputPrice: 3.0,
-        contextWindow: 32768,
-        category: 'balanced',
-        features: ['chat', 'text-generation']
+        contextWindow: 0,
+        category: 'document',
+        features: ['ocr', 'document-understanding', 'annotations', 'text-extraction']
+    },
+    'mistral-ocr-latest': {
+        provider: 'Mistral',
+        inputPrice: 1.0,
+        outputPrice: 3.0,
+        contextWindow: 0,
+        category: 'document',
+        features: ['ocr', 'document-understanding', 'annotations', 'text-extraction']
+    },
+    'mistral-large-2411': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        contextWindow: 128000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'reasoning', 'complex-tasks', 'high-complexity']
+    },
+    'mistral-large-latest': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        contextWindow: 128000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'reasoning', 'complex-tasks', 'high-complexity']
+    },
+    'pixtral-large-2411': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'vision', 'multimodal', 'reasoning', 'frontier-class']
+    },
+    'pixtral-large-latest': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'vision', 'multimodal', 'reasoning', 'frontier-class']
+    },
+    'mistral-small-2407': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 32000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'multilingual', 'open-source']
+    },
+    'mistral-embed': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 8192,
+        category: 'embedding',
+        features: ['embedding', 'text', 'semantic']
+    },
+    'codestral-embed-2505': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 8192,
+        category: 'embedding',
+        features: ['embedding', 'code', 'semantic']
+    },
+    'mistral-moderation-2411': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 32000,
+        category: 'moderation',
+        features: ['moderation', 'classification', 'harmful-content-detection']
+    },
+    'mistral-moderation-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 32000,
+        category: 'moderation',
+        features: ['moderation', 'classification', 'harmful-content-detection']
+    },
+    
+    // Open Models
+    'magistral-small-2507': {
+        provider: 'Mistral',
+        inputPrice: 0.5,
+        outputPrice: 1.5,
+        contextWindow: 40000,
+        category: 'reasoning',
+        features: ['chat', 'text-generation', 'reasoning', 'thinking', 'domain-specific', 'multilingual']
+    },
+    'magistral-small-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.5,
+        outputPrice: 1.5,
+        contextWindow: 40000,
+        category: 'reasoning',
+        features: ['chat', 'text-generation', 'reasoning', 'thinking', 'domain-specific', 'multilingual']
+    },
+    'voxtral-small-2507': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 32000,
+        category: 'audio',
+        features: ['chat', 'text-generation', 'audio', 'instruct', 'multimodal']
+    },
+    'voxtral-small-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        contextWindow: 32000,
+        category: 'audio',
+        features: ['chat', 'text-generation', 'audio', 'instruct', 'multimodal']
+    },
+    'mistral-small-2506': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'multilingual', 'open-source']
+    },
+    'devstral-small-2507': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'agents', 'open-source', 'codebase-exploration', 'multi-file-editing']
+    },
+    'devstral-small-latest': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'agents', 'open-source', 'codebase-exploration', 'multi-file-editing']
+    },
+    'mistral-small-2503': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'multilingual', 'open-source', 'image-understanding']
+    },
+    'mistral-small-2501': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 32000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'multilingual', 'open-source']
+    },
+    'devstral-small-2505': {
+        provider: 'Mistral',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'agents', 'open-source', '24b-parameter']
+    },
+    'pixtral-12b-2409': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'vision', 'multimodal', 'small', 'image-understanding']
+    },
+    'pixtral-12b': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'vision', 'multimodal', 'small', 'image-understanding']
+    },
+    'open-mistral-nemo-2407': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'multilingual', 'open-source', 'best-multilingual']
+    },
+    'open-mistral-nemo': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'multilingual', 'open-source', 'best-multilingual']
+    },
+    'mistral-nemo': {
+        provider: 'Mistral',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        contextWindow: 128000,
+        category: 'code',
+        features: ['chat', 'text-generation', 'code', 'specialized']
+    },
+    'open-mistral-7b': {
+        provider: 'Mistral',
+        inputPrice: 0.25,
+        outputPrice: 0.25,
+        contextWindow: 32000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'open-source', 'fast']
+    },
+    'open-mixtral-8x7b': {
+        provider: 'Mistral',
+        inputPrice: 0.7,
+        outputPrice: 0.7,
+        contextWindow: 32000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'mixture-of-experts', 'open-source']
+    },
+    'open-mixtral-8x22b': {
+        provider: 'Mistral',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        contextWindow: 65000,
+        category: 'text',
+        features: ['chat', 'text-generation', 'mixture-of-experts', 'open-source', 'high-performance']
+    },
+
+    // Grok AI Models
+    'grok-4-0709': {
+        provider: 'xAI',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 256000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'reasoning', 'function-calling', 'structured-outputs']
+    },
+    'grok-3': {
+        provider: 'xAI',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        contextWindow: 131072,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'function-calling', 'structured-outputs']
+    },
+    'grok-3-mini': {
+        provider: 'xAI',
+        inputPrice: 0.3,
+        outputPrice: 0.5,
+        contextWindow: 131072,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'function-calling', 'structured-outputs']
+    },
+    'grok-2-image-1212': {
+        provider: 'xAI',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        contextWindow: 0,
+        category: 'image',
+        features: ['image-generation']
+    },
+
+    // Meta Llama 4 Models
+    'llama-4-scout': {
+        provider: 'Meta',
+        inputPrice: 0.19,
+        outputPrice: 0.49,
+        contextWindow: 10000000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'long-context', 'multilingual', 'image-grounding']
+    },
+    'llama-4-maverick': {
+        provider: 'Meta',
+        inputPrice: 0.19,
+        outputPrice: 0.49,
+        contextWindow: 10000000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'long-context', 'multilingual', 'image-grounding', 'fast-responses']
+    },
+    'llama-4-behemoth-preview': {
+        provider: 'Meta',
+        inputPrice: 0.19,
+        outputPrice: 0.49,
+        contextWindow: 10000000,
+        category: 'multimodal',
+        features: ['chat', 'text-generation', 'multimodal', 'vision', 'long-context', 'multilingual', 'image-grounding', 'teacher-model']
     }
 };
 
@@ -429,6 +1152,14 @@ const MODEL_ID_MAPPING: Record<string, string> = {
     'anthropic.claude-3-5-haiku-20241022-v1:0': 'claude-3-5-haiku-20241022-v1:0',
     
     // GPT variations
+    // === GPT-5 Models (Latest) ===
+    'gpt-5': 'gpt-5',
+    'gpt-5-mini': 'gpt-5-mini',
+    'gpt-5-nano': 'gpt-5-nano',
+    'gpt-5-chat-latest': 'gpt-5-chat-latest',
+    'gpt-5-chat': 'gpt-5-chat-latest',
+    
+    // === GPT-4 Models ===
     'gpt-4': 'gpt-4',
     'gpt-4-turbo': 'gpt-4-turbo',
     'gpt-4-turbo-preview': 'gpt-4-turbo-preview',
@@ -436,19 +1167,132 @@ const MODEL_ID_MAPPING: Record<string, string> = {
     'gpt-4o-mini': 'gpt-4o-mini',
     
     // Gemini variations
-    'gemini-pro': 'gemini-pro',
+    'gemini-pro': 'gemini-1.0-pro',
+    'gemini-1.0-pro': 'gemini-1.0-pro',
+    'gemini-1.0-pro-vision': 'gemini-1.0-pro-vision',
     'gemini-1.5-pro': 'gemini-1.5-pro',
     'gemini-1.5-flash': 'gemini-1.5-flash',
+    'gemini-1.5-flash-large-context': 'gemini-1.5-flash-large-context',
+    'gemini-1.5-flash-8b-large-context': 'gemini-1.5-flash-8b-large-context',
+    'gemini-1.5-pro-large-context': 'gemini-1.5-pro-large-context',
+    'gemini-2.5-pro': 'gemini-2.5-pro',
+    'gemini-2.5-flash': 'gemini-2.5-flash',
+    'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
+    'gemini-2.5-flash-audio': 'gemini-2.5-flash-audio',
+    'gemini-2.5-flash-lite-audio-preview': 'gemini-2.5-flash-lite-audio-preview',
+    'gemini-2.5-flash-native-audio-output': 'gemini-2.5-flash-native-audio-output',
+    'gemini-2.0-flash': 'gemini-2.0-flash',
+    'gemini-2.0-flash-lite': 'gemini-2.0-flash-lite',
+    'gemini-2.0-flash-audio': 'gemini-2.0-flash-audio',
+    
+    // Gemma variations
+    'gemma-2': 'gemma-2',
+    'gemma': 'gemma',
+    'shieldgemma-2': 'shieldgemma-2',
+    'paligemma': 'paligemma',
+    'codegemma': 'codegemma',
+    'txgemma': 'txgemma',
+    'medgemma': 'medgemma',
+    'medsiglip': 'medsiglip',
+    't5gemma': 't5gemma',
+    
+    // Google Embeddings variations
+    'multimodal-embeddings': 'multimodal-embeddings',
+    
+    // Google Imagen variations
+    'imagen-4-generation': 'imagen-4-generation',
+    'imagen-4-fast-generation': 'imagen-4-fast-generation',
+    'imagen-4-ultra-generation': 'imagen-4-ultra-generation',
+    'imagen-3-generation': 'imagen-3-generation',
+    'imagen-3-editing-customization': 'imagen-3-editing-customization',
+    'imagen-3-fast-generation': 'imagen-3-fast-generation',
+    'imagen-captioning-vqa': 'imagen-captioning-vqa',
+    
+    // Google Veo variations
+    'veo-3': 'veo-3',
+    'veo-3-fast': 'veo-3-fast',
+    'virtual-try-on': 'virtual-try-on',
+    'veo-3-preview': 'veo-3-preview',
+    'veo-3-fast-preview': 'veo-3-fast-preview',
     
     // Cohere variations
-    'command-r': 'cohere.command-r-v1:0',
-    'command-r-plus': 'cohere.command-r-plus-v1:0',
-    'cohere.command-r-v1:0': 'command-r',
-    'cohere.command-r-plus-v1:0': 'command-r-plus',
+    'command-a': 'command-a-03-2025',
+    'command-a-03-2025': 'command-a-03-2025',
+    'command-r7b': 'command-r7b-12-2024',
+    'command-r7b-12-2024': 'command-r7b-12-2024',
+    'command-a-reasoning': 'command-a-reasoning-08-2025',
+    'command-a-reasoning-08-2025': 'command-a-reasoning-08-2025',
+    'command-a-vision': 'command-a-vision-07-2025',
+    'command-a-vision-07-2025': 'command-a-vision-07-2025',
+    'command-r-plus': 'command-r-plus-04-2024',
+    'command-r-plus-04-2024': 'command-r-plus-04-2024',
+    'command-r': 'command-r-08-2024',
+    'command-r-08-2024': 'command-r-08-2024',
+    'command-r-03-2024': 'command-r-03-2024',
+    'command': 'command',
+    'command-nightly': 'command-nightly',
+    'command-light': 'command-light',
+    'command-light-nightly': 'command-light-nightly',
     
-    // Mistral variations
-    'mistral-7b': 'mistral.mistral-7b-instruct-v0:2',
-    'mistral-large': 'mistral.mistral-large-2402-v1:0',
+    // Mistral AI variations
+    // Premier Models
+    'mistral-medium': 'mistral-medium-2508',
+    'mistral-medium-2508': 'mistral-medium-2508',
+    'mistral-medium-latest': 'mistral-medium-2508',
+    'magistral-medium': 'magistral-medium-2507',
+    'magistral-medium-2507': 'magistral-medium-2507',
+    'magistral-medium-latest': 'magistral-medium-2507',
+    'codestral': 'codestral-2508',
+    'codestral-2508': 'codestral-2508',
+    'codestral-latest': 'codestral-2508',
+    'voxtral-mini': 'voxtral-mini-2507',
+    'voxtral-mini-2507': 'voxtral-mini-2507',
+    'voxtral-mini-latest': 'voxtral-mini-2507',
+    'devstral-medium': 'devstral-medium-2507',
+    'devstral-medium-2507': 'devstral-medium-2507',
+    'devstral-medium-latest': 'devstral-medium-2507',
+    'mistral-ocr': 'mistral-ocr-2505',
+    'mistral-ocr-2505': 'mistral-ocr-2505',
+    'mistral-ocr-latest': 'mistral-ocr-2505',
+    'mistral-large-2411': 'mistral-large-2411',
+    'mistral-large-latest': 'mistral-large-2411',
+    'pixtral-large': 'pixtral-large-2411',
+    'pixtral-large-2411': 'pixtral-large-2411',
+    'pixtral-large-latest': 'pixtral-large-2411',
+    'mistral-small-2407': 'mistral-small-2407',
+    'mistral-small-2506': 'mistral-small-2506',
+    'mistral-small-2503': 'mistral-small-2503',
+    'mistral-small-2501': 'mistral-small-2501',
+    'mistral-embed': 'mistral-embed',
+    'codestral-embed': 'codestral-embed-2505',
+    'codestral-embed-2505': 'codestral-embed-2505',
+    'mistral-moderation': 'mistral-moderation-2411',
+    'mistral-moderation-2411': 'mistral-moderation-2411',
+    'mistral-moderation-latest': 'mistral-moderation-2411',
+    
+    // Open Models
+    'magistral-small': 'magistral-small-2507',
+    'magistral-small-2507': 'magistral-small-2507',
+    'magistral-small-latest': 'magistral-small-2507',
+    'voxtral-small': 'voxtral-small-2507',
+    'voxtral-small-2507': 'voxtral-small-2507',
+    'voxtral-small-latest': 'voxtral-small-2507',
+    'devstral-small': 'devstral-small-2507',
+    'devstral-small-2507': 'devstral-small-2507',
+    'devstral-small-latest': 'devstral-small-2507',
+    'devstral-small-2505': 'devstral-small-2505',
+    'pixtral-12b': 'pixtral-12b-2409',
+    'pixtral-12b-2409': 'pixtral-12b-2409',
+    'open-mistral-nemo': 'open-mistral-nemo-2407',
+    'open-mistral-nemo-2407': 'open-mistral-nemo-2407',
+    'mistral-nemo': 'mistral-nemo',
+    'open-mistral-7b': 'open-mistral-7b',
+    'open-mixtral-8x7b': 'open-mixtral-8x7b',
+    'open-mixtral-8x22b': 'open-mixtral-8x22b',
+    
+    // Legacy AWS Bedrock Mistral models (using different keys to avoid conflicts)
+    'mistral-7b-legacy': 'mistral.mistral-7b-instruct-v0:2',
+    'mistral-large-legacy': 'mistral.mistral-large-2402-v1:0',
     'mistral.mistral-7b-instruct-v0:2': 'mistral-7b-instruct',
     'mistral.mistral-large-2402-v1:0': 'mistral-large-2402',
     
@@ -460,7 +1304,21 @@ const MODEL_ID_MAPPING: Record<string, string> = {
     'meta.llama2-13b-chat-v1:0': 'llama2-13b-chat',
     'meta.llama2-70b-chat-v1:0': 'llama2-70b-chat',
     'meta.llama3-8b-instruct-v1:0': 'llama3-8b-instruct',
-    'meta.llama3-70b-instruct-v1:0': 'llama3-70b-instruct'
+    'meta.llama3-70b-instruct-v1:0': 'llama3-70b-instruct',
+    
+    // Grok AI variations
+    'grok-4': 'grok-4-0709',
+    'grok-4-latest': 'grok-4-0709',
+    'grok-3-latest': 'grok-3',
+    'grok-3-mini-latest': 'grok-3-mini',
+    'grok-2-image': 'grok-2-image-1212',
+    'grok-2-image-latest': 'grok-2-image-1212',
+    
+    // Meta Llama 4 variations
+    'llama-4-scout': 'llama-4-scout',
+    'llama-4-maverick': 'llama-4-maverick',
+    'llama-4-behemoth': 'llama-4-behemoth-preview',
+    'llama-4-behemoth-preview': 'llama-4-behemoth-preview'
 };
 
 // Utility functions
