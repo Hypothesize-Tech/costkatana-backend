@@ -61,6 +61,9 @@ export interface IUsage {
     workflowSequence?: number;
     createdAt: Date;
     updatedAt: Date;
+    // Email fields for user and customer identification
+    userEmail?: string;
+    customerEmail?: string;
 }
 
 const usageSchema = new Schema<IUsage>({
@@ -160,6 +163,19 @@ const usageSchema = new Schema<IUsage>({
     isServerError: {
         type: Boolean,
         default: false
+    },
+    // Email fields for user and customer identification
+    userEmail: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        sparse: true
+    },
+    customerEmail: {
+        type: String,
+        trim: true,
+        lowercase: true,
+        sparse: true
     },
     ipAddress: String,
     userAgent: String,

@@ -139,7 +139,7 @@ export class UsageController {
                 service: data.service || data.provider || 'openai',
                 model: sanitizeModelName(data.model),
                 prompt: data.prompt || '',
-                completion: data.completion || undefined,
+                completion: data.completion,
                 promptTokens: data.promptTokens,
                 completionTokens: data.completionTokens,
                 totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
@@ -158,14 +158,30 @@ export class UsageController {
                     }
                 })(),
                 responseTime: data.responseTime || 0,
-                metadata: data.metadata || {},
+                metadata: {
+                    ...data.metadata,
+                    // Enhanced request/response data
+                    messages: data.messages,
+                    system: data.system,
+                    input: data.input,
+                    output: data.output,
+                    // Enhanced metadata for comprehensive tracking
+                    requestMetadata: data.requestMetadata,
+                    responseMetadata: data.responseMetadata
+                },
                 tags: data.tags || [],
+                projectId: data.projectId,
+                // Workflow tracking
                 workflowId: data.workflowId,
                 workflowName: data.workflowName,
                 workflowStep: data.workflowStep,
                 workflowSequence: data.workflowSequence,
+                // Email tracking
+                userAgent: req.headers['user-agent'],
+                userEmail: data.userEmail,
+                customerEmail: data.customerEmail,
+                // Error tracking fields
                 optimizationApplied: false,
-                // Enhanced error tracking
                 errorOccurred: hasError || false,
                 errorMessage: data.errorMessage || (data.error?.message) || undefined,
                 httpStatusCode: errorInfo.httpStatusCode,
@@ -173,8 +189,7 @@ export class UsageController {
                 errorDetails: errorInfo.errorDetails,
                 isClientError: errorInfo.isClientError || false,
                 isServerError: errorInfo.isServerError || false,
-                ipAddress: req.ip || req.connection?.remoteAddress,
-                userAgent: req.headers['user-agent']
+                ipAddress: req.ip || req.connection?.remoteAddress
             };
 
             // Only add projectId if it exists and is valid

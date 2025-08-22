@@ -65,15 +65,15 @@ export class UsageService {
             }
             // Create usage document
             const usageData = {
-                userId,
-                service: data.service,
+                userId: new mongoose.Types.ObjectId(data.userId),
+                service: data.service || data.provider || 'openai',
                 model: data.model,
                 prompt: data.prompt || '',
                 completion: data.completion,
                 promptTokens: data.promptTokens,
                 completionTokens: data.completionTokens,
-                totalTokens: data.totalTokens,
-                cost: data.cost || 0,
+                totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
+                cost: data.cost || data.estimatedCost || 0,
                 responseTime: data.responseTime || 0,
                 metadata: data.metadata || {},
                 tags: data.tags || [],
@@ -86,7 +86,10 @@ export class UsageService {
                 workflowId: data.workflowId,
                 workflowName: data.workflowName,
                 workflowStep: data.workflowStep,
-                workflowSequence: data.workflowSequence
+                workflowSequence: data.workflowSequence,
+                // Add email fields
+                userEmail: data.userEmail,
+                customerEmail: data.customerEmail
             };
 
             // Only add projectId if it exists and is not empty

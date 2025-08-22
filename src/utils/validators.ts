@@ -62,7 +62,39 @@ export const sdkTrackUsageSchema = z.object({
     workflowId: z.string().optional(),
     workflowName: z.string().optional(),
     workflowStep: z.string().optional(),
-    workflowSequence: z.number().min(0).optional()
+    workflowSequence: z.number().min(0).optional(),
+    // Email fields for user and customer identification
+    userEmail: z.string().email().optional(),
+    customerEmail: z.string().email().optional(),
+    // Enhanced request/response data
+    messages: z.array(z.object({
+        role: z.enum(['system', 'user', 'assistant']),
+        content: z.string()
+    })).optional(),
+    system: z.string().optional(),
+    input: z.string().optional(),
+    output: z.string().optional(),
+    // Enhanced metadata for comprehensive tracking
+    requestMetadata: z.object({
+        messages: z.array(z.object({
+            role: z.enum(['system', 'user', 'assistant']),
+            content: z.string()
+        })).optional(),
+        system: z.string().optional(),
+        input: z.string().optional(),
+        prompt: z.string().optional()
+    }).optional(),
+    responseMetadata: z.object({
+        completion: z.string().optional(),
+        output: z.string().optional(),
+        choices: z.array(z.object({
+            message: z.object({
+                content: z.string(),
+                role: z.string()
+            }).optional(),
+            text: z.string().optional()
+        })).optional()
+    }).optional()
 }).refine(
     (data) => data.provider || data.service,
     { message: "Either 'provider' or 'service' must be provided" }
