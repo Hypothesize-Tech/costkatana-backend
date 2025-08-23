@@ -934,4 +934,293 @@ export class TelemetryService {
       // Don't throw - vectorization failure shouldn't break telemetry storage
     }
   }
+
+  /**
+   * Start continuous background enrichment
+   */
+  static startBackgroundEnrichment(): void {
+    // Run enrichment every 5 minutes
+    setInterval(async () => {
+      try {
+        await TelemetryService.autoEnrichSpans();
+        logger.info('Background span enrichment completed');
+      } catch (error) {
+        logger.error('Background span enrichment failed:', error);
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+
+    // Also run immediately
+    setImmediate(async () => {
+      try {
+        await TelemetryService.autoEnrichSpans();
+        logger.info('Initial background span enrichment completed');
+      } catch (error) {
+        logger.error('Initial background span enrichment failed:', error);
+      }
+    });
+  }
+
+  /**
+   * Auto-enrich spans with AI insights and cost optimization
+   */
+  static async autoEnrichSpans(): Promise<void> {
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - 24 * 60 * 60 * 1000); // Last 24 hours
+
+      // Find spans that haven't been enriched yet
+      const unenrichedSpans = await Telemetry.find({
+        timestamp: { $gte: start, $lte: now },
+        'attributes.enriched_insights': { $exists: false },
+        status: { $in: ['success', 'error'] }
+      }).limit(50).lean(); // Reduced limit for better performance
+
+      if (unenrichedSpans.length === 0) {
+        return;
+      }
+
+      logger.info(`Enriching ${unenrichedSpans.length} spans with AI insights`);
+
+      // Process spans in batches for better performance
+      const batchSize = 10;
+      for (let i = 0; i < unenrichedSpans.length; i += batchSize) {
+        const batch = unenrichedSpans.slice(i, i + batchSize);
+        
+        await Promise.all(batch.map(async (span) => {
+          try {
+            const enrichment = await this.generateSpanEnrichment(span);
+            
+            if (enrichment) {
+              await Telemetry.updateOne(
+                { _id: span._id },
+                { 
+                  $set: { 
+                    'attributes.enriched_insights': enrichment.insights,
+                    'attributes.routing_decision': enrichment.routing_decision,
+                    'attributes.processing_type': enrichment.processing_type,
+                    'attributes.request_priority': enrichment.priority,
+                    'attributes.cache_hit': enrichment.cache_hit
+                  }
+                }
+              );
+            }
+          } catch (error) {
+            logger.error(`Failed to enrich span ${span.span_id}:`, error);
+          }
+        }));
+
+        // Small delay between batches to prevent overwhelming the database
+        if (i + batchSize < unenrichedSpans.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to auto-enrich spans:', error);
+    }
+  }
+
+  /**
+   * Generate AI enrichment for a span
+   */
+  private static async generateSpanEnrichment(span: any): Promise<{
+    insights: string;
+    routing_decision: string;
+    processing_type: string;
+    priority: string;
+    cache_hit: boolean;
+  } | null> {
+    try {
+      // Analyze span characteristics
+      const isHighCost = (span.cost_usd || 0) > 0.01;
+      const isSlow = (span.duration_ms || 0) > 5000;
+      const isError = span.status === 'error';
+      const isGenAI = span.gen_ai_model || span.gen_ai_system;
+
+      let insights = '';
+      let routing_decision = 'standard';
+      let processing_type = 'general';
+      let priority = 'normal';
+      let cache_hit = false;
+
+      // Generate insights based on span characteristics
+      if (isHighCost && isGenAI) {
+        insights = `High-cost AI operation detected. Consider using a more cost-effective model or implementing caching for similar requests.`;
+        routing_decision = 'cost_optimized';
+        processing_type = 'ai_cost_optimization';
+        priority = 'high';
+      } else if (isSlow && isGenAI) {
+        insights = `Slow AI response detected. Consider using a faster model or implementing request batching.`;
+        routing_decision = 'performance_optimized';
+        processing_type = 'ai_performance_optimization';
+        priority = 'medium';
+      } else if (isError && isGenAI) {
+        insights = `AI operation failed. Check model availability and consider implementing retry logic with exponential backoff.`;
+        routing_decision = 'error_handling';
+        processing_type = 'ai_error_recovery';
+        priority = 'high';
+      } else if (isGenAI) {
+        insights = `AI operation completed successfully. Consider implementing caching for repeated similar requests to reduce costs.`;
+        routing_decision = 'cache_optimized';
+        processing_type = 'ai_caching';
+        priority = 'low';
+        cache_hit = true;
+      } else if (span.database_latency_ms > 1000) {
+        insights = `Database operation is slow. Consider adding database indexes or implementing connection pooling.`;
+        routing_decision = 'db_optimized';
+        processing_type = 'database_optimization';
+        priority = 'medium';
+      } else if (span.http_status_code >= 400) {
+        insights = `HTTP error detected. Check external service health and implement proper error handling.`;
+        routing_decision = 'error_handling';
+        processing_type = 'http_error_recovery';
+        priority = 'high';
+      } else {
+        insights = `Operation completed successfully. No immediate optimization needed.`;
+        routing_decision = 'standard';
+        processing_type = 'general';
+        priority = 'low';
+      }
+
+      return {
+        insights,
+        routing_decision,
+        processing_type,
+        priority,
+        cache_hit
+      };
+    } catch (error) {
+      logger.error('Failed to generate span enrichment:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Generate real-time AI recommendations based on current telemetry
+   */
+  static async generateAIRecommendations(timeframe = '1h'): Promise<Array<{
+    trace_id: string;
+    operation: string;
+    insight: string;
+    cost_impact: number;
+    routing_decision: string;
+    priority: 'high' | 'medium' | 'low';
+    category: string;
+  }>> {
+    try {
+      const now = new Date();
+      const start = new Date(now.getTime() - this.getTimeframeMs(timeframe));
+
+      // Get recent spans for analysis
+      const recentSpans = await Telemetry.find({
+        timestamp: { $gte: start, $lte: now },
+        status: { $in: ['success', 'error'] }
+      }).sort({ timestamp: -1 }).limit(100).lean();
+
+      if (recentSpans.length === 0) {
+        return [];
+      }
+
+      const recommendations: Array<{
+        trace_id: string;
+        operation: string;
+        insight: string;
+        cost_impact: number;
+        routing_decision: string;
+        priority: 'high' | 'medium' | 'low';
+        category: string;
+      }> = [];
+
+      // Analyze cost patterns
+      const highCostSpans = recentSpans.filter(span => (span.cost_usd || 0) > 0.01);
+      if (highCostSpans.length > 0) {
+        const totalCost = highCostSpans.reduce((sum, span) => sum + (span.cost_usd || 0), 0);
+        const avgCost = totalCost / highCostSpans.length;
+        
+        recommendations.push({
+          trace_id: highCostSpans[0].trace_id,
+          operation: 'Cost Optimization',
+          insight: `High-cost operations detected: ${highCostSpans.length} spans with average cost $${avgCost.toFixed(4)}. Consider implementing caching, using cost-effective models, or request batching.`,
+          cost_impact: totalCost,
+          routing_decision: 'cost_optimized',
+          priority: 'high',
+          category: 'cost_optimization'
+        });
+      }
+
+      // Analyze performance patterns
+      const slowSpans = recentSpans.filter(span => (span.duration_ms || 0) > 5000);
+      if (slowSpans.length > 0) {
+        const avgDuration = slowSpans.reduce((sum, span) => sum + (span.duration_ms || 0), 0) / slowSpans.length;
+        
+        recommendations.push({
+          trace_id: slowSpans[0].trace_id,
+          operation: 'Performance Optimization',
+          insight: `Slow operations detected: ${slowSpans.length} spans with average duration ${(avgDuration / 1000).toFixed(2)}s. Consider optimizing database queries, implementing caching, or using faster models.`,
+          cost_impact: 0,
+          routing_decision: 'performance_optimized',
+          priority: 'medium',
+          category: 'performance_optimization'
+        });
+      }
+
+      // Analyze error patterns
+      const errorSpans = recentSpans.filter(span => span.status === 'error');
+      if (errorSpans.length > 0) {
+        const errorRate = (errorSpans.length / recentSpans.length) * 100;
+        
+        recommendations.push({
+          trace_id: errorSpans[0].trace_id,
+          operation: 'Error Resolution',
+          insight: `Error rate is ${errorRate.toFixed(1)}%. Check service health, implement proper error handling, and consider adding retry logic for transient failures.`,
+          cost_impact: 0,
+          routing_decision: 'error_handling',
+          priority: 'high',
+          category: 'error_resolution'
+        });
+      }
+
+      // Analyze AI model usage patterns
+      const aiSpans = recentSpans.filter(span => span.gen_ai_model || span.gen_ai_system);
+      if (aiSpans.length > 0) {
+        const modelUsage = aiSpans.reduce((acc, span) => {
+          const model = span.gen_ai_model || span.gen_ai_system || 'unknown';
+          acc[model] = (acc[model] || 0) + 1;
+          return acc;
+        }, {} as Record<string, number>);
+
+        const topModel = Object.entries(modelUsage).sort(([,a], [,b]) => b - a)[0];
+        
+        recommendations.push({
+          trace_id: aiSpans[0].trace_id,
+          operation: 'AI Model Optimization',
+          insight: `Most used AI model: ${topModel[0]} (${topModel[1]} requests). Consider implementing model selection logic based on request complexity and cost requirements.`,
+          cost_impact: aiSpans.reduce((sum, span) => sum + (span.cost_usd || 0), 0),
+          routing_decision: 'model_optimized',
+          priority: 'medium',
+          category: 'ai_optimization'
+        });
+      }
+
+      // Analyze database performance
+      const dbSpans = recentSpans.filter(span => span.database_latency_ms && span.database_latency_ms > 1000);
+      if (dbSpans.length > 0) {
+        const avgDbLatency = dbSpans.reduce((sum, span) => sum + (span.database_latency_ms || 0), 0) / dbSpans.length;
+        
+        recommendations.push({
+          trace_id: dbSpans[0].trace_id,
+          operation: 'Database Optimization',
+          insight: `Slow database operations detected: ${dbSpans.length} spans with average latency ${(avgDbLatency / 1000).toFixed(2)}s. Consider adding indexes, optimizing queries, or implementing connection pooling.`,
+          cost_impact: 0,
+          routing_decision: 'db_optimized',
+          priority: 'medium',
+          category: 'database_optimization'
+        });
+      }
+
+      return recommendations.slice(0, 5); // Return top 5 recommendations
+    } catch (error) {
+      logger.error('Failed to generate AI recommendations:', error);
+      return [];
+    }
+  }
 }

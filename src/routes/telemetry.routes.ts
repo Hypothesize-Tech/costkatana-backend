@@ -30,6 +30,7 @@ router.get('/dependencies', TelemetryController.getServiceDependencies);
 router.get('/enrichment/stats', TelemetryController.getEnrichmentStats);
 router.get('/enrichment/spans', TelemetryController.getEnrichedSpans);
 router.get('/enrichment/health', TelemetryController.getProcessorHealth);
+router.get('/enrichment/trigger', TelemetryController.triggerEnrichment);
 router.get('/dashboard/enhanced', TelemetryController.getEnhancedDashboard);
 
 export default router;

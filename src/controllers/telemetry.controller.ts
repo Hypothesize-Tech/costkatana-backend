@@ -441,7 +441,8 @@ export class TelemetryController {
       const [
         standardDashboard,
         enrichmentStats,
-        enrichedSpans
+        enrichedSpans,
+        aiRecommendations
       ] = await Promise.all([
         // Reuse existing dashboard logic
         TelemetryController.getDashboardData(tenant_id as string, workspace_id as string),
@@ -451,8 +452,18 @@ export class TelemetryController {
           workspace_id: workspace_id as string,
           timeframe: '1h',
           limit: 20
-        })
+        }),
+        TelemetryService.generateAIRecommendations('1h')
       ]);
+
+      // Auto-enrich spans in background (don't block response)
+      setImmediate(async () => {
+        try {
+          await TelemetryService.autoEnrichSpans();
+        } catch (error) {
+          logger.error('Background span enrichment failed:', error);
+        }
+      });
 
       res.json({
         success: true,
@@ -461,16 +472,15 @@ export class TelemetryController {
           enrichment: {
             stats: enrichmentStats,
             recent_insights: enrichedSpans.slice(0, 10),
-            ai_recommendations: enrichedSpans
-              .filter(span => span.insights)
-              .map(span => ({
-                trace_id: span.trace_id,
-                operation: span.operation_name,
-                insight: span.insights,
-                cost_impact: span.cost_usd,
-                routing_decision: span.routing_decision
-              }))
-              .slice(0, 5)
+            ai_recommendations: aiRecommendations.map(rec => ({
+              trace_id: rec.trace_id,
+              operation: rec.operation,
+              insight: rec.insight,
+              cost_impact: rec.cost_impact,
+              routing_decision: rec.routing_decision,
+              priority: rec.priority,
+              category: rec.category
+            }))
           }
         }
       });
@@ -479,6 +489,38 @@ export class TelemetryController {
       res.status(500).json({
         success: false,
         error: 'Failed to get enhanced dashboard data',
+        message: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * Manually trigger span enrichment (for testing/admin purposes)
+   */
+  static async triggerEnrichment(req: any, res: Response) {
+    try {
+      const { timeframe = '24h' } = req.query;
+      
+      // Start enrichment in background
+      setImmediate(async () => {
+        try {
+          await TelemetryService.autoEnrichSpans();
+          logger.info('Manual span enrichment completed successfully');
+        } catch (error) {
+          logger.error('Manual span enrichment failed:', error);
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Span enrichment started in background',
+        timeframe
+      });
+    } catch (error) {
+      logger.error('Failed to trigger enrichment:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to trigger enrichment',
         message: error instanceof Error ? error.message : 'Unknown error'
       });
     }

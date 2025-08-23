@@ -34,6 +34,7 @@ import { agentService } from './services/agent.service';
 import { redisService } from './services/redis.service';
 import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
+import { TelemetryService } from './services/telemetry.service';
 
 // Create Express app
 const app: Application = express();
@@ -215,6 +216,14 @@ export const startServer = async () => {
         logger.info('Starting server...');
         await connectDatabase();
         logger.info('MongoDB connected');
+
+        // Start background telemetry enrichment
+        try {
+            TelemetryService.startBackgroundEnrichment();
+            logger.info('✅ Background telemetry enrichment started');
+        } catch (error) {
+            logger.warn('⚠️ Background telemetry enrichment failed:', error);
+        }
 
         // Initialize Redis
         try {
