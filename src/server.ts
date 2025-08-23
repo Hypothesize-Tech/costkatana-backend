@@ -135,13 +135,15 @@ app.use(trackAnalyticsEvents);
 app.use(trackProjectEvents);
 app.use(trackUserSession);
 app.use(trackOptimizationEvents);
-app.use(cacheMiddleware);
 
 // Trace interceptor middleware
 app.use(traceInterceptor);
 
 // API routes
 app.use('/api', apiRouter);
+
+// Apply cache middleware AFTER API routes to exclude them from caching
+app.use(cacheMiddleware);
 
 // Health check route with minimal logging
 app.get('/', (req, res) => {

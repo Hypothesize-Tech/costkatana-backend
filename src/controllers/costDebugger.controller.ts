@@ -6,6 +6,7 @@ import { AIProvider } from '../types/aiCostTracker.types';
 export class CostDebuggerController {
   static async analyzePrompt(req: Request, res: Response): Promise<void> {
     try {
+      logger.info('🚀 CostDebuggerController.analyzePrompt called');
       const { prompt, provider, model, systemMessage, conversationHistory, toolCalls, metadata } = req.body;
 
       if (!prompt || !provider || !model) {
@@ -24,6 +25,12 @@ export class CostDebuggerController {
         });
         return;
       }
+
+      // Disable caching for cost debugger to ensure fresh AI analysis
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.setHeader('X-Cache', 'DISABLED-COST-DEBUGGER');
 
       logger.info(`🔍 Analyzing prompt for ${provider}/${model}`);
 

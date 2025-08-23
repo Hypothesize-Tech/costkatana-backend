@@ -1,6 +1,11 @@
-import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
-import { CloudWatchClient } from '@aws-sdk/client-cloudwatch';
-import { S3Client } from '@aws-sdk/client-s3';
+import * as AWS from '@aws-sdk/client-bedrock-runtime';
+import * as CloudWatch from '@aws-sdk/client-cloudwatch';
+import * as S3 from '@aws-sdk/client-s3';
+
+
+const { BedrockRuntimeClient } = AWS;
+const { CloudWatchClient } = CloudWatch;
+const { S3Client } = S3;
 
 export const bedrockClient = new BedrockRuntimeClient({
     region: process.env.AWS_BEDROCK_REGION || 'us-east-1',

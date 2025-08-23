@@ -1,9 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { redisService } from '../services/redis.service';
 
-
-
-
 // Helper function to extract the prompt from various LLM API request formats
 const extractPromptFromRequest = (req: Request): string | null => {
   const body = req.body;
@@ -24,7 +21,55 @@ const extractPromptFromRequest = (req: Request): string | null => {
   return null;
 };
 
-export const cacheMiddleware = async (req: Request, res: Response, next: NextFunction) => {
+export const cacheMiddleware = async (req: any, res: Response, next: NextFunction) => {
+  // Import logger here to avoid circular dependencies
+  const { logger } = require('../utils/logger');
+  // Debug logging to see what paths are being checked - log all POST requests
+  if (req.method === 'POST') {
+    logger.info('🔍 Cache middleware called for POST request', { 
+      path: req.path, 
+      originalUrl: req.originalUrl, 
+      url: req.url,
+      method: req.method,
+      fullPath: `${req.method} ${req.originalUrl}`,
+      baseUrl: req.baseUrl,
+      route: req.route?.path
+    });
+  }
+  
+  // Bypass cache for cost debugger endpoints to ensure fresh analysis
+  // Check multiple path formats to handle different routing configurations
+  const pathChecks = {
+    'req.path includes /cost-debugger/': req.path.includes('/cost-debugger/'),
+    'req.originalUrl includes /cost-debugger/': req.originalUrl.includes('/cost-debugger/'),
+    'req.url includes /cost-debugger/': req.url.includes('/cost-debugger/'),
+    'req.originalUrl includes /api/cost-debugger/': req.originalUrl.includes('/api/cost-debugger/'),
+    'req.url includes /api/cost-debugger/': req.url.includes('/api/cost-debugger/')
+  };
+  
+  const shouldBypass = Object.values(pathChecks).some(check => check);
+  
+  logger.info('🔍 Cache bypass check', { 
+    path: req.path, 
+    originalUrl: req.originalUrl,
+    url: req.url,
+    pathChecks,
+    shouldBypass
+  });
+    
+  if (shouldBypass) {
+    logger.info('✅ Cache completely disabled for cost debugger endpoint', { 
+      path: req.path, 
+      originalUrl: req.originalUrl 
+    });
+    res.setHeader('X-Cache', 'DISABLED-COST-DEBUGGER');
+    // Skip all cache logic for cost debugger endpoints
+    return next();
+  }
+
+  // If we reach here, caching is enabled for this route
+  logger.info('🔍 Cache enabled for this route, proceeding with cache check');
+
   const cacheControl = req.headers['cache-control'];
   if (cacheControl === 'no-cache') {
     res.setHeader('X-Cache', 'BYPASS');
@@ -73,7 +118,7 @@ export const cacheMiddleware = async (req: Request, res: Response, next: NextFun
           await redisService.storeCache(prompt, responseBody, {
             model: req.body.model,
             ttl,
-            // userId: req.user.id, // Example
+            userId: req.user.id, 
           });
         } catch (err) {
           // Catches JSON parsing errors or other issues

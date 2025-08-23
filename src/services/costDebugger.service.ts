@@ -2,6 +2,7 @@ import { logger } from '../utils/logger';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
 import { calculateCost, getModelPricing, getProviderModels } from '../utils/pricing';
+import { BedrockService } from './bedrock.service';
 
 export interface TokenAttribution {
   systemPrompt: { tokens: number; cost: number; impact: 'high' | 'medium' | 'low' };
@@ -76,25 +77,50 @@ export class CostDebuggerService {
     } = {}
   ): Promise<CostDebuggerAnalysis> {
     try {
+      logger.info('🚀 analyzePrompt method entered', { prompt, provider, model, options });
       logger.info('🔍 Starting prompt cost analysis');
 
       // Get model pricing information
+      logger.info('🔍 Getting model pricing...');
       const modelPricing = getModelPricing(provider, model);
       if (!modelPricing) {
         throw new Error(`No pricing data found for ${provider}/${model}`);
       }
+      logger.info('✅ Model pricing retrieved successfully', { modelPricing });
 
       // Parse prompt into sections
+      logger.info('🔍 Parsing prompt sections...');
       const sections = await this.parsePromptSections(prompt, provider, options);
+      logger.info('✅ Prompt sections parsed successfully', { sectionsCount: sections.length });
       
       // Calculate token attribution with dynamic pricing
+      logger.info('🔍 Calculating token attribution...');
       const tokenAttribution = await this.calculateTokenAttribution(sections, provider, model, modelPricing);
+      logger.info('✅ Token attribution calculated successfully', { tokenAttribution });
       
       // Analyze optimization opportunities
+      logger.info('🔍 About to call analyzeOptimizationOpportunities', { sectionsCount: sections.length, provider, model });
       const optimizationOpportunities = await this.analyzeOptimizationOpportunities(sections, provider, model);
+      logger.info('✅ analyzeOptimizationOpportunities completed successfully', { optimizationOpportunities });
       
       // Assess quality metrics
-      const qualityMetrics = await this.assessPromptQuality(sections, provider, model);
+      logger.info('🔍 About to call assessPromptQuality', { sectionsCount: sections.length, provider, model });
+      let qualityMetrics;
+      try {
+       logger.info('🚀 Calling assessPromptQuality method...');
+        qualityMetrics = await this.assessPromptQuality(sections, provider, model);
+        logger.info('✅ assessPromptQuality completed successfully', { qualityMetrics });
+      } catch (error) {
+        logger.error('❌ assessPromptQuality failed:', error);
+        // Provide fallback quality metrics
+        qualityMetrics = {
+          instructionClarity: 70,
+          contextRelevance: 70,
+          exampleEfficiency: 70,
+          overallScore: 70
+        };
+        logger.info('🔄 Using fallback quality metrics', { qualityMetrics });
+      }
 
       const analysis: CostDebuggerAnalysis = {
         promptId: this.generatePromptId(),
@@ -312,6 +338,147 @@ export class CostDebuggerService {
     estimatedSavings: number;
     confidence: number;
   }> {
+    try {
+      // Use AI-powered optimization analysis for better suggestions
+      const aiOptimizations = await this.performAIOptimizationAnalysis(sections, provider, model);
+      return aiOptimizations;
+    } catch (error) {
+      logger.warn('AI optimization analysis failed, falling back to heuristic analysis:', error);
+      return this.fallbackOptimizationAnalysis(sections, provider, model);
+    }
+  }
+
+  private async performAIOptimizationAnalysis(
+    sections: PromptSection[],
+    provider: AIProvider,
+    model: string
+  ): Promise<{
+    highImpact: string[];
+    mediumImpact: string[];
+    lowImpact: string[];
+    estimatedSavings: number;
+    confidence: number;
+  }> {
+    try {
+      const optimizationPrompt = this.buildOptimizationAnalysisPrompt(sections, provider, model);
+      const aiResponse = await BedrockService.invokeModel(optimizationPrompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
+      
+      const optimizations = this.parseOptimizationSuggestions(aiResponse);
+      
+      // Update section optimization suggestions
+      for (const section of sections) {
+        section.optimizationSuggestions = optimizations.sectionSuggestions[section.id] || [];
+      }
+      
+      logger.info('AI optimization analysis completed successfully', { optimizations });
+      return optimizations;
+      
+    } catch (error) {
+      logger.error('AI optimization analysis failed:', error);
+      throw error;
+    }
+  }
+
+  private buildOptimizationAnalysisPrompt(
+    sections: PromptSection[],
+    provider: AIProvider,
+    model: string
+  ): string {
+    const systemPrompt = `You are an expert AI prompt optimization analyst. Analyze the given prompt sections and provide specific optimization suggestions to reduce token usage and improve cost efficiency.
+
+Provider: ${provider}
+Model: ${model}
+
+Prompt Sections:
+${sections.map(section => `
+**${section.id} (${section.type})**: ${section.content.substring(0, 300)}${section.content.length > 300 ? '...' : ''}
+Tokens: ${section.tokens}
+Cost: $${section.cost.toFixed(6)}
+`).join('\n')}
+
+Analyze each section and provide optimization suggestions. Focus on:
+1. Removing redundant or unnecessary content
+2. Simplifying complex instructions
+3. Consolidating similar information
+4. Improving clarity while reducing length
+
+Provide your response as a valid JSON object with this exact format:
+{
+  "highImpact": [
+    "Remove redundant system instructions → Save 35% on system prompt tokens",
+    "Consolidate multiple examples into one comprehensive example → Save 40% on user message"
+  ],
+  "mediumImpact": [
+    "Simplify verbose language → Save 25% on instruction clarity",
+    "Remove duplicate context references → Save 20% on conversation history"
+  ],
+  "lowImpact": [
+    "Optimize metadata structure → Save 15% on metadata tokens",
+    "Streamline tool call arguments → Save 10% on tool section"
+  ],
+  "estimatedSavings": 0.000015,
+  "confidence": 0.88,
+  "sectionSuggestions": {
+    "system-prompt": ["Compress system instructions → Save 30%"],
+    "user-message": ["Break down complex request → Save 25%"],
+    "history-0": ["Summarize older messages → Save 40%"]
+  }
+}
+
+Scoring Guidelines:
+- High Impact: 25-40% token reduction potential
+- Medium Impact: 15-25% token reduction potential  
+- Low Impact: 5-15% token reduction potential
+
+Be specific about what to change and estimated savings.`;
+
+    return systemPrompt;
+  }
+
+  private parseOptimizationSuggestions(aiResponse: string): {
+    highImpact: string[];
+    mediumImpact: string[];
+    lowImpact: string[];
+    estimatedSavings: number;
+    confidence: number;
+    sectionSuggestions: Record<string, string[]>;
+  } {
+    try {
+      const jsonResponse = BedrockService.extractJson(aiResponse);
+      const parsed = JSON.parse(jsonResponse);
+      
+      return {
+        highImpact: Array.isArray(parsed.highImpact) ? parsed.highImpact : [],
+        mediumImpact: Array.isArray(parsed.mediumImpact) ? parsed.mediumImpact : [],
+        lowImpact: Array.isArray(parsed.lowImpact) ? parsed.lowImpact : [],
+        estimatedSavings: Number(parsed.estimatedSavings) || 0,
+        confidence: Number(parsed.confidence) || 0.85,
+        sectionSuggestions: parsed.sectionSuggestions || {}
+      };
+    } catch (error) {
+      logger.error('Failed to parse AI optimization suggestions:', error);
+      return {
+        highImpact: [],
+        mediumImpact: [],
+        lowImpact: [],
+        estimatedSavings: 0,
+        confidence: 0.85,
+        sectionSuggestions: {}
+      };
+    }
+  }
+
+  private async fallbackOptimizationAnalysis(
+    sections: PromptSection[],
+    provider: AIProvider,
+    model: string
+  ): Promise<{
+    highImpact: string[];
+    mediumImpact: string[];
+    lowImpact: string[];
+    estimatedSavings: number;
+    confidence: number;
+  }> {
     const highImpact: string[] = [];
     const mediumImpact: string[] = [];
     const lowImpact: string[] = [];
@@ -437,17 +604,162 @@ export class CostDebuggerService {
 
   private async assessPromptQuality(
     sections: PromptSection[],
-    _provider: AIProvider,
-    _model: string
+    provider: AIProvider,
+    model: string
   ): Promise<{
     instructionClarity: number;
     contextRelevance: number;
     exampleEfficiency: number;
     overallScore: number;
   }> {
-    let instructionClarity = 0;
-    let contextRelevance = 0;
-    let exampleEfficiency = 0;
+    logger.info('🔍 Starting quality assessment', { 
+      sectionsCount: sections.length, 
+      provider, 
+      model 
+    });
+    
+    try {
+      // Use AI-powered quality assessment for better accuracy
+      logger.info('🤖 Attempting AI-powered quality analysis...');
+      const qualityAnalysis = await this.performAIQualityAnalysis(sections, provider, model);
+      logger.info('✅ AI quality analysis completed successfully', { qualityAnalysis });
+      return qualityAnalysis;
+    } catch (error) {
+      logger.error('❌ AI quality analysis failed with error:', error);
+      logger.warn('⚠️ Falling back to heuristic scoring');
+      const fallbackScores = this.fallbackQualityAssessment(sections);
+      logger.info('🔄 Using fallback quality scores', { fallbackScores });
+      return fallbackScores;
+    }
+  }
+
+  private async performAIQualityAnalysis(
+    sections: PromptSection[],
+    provider: AIProvider,
+    model: string
+  ): Promise<{
+    instructionClarity: number;
+    contextRelevance: number;
+    exampleEfficiency: number;
+    overallScore: number;
+  }> {
+    try {
+      // Prepare the prompt for AI analysis
+      const analysisPrompt = this.buildQualityAnalysisPrompt(sections);
+      
+      logger.info('🚀 Starting AI quality analysis', { 
+        sectionsCount: sections.length, 
+        promptLength: analysisPrompt.length,
+        provider,
+        model
+      });
+      
+      // Use Bedrock service for AI-powered analysis - use a more cost-effective model
+      const aiResponse = await BedrockService.invokeModel(analysisPrompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
+      
+      logger.info('✅ AI quality analysis completed successfully', { 
+        responseLength: aiResponse.length,
+        responsePreview: aiResponse.substring(0, 200) + '...'
+      });
+      
+      // Parse the AI response to extract quality scores
+      const qualityScores = this.parseQualityScores(aiResponse);
+      
+      // Validate that we got meaningful scores
+      if (qualityScores.overallScore > 0) {
+        logger.info('🎯 Quality scores parsed successfully', { qualityScores });
+        return qualityScores;
+      } else {
+        logger.warn('⚠️ AI returned zero scores, falling back to heuristic analysis');
+        return this.fallbackQualityAssessment(sections);
+      }
+      
+    } catch (error) {
+      logger.warn('⚠️ AI quality analysis failed, falling back to heuristic scoring', { 
+        error: error instanceof Error ? error.message : String(error),
+        provider,
+        model
+      });
+      
+      // Fallback to heuristic scoring instead of throwing
+      return this.fallbackQualityAssessment(sections);
+    }
+  }
+
+  private buildQualityAnalysisPrompt(sections: PromptSection[]): string {
+    const systemPrompt = `You are an expert AI prompt quality analyst. Analyze the given prompt sections and provide quality scores on a scale of 0-100 for each metric.
+
+Please evaluate the following prompt sections and provide scores for:
+
+1. **Instruction Clarity (0-100)**: How clear, specific, and actionable the instructions are
+2. **Context Relevance (0-100)**: How relevant and necessary the provided context is
+3. **Example Efficiency (0-100)**: How well examples illustrate the requirements without being redundant
+4. **Overall Score (0-100)**: Weighted average considering all factors
+
+Prompt Sections:
+${sections.map(section => `
+**${section.type.toUpperCase()}**: ${section.content.substring(0, 200)}${section.content.length > 200 ? '...' : ''}
+`).join('\n')}
+
+Provide your response as a valid JSON object with this exact format:
+{
+  "instructionClarity": 85,
+  "contextRelevance": 90,
+  "exampleEfficiency": 75,
+  "overallScore": 83
+}
+
+Scoring Guidelines:
+- 90-100: Excellent - Clear, concise, well-structured
+- 80-89: Good - Clear with minor improvements possible
+- 70-79: Fair - Generally clear but could be improved
+- 60-69: Poor - Unclear or verbose
+- 0-59: Very Poor - Confusing or overly complex
+
+Focus on clarity, conciseness, and effectiveness.`;
+
+    return systemPrompt;
+  }
+
+  private parseQualityScores(aiResponse: string): {
+    instructionClarity: number;
+    contextRelevance: number;
+    exampleEfficiency: number;
+    overallScore: number;
+  } {
+    try {
+      // Extract JSON from AI response
+      const jsonResponse = BedrockService.extractJson(aiResponse);
+      const parsed = JSON.parse(jsonResponse);
+      
+      // Validate and return scores
+      return {
+        instructionClarity: Math.max(0, Math.min(100, Number(parsed.instructionClarity) || 0)),
+        contextRelevance: Math.max(0, Math.min(100, Number(parsed.contextRelevance) || 0)),
+        exampleEfficiency: Math.max(0, Math.min(100, Number(parsed.exampleEfficiency) || 0)),
+        overallScore: Math.max(0, Math.min(100, Number(parsed.overallScore) || 0))
+      };
+    } catch (error) {
+      logger.error('Failed to parse AI quality scores:', error);
+      // Return default scores if parsing fails
+      return {
+        instructionClarity: 70,
+        contextRelevance: 70,
+        exampleEfficiency: 70,
+        overallScore: 70
+      };
+    }
+  }
+
+  private fallbackQualityAssessment(sections: PromptSection[]): {
+    instructionClarity: number;
+    contextRelevance: number;
+    exampleEfficiency: number;
+    overallScore: number;
+  } {
+    let instructionClarity = 75; // Improved base score
+    let contextRelevance = 75;
+    let exampleEfficiency = 75;
 
     for (const section of sections) {
       if (section.type === 'system') {
@@ -459,7 +771,19 @@ export class CostDebuggerService {
       }
     }
 
-    const overallScore = (instructionClarity + contextRelevance + exampleEfficiency) / 3;
+    // Ensure we never return 0 scores
+    instructionClarity = Math.max(instructionClarity, 60);
+    contextRelevance = Math.max(contextRelevance, 60);
+    exampleEfficiency = Math.max(exampleEfficiency, 60);
+
+    const overallScore = Math.round((instructionClarity + contextRelevance + exampleEfficiency) / 3);
+
+    logger.info('Using fallback quality assessment', { 
+      instructionClarity, 
+      contextRelevance, 
+      exampleEfficiency, 
+      overallScore 
+    });
 
     return {
       instructionClarity,
@@ -470,41 +794,66 @@ export class CostDebuggerService {
   }
 
   private scoreInstructionClarity(content: string): number {
-    let score = 70; // Base score
+    let score = 75; // Improved base score
 
+    // Positive indicators
     if (content.includes('MUST') || content.includes('REQUIRED')) score += 10;
     if (content.includes('DO NOT') || content.includes('NEVER')) score += 10;
-    if (content.includes('format') || content.includes('structure')) score += 5;
+    if (content.includes('format') || content.includes('structure')) score += 8;
+    if (content.includes('step') || content.includes('steps')) score += 5;
+    if (content.includes('example') || content.includes('examples')) score += 5;
     if (content.length < 200) score += 5;
-    if (content.length > 500) score -= 10;
+    if (content.length < 100) score += 10;
 
-    return Math.min(100, Math.max(0, score));
+    // Negative indicators
+    if (content.length > 500) score -= 15;
+    if (content.includes('very') || content.includes('really')) score -= 5;
+    if (content.includes('please') && content.includes('kindly')) score -= 5;
+
+    return Math.min(100, Math.max(60, score)); // Ensure minimum score of 60
   }
 
   private scoreContextRelevance(content: string): number {
-    let score = 70; // Base score
+    let score = 75; // Improved base score
 
+    // Positive indicators
     if (content.includes('relevant') || content.includes('important')) score += 10;
     if (content.includes('recent') || content.includes('latest')) score += 10;
-    if (content.includes('similar') || content.includes('same')) score -= 15;
+    if (content.includes('current') || content.includes('today')) score += 8;
     if (content.length < 100) score += 10;
-    if (content.length > 400) score -= 10;
+    if (content.length < 50) score += 15;
 
-    return Math.min(100, Math.max(0, score));
+    // Negative indicators
+    if (content.includes('similar') || content.includes('same')) score -= 15;
+    if (content.includes('duplicate') || content.includes('repeated')) score -= 10;
+    if (content.length > 400) score -= 15;
+    if (content.includes('as mentioned before') || content.includes('as I said earlier')) score -= 10;
+
+    return Math.min(100, Math.max(60, score)); // Ensure minimum score of 60
   }
 
   private scoreExampleEfficiency(content: string): number {
-    let score = 70; // Base score
+    let score = 75; // Improved base score
 
     const exampleCount = (content.match(/example/gi) || []).length;
+    
+    // Example count scoring
     if (exampleCount === 1) score += 15;
     if (exampleCount === 2) score += 10;
+    if (exampleCount === 3) score += 5;
     if (exampleCount > 3) score -= 20;
 
+    // Positive indicators
     if (content.includes('brief') || content.includes('concise')) score += 10;
-    if (content.includes('detailed') && content.length > 200) score -= 10;
+    if (content.includes('simple') || content.includes('clear')) score += 8;
+    if (content.includes('step-by-step') || content.includes('step by step')) score += 10;
 
-    return Math.min(100, Math.max(0, score));
+    // Negative indicators
+    if (content.includes('detailed') && content.length > 200) score -= 10;
+    if (content.includes('verbose') || content.includes('lengthy')) score -= 15;
+    if (content.includes('comprehensive') && content.length > 300) score -= 8;
+
+    return Math.min(100, Math.max(60, score)); // Ensure minimum score of 60
   }
 
   private generatePromptId(): string {
@@ -515,39 +864,149 @@ export class CostDebuggerService {
     try {
       const analysis = await this.analyzePrompt(prompt, provider, model);
       
-      const redundantInstructions: string[] = [];
-      const unnecessaryExamples: string[] = [];
-      const verbosePhrasing: string[] = [];
-      const duplicateContext: string[] = [];
-
-      for (const section of analysis.sections) {
-        if (section.optimizationSuggestions.some(s => s.includes('redundant'))) {
-          redundantInstructions.push(section.content.substring(0, 100) + '...');
-        }
-        if (section.optimizationSuggestions.some(s => s.includes('examples'))) {
-          unnecessaryExamples.push(section.content.substring(0, 100) + '...');
-        }
-        if (section.optimizationSuggestions.some(s => s.includes('qualifiers'))) {
-          verbosePhrasing.push(section.content.substring(0, 100) + '...');
-        }
-        if (section.optimizationSuggestions.some(s => s.includes('duplicate'))) {
-          duplicateContext.push(section.content.substring(0, 100) + '...');
-        }
+      // Use AI-powered dead weight detection for better accuracy
+      try {
+        const aiDeadWeight = await this.performAIDeadWeightAnalysis(analysis, provider, model);
+        return aiDeadWeight;
+      } catch (error) {
+        logger.warn('AI dead weight analysis failed, falling back to heuristic detection:', error);
+        return this.fallbackDeadWeightDetection(analysis);
       }
-
-      return {
-        redundantInstructions,
-        unnecessaryExamples,
-        verbosePhrasing,
-        duplicateContext,
-        estimatedSavings: analysis.optimizationOpportunities.estimatedSavings,
-        confidence: analysis.optimizationOpportunities.confidence
-      };
 
     } catch (error) {
       logger.error('❌ Error detecting dead weight:', error);
       throw new Error(`Failed to detect dead weight: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private async performAIDeadWeightAnalysis(
+    analysis: CostDebuggerAnalysis,
+    provider: AIProvider,
+    model: string
+  ): Promise<DeadWeightAnalysis> {
+    try {
+      const deadWeightPrompt = this.buildDeadWeightAnalysisPrompt(analysis, provider, model);
+      const aiResponse = await BedrockService.invokeModel(deadWeightPrompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
+      
+      const deadWeight = this.parseDeadWeightAnalysis(aiResponse);
+      
+      logger.info('AI dead weight analysis completed successfully', { deadWeight });
+      return deadWeight;
+      
+    } catch (error) {
+      logger.error('AI dead weight analysis failed:', error);
+      throw error;
+    }
+  }
+
+  private buildDeadWeightAnalysisPrompt(
+    analysis: CostDebuggerAnalysis,
+    provider: AIProvider,
+    model: string
+  ): string {
+    const systemPrompt = `You are an expert AI prompt optimization analyst specializing in detecting "dead weight" - unnecessary, redundant, or verbose content that increases token usage without adding value.
+
+Provider: ${provider}
+Model: ${model}
+Total Tokens: ${analysis.totalTokens}
+Total Cost: $${analysis.totalCost.toFixed(6)}
+
+Prompt Sections:
+${analysis.sections.map(section => `
+**${section.id} (${section.type})**: ${section.content.substring(0, 400)}${section.content.length > 400 ? '...' : ''}
+Tokens: ${section.tokens}
+Cost: $${section.cost.toFixed(6)}
+`).join('\n')}
+
+Analyze each section and identify dead weight in these categories:
+
+1. **Redundant Instructions**: Repeated or unnecessary instructions
+2. **Unnecessary Examples**: Examples that don't add value or are too verbose
+3. **Verbose Phrasing**: Overly wordy or complex language
+4. **Duplicate Context**: Repeated information across sections
+
+Provide your response as a valid JSON object with this exact format:
+{
+  "redundantInstructions": [
+    "System prompt contains redundant role definitions that are already clear from context",
+    "User message repeats the same request in different words"
+  ],
+  "unnecessaryExamples": [
+    "Multiple similar examples that could be consolidated into one comprehensive example",
+    "Example is too detailed and doesn't match the complexity of the actual request"
+  ],
+  "verbosePhrasing": [
+    "Uses 'very' and 'really' qualifiers that don't add meaning",
+    "Overly formal language that could be simplified"
+  ],
+  "duplicateContext": [
+    "Conversation history repeats information already in the user message",
+    "Metadata contains redundant timestamp information"
+  ],
+  "estimatedSavings": 0.000012,
+  "confidence": 0.92
+}
+
+Focus on identifying content that can be removed or simplified without losing the prompt's effectiveness.`;
+
+    return systemPrompt;
+  }
+
+  private parseDeadWeightAnalysis(aiResponse: string): DeadWeightAnalysis {
+    try {
+      const jsonResponse = BedrockService.extractJson(aiResponse);
+      const parsed = JSON.parse(jsonResponse);
+      
+      return {
+        redundantInstructions: Array.isArray(parsed.redundantInstructions) ? parsed.redundantInstructions : [],
+        unnecessaryExamples: Array.isArray(parsed.unnecessaryExamples) ? parsed.unnecessaryExamples : [],
+        verbosePhrasing: Array.isArray(parsed.verbosePhrasing) ? parsed.verbosePhrasing : [],
+        duplicateContext: Array.isArray(parsed.duplicateContext) ? parsed.duplicateContext : [],
+        estimatedSavings: Number(parsed.estimatedSavings) || 0,
+        confidence: Number(parsed.confidence) || 0.85
+      };
+    } catch (error) {
+      logger.error('Failed to parse AI dead weight analysis:', error);
+      return {
+        redundantInstructions: [],
+        unnecessaryExamples: [],
+        verbosePhrasing: [],
+        duplicateContext: [],
+        estimatedSavings: 0,
+        confidence: 0.85
+      };
+    }
+  }
+
+  private fallbackDeadWeightDetection(analysis: CostDebuggerAnalysis): DeadWeightAnalysis {
+    const redundantInstructions: string[] = [];
+    const unnecessaryExamples: string[] = [];
+    const verbosePhrasing: string[] = [];
+    const duplicateContext: string[] = [];
+
+    for (const section of analysis.sections) {
+      if (section.optimizationSuggestions.some(s => s.includes('redundant'))) {
+        redundantInstructions.push(section.content.substring(0, 100) + '...');
+      }
+      if (section.optimizationSuggestions.some(s => s.includes('examples'))) {
+        unnecessaryExamples.push(section.content.substring(0, 100) + '...');
+      }
+      if (section.optimizationSuggestions.some(s => s.includes('qualifiers'))) {
+        verbosePhrasing.push(section.content.substring(0, 100) + '...');
+      }
+      if (section.optimizationSuggestions.some(s => s.includes('duplicate'))) {
+        duplicateContext.push(section.content.substring(0, 100) + '...');
+      }
+    }
+
+    return {
+      redundantInstructions,
+      unnecessaryExamples,
+      verbosePhrasing,
+      duplicateContext,
+      estimatedSavings: analysis.optimizationOpportunities.estimatedSavings,
+      confidence: analysis.optimizationOpportunities.confidence
+    };
   }
 
   async comparePromptVersions(
@@ -563,6 +1022,7 @@ export class CostDebuggerService {
       costSaved: number;
       savingsPercentage: number;
       qualityImpact: number;
+      aiInsights: string[];
     };
   }> {
     try {
@@ -576,6 +1036,15 @@ export class CostDebuggerService {
       const savingsPercentage = (tokensSaved / originalAnalysis.totalTokens) * 100;
       const qualityImpact = optimizedAnalysis.qualityMetrics.overallScore - originalAnalysis.qualityMetrics.overallScore;
 
+      // Get AI-powered insights on the comparison
+      let aiInsights: string[] = [];
+      try {
+        aiInsights = await this.getAIComparisonInsights(originalAnalysis, optimizedAnalysis, provider, model);
+      } catch (error) {
+        logger.warn('AI comparison insights failed, using basic analysis:', error);
+        aiInsights = this.generateBasicComparisonInsights(originalAnalysis, optimizedAnalysis);
+      }
+
       return {
         originalAnalysis,
         optimizedAnalysis,
@@ -583,7 +1052,8 @@ export class CostDebuggerService {
           tokensSaved,
           costSaved,
           savingsPercentage,
-          qualityImpact
+          qualityImpact,
+          aiInsights
         }
       };
 
@@ -591,6 +1061,118 @@ export class CostDebuggerService {
       logger.error('❌ Error comparing prompt versions:', error);
       throw new Error(`Failed to compare prompt versions: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private async getAIComparisonInsights(
+    originalAnalysis: CostDebuggerAnalysis,
+    optimizedAnalysis: CostDebuggerAnalysis,
+    provider: AIProvider,
+    model: string
+  ): Promise<string[]> {
+    try {
+      const comparisonPrompt = this.buildComparisonAnalysisPrompt(originalAnalysis, optimizedAnalysis, provider, model);
+      const aiResponse = await BedrockService.invokeModel(comparisonPrompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
+      
+      const insights = this.parseComparisonInsights(aiResponse);
+      
+      logger.info('AI comparison insights generated successfully', { insights });
+      return insights;
+      
+    } catch (error) {
+      logger.error('AI comparison insights failed:', error);
+      throw error;
+    }
+  }
+
+  private buildComparisonAnalysisPrompt(
+    originalAnalysis: CostDebuggerAnalysis,
+    optimizedAnalysis: CostDebuggerAnalysis,
+    provider: AIProvider,
+    model: string
+  ): string {
+    const systemPrompt = `You are an expert AI prompt optimization analyst. Compare the original and optimized prompt versions and provide specific insights about the improvements made.
+
+Provider: ${provider}
+Model: ${model}
+
+**ORIGINAL PROMPT ANALYSIS:**
+- Total Tokens: ${originalAnalysis.totalTokens}
+- Total Cost: $${originalAnalysis.totalCost.toFixed(6)}
+- Quality Score: ${originalAnalysis.qualityMetrics.overallScore}/100
+- Sections: ${originalAnalysis.sections.map(s => `${s.type}(${s.tokens})`).join(', ')}
+
+**OPTIMIZED PROMPT ANALYSIS:**
+- Total Tokens: ${optimizedAnalysis.totalTokens}
+- Total Cost: $${optimizedAnalysis.totalCost.toFixed(6)}
+- Quality Score: ${optimizedAnalysis.qualityMetrics.overallScore}/100
+- Sections: ${optimizedAnalysis.sections.map(s => `${s.type}(${s.tokens})`).join(', ')}
+
+**IMPROVEMENTS:**
+- Tokens Saved: ${originalAnalysis.totalTokens - optimizedAnalysis.totalTokens}
+- Cost Saved: $${(originalAnalysis.totalCost - optimizedAnalysis.totalCost).toFixed(6)}
+- Quality Impact: ${optimizedAnalysis.qualityMetrics.overallScore - originalAnalysis.qualityMetrics.overallScore}
+
+Provide 3-5 specific insights about what was optimized and how it improves the prompt. Focus on:
+1. Specific changes that led to token reduction
+2. Quality improvements or potential concerns
+3. Cost-effectiveness of the optimization
+4. Areas that could still be improved
+
+Provide your response as a valid JSON array of strings:
+[
+  "Removed redundant system instructions, saving 15 tokens while maintaining clarity",
+  "Consolidated multiple examples into one comprehensive example, reducing user message by 25%",
+  "Simplified verbose language in conversation history, improving readability",
+  "Quality score improved by 8 points due to better instruction clarity",
+  "Cost reduction of $0.000008 represents 40% savings with no quality loss"
+]
+
+Be specific about what changed and the impact of those changes.`;
+
+    return systemPrompt;
+  }
+
+  private parseComparisonInsights(aiResponse: string): string[] {
+    try {
+      const jsonResponse = BedrockService.extractJson(aiResponse);
+      const parsed = JSON.parse(jsonResponse);
+      
+      if (Array.isArray(parsed)) {
+        return parsed.filter(insight => typeof insight === 'string');
+      }
+      
+      return [];
+    } catch (error) {
+      logger.error('Failed to parse AI comparison insights:', error);
+      return [];
+    }
+  }
+
+  private generateBasicComparisonInsights(
+    originalAnalysis: CostDebuggerAnalysis,
+    optimizedAnalysis: CostDebuggerAnalysis
+  ): string[] {
+    const insights: string[] = [];
+    
+    const tokensSaved = originalAnalysis.totalTokens - optimizedAnalysis.totalTokens;
+    const costSaved = originalAnalysis.totalCost - optimizedAnalysis.totalCost;
+    const qualityImpact = optimizedAnalysis.qualityMetrics.overallScore - originalAnalysis.qualityMetrics.overallScore;
+    
+    if (tokensSaved > 0) {
+      insights.push(`Reduced tokens from ${originalAnalysis.totalTokens} to ${optimizedAnalysis.totalTokens} (${tokensSaved} saved)`);
+    }
+    
+    if (costSaved > 0) {
+      insights.push(`Cost reduced from $${originalAnalysis.totalCost.toFixed(6)} to $${optimizedAnalysis.totalCost.toFixed(6)}`);
+    }
+    
+    if (qualityImpact > 0) {
+      insights.push(`Quality improved from ${originalAnalysis.qualityMetrics.overallScore}/100 to ${optimizedAnalysis.qualityMetrics.overallScore}/100`);
+    } else if (qualityImpact < 0) {
+      insights.push(`Quality decreased from ${originalAnalysis.qualityMetrics.overallScore}/100 to ${optimizedAnalysis.qualityMetrics.overallScore}/100`);
+    }
+    
+    return insights;
   }
 
   async getProviderComparison(

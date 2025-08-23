@@ -1,5 +1,5 @@
-import dotenv from 'dotenv';
-import path from 'path';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
 
 // Load environment variables
 dotenv.config({
@@ -67,4 +67,4 @@ export const config = {
 
 export * from './database';
 export * from './aws';
-export * from './email';
+export * from './email'; 
