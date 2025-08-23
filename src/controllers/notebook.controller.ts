@@ -9,7 +9,7 @@ export class NotebookController {
    */
   static async getNotebooks(_req: Request, res: Response): Promise<Response> {
     try {
-      const notebooks = notebookService.getNotebooks();
+      const notebooks = await notebookService.getNotebooks();
       return res.json({
         success: true,
         notebooks
@@ -29,7 +29,7 @@ export class NotebookController {
   static async getNotebook(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
-      const notebook = notebookService.getNotebook(id);
+      const notebook = await notebookService.getNotebook(id);
       
       if (!notebook) {
         return res.status(404).json({
@@ -92,7 +92,7 @@ export class NotebookController {
       const { id } = req.params;
       const updates = req.body;
 
-      const notebook = notebookService.updateNotebook(id, updates);
+      const notebook = await notebookService.updateNotebook(id, updates);
       
       if (!notebook) {
         return res.status(404).json({
@@ -120,7 +120,7 @@ export class NotebookController {
   static async deleteNotebook(req: Request, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
-      const deleted = notebookService.deleteNotebook(id);
+      const deleted = await notebookService.deleteNotebook(id);
       
       if (!deleted) {
         return res.status(404).json({
@@ -166,10 +166,10 @@ export class NotebookController {
   /**
    * Get execution results
    */
-  static async getExecution(req: Request, res: Response): Promise<Response> {
+    static async getExecution(req: Request, res: Response): Promise<Response> {
     try {
       const { executionId } = req.params;
-      const execution = notebookService.getExecution(executionId);
+      const execution = await notebookService.getExecution(executionId);
       
       if (!execution) {
         return res.status(404).json({

@@ -23,3 +23,5 @@ export { FineTuneJob, IFineTuneJob } from './FineTuneJob';
 export { EvaluationJob, IEvaluationJob } from './EvaluationJob';
 export { UserMemory, IUserMemory, ConversationMemory, IConversationMemory, UserPreference, IUserPreference, MemoryAnalytics, IMemoryAnalytics } from './Memory';
 export { Telemetry, ITelemetry } from './Telemetry';
+export { Notebook, INotebook } from './Notebook';
+export { NotebookExecution, INotebookExecution } from './NotebookExecution';
