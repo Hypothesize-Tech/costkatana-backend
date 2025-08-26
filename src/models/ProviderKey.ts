@@ -58,7 +58,7 @@ const providerKeySchema = new Schema<IProviderKey>({
 // Indexes for performance
 providerKeySchema.index({ userId: 1, provider: 1 });
 providerKeySchema.index({ userId: 1, isActive: 1 });
-providerKeySchema.index({ createdAt: -1 });
+
 
 // Compound unique index to prevent duplicate provider keys per user
 providerKeySchema.index({ userId: 1, provider: 1, name: 1 }, { unique: true });

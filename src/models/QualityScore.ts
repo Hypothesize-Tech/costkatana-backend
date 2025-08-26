@@ -80,7 +80,7 @@ const QualityScoreSchema = new Schema<IQualityScore>({
 // Indexes for efficient querying
 QualityScoreSchema.index({ userId: 1, createdAt: -1 });
 QualityScoreSchema.index({ optimizedScore: 1, costSavings: -1 });
-QualityScoreSchema.index({ optimizationType: 1 });
+
 
 // Virtual for quality delta
 QualityScoreSchema.virtual('qualityDelta').get(function () {

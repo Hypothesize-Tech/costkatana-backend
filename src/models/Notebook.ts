@@ -40,33 +40,23 @@ const NotebookCellSchema = new Schema({
 const NotebookSchema = new Schema<INotebook>({
   title: {
     type: String,
-    required: true,
-    index: true
-  },
+    required: true, },
   description: {
     type: String,
     required: true
   },
   cells: [NotebookCellSchema],
   tags: [{
-    type: String,
-    index: true
-  }],
+    type: String, }],
   template_type: {
     type: String,
-    enum: ['cost_spike', 'model_performance', 'usage_patterns', 'custom'],
-    index: true
-  },
+    enum: ['cost_spike', 'model_performance', 'usage_patterns', 'custom'], },
   userId: {
-    type: String,
-    index: true
-  },
+    type: String, },
   status: {
     type: String,
     enum: ['active', 'archived', 'deleted'],
-    default: 'active',
-    index: true
-  }
+    default: 'active', }
 }, {
   timestamps: {
     createdAt: 'created_at',
@@ -77,10 +67,9 @@ const NotebookSchema = new Schema<INotebook>({
 // Compound indexes for efficient queries
 NotebookSchema.index({ userId: 1, status: 1, created_at: -1 });
 NotebookSchema.index({ template_type: 1, status: 1 });
-NotebookSchema.index({ tags: 1, status: 1 });
 
-// Text search index for title and description
-NotebookSchema.index({ title: 'text', description: 'text' });
+
+
 
 // Virtual for id field to ensure frontend compatibility
 NotebookSchema.virtual('id').get(function() {

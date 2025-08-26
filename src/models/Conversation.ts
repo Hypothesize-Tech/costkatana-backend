@@ -57,6 +57,5 @@ const conversationSchema = new Schema<IConversation>({
 // Indexes for performance
 conversationSchema.index({ userId: 1, updatedAt: -1 });
 conversationSchema.index({ userId: 1, isActive: 1, updatedAt: -1 });
-conversationSchema.index({ modelId: 1 });
 
 export const Conversation = model<IConversation>('Conversation', conversationSchema); 

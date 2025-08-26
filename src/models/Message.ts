@@ -19,19 +19,13 @@ const MessageSchema = new Schema<IMessage>(
         messageId: {
             type: String,
             required: true,
-            unique: true,
-            index: true
-        },
+            unique: true, },
         sessionId: {
             type: String,
-            required: true,
-            index: true
-        },
+            required: true, },
         traceId: {
             type: String,
-            required: true,
-            index: true
-        },
+            required: true, },
         role: {
             type: String,
             enum: ['user', 'assistant', 'system', 'tool'],
@@ -49,9 +43,7 @@ const MessageSchema = new Schema<IMessage>(
         fullContentUrl: String,
         timestamp: {
             type: Date,
-            required: true,
-            index: true
-        },
+            required: true, },
         metadata: {
             type: Schema.Types.Mixed
         }
@@ -65,10 +57,6 @@ const MessageSchema = new Schema<IMessage>(
 MessageSchema.index({ sessionId: 1, timestamp: 1 });
 MessageSchema.index({ traceId: 1, timestamp: 1 });
 
-// TTL index if enabled
-if (process.env.TRACE_TTL_DAYS) {
-    const ttlDays = parseInt(process.env.TRACE_TTL_DAYS);
-    MessageSchema.index({ createdAt: 1 }, { expireAfterSeconds: ttlDays * 24 * 60 * 60 });
-}
+
 
 export const Message = mongoose.model<IMessage>('Message', MessageSchema);

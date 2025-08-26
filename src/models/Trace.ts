@@ -33,18 +33,12 @@ const TraceSchema = new Schema<ITrace>(
         traceId: {
             type: String,
             required: true,
-            unique: true,
-            index: true
-        },
+            unique: true, },
         sessionId: {
             type: String,
-            required: true,
-            index: true
-        },
+            required: true, },
         parentId: {
-            type: String,
-            index: true
-        },
+            type: String, },
         name: {
             type: String,
             required: true
@@ -56,9 +50,7 @@ const TraceSchema = new Schema<ITrace>(
         },
         startedAt: {
             type: Date,
-            required: true,
-            index: true
-        },
+            required: true, },
         endedAt: {
             type: Date
         },
@@ -68,9 +60,7 @@ const TraceSchema = new Schema<ITrace>(
         status: {
             type: String,
             enum: ['ok', 'error'],
-            default: 'ok',
-            index: true
-        },
+            default: 'ok', },
         error: {
             message: String,
             stack: String
@@ -103,7 +93,7 @@ const TraceSchema = new Schema<ITrace>(
 );
 
 // Compound indexes for efficient queries
-TraceSchema.index({ sessionId: 1, parentId: 1, startedAt: 1 });
+
 TraceSchema.index({ sessionId: 1, startedAt: 1 });
 TraceSchema.index({ status: 1, startedAt: -1 });
 

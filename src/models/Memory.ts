@@ -18,14 +18,12 @@ export interface IUserMemory extends Document {
 const UserMemorySchema = new Schema<IUserMemory>({
     userId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     memoryType: {
         type: String,
         enum: ['preference', 'pattern', 'security', 'context', 'insight'],
-        required: true,
-        index: true
+        required: true
     },
     content: {
         type: String,
@@ -53,12 +51,10 @@ const UserMemorySchema = new Schema<IUserMemory>({
     },
     isActive: {
         type: Boolean,
-        default: true,
-        index: true
+        default: true
     },
     expiresAt: {
-        type: Date,
-        index: { expireAfterSeconds: 0 }
+        type: Date
     }
 }, {
     timestamps: true
@@ -66,8 +62,6 @@ const UserMemorySchema = new Schema<IUserMemory>({
 
 // Compound indexes for efficient queries
 UserMemorySchema.index({ userId: 1, memoryType: 1, isActive: 1 });
-UserMemorySchema.index({ userId: 1, createdAt: -1 });
-UserMemorySchema.index({ tags: 1, isActive: 1 });
 
 // Conversation Memory Model - Stores individual conversations for similarity search
 export interface IConversationMemory extends Document {
@@ -97,13 +91,11 @@ export interface IConversationMemory extends Document {
 const ConversationMemorySchema = new Schema<IConversationMemory>({
     userId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     conversationId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     query: {
         type: String,
@@ -121,8 +113,7 @@ const ConversationMemorySchema = new Schema<IConversationMemory>({
     metadata: {
         timestamp: {
             type: Date,
-            required: true,
-            index: true
+            required: true
         },
         modelUsed: String,
         chatMode: {
@@ -152,18 +143,11 @@ const ConversationMemorySchema = new Schema<IConversationMemory>({
     },
     isArchived: {
         type: Boolean,
-        default: false,
-        index: true
+        default: false
     }
 }, {
     timestamps: true
 });
-
-// Compound indexes for efficient queries
-ConversationMemorySchema.index({ userId: 1, createdAt: -1 });
-ConversationMemorySchema.index({ userId: 1, isArchived: 1, createdAt: -1 });
-ConversationMemorySchema.index({ conversationId: 1, createdAt: -1 });
-ConversationMemorySchema.index({ 'metadata.topics': 1, userId: 1 });
 
 // User Preferences Model - Stores user preferences and learned behaviors
 export interface IUserPreference extends Document {
@@ -225,8 +209,7 @@ const UserPreferenceSchema = new Schema<IUserPreference>({
     userId: {
         type: String,
         required: true,
-        unique: true,
-        index: true
+        unique: true
     },
     preferredModel: {
         type: String,
@@ -363,19 +346,16 @@ const UserPreferenceSchema = new Schema<IUserPreference>({
     
     isActive: {
         type: Boolean,
-        default: true,
-        index: true
+        default: true
     }
 }, {
     timestamps: true
 });
 
-// Indexes for efficient queries
 UserPreferenceSchema.index({ userId: 1, isActive: 1 });
 UserPreferenceSchema.index({ commonTopics: 1 });
 UserPreferenceSchema.index({ preferredModel: 1 });
 
-// Memory Analytics Model - Stores aggregated memory insights and patterns
 export interface IMemoryAnalytics extends Document {
     userId: string;
     analyticsType: 'daily' | 'weekly' | 'monthly';
@@ -412,8 +392,7 @@ export interface IMemoryAnalytics extends Document {
 const MemoryAnalyticsSchema = new Schema<IMemoryAnalytics>({
     userId: {
         type: String,
-        required: true,
-        index: true
+        required: true
     },
     analyticsType: {
         type: String,
@@ -422,8 +401,7 @@ const MemoryAnalyticsSchema = new Schema<IMemoryAnalytics>({
     },
     period: {
         type: Date,
-        required: true,
-        index: true
+        required: true
     },
     
     conversationStats: {
@@ -495,11 +473,8 @@ const MemoryAnalyticsSchema = new Schema<IMemoryAnalytics>({
     timestamps: true
 });
 
-// Compound indexes
 MemoryAnalyticsSchema.index({ userId: 1, analyticsType: 1, period: -1 });
-MemoryAnalyticsSchema.index({ userId: 1, 'securityInsights.riskLevel': 1 });
 
-// Export models
 export const UserMemory = mongoose.model<IUserMemory>('UserMemory', UserMemorySchema);
 export const ConversationMemory = mongoose.model<IConversationMemory>('ConversationMemory', ConversationMemorySchema);
 export const UserPreference = mongoose.model<IUserPreference>('UserPreference', UserPreferenceSchema);

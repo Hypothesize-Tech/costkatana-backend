@@ -82,7 +82,5 @@ const chatMessageSchema = new Schema<IChatMessage>({
 // Indexes for performance
 chatMessageSchema.index({ conversationId: 1, createdAt: 1 });
 chatMessageSchema.index({ userId: 1, createdAt: -1 });
-chatMessageSchema.index({ modelId: 1, createdAt: -1 });
-chatMessageSchema.index({ conversationId: 1, role: 1, createdAt: 1 });
 
 export const ChatMessage = model<IChatMessage>('ChatMessage', chatMessageSchema); 
