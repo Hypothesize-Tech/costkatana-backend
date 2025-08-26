@@ -34,25 +34,21 @@ const ExecutionResultSchema = new Schema({
 const NotebookExecutionSchema = new Schema<INotebookExecution>({
   notebook_id: {
     type: String,
-    required: true,
-    index: true
+    required: true
   },
   execution_id: {
     type: String,
     required: true,
-    unique: true,
-    index: true
+    unique: true
   },
   status: {
     type: String,
     enum: ['pending', 'running', 'completed', 'failed'],
-    default: 'pending',
-    index: true
+    default: 'pending'
   },
   started_at: {
     type: Date,
-    required: true,
-    index: true
+    required: true
   },
   completed_at: Date,
   execution_time_ms: {
@@ -63,8 +59,7 @@ const NotebookExecutionSchema = new Schema<INotebookExecution>({
   results: [ExecutionResultSchema],
   metadata: Schema.Types.Mixed,
   userId: {
-    type: String,
-    index: true
+    type: String
   }
 }, {
   timestamps: true

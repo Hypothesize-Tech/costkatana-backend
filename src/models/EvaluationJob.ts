@@ -105,8 +105,7 @@ const evaluationJobSchema = new Schema<IEvaluationJob>({
     fineTuneJobId: {
         type: Schema.Types.ObjectId,
         ref: 'FineTuneJob',
-        required: false,
-        index: true
+        required: false
     },
     modelId: {
         type: String,

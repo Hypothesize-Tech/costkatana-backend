@@ -1,7 +1,4 @@
-// OpenTelemetry is now initialized via register.ts before any imports
-// This ensures all instrumentation is loaded before modules are imported
 import { shutdownTelemetry } from './observability/otel';
-
 import express, { Application, Request, Response } from 'express';
 import { cacheMiddleware } from './middleware/cache.middleware';
 import cors from 'cors';

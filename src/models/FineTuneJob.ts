@@ -143,8 +143,7 @@ const fineTuneJobSchema = new Schema<IFineTuneJob>({
     datasetId: {
         type: Schema.Types.ObjectId,
         ref: 'TrainingDataset',
-        required: true,
-        index: true
+        required: true
     },
     datasetVersion: {
         type: String,
@@ -186,8 +185,7 @@ const fineTuneJobSchema = new Schema<IFineTuneJob>({
     status: {
         type: String,
         enum: ['queued', 'validating', 'running', 'succeeded', 'failed', 'cancelled'],
-        default: 'queued',
-        index: true
+        default: 'queued'
     },
     progress: {
         percentage: { type: Number, min: 0, max: 100, default: 0 },
@@ -199,7 +197,7 @@ const fineTuneJobSchema = new Schema<IFineTuneJob>({
     },
     
     // Provider job details
-    providerJobId: { type: String, index: true },
+    providerJobId: { type: String },
     providerJobArn: String,
     
     // Metrics and results

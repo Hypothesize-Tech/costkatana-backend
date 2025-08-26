@@ -161,7 +161,7 @@ const TelemetrySchema = new Schema<ITelemetry>({
   // Trace identifiers
   trace_id: { type: String, required: true, index: true },
   span_id: { type: String, required: true, index: true },
-  parent_span_id: { type: String, index: true },
+  parent_span_id: { type: String },
   
   // Context
   tenant_id: { type: String, required: true, index: true },
@@ -170,7 +170,7 @@ const TelemetrySchema = new Schema<ITelemetry>({
   request_id: { type: String, required: true, index: true },
   
   // Timing
-  timestamp: { type: Date, required: true, index: true },
+  timestamp: { type: Date, required: true },
   start_time: { type: Date, required: true },
   end_time: { type: Date, required: true },
   duration_ms: { type: Number, required: true, index: true },
@@ -188,8 +188,7 @@ const TelemetrySchema = new Schema<ITelemetry>({
   status: { 
     type: String, 
     required: true, 
-    enum: ['success', 'error', 'unset'],
-    index: true 
+    enum: ['success', 'error', 'unset']
   },
   status_message: String,
   
