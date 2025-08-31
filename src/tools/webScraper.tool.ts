@@ -1,6 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import puppeteer, { Browser } from 'puppeteer';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 
 export interface ScrapingRequest {
@@ -121,7 +121,14 @@ export class WebScraperTool extends Tool {
             if (request.cache?.enabled) {
                 const cached = this.getCachedResult(request);
                 if (cached) {
-                    logger.info(`🎯 Cache hit for web scraping: ${request.url || request.query}`);
+                    loggingService.info('Cache hit for web scraping', {
+                        component: 'webScraperTool',
+                        operation: '_call',
+                        step: 'cacheHit',
+                        url: request.url,
+                        query: request.query,
+                        cacheKey: request.cache?.key || 'auto-generated'
+                    });
                     return JSON.stringify({ ...cached, cached: true });
                 }
             }
@@ -166,7 +173,13 @@ export class WebScraperTool extends Tool {
             return JSON.stringify(result);
 
         } catch (error) {
-            logger.error('Web scraping failed:', error);
+            loggingService.error('Web scraping failed', {
+                component: 'webScraperTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorStack: error instanceof Error ? error.stack : undefined
+            });
             return JSON.stringify({
                 success: false,
                 operation: 'unknown',
@@ -229,7 +242,14 @@ export class WebScraperTool extends Tool {
                 waitUntil: 'domcontentloaded', // Use simpler wait condition
                 timeout: 45000 // Increase timeout to 45 seconds
             }).catch(async (error) => {
-                logger.warn(`Navigation failed for ${request.url}, trying with different settings: ${error.message}`);
+                loggingService.warn('Navigation failed, trying with different settings', {
+                    component: 'webScraperTool',
+                    operation: 'scrapeWebsite',
+                    step: 'navigationRetry',
+                    url: request.url,
+                    error: error instanceof Error ? error.message : String(error),
+                    fallbackSettings: 'load timeout 30000'
+                });
                 // Try again with even simpler settings
                 return await page.goto(request.url!, {
                     waitUntil: 'load', // Simplest wait condition
@@ -246,7 +266,13 @@ export class WebScraperTool extends Tool {
                 // Check if we're blocked or need to login
                 const isBlocked = await page.$('.challenge-page, .authwall, .guest-homepage');
                 if (isBlocked) {
-                    logger.warn('LinkedIn access blocked, using fallback extraction');
+                    loggingService.warn('LinkedIn access blocked, using fallback extraction', {
+                        component: 'webScraperTool',
+                        operation: 'scrapeWebsite',
+                        step: 'linkedinBlocked',
+                        url: request.url,
+                        fallbackMethod: 'meta tags extraction'
+                    });
                     // Try to extract what we can from the page title and meta tags
                     const pageTitle = await page.title();
                     const metaDescription = await page.$eval('meta[name="description"]', (el: any) => el.content).catch(() => '');
@@ -275,7 +301,14 @@ export class WebScraperTool extends Tool {
                 try {
                     await page.waitForSelector(request.options.waitFor, { timeout: 10000 });
                 } catch (error) {
-                    logger.warn(`Selector wait failed for ${request.options.waitFor}, continuing anyway`);
+                    loggingService.warn('Selector wait failed, continuing anyway', {
+                        component: 'webScraperTool',
+                        operation: 'scrapeWebsite',
+                        step: 'selectorWaitFailed',
+                        selector: request.options.waitFor,
+                        error: error instanceof Error ? error.message : String(error),
+                        action: 'continue with extraction'
+                    });
                     // Don't throw, continue with extraction
                 }
             }
@@ -417,7 +450,14 @@ export class WebScraperTool extends Tool {
 
             return response.content.toString();
         } catch (error) {
-            logger.error('Content summarization failed:', error);
+            loggingService.error('Content summarization failed', {
+                component: 'webScraperTool',
+                operation: 'summarizeContent',
+                step: 'error',
+                context: context,
+                contentLength: content.length,
+                error: error instanceof Error ? error.message : String(error)
+            });
             return 'Summary generation failed';
         }
     }
@@ -446,7 +486,13 @@ export class WebScraperTool extends Tool {
                 return { structured_data: response.content.toString() };
             }
         } catch (error) {
-            logger.error('Structured data extraction failed:', error);
+            loggingService.error('Structured data extraction failed', {
+                component: 'webScraperTool',
+                operation: 'identifyStructuredData',
+                step: 'error',
+                textLength: text.length,
+                error: error instanceof Error ? error.message : String(error)
+            });
             return {};
         }
     }
@@ -498,7 +544,14 @@ export class WebScraperTool extends Tool {
             // Store in vector database if available
             // Note: This would require vectorStoreService.addDocuments method to be implemented
             // For now, we'll just log that we would store it
-            logger.info(`📚 Would store scraped content in vector DB: ${result.data.url}`);
+            loggingService.info('Would store scraped content in vector DB', {
+                component: 'webScraperTool',
+                operation: 'storeInVectorDB',
+                step: 'vectorStorage',
+                url: result.data.url,
+                contentLength: result.data.extractedText?.length || 0,
+                status: 'pending implementation'
+            });
             
             // Vector storage will be implemented when addDocuments method is available
             // await vectorStoreService.addDocuments([{
@@ -514,7 +567,13 @@ export class WebScraperTool extends Tool {
             // }]);
 
         } catch (error) {
-            logger.error('Failed to store in vector DB:', error);
+            loggingService.error('Failed to store in vector DB', {
+                component: 'webScraperTool',
+                operation: 'storeInVectorDB',
+                step: 'error',
+                url: result.data.url,
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     }
 

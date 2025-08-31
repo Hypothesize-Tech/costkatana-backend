@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 
@@ -102,11 +102,11 @@ export class OutputModerationService {
                 };
             }
 
-            logger.info('Starting output moderation check', {
+            loggingService.info('Starting output moderation check', { value:  { 
                 requestId,
                 contentLength: content.length,
                 modelUsed
-            });
+             } });
 
             // Stage 1: AI-powered comprehensive check (primary method)
             let moderationResult: OutputModerationResult;
@@ -114,7 +114,7 @@ export class OutputModerationService {
             try {
                 moderationResult = await this.runAIModerationCheck(content, config, requestId);
             } catch (error) {
-                logger.warn('AI moderation failed, falling back to pattern matching', error);
+                loggingService.warn('AI moderation failed, falling back to pattern matching', { error: error instanceof Error ? error.message : String(error) });
                 // Fallback to pattern-based detection
                 moderationResult = this.runPatternModerationCheck(content, config);
             }
@@ -143,17 +143,18 @@ export class OutputModerationService {
                 await this.logOutputThreatDetection(requestId, moderationResult, modelUsed);
             }
 
-            logger.info('Output moderation check completed', {
+            loggingService.info('Output moderation check completed', { value:  { 
                 requestId,
                 isBlocked: moderationResult.isBlocked,
                 violationCategories: moderationResult.violationCategories,
                 action: moderationResult.action
-            });
+             } });
 
             return moderationResult;
 
         } catch (error) {
-            logger.error('Error in output moderation check', error as Error, {
+            loggingService.error('Error in output moderation check', {
+                error: error instanceof Error ? error.message : String(error),
                 requestId,
                 contentLength: content.length
             });
@@ -266,7 +267,7 @@ Respond with JSON only:
             };
 
         } catch (error) {
-            logger.error('AI output moderation failed', error);
+            loggingService.error('AI output moderation failed', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -356,15 +357,16 @@ Respond with JSON only:
                 timestamp: new Date()
             });
 
-            logger.info('Output threat logged', {
+            loggingService.info('Output threat logged', { value:  { 
                 requestId,
                 category: result.violationCategories[0],
                 confidence: result.confidence,
                 action: result.action
-            });
+             } });
 
         } catch (error) {
-            logger.error('Failed to log output threat detection', error as Error, {
+            loggingService.error('Failed to log output threat detection', {
+                error: error instanceof Error ? error.message : String(error),
                 requestId
             });
         }
@@ -489,7 +491,7 @@ Respond with JSON only:
             };
 
         } catch (error) {
-            logger.error('Error getting output moderation analytics', error);
+            loggingService.error('Error getting output moderation analytics', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
 import { WebhookEventData, WebhookEventType, WEBHOOK_EVENTS } from '../types/webhook.types';
 import { webhookService } from './webhook.service';
-import { logger } from '../utils/logger';
 import { v4 as uuidv4 } from 'uuid';
+import { loggingService } from './logging.service';
 
 export class WebhookEventEmitter extends EventEmitter {
     private static instance: WebhookEventEmitter;
@@ -49,7 +49,7 @@ export class WebhookEventEmitter extends EventEmitter {
                 batch.map(event => webhookService.processEvent(event))
             );
         } catch (error) {
-            logger.error('Error processing webhook event batch', { error });
+            loggingService.error('Error processing webhook event batch', { error });
         } finally {
             this.processing = false;
         }
@@ -86,12 +86,12 @@ export class WebhookEventEmitter extends EventEmitter {
             };
 
             // Log the event
-            logger.info('Webhook event emitted', {
+            loggingService.info('Webhook event emitted', { value:  { 
                 eventId: event.eventId,
                 eventType: event.eventType,
                 userId: event.userId,
                 severity: event.data.severity
-            });
+             } });
 
             // Emit for local listeners
             this.emit(eventType, event);
@@ -100,13 +100,13 @@ export class WebhookEventEmitter extends EventEmitter {
             // Add to queue or process immediately
             if (options?.immediate) {
                 webhookService.processEvent(event).catch(error => {
-                    logger.error('Error processing immediate webhook event', { error, event });
+                    loggingService.error('Error processing immediate webhook event', { error, event });
                 });
             } else {
                 this.eventQueue.push(event);
             }
         } catch (error) {
-            logger.error('Error emitting webhook event', { error, eventType, userId });
+            loggingService.error('Error emitting webhook event', { error, eventType, userId });
         }
     }
 

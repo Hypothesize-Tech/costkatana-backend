@@ -2,6 +2,7 @@ import { Tool } from "@langchain/core/tools";
 import { Optimization } from "../models/Optimization";
 import { Usage } from "../models/Usage";
 import { getModelPricing, getModelsByUseCase } from "../data/modelPricing";
+import { loggingService } from '../services/logging.service';
 
 interface OptimizationOperation {
     operation: 'analyze_costs' | 'recommend_models' | 'optimize_prompts' | 'batch_optimization' | 'create_optimization' | 'list_optimizations' | 'apply_optimization' | 'bulk_analysis' | 'cost_forecast';
@@ -102,7 +103,13 @@ export class OptimizationManagerTool extends Tool {
             }
 
         } catch (error) {
-            console.error('Optimization operation failed:', error);
+            loggingService.error('Optimization operation failed', {
+                component: 'optimizationManagerTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorType: error instanceof SyntaxError ? 'SyntaxError' : 'Unknown'
+            });
             
             if (error instanceof SyntaxError) {
                 return "Invalid JSON input. Please provide a valid operation object.";
@@ -274,12 +281,18 @@ export class OptimizationManagerTool extends Tool {
             const complexity = this.determineComplexity(usage.avgPromptTokens);
 
             // Get model recommendations based on patterns
-            const suitableModels = getModelsByUseCase(useCase);
+            const suitableModels = getModelsByUseCase({
+                type: useCase,
+                volume: volume as 'low' | 'medium' | 'high',
+                complexity: complexity as 'simple' | 'moderate' | 'complex',
+                priority: 'cost'
+            });
             const recommendations = [];
 
-            for (const modelId of suitableModels.slice(0, 5)) {
+            for (const modelInfo of suitableModels.slice(0, 5)) {
+                const modelId = modelInfo.model;
                 const pricing = getModelPricing(modelId);
-                if (pricing) {
+                if (pricing && pricing.length > 0) {
                     const projectedCost = this.calculateProjectedCost(
                         modelId,
                         usage.avgPromptTokens,
@@ -289,7 +302,7 @@ export class OptimizationManagerTool extends Tool {
 
                     recommendations.push({
                         model: modelId,
-                        provider: pricing.provider,
+                        provider: pricing[0].provider,
                         suitabilityScore: this.calculateSuitabilityScore(modelId, useCase, volume, complexity),
                         projectedMonthlyCost: Number(projectedCost.toFixed(4)),
                         costVsCurrent: Number(((projectedCost - usage.totalCost) / usage.totalCost * 100).toFixed(1)),
@@ -545,7 +558,14 @@ export class OptimizationManagerTool extends Tool {
             };
 
         } catch (error) {
-            console.error('Error calculating dynamic optimization data:', error);
+            loggingService.error('Error calculating dynamic optimization data', {
+                component: 'optimizationManagerTool',
+                operation: 'calculateDynamicOptimizationData',
+                step: 'error',
+                userId: operation.userId,
+                optimizationType: operation.optimizationData?.type,
+                error: error instanceof Error ? error.message : String(error)
+            });
             return this.createFallbackOptimizationData(operation);
         }
     }
@@ -569,11 +589,11 @@ export class OptimizationManagerTool extends Tool {
         if (targetModel) {
             // Use specified target model
             const targetPricing = getModelPricing(targetModel);
-            if (targetPricing) {
-                const newCost = ((avgPromptTokens * targetPricing.inputPrice) + (avgCompletionTokens * targetPricing.outputPrice)) * totalRequests / 1000000;
+            if (targetPricing && targetPricing.length > 0) {
+                const newCost = ((avgPromptTokens * targetPricing[0].inputPrice) + (avgCompletionTokens * targetPricing[0].outputPrice)) * totalRequests / 1000000;
                 bestAlternative = {
                     model: targetModel,
-                    pricing: targetPricing,
+                    pricing: targetPricing[0],
                     projectedCost: newCost,
                     savings: currentTotalCost - newCost
                 };
@@ -788,14 +808,14 @@ export class OptimizationManagerTool extends Tool {
 
         for (const modelId of allModels) {
             const pricing = getModelPricing(modelId);
-            if (pricing && modelId !== currentModel) {
-                const currentCost = (avgPromptTokens * currentPricing.inputPrice + avgCompletionTokens * currentPricing.outputPrice) / 1000000;
-                const alternativeCost = (avgPromptTokens * pricing.inputPrice + avgCompletionTokens * pricing.outputPrice) / 1000000;
+            if (pricing && pricing.length > 0 && modelId !== currentModel) {
+                const currentCost = (avgPromptTokens * currentPricing[0].inputPrice + avgCompletionTokens * currentPricing[0].outputPrice) / 1000000;
+                const alternativeCost = (avgPromptTokens * pricing[0].inputPrice + avgCompletionTokens * pricing[0].outputPrice) / 1000000;
 
                 if (alternativeCost < currentCost) {
                     alternatives.push({
                         model: modelId,
-                        provider: pricing.provider,
+                        provider: pricing[0].provider,
                         projectedCost: alternativeCost,
                         savings: currentCost - alternativeCost,
                         confidence: this.calculateConfidence(currentModel, modelId),
@@ -957,26 +977,26 @@ export class OptimizationManagerTool extends Tool {
         let score = 70; // Base score
         
         const modelPricing = getModelPricing(modelId);
-        if (!modelPricing) return 0;
+        if (!modelPricing || modelPricing.length === 0) return 0;
         
         // Adjust based on model characteristics
-        if (modelPricing.category === 'fast' && volume === 'high') score += 15;
-        if (modelPricing.category === 'premium' && complexity === 'complex') score += 10;
-        if (modelPricing.category === 'balanced') score += 5;
+        if (modelPricing[0].category === 'fast' && volume === 'high') score += 15;
+        if (modelPricing[0].category === 'premium' && complexity === 'complex') score += 10;
+        if (modelPricing[0].category === 'balanced') score += 5;
         
         // Use case specific adjustments
-        if (useCase === 'content-generation' && modelPricing.features.includes('creative-writing')) score += 10;
-        if (useCase === 'api-integration' && modelPricing.inputPrice < 1.0) score += 10;
+        if (useCase === 'content-generation' && modelPricing[0].features.includes('creative-writing')) score += 10;
+        if (useCase === 'api-integration' && modelPricing[0].inputPrice < 1.0) score += 10;
         
         return Math.min(score, 100);
     }
 
     private calculateProjectedCost(modelId: string, avgPromptTokens: number, avgCompletionTokens: number, totalRequests: number): number {
         const pricing = getModelPricing(modelId);
-        if (!pricing) return 0;
+        if (!pricing || pricing.length === 0) return 0;
         
-        const inputCost = (avgPromptTokens * pricing.inputPrice * totalRequests) / 1000000;
-        const outputCost = (avgCompletionTokens * pricing.outputPrice * totalRequests) / 1000000;
+        const inputCost = (avgPromptTokens * pricing[0].inputPrice * totalRequests) / 1000000;
+        const outputCost = (avgCompletionTokens * pricing[0].outputPrice * totalRequests) / 1000000;
         
         return inputCost + outputCost;
     }
@@ -997,12 +1017,12 @@ export class OptimizationManagerTool extends Tool {
         const considerations = [];
         const pricing = getModelPricing(modelId);
         
-        if (pricing) {
-            if (pricing.contextWindow < usage.avgPromptTokens + usage.avgCompletionTokens) {
+        if (pricing && pricing.length > 0) {
+            if (pricing[0].contextWindow < usage.avgPromptTokens + usage.avgCompletionTokens) {
                 considerations.push('May require prompt truncation for long contexts');
             }
             
-            if (pricing.category === 'premium') {
+            if (pricing[0].category === 'premium') {
                 considerations.push('Higher cost per request - ensure quality benefits justify expense');
             }
         }

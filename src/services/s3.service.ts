@@ -2,7 +2,7 @@ import { s3Client } from '../config/aws';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { AWS_CONFIG } from '../config/aws';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export class S3Service {
     static async getPresignedAvatarUploadUrl(
@@ -24,7 +24,7 @@ export class S3Service {
             });
             return { uploadUrl, key };
         } catch (error) {
-            logger.error('Error creating pre-signed URL', { error, userId, fileName });
+            loggingService.error('Error creating pre-signed URL', { error, userId, fileName });
             throw new Error('Could not create pre-signed URL for S3 upload.');
         }
     }

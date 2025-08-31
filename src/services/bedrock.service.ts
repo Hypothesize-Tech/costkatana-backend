@@ -1,11 +1,11 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
-import { logger } from '../utils/logger';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { recordGenAIUsage } from '../utils/genaiTelemetry';
 import { calculateCost } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
+import { loggingService } from './logging.service';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -260,7 +260,7 @@ export class BedrockService {
         const actualModelId = this.convertToInferenceProfile(model);
         
         if (actualModelId !== model) {
-            logger.info(`Converting model ID: ${model} -> ${actualModelId}`);
+            loggingService.info(`Converting model ID: ${model} -> ${actualModelId}`);
         }
         
         const command = new InvokeModelCommand({
@@ -350,7 +350,7 @@ export class BedrockService {
 
             return result;
         } catch (error: any) {
-            logger.error('Error invoking Bedrock model:', { 
+            loggingService.error('Error invoking Bedrock model:', { 
                 originalModel: model, 
                 actualModelId, 
                 error 
@@ -401,15 +401,15 @@ Format your response as a single valid JSON object:
             const cleanedResponse = this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
-            logger.info('Prompt optimization completed', {
+            loggingService.info('Prompt optimization completed', { value:  { 
                 originalLength: request.prompt.length,
                 optimizedLength: result.optimizedPrompt.length,
                 reduction: result.estimatedTokenReduction,
-            });
+             } });
 
             return result;
         } catch (error) {
-            logger.error('Error optimizing prompt:', error);
+            loggingService.error('Error optimizing prompt:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -455,15 +455,15 @@ Format your response as JSON:
             const cleanedResponse = this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
-            logger.info('Usage analysis completed', {
+            loggingService.info('Usage analysis completed', { value:  { 
                 timeframe: request.timeframe,
                 promptsAnalyzed: request.usageData.length,
                 potentialSavings: result.potentialSavings,
-            });
+             } });
 
             return result;
         } catch (error) {
-            logger.error('Error analyzing usage patterns:', error);
+            loggingService.error('Error analyzing usage patterns:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -508,14 +508,14 @@ Format your response as JSON:
             const cleanedResponse = this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
-            logger.info('Model alternatives suggested', {
+            loggingService.info('Model alternatives suggested', { value:  { 
                 currentModel,
                 alternativesCount: result.recommendations.length,
-            });
+             } });
 
             return result;
         } catch (error) {
-            logger.error('Error suggesting model alternatives:', error);
+            loggingService.error('Error suggesting model alternatives:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -555,11 +555,11 @@ Format your response as JSON:
             const cleanedResponse = this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
-            logger.info('Prompt template generated', { objective });
+            loggingService.info('Prompt template generated', { value:  {  objective  } });
 
             return result;
         } catch (error) {
-            logger.error('Error generating prompt template:', error);
+            loggingService.error('Error generating prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -617,13 +617,13 @@ Format your response as JSON:
                 timestamp: new Date(a.timestamp),
             }));
 
-            logger.info('Anomaly detection completed', {
+            loggingService.info('Anomaly detection completed', { value:  { 
                 anomaliesFound: result.anomalies.length,
-            });
+             } });
 
             return result;
         } catch (error) {
-            logger.error('Error detecting anomalies:', error);
+            loggingService.error('Error detecting anomalies:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

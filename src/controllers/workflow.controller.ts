@@ -1,6 +1,6 @@
 import {  Response, NextFunction } from 'express';
 import { workflowOrchestrator, WorkflowExecution } from '../services/workflowOrchestrator.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { redisService } from '../services/redis.service';
 import mongoose from 'mongoose';
 
@@ -9,9 +9,23 @@ export class WorkflowController {
      * Create a new workflow template
      */
     static async createTemplate(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id || req.userId;
+
         try {
-            const userId = req.user?.id || req.userId;
+            loggingService.info('Workflow template creation initiated', {
+                requestId,
+                userId,
+                hasUserId: !!userId
+            });
+
             if (!userId) {
+                loggingService.warn('Workflow template creation failed - unauthorized', {
+                    requestId,
+                    hasUserId: !!userId
+                });
+
                 res.status(401).json({
                     success: false,
                     message: 'Authentication required'
@@ -24,7 +38,44 @@ export class WorkflowController {
                 createdBy: userId
             };
 
+            loggingService.info('Workflow template creation parameters received', {
+                requestId,
+                userId,
+                hasTemplateData: !!req.body,
+                templateDataKeys: req.body ? Object.keys(req.body) : [],
+                hasName: !!req.body?.name,
+                hasDescription: !!req.body?.description,
+                hasSteps: !!req.body?.steps,
+                stepsCount: req.body?.steps?.length || 0
+            });
+
             const template = await workflowOrchestrator.createWorkflowTemplate(templateData);
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Workflow template created successfully', {
+                requestId,
+                duration,
+                userId,
+                templateId: (template as any)._id || template.id,
+                templateName: template.name,
+                hasSteps: !!template.steps,
+                stepsCount: template.steps?.length || 0,
+                hasVariables: !!template.variables,
+                variablesCount: template.variables?.length || 0
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'workflow_template_created',
+                category: 'workflow_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    templateId: (template as any)._id || template.id,
+                    templateName: template.name,
+                    stepsCount: template.steps?.length || 0
+                }
+            });
 
             res.status(201).json({
                 success: true,
@@ -32,7 +83,20 @@ export class WorkflowController {
                 data: template
             });
         } catch (error: any) {
-            logger.error('Create workflow template error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Workflow template creation failed', {
+                requestId,
+                userId,
+                hasUserId: !!userId,
+                templateName: req.body?.name,
+                hasSteps: !!req.body?.steps,
+                stepsCount: req.body?.steps?.length,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            
             next(error);
         }
     }
@@ -67,7 +131,18 @@ export class WorkflowController {
                 data: execution
             });
         } catch (error: any) {
-            logger.error('Execute workflow error:', error);
+            loggingService.error('Execute workflow failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!req.user?.id || !!req.userId,
+                templateId: req.params.templateId,
+                hasInput: !!req.body?.input,
+                hasVariables: !!req.body?.variables,
+                hasEnvironment: !!req.body?.environment,
+                hasTags: !!req.body?.tags,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -93,7 +168,12 @@ export class WorkflowController {
                 data: execution
             });
         } catch (error: any) {
-            logger.error('Get workflow execution error:', error);
+            loggingService.error('Get workflow execution failed', {
+                requestId: req.headers['x-request-id'] as string,
+                executionId: req.params.executionId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -119,7 +199,13 @@ export class WorkflowController {
                 data: templates
             });
         } catch (error: any) {
-            logger.error('List workflow templates error:', error);
+            loggingService.error('List workflow templates failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!req.user?.id || !!req.userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -145,7 +231,12 @@ export class WorkflowController {
                 data: template
             });
         } catch (error: any) {
-            logger.error('Get workflow template error:', error);
+            loggingService.error('Get workflow template failed', {
+                requestId: req.headers['x-request-id'] as string,
+                templateId: req.params.templateId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -168,7 +259,13 @@ export class WorkflowController {
                 data: metrics
             });
         } catch (error: any) {
-            logger.error('Get workflow metrics error:', error);
+            loggingService.error('Get workflow metrics failed', {
+                requestId: req.headers['x-request-id'] as string,
+                workflowId: req.params.workflowId,
+                timeRange: req.query.timeRange,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -187,7 +284,12 @@ export class WorkflowController {
                 message: 'Workflow paused successfully'
             });
         } catch (error: any) {
-            logger.error('Pause workflow error:', error);
+            loggingService.error('Pause workflow failed', {
+                requestId: req.headers['x-request-id'] as string,
+                executionId: req.params.executionId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -206,7 +308,12 @@ export class WorkflowController {
                 message: 'Workflow resumed successfully'
             });
         } catch (error: any) {
-            logger.error('Resume workflow error:', error);
+            loggingService.error('Resume workflow failed', {
+                requestId: req.headers['x-request-id'] as string,
+                executionId: req.params.executionId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -225,7 +332,12 @@ export class WorkflowController {
                 message: 'Workflow cancelled successfully'
             });
         } catch (error: any) {
-            logger.error('Cancel workflow error:', error);
+            loggingService.error('Cancel workflow failed', {
+                requestId: req.headers['x-request-id'] as string,
+                executionId: req.params.executionId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -283,7 +395,12 @@ export class WorkflowController {
                 data: trace
             });
         } catch (error: any) {
-            logger.error('Get workflow trace error:', error);
+            loggingService.error('Get workflow trace failed', {
+                requestId: req.headers['x-request-id'] as string,
+                executionId: req.params.executionId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -308,7 +425,11 @@ export class WorkflowController {
             }).sort({ createdAt: -1 }).lean();
             
             if (workflowUsage && workflowUsage.length > 0) {
-                logger.info(`Found ${workflowUsage.length} workflow usage records for user`);
+                loggingService.info('Workflow usage records found for user', {
+                    requestId: _req.headers['x-request-id'] as string,
+                    userId,
+                    workflowUsageCount: workflowUsage.length
+                });
                 
                 // Group by workflowId
                 const workflowsMap = new Map();
@@ -408,7 +529,15 @@ export class WorkflowController {
                 }
             });
         } catch (error: any) {
-            logger.error('Get workflows list error:', error);
+            loggingService.error('Get workflows list failed', {
+                requestId: _req.headers['x-request-id'] as string,
+                userId: _req.user?.id || _req.userId,
+                hasUserId: !!_req.user?.id || !!_req.userId,
+                page: _req.query.page,
+                limit: _req.query.limit,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -430,7 +559,11 @@ export class WorkflowController {
             }).sort({ createdAt: -1 }).lean();
             
             if (workflowUsage && workflowUsage.length > 0) {
-                logger.info(`Found ${workflowUsage.length} workflow usage records for analytics`);
+                loggingService.info('Workflow usage records found for analytics', {
+                    requestId: _req.headers['x-request-id'] as string,
+                    userId,
+                    workflowUsageCount: workflowUsage.length
+                });
                 
                 // Group by workflowId
                 const workflowsMap = new Map();
@@ -500,7 +633,13 @@ export class WorkflowController {
                 }
             });
         } catch (error: any) {
-            logger.error('Get workflow analytics error:', error);
+            loggingService.error('Get workflow analytics failed', {
+                requestId: _req.headers['x-request-id'] as string,
+                userId: _req.user?.id || _req.userId,
+                hasUserId: !!_req.user?.id || !!_req.userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -523,7 +662,11 @@ export class WorkflowController {
             }).sort({ createdAt: -1 }).lean();
             
             if (workflowUsage && workflowUsage.length > 0) {
-                logger.info(`Found ${workflowUsage.length} workflow usage records for user`);
+                loggingService.info('Workflow usage records found for user', {
+                    requestId: _req.headers['x-request-id'] as string,
+                    userId,
+                    workflowUsageCount: workflowUsage.length
+                });
                 
                 // Group by workflowId
                 const workflowsMap = new Map();
@@ -655,7 +798,11 @@ export class WorkflowController {
             }
             
             // Fall back to generated data if no workflow data found
-            logger.info('No workflow data found, falling back to generated data');
+            loggingService.info('No workflow data found, falling back to generated data', {
+                requestId: _req.headers['x-request-id'] as string,
+                userId,
+                timeRange
+            });
             const dashboardData = await WorkflowController.generateRealDashboardData(userId, timeRange);
 
             res.json({
@@ -663,7 +810,14 @@ export class WorkflowController {
                 data: dashboardData
             });
         } catch (error: any) {
-            logger.error('Get observability dashboard error:', error);
+            loggingService.error('Get observability dashboard failed', {
+                requestId: _req.headers['x-request-id'] as string,
+                userId: _req.user?.id || _req.userId,
+                hasUserId: !!_req.user?.id || !!_req.userId,
+                timeRange: _req.query.timeRange,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -770,8 +924,11 @@ export class WorkflowController {
                 costAnalysis,
                 alerts
             };
-        } catch (error) {
-            logger.error('Failed to generate dashboard data:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to generate dashboard data', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             // Return empty data structure if real data fails
             return {
                 overview: {
@@ -814,8 +971,11 @@ export class WorkflowController {
                 // For Redis, use keys command
                 try {
                     executionKeys = await redisServiceInternal.client.keys(pattern);
-                } catch (error) {
-                    logger.warn('Failed to get execution keys from Redis:', error);
+                } catch (error: any) {
+                    loggingService.warn('Failed to get execution keys from Redis', {
+                        error: error.message || 'Unknown error',
+                        stack: error.stack
+                    });
                     return [];
                 }
             }
@@ -834,15 +994,22 @@ export class WorkflowController {
                             activeExecutions.push(execution);
                         }
                     }
-                } catch (error) {
-                    logger.warn(`Failed to parse execution from key ${key}:`, error);
+                } catch (error: any) {
+                    loggingService.warn('Failed to parse execution from key', {
+                        key,
+                        error: error.message || 'Unknown error',
+                        stack: error.stack
+                    });
                     continue;
                 }
             }
             
             return activeExecutions;
-        } catch (error) {
-            logger.error('Failed to get active executions:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to get active executions', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return [];
         }
     }
@@ -864,8 +1031,11 @@ export class WorkflowController {
                 // For Redis, use keys command
                 try {
                     executionKeys = await redisServiceInternal.client.keys(pattern);
-                } catch (error) {
-                    logger.warn('Failed to get execution keys from Redis:', error);
+                } catch (error: any) {
+                    loggingService.warn('Failed to get execution keys from Redis', {
+                        error: error.message || 'Unknown error',
+                        stack: error.stack
+                    });
                     return [];
                 }
             }
@@ -905,8 +1075,12 @@ export class WorkflowController {
                             }
                         }
                     }
-                } catch (error) {
-                    logger.warn(`Failed to parse execution from key ${key}:`, error);
+                } catch (error: any) {
+                    loggingService.warn('Failed to parse execution from key', {
+                        key,
+                        error: error.message || 'Unknown error',
+                        stack: error.stack
+                    });
                     continue;
                 }
             }
@@ -915,8 +1089,11 @@ export class WorkflowController {
             return recentExecutions.sort((a, b) => 
                 new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
             );
-        } catch (error) {
-            logger.error('Failed to get recent executions:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to get recent executions', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return [];
         }
     }

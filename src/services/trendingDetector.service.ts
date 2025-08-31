@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 
 export interface TrendingQuery {
@@ -277,6 +277,19 @@ export class TrendingDetectorService {
 
     async analyzeQuery(query: string): Promise<TrendingQuery> {
         try {
+            // Check if this is a Cost Katana query first - these should NOT be treated as trending/shopping
+            if (this.isCostKatanaQuery(query)) {
+                loggingService.info(`🎯 Detected Cost Katana query, skipping trending analysis: "${query}"`);
+                return {
+                    needsRealTimeData: false,
+                    confidence: 0.0,
+                    suggestedSources: [],
+                    queryType: 'general',
+                    extractionStrategy: { selectors: {} },
+                    cacheStrategy: { ttl: 3600, refreshTriggers: ['manual'] }
+                };
+            }
+            
             // Quick pattern-based detection
             const patternScore = this.calculatePatternScore(query);
             
@@ -306,7 +319,7 @@ export class TrendingDetectorService {
                 cacheStrategy
             };
 
-            logger.info(`🔍 Trending analysis for "${query}":`, {
+            loggingService.info(`🔍 Trending analysis for "${query}":`, {
                 needsRealTimeData,
                 confidence: confidence.toFixed(2),
                 queryType,
@@ -316,7 +329,7 @@ export class TrendingDetectorService {
             return result;
 
         } catch (error) {
-            logger.error('Trending detection failed:', error);
+            loggingService.error('Trending detection failed:', { error: error instanceof Error ? error.message : String(error) });
             
             // Fallback to safe defaults
             return {
@@ -336,6 +349,25 @@ export class TrendingDetectorService {
                 }
             };
         }
+    }
+
+    /**
+     * Check if query is about Cost Katana (AI cost optimization platform)
+     */
+    private isCostKatanaQuery(query: string): boolean {
+        const costKatanaPatterns = [
+            /cost\s*katana/i,
+            /costkatana/i,
+            /what\s+is\s+cost\s*katana/i,
+            /what\s+is\s+costkatana/i,
+            /tell\s+me\s+about\s+cost\s*katana/i,
+            /explain\s+cost\s*katana/i,
+            /ai\s+cost\s+optimizer/i,
+            /cost\s+optimization\s+platform/i,
+            /cost\s+optimization\s+system/i
+        ];
+        
+        return costKatanaPatterns.some(pattern => pattern.test(query));
     }
 
     private calculatePatternScore(query: string): number {
@@ -396,7 +428,7 @@ Respond with JSON:
             }
 
         } catch (error) {
-            logger.error('AI classification failed:', error);
+            loggingService.error('AI classification failed:', { error: error instanceof Error ? error.message : String(error) });
             return { confidence: 0, reasoning: 'Classification failed' };
         }
     }
@@ -794,6 +826,11 @@ Respond with JSON:
      * Check if a query should trigger web scraping based on simple heuristics
      */
     quickCheck(query: string): boolean {
+        // First check if this is a Cost Katana query - these should NOT trigger web scraping
+        if (this.isCostKatanaQuery(query)) {
+            return false;
+        }
+        
         return this.realTimePatterns.some(pattern => pattern.test(query));
     }
 

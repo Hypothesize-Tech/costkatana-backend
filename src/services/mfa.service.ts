@@ -3,7 +3,7 @@ import qrcode from 'qrcode';
 import crypto from 'crypto';
 import { User } from '../models/User';
 import { emailTransporter, EMAIL_CONFIG } from '../config/email';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface MFASetupResult {
     secret: string;
@@ -53,7 +53,7 @@ export class MFAService {
             user.mfa.totp.backupCodes = backupCodes;
             await user.save();
 
-            logger.info(`TOTP setup initiated for user: ${userId}`);
+            loggingService.info(`TOTP setup initiated for user: ${userId}`);
 
             return {
                 secret: secret.base32!,
@@ -61,7 +61,7 @@ export class MFAService {
                 backupCodes,
             };
         } catch (error) {
-            logger.error('Error setting up TOTP:', error);
+            loggingService.error('Error setting up TOTP:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -98,13 +98,13 @@ export class MFAService {
                 
                 await user.save();
 
-                logger.info(`TOTP enabled for user: ${userId}`);
+                loggingService.info(`TOTP enabled for user: ${userId}`);
                 return true;
             }
 
             return false;
         } catch (error) {
-            logger.error('Error verifying TOTP:', error);
+            loggingService.error('Error verifying TOTP:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -126,7 +126,7 @@ export class MFAService {
                 user.mfa.totp.lastUsed = new Date();
                 await user.save();
 
-                logger.info(`Backup code used for user: ${userId}`);
+                loggingService.info(`Backup code used for user: ${userId}`);
                 return true;
             }
 
@@ -142,13 +142,13 @@ export class MFAService {
                 user.mfa.totp.lastUsed = new Date();
                 await user.save();
 
-                logger.info(`TOTP verified for user: ${userId}`);
+                loggingService.info(`TOTP verified for user: ${userId}`);
                 return true;
             }
 
             return false;
         } catch (error) {
-            logger.error('Error verifying TOTP:', error);
+            loggingService.error('Error verifying TOTP:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -211,10 +211,10 @@ export class MFAService {
                 `,
             });
 
-            logger.info(`Email MFA code sent to user: ${userId}`);
+            loggingService.info(`Email MFA code sent to user: ${userId}`);
             return true;
         } catch (error) {
-            logger.error('Error sending email code:', error);
+            loggingService.error('Error sending email code:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -248,13 +248,13 @@ export class MFAService {
                 user.mfa.email.attempts = 0; // Reset attempts on success
                 await user.save();
 
-                logger.info(`Email code verified for user: ${userId}`);
+                loggingService.info(`Email code verified for user: ${userId}`);
                 return true;
             }
 
             return false;
         } catch (error) {
-            logger.error('Error verifying email code:', error);
+            loggingService.error('Error verifying email code:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -281,10 +281,10 @@ export class MFAService {
             
             await user.save();
 
-            logger.info(`Email MFA enabled for user: ${userId}`);
+            loggingService.info(`Email MFA enabled for user: ${userId}`);
             return true;
         } catch (error) {
-            logger.error('Error enabling email MFA:', error);
+            loggingService.error('Error enabling email MFA:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -320,10 +320,10 @@ export class MFAService {
 
             await user.save();
 
-            logger.info(`${method.toUpperCase()} MFA disabled for user: ${userId}`);
+            loggingService.info(`${method.toUpperCase()} MFA disabled for user: ${userId}`);
             return true;
         } catch (error) {
-            logger.error(`Error disabling ${method} MFA:`, error);
+            loggingService.error(`Error disabling ${method} MFA:`, { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -355,10 +355,10 @@ export class MFAService {
 
             await user.save();
 
-            logger.info(`Trusted device added for user: ${userId}`);
+            loggingService.info(`Trusted device added for user: ${userId}`);
             return true;
         } catch (error) {
-            logger.error('Error adding trusted device:', error);
+            loggingService.error('Error adding trusted device:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -387,7 +387,7 @@ export class MFAService {
 
             return false;
         } catch (error) {
-            logger.error('Error checking trusted device:', error);
+            loggingService.error('Error checking trusted device:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -408,10 +408,10 @@ export class MFAService {
 
             await user.save();
 
-            logger.info(`Trusted device removed for user: ${userId}`);
+            loggingService.info(`Trusted device removed for user: ${userId}`);
             return true;
         } catch (error) {
-            logger.error('Error removing trusted device:', error);
+            loggingService.error('Error removing trusted device:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -444,7 +444,7 @@ export class MFAService {
                 })),
             };
         } catch (error) {
-            logger.error('Error getting MFA status:', error);
+            loggingService.error('Error getting MFA status:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

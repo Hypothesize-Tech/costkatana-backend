@@ -1,6 +1,6 @@
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface SmartTag {
     tag: string;
@@ -213,7 +213,7 @@ export class SmartTagGeneratorService {
 
     async generateSmartTags(query: string): Promise<TagGenerationResult> {
         try {
-            logger.info(`🏷️ Generating smart tags for query: "${query}"`);
+            loggingService.info(`🏷️ Generating smart tags for query: "${query}"`);
             
             // Extract entities using AI
             const entities = await this.extractEntities(query);
@@ -240,7 +240,7 @@ export class SmartTagGeneratorService {
             };
             
         } catch (error) {
-            logger.error('❌ Smart tag generation failed:', error);
+            loggingService.error('❌ Smart tag generation failed:', { error: error instanceof Error ? error.message : String(error) });
             return this.getFallbackTags(query);
         }
     }
@@ -281,7 +281,7 @@ Example for "check on linkedin who is John Smith":
             const entityData = JSON.parse(jsonString);
             return entityData;
         } catch (error) {
-            logger.warn('Entity extraction failed, using fallback:', error);
+            loggingService.warn('Entity extraction failed, using fallback:', { error: error instanceof Error ? error.message : String(error) });
             return this.extractEntitiesWithRegex(query);
         }
     }

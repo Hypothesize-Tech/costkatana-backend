@@ -1,5 +1,5 @@
 import { Activity, IActivity } from '../models/Activity';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
 
 export interface ActivityOptions {
@@ -22,10 +22,10 @@ export class ActivityService {
                 ...options
             });
 
-            logger.info(`Activity tracked: ${options.type} for user ${userId}`);
+            loggingService.info(`Activity tracked: ${options.type} for user ${userId}`);
             return activity;
         } catch (error) {
-            logger.error('Error tracking activity:', error);
+            loggingService.error('Error tracking activity:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -85,7 +85,7 @@ export class ActivityService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting user activities:', error);
+            loggingService.error('Error getting user activities:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -124,7 +124,7 @@ export class ActivityService {
 
             return summary;
         } catch (error) {
-            logger.error('Error getting activity summary:', error);
+            loggingService.error('Error getting activity summary:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -143,10 +143,10 @@ export class ActivityService {
             if (activities.length > 0) {
                 const idsToDelete = activities.map(a => a._id);
                 await Activity.deleteMany({ _id: { $in: idsToDelete } });
-                logger.info(`Cleaned up ${idsToDelete.length} old activities for user ${userId}`);
+                loggingService.info(`Cleaned up ${idsToDelete.length} old activities for user ${userId}`);
             }
         } catch (error) {
-            logger.error('Error cleaning up activities:', error);
+             loggingService.error('Error cleaning up activities:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 } 

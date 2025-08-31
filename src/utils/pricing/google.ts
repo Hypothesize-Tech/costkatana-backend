@@ -1,4 +1,4 @@
-import { ModelPricing, PricingUnit } from '../pricing';
+import { ModelPricing, PricingUnit } from './types';
 
 export const GOOGLE_PRICING: ModelPricing[] = [
   // === Gemini 2.5 Models (Latest) ===

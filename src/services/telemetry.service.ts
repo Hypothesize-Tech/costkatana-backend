@@ -1,6 +1,6 @@
 import { Telemetry, ITelemetry } from '../models/Telemetry';
 import { context, SpanKind, SpanStatusCode } from '@opentelemetry/api';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import os from 'os';
 
 export interface TelemetryQuery {
@@ -220,7 +220,7 @@ export class TelemetryService {
       
       return telemetry;
     } catch (error) {
-      logger.error('Failed to store telemetry from span:', error);
+      loggingService.error('Failed to store telemetry from span:', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -234,7 +234,7 @@ export class TelemetryService {
       await telemetry.save();
       return telemetry;
     } catch (error) {
-      logger.error('Failed to store telemetry data:', error);
+      loggingService.error('Failed to store telemetry data:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -313,7 +313,7 @@ export class TelemetryService {
         }
       };
     } catch (error) {
-      logger.error('Failed to query telemetry:', error);
+      loggingService.error('Failed to query telemetry:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -361,7 +361,7 @@ export class TelemetryService {
         flat_spans: spans
       };
     } catch (error) {
-      logger.error('Failed to get trace details:', error);
+      loggingService.error('Failed to get trace details:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -475,7 +475,7 @@ export class TelemetryService {
 
       let result: any;
       try {
-        logger.info(`Executing aggregation pipeline for timeframe: ${timeframe}, maxRecords: ${maxRecords}`);
+        loggingService.info(`Executing aggregation pipeline for timeframe: ${timeframe}, maxRecords: ${maxRecords}`);
         
         // Add timeout to MongoDB aggregation to prevent hanging
         const aggregationPromise = Telemetry.aggregate(pipeline as any);
@@ -485,11 +485,11 @@ export class TelemetryService {
         
         const aggregationResult = await Promise.race([aggregationPromise, timeoutPromise]);
         result = (aggregationResult as any)[0] || {};
-        logger.info(`Aggregation completed successfully with ${result.basic?.[0]?.total_requests || 0} records`);
+        loggingService.info(`Aggregation completed successfully with ${result.basic?.[0]?.total_requests || 0} records`);
       } catch (error: any) {
         // Handle memory limit errors gracefully
         if (error.message && error.message.includes('memory limit')) {
-          logger.warn(`Memory limit exceeded for timeframe ${timeframe}, using fallback aggregation`);
+          loggingService.warn(`Memory limit exceeded for timeframe ${timeframe}, using fallback aggregation`);
                      // Fallback to simpler aggregation without percentiles
            const fallbackPipeline = [
              { $match: matchStage },
@@ -511,7 +511,7 @@ export class TelemetryService {
           ];
           
                      const [fallbackResult] = await Telemetry.aggregate(fallbackPipeline as any);
-           logger.info(`Fallback aggregation completed with ${fallbackResult?.total_requests || 0} records`);
+           loggingService.info(`Fallback aggregation completed with ${fallbackResult?.total_requests || 0} records`);
            result = {
              basic: [fallbackResult],
              percentiles: [{ durations: [] }],
@@ -588,7 +588,7 @@ export class TelemetryService {
       
       return metrics;
     } catch (error) {
-      logger.error('Failed to get performance metrics:', error);
+      loggingService.error('Failed to get performance metrics:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -660,7 +660,7 @@ export class TelemetryService {
         dependencies
       };
     } catch (error) {
-      logger.error('Failed to get service dependencies:', error);
+      loggingService.error('Failed to get service dependencies:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -832,7 +832,7 @@ export class TelemetryService {
         request_priorities: result.priorities || []
       };
     } catch (error) {
-      logger.error('Failed to get enrichment stats:', error);
+      loggingService.error('Failed to get enrichment stats:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -897,7 +897,7 @@ export class TelemetryService {
         request_priority: span.attributes?.request_priority
       }));
     } catch (error) {
-      logger.error('Failed to get enriched spans:', error);
+      loggingService.error('Failed to get enriched spans:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -928,9 +928,9 @@ export class TelemetryService {
         }
       );
 
-      logger.info(`Auto-vectorized span: ${spanData.span_id}`);
+      loggingService.info(`Auto-vectorized span: ${spanData.span_id}`);
     } catch (error) {
-      logger.warn(`Failed to auto-vectorize span ${spanData.span_id}:`, error);
+      loggingService.warn(`Failed to auto-vectorize span ${spanData.span_id}:`, { error: error instanceof Error ? error.message : String(error) });
       // Don't throw - vectorization failure shouldn't break telemetry storage
     }
   }
@@ -943,9 +943,9 @@ export class TelemetryService {
     setInterval(async () => {
       try {
         await TelemetryService.autoEnrichSpans();
-        logger.info('Background span enrichment completed');
+        loggingService.info('Background span enrichment completed');
       } catch (error) {
-        logger.error('Background span enrichment failed:', error);
+        loggingService.error('Background span enrichment failed:', { error: error instanceof Error ? error.message : String(error) });
       }
     }, 5 * 60 * 1000); // 5 minutes
 
@@ -953,9 +953,9 @@ export class TelemetryService {
     setImmediate(async () => {
       try {
         await TelemetryService.autoEnrichSpans();
-        logger.info('Initial background span enrichment completed');
+        loggingService.info('Initial background span enrichment completed');
       } catch (error) {
-        logger.error('Initial background span enrichment failed:', error);
+        loggingService.error('Initial background span enrichment failed:', { error: error instanceof Error ? error.message : String(error) });
       }
     });
   }
@@ -979,7 +979,7 @@ export class TelemetryService {
         return;
       }
 
-      logger.info(`Enriching ${unenrichedSpans.length} spans with AI insights`);
+      loggingService.info(`Enriching ${unenrichedSpans.length} spans with AI insights`);
 
       // Process spans in batches for better performance
       const batchSize = 10;
@@ -1005,7 +1005,7 @@ export class TelemetryService {
               );
             }
           } catch (error) {
-            logger.error(`Failed to enrich span ${span.span_id}:`, error);
+            loggingService.error(`Failed to enrich span ${span.span_id}:`, { error: error instanceof Error ? error.message : String(error) });
           }
         }));
 
@@ -1015,7 +1015,7 @@ export class TelemetryService {
         }
       }
     } catch (error) {
-      logger.error('Failed to auto-enrich spans:', error);
+      loggingService.error('Failed to auto-enrich spans:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -1089,7 +1089,7 @@ export class TelemetryService {
         cache_hit
       };
     } catch (error) {
-      logger.error('Failed to generate span enrichment:', error);
+      loggingService.error('Failed to generate span enrichment:', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -1219,7 +1219,7 @@ export class TelemetryService {
 
       return recommendations.slice(0, 5); // Return top 5 recommendations
     } catch (error) {
-      logger.error('Failed to generate AI recommendations:', error);
+      loggingService.error('Failed to generate AI recommendations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }

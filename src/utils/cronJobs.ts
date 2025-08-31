@@ -1,36 +1,77 @@
 import cron from 'node-cron';
-import { logger } from './logger';
+import { loggingService } from '../services/logging.service';
 import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 import { GuardrailsService } from '../services/guardrails.service';
 
 export const initializeCronJobs = () => {
-    logger.info('Initializing cron jobs...');
+    loggingService.info('Initializing cron jobs', {
+        component: 'cronJobs',
+        operation: 'initializeCronJobs',
+        step: 'start'
+    });
 
     // Daily intelligent monitoring - runs at 9 AM every day
     cron.schedule('0 9 * * *', async () => {
-        logger.info('Running daily intelligent monitoring...');
+        loggingService.info('Running daily intelligent monitoring', {
+            component: 'cronJobs',
+            operation: 'dailyIntelligentMonitoring',
+            step: 'start',
+            schedule: '0 9 * * *'
+        });
         try {
             await IntelligentMonitoringService.runDailyMonitoring();
-            logger.info('Daily intelligent monitoring completed');
+            loggingService.info('Daily intelligent monitoring completed', {
+                component: 'cronJobs',
+                operation: 'dailyIntelligentMonitoring',
+                step: 'complete',
+                schedule: '0 9 * * *'
+            });
         } catch (error) {
-            logger.error('Daily intelligent monitoring failed:', error);
+            loggingService.error('Daily intelligent monitoring failed', {
+                component: 'cronJobs',
+                operation: 'dailyIntelligentMonitoring',
+                step: 'error',
+                schedule: '0 9 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
     // Weekly digest check - runs at 10 AM on Mondays
     cron.schedule('0 10 * * 1', async () => {
-        logger.info('Running weekly digest check...');
+        loggingService.info('Running weekly digest check', {
+            component: 'cronJobs',
+            operation: 'weeklyDigestCheck',
+            step: 'start',
+            schedule: '0 10 * * 1'
+        });
         try {
             await IntelligentMonitoringService.runDailyMonitoring(); // This handles weekly digests too
-            logger.info('Weekly digest check completed');
+            loggingService.info('Weekly digest check completed', {
+                component: 'cronJobs',
+                operation: 'weeklyDigestCheck',
+                step: 'complete',
+                schedule: '0 10 * * 1'
+            });
         } catch (error) {
-            logger.error('Weekly digest check failed:', error);
+            loggingService.error('Weekly digest check failed', {
+                component: 'cronJobs',
+                operation: 'weeklyDigestCheck',
+                step: 'error',
+                schedule: '0 10 * * 1',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
     // Urgent alerts check - runs every 2 hours during business hours
     cron.schedule('0 */2 8-20 * * *', async () => {
-        logger.info('Running urgent alerts check...');
+        loggingService.info('Running urgent alerts check', {
+            component: 'cronJobs',
+            operation: 'urgentAlertsCheck',
+            step: 'start',
+            schedule: '0 */2 8-20 * * *'
+        });
         try {
             // Get users who might need urgent alerts
             const { User } = await import('../models/User');
@@ -41,19 +82,42 @@ export const initializeCronJobs = () => {
 
             const promises = activeUsers.map(user =>
                 IntelligentMonitoringService.monitorUserUsage(user._id.toString())
-                    .catch(error => logger.error(`Failed urgent check for user ${user._id}:`, error))
+                    .catch(error => loggingService.error('Failed urgent check for user', {
+                        component: 'cronJobs',
+                        operation: 'urgentAlertsCheck',
+                        step: 'userCheckError',
+                        userId: user._id.toString(),
+                        error: error instanceof Error ? error.message : String(error)
+                    }))
             );
 
             await Promise.all(promises);
-            logger.info(`Urgent alerts check completed for ${activeUsers.length} users`);
+            loggingService.info('Urgent alerts check completed', {
+                component: 'cronJobs',
+                operation: 'urgentAlertsCheck',
+                step: 'complete',
+                schedule: '0 */2 8-20 * * *',
+                usersProcessed: activeUsers.length
+            });
         } catch (error) {
-            logger.error('Urgent alerts check failed:', error);
+            loggingService.error('Urgent alerts check failed', {
+                component: 'cronJobs',
+                operation: 'urgentAlertsCheck',
+                step: 'error',
+                schedule: '0 */2 8-20 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
     // Monthly usage reset - runs at midnight on the 1st of every month
     cron.schedule('0 0 1 * *', async () => {
-        logger.info('Running monthly usage reset...');
+        loggingService.info('Running monthly usage reset', {
+            component: 'cronJobs',
+            operation: 'monthlyUsageReset',
+            step: 'start',
+            schedule: '0 0 1 * *'
+        });
         try {
             const { User } = await import('../models/User');
             // Reset monthly usage for all users
@@ -63,26 +127,58 @@ export const initializeCronJobs = () => {
                     'monthlyUsage.lastReset': new Date()
                 }
             });
-            logger.info('Monthly usage reset completed');
+            loggingService.info('Monthly usage reset completed', {
+                component: 'cronJobs',
+                operation: 'monthlyUsageReset',
+                step: 'complete',
+                schedule: '0 0 1 * *'
+            });
         } catch (error) {
-            logger.error('Monthly usage reset failed:', error);
+            loggingService.error('Monthly usage reset failed', {
+                component: 'cronJobs',
+                operation: 'monthlyUsageReset',
+                step: 'error',
+                schedule: '0 0 1 * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
     // Monthly usage reset - runs at midnight on the 1st of each month
     cron.schedule('0 0 1 * *', async () => {
-        logger.info('Running monthly usage reset...');
+        loggingService.info('Running monthly usage reset via guardrails', {
+            component: 'cronJobs',
+            operation: 'monthlyUsageResetGuardrails',
+            step: 'start',
+            schedule: '0 0 1 * *'
+        });
         try {
             await GuardrailsService.resetMonthlyUsage();
-            logger.info('Monthly usage reset completed');
+            loggingService.info('Monthly usage reset via guardrails completed', {
+                component: 'cronJobs',
+                operation: 'monthlyUsageResetGuardrails',
+                step: 'complete',
+                schedule: '0 0 1 * *'
+            });
         } catch (error) {
-            logger.error('Monthly usage reset failed:', error);
+            loggingService.error('Monthly usage reset via guardrails failed', {
+                component: 'cronJobs',
+                operation: 'monthlyUsageResetGuardrails',
+                step: 'error',
+                schedule: '0 0 1 * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
     // Hourly usage check for free tier throttling - runs every hour
     cron.schedule('0 * * * *', async () => {
-        logger.info('Running hourly usage check for guardrails...');
+        loggingService.info('Running hourly usage check for guardrails', {
+            component: 'cronJobs',
+            operation: 'hourlyUsageCheck',
+            step: 'start',
+            schedule: '0 * * * *'
+        });
         try {
             // Check users approaching limits
             const { User } = await import('../models/User');
@@ -102,9 +198,14 @@ export const initializeCronJobs = () => {
                 const requestPercentage = (usage.apiCalls / limits.apiCalls) * 100;
 
                 if (tokenPercentage >= 80 || requestPercentage >= 80) {
-                    logger.warn(`User ${user._id} approaching limits`, {
+                    loggingService.warn('User approaching limits', {
+                        component: 'cronJobs',
+                        operation: 'hourlyUsageCheck',
+                        step: 'userLimitWarning',
+                        userId: user._id.toString(),
                         tokenPercentage: tokenPercentage.toFixed(2),
-                        requestPercentage: requestPercentage.toFixed(2)
+                        requestPercentage: requestPercentage.toFixed(2),
+                        threshold: 80
                     });
 
                     // The GuardrailsService will handle sending alerts
@@ -116,11 +217,27 @@ export const initializeCronJobs = () => {
                 }
             }
 
-            logger.info(`Hourly usage check completed for ${freeUsers.length} free tier users`);
+            loggingService.info('Hourly usage check completed', {
+                component: 'cronJobs',
+                operation: 'hourlyUsageCheck',
+                step: 'complete',
+                schedule: '0 * * * *',
+                usersProcessed: freeUsers.length
+            });
         } catch (error) {
-            logger.error('Hourly usage check failed:', error);
+            loggingService.error('Hourly usage check failed', {
+                component: 'cronJobs',
+                operation: 'hourlyUsageCheck',
+                step: 'error',
+                schedule: '0 * * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     });
 
-    logger.info('Cron jobs initialized successfully');
+    loggingService.info('Cron jobs initialized successfully', {
+        component: 'cronJobs',
+        operation: 'initializeCronJobs',
+        step: 'complete'
+    });
 }; 

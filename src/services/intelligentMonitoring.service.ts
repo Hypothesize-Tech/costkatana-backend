@@ -2,7 +2,7 @@ import { User } from '../models/User';
 import { Usage } from '../models/Usage';
 import { EmailService } from './email.service';
 import { BedrockService } from './bedrock.service';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 interface ChatGPTPlan {
     name: 'free' | 'plus' | 'team' | 'enterprise';
@@ -148,7 +148,7 @@ export class IntelligentMonitoringService {
                 await this.sendIntelligentNotifications(user, recommendations, usagePattern);
             }
 
-            logger.info('AI-powered intelligent monitoring completed', {
+            loggingService.info('AI-powered intelligent monitoring completed', {
                 userId,
                 monthlyRequests: monthlyUsage.length,
                 dailyRequests: dailyUsage.length,
@@ -161,7 +161,7 @@ export class IntelligentMonitoringService {
             });
 
         } catch (error) {
-            logger.error('Error in AI-powered intelligent monitoring:', error);
+            loggingService.error('Error in AI-powered intelligent monitoring:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -245,16 +245,16 @@ export class IntelligentMonitoringService {
                 // Get personalized user profile analysis using AI
                 personalizedAnalysis = await this.generatePersonalizedUserProfile(userId, usageData, historicalData);
 
-                logger.info('AI insights and personalization generated successfully', {
+                loggingService.info('AI insights and personalization generated successfully', { value:  { 
                     userId,
                     potentialSavings: aiInsights.potentialSavings,
                     patternsFound: aiInsights.patterns.length,
                     userProfile: personalizedAnalysis.userProfile,
                     technicalLevel: personalizedAnalysis.technicalLevel
-                });
+                 } });
 
             } catch (error) {
-                logger.warn('Failed to generate AI insights and personalization:', error);
+                loggingService.warn('Failed to generate AI insights and personalization:', { error: error instanceof Error ? error.message : String(error) });
             }
         }
 
@@ -338,7 +338,7 @@ Make this highly specific to the user's actual usage patterns, not generic advic
             };
 
         } catch (error) {
-            logger.warn('Failed to generate personalized user profile:', error);
+            loggingService.warn('Failed to generate personalized user profile:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 userProfile: 'AI user with mixed patterns',
                 usagePersonality: 'Varied AI usage',
@@ -424,7 +424,7 @@ Make this highly specific to the user's actual usage patterns, not generic advic
             }
 
         } catch (error) {
-            logger.error('Error generating AI personalized recommendations:', error);
+            loggingService.error('Error generating AI personalized recommendations:', { error: error instanceof Error ? error.message : String(error) });
             
             // Fallback: Generate at least one helpful recommendation
             recommendations.push({
@@ -542,7 +542,7 @@ Make recommendations highly specific to their usage patterns, not generic advice
                 confidence: rec.confidence || 80
             }));
 
-            logger.info('AI-powered personalized recommendations generated', {
+            loggingService.info('AI-powered personalized recommendations generated', {
                 userId: _userId,
                 recommendationsCount: recommendations.length,
                 avgConfidence: recommendations.reduce((sum, r) => sum + r.confidence, 0) / recommendations.length,
@@ -552,7 +552,7 @@ Make recommendations highly specific to their usage patterns, not generic advice
             return recommendations;
 
         } catch (error) {
-            logger.error('Error generating comprehensive AI recommendations:', error);
+            loggingService.error('Error generating comprehensive AI recommendations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -614,7 +614,7 @@ JSON Format:
             }));
 
         } catch (error) {
-            logger.error('Error generating AI onboarding recommendations:', error);
+            loggingService.error('Error generating AI onboarding recommendations:', { error: error instanceof Error ? error.message : String(error) });
             
             // Fallback onboarding recommendation
             return [{
@@ -742,7 +742,7 @@ JSON Format:
             html
         });
         
-        logger.info('Urgent alert sent', {
+        loggingService.info('Urgent alert sent', { value:  { 
             userId: user._id,
             email: user.email,
             alertType: recommendation.type,
@@ -750,7 +750,7 @@ JSON Format:
             aiGenerated: recommendation.aiGenerated,
             personalized: recommendation.personalized,
             confidence: recommendation.confidence
-        });
+         } });
     }
 
     /**
@@ -889,7 +889,7 @@ JSON Format:
             'preferences.lastDigestSent': new Date()
         });
 
-        logger.info('AI-personalized weekly digest sent', {
+        loggingService.info('AI-personalized weekly digest sent', { value:  { 
             userId: user._id,
             email: user.email,
             recommendationsCount: recommendations.length,
@@ -897,7 +897,7 @@ JSON Format:
             personalizedRecommendations: personalizedRecommendations.length,
             aiInsightsIncluded: !!pattern.aiInsights,
             userProfile: pattern.personalizedAnalysis?.userProfile
-        });
+         } });
     }
 
     /**
@@ -1009,19 +1009,19 @@ JSON Format:
                 'preferences.emailAlerts': true
             }).select('_id');
 
-            logger.info(`Running AI-powered daily monitoring for ${activeUsers.length} users`);
+            loggingService.info(`Running AI-powered daily monitoring for ${activeUsers.length} users`);
 
             const promises = activeUsers.map(user => 
                 this.monitorUserUsage(user._id.toString()).catch(error => 
-                    logger.error(`Failed to monitor user ${user._id}:`, error)
+                    loggingService.error(`Failed to monitor user ${user._id}:`, error)
                 )
             );
 
             await Promise.all(promises);
             
-            logger.info('AI-powered daily monitoring completed successfully');
+            loggingService.info('AI-powered daily monitoring completed successfully');
         } catch (error) {
-            logger.error('Error in daily monitoring:', error);
+            loggingService.error('Error in daily monitoring:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 } 

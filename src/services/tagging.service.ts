@@ -1,5 +1,5 @@
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface TagHierarchy {
     id: string;
@@ -188,7 +188,7 @@ export class TaggingService {
 
             return tagAnalytics;
         } catch (error) {
-            logger.error('Error getting tag analytics:', error);
+            loggingService.error('Error getting tag analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -268,7 +268,7 @@ export class TaggingService {
 
             return Array.from(tagMetrics.values());
         } catch (error) {
-            logger.error('Error getting real-time tag metrics:', error);
+            loggingService.error('Error getting real-time tag metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -302,7 +302,7 @@ export class TaggingService {
             // For now, we'll return the created hierarchy
             return tagHierarchy;
         } catch (error) {
-            logger.error('Error creating tag hierarchy:', error);
+            loggingService.error('Error creating tag hierarchy:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -368,7 +368,7 @@ export class TaggingService {
 
             return Array.from(suggestions).slice(0, 20);
         } catch (error) {
-            logger.error('Error getting tag suggestions:', error);
+            loggingService.error('Error getting tag suggestions:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -403,7 +403,7 @@ export class TaggingService {
             // In a real implementation, you would save this to a CostAllocationRule collection
             return rule;
         } catch (error) {
-            logger.error('Error creating cost allocation rule:', error);
+            loggingService.error('Error creating cost allocation rule:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

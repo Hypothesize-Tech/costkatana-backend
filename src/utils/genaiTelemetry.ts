@@ -1,6 +1,6 @@
 import { trace, metrics, SpanStatusCode, context, propagation } from '@opentelemetry/api';
 import crypto from 'crypto';
-import { logger } from './logger';
+import { loggingService } from '../services/logging.service';
 import { TelemetryService } from '../services/telemetry.service';
 
 const tracer = trace.getTracer('cost-katana-genai', '1.0.0');
@@ -169,7 +169,7 @@ export async function recordGenAIUsage(params: GenAIUsageParams): Promise<void> 
             processing_latency_ms: latencyMs,
             attributes: extra
         }).catch(err => {
-            logger.error('Failed to store GenAI telemetry in MongoDB:', err);
+            loggingService.error('Failed to store GenAI telemetry in MongoDB:', err);
         });
 
         // End span if we created it
@@ -204,7 +204,7 @@ export async function recordGenAIUsage(params: GenAIUsageParams): Promise<void> 
 
         // Log high-cost operations
         if (costUSD >= 0.01) {
-            logger.info('High-cost LLM operation detected', {
+            loggingService.info('High-cost LLM operation detected', {
                 provider,
                 model,
                 operationName,
@@ -217,7 +217,7 @@ export async function recordGenAIUsage(params: GenAIUsageParams): Promise<void> 
         }
 
     } catch (error) {
-        logger.error('Error recording GenAI telemetry:', error);
+        loggingService.error('Error recording GenAI telemetry:', { error: error instanceof Error ? error.message : String(error) });
         // Don't throw - telemetry should not break the application
     }
 }

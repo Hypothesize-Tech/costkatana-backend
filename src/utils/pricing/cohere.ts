@@ -1,4 +1,4 @@
-import { ModelPricing, PricingUnit } from '../pricing';
+import { ModelPricing, PricingUnit } from './types';
 
 export const COHERE_PRICING: ModelPricing[] = [
     {

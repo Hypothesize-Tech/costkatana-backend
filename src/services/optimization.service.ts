@@ -2,7 +2,7 @@ import { Optimization, IOptimization } from '../models/Optimization';
 import { Usage } from '../models/Usage';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { AIProvider, CostEstimate, OptimizationResult } from '../types/aiCostTracker.types';
 import { estimateCost, getModelPricing } from '../utils/pricing';
@@ -145,7 +145,7 @@ export class OptimizationService {
             try {
                 originalTokens = estimateTokens(request.prompt, provider);
             } catch (error) {
-                logger.warn(`Failed to estimate tokens for original prompt, using fallback: ${error}`);
+                loggingService.warn(`Failed to estimate tokens for original prompt, using fallback: ${error}`);
                 originalTokens = request.prompt.length / 4; // Rough estimate
             }
             
@@ -158,7 +158,7 @@ export class OptimizationService {
                     request.model
                 );
             } catch (error) {
-                logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing`);
+                loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing`);
                 // Use fallback pricing (GPT-4o-mini rates as default)
                 originalSimpleEstimate = {
                     inputCost: (originalTokens / 1_000_000) * 0.15,
@@ -185,7 +185,7 @@ export class OptimizationService {
                     request.conversationHistory
                 );
             } catch (error) {
-                logger.error('Failed to generate optimization suggestions:', error);
+                loggingService.error('Failed to generate optimization suggestions:', { error: error instanceof Error ? error.message : String(error) });
                 // Create a fallback optimization result
                 optimizationResult = {
                     id: 'fallback-optimization',
@@ -237,7 +237,7 @@ export class OptimizationService {
             try {
                 optimizedTokens = estimateTokens(optimizedPrompt, provider);
             } catch (error) {
-                logger.warn(`Failed to estimate tokens for optimized prompt, using fallback: ${error}`);
+                loggingService.warn(`Failed to estimate tokens for optimized prompt, using fallback: ${error}`);
                 optimizedTokens = optimizedPrompt.length / 4; // Rough estimate
             }
             
@@ -250,7 +250,7 @@ export class OptimizationService {
                     request.model
                 );
             } catch (error) {
-                logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing for optimized prompt`);
+                loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing for optimized prompt`);
                 // Use fallback pricing (GPT-4o-mini rates as default)
                 optimizedSimpleEstimate = {
                     inputCost: (optimizedTokens / 1_000_000) * 0.15,
@@ -364,17 +364,17 @@ export class OptimizationService {
                 });
             }
 
-            logger.info('Optimization created', {
+            loggingService.info('Optimization created', { value:  { 
                 userId: request.userId,
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
                 savings: improvementPercentage,
                 type: optimizationType,
-            });
+             } });
 
             return optimization;
         } catch (error) {
-            logger.error('Error creating optimization:', error);
+            loggingService.error('Error creating optimization:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -419,7 +419,7 @@ export class OptimizationService {
                                 req.model
                             );
                         } catch (error) {
-                            logger.warn(`No pricing data found for ${providerEnumToString(provider)}/${req.model}, using fallback pricing`);
+                            loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${req.model}, using fallback pricing`);
                             // Use fallback pricing (GPT-4o-mini rates as default)
                             estimate = {
                                 inputCost: (promptTokens / 1_000_000) * 0.15,
@@ -445,7 +445,7 @@ export class OptimizationService {
                             request.requests[0].model
                         );
                     } catch (error) {
-                        logger.warn(`No pricing data found for ${providerEnumToString(firstProvider)}/${request.requests[0].model}, using fallback pricing`);
+                        loggingService.warn(`No pricing data found for ${providerEnumToString(firstProvider)}/${request.requests[0].model}, using fallback pricing`);
                         // Use fallback pricing (GPT-4o-mini rates as default)
                         optimizedEstimate = {
                             inputCost: (optimizedPromptTokens / 1_000_000) * 0.15,
@@ -493,7 +493,7 @@ export class OptimizationService {
 
             return optimizations;
         } catch (error) {
-            logger.error('Error creating batch optimization:', error);
+            loggingService.error('Error creating batch optimization:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -552,7 +552,7 @@ export class OptimizationService {
 
             return paginate(data, total, options);
         } catch (error) {
-            logger.error('Error fetching optimizations:', error);
+            loggingService.error('Error fetching optimizations:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -586,12 +586,12 @@ export class OptimizationService {
                 }
             });
 
-            logger.info('Optimization applied', {
+            loggingService.info('Optimization applied', { value:  { 
                 optimizationId,
                 userId,
-            });
+             } });
         } catch (error) {
-            logger.error('Error applying optimization:', error);
+            loggingService.error('Error applying optimization:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -621,13 +621,13 @@ export class OptimizationService {
             };
             await optimization.save();
 
-            logger.info('Optimization feedback provided', {
+            loggingService.info('Optimization feedback provided', { value:  { 
                 optimizationId,
                 helpful: feedback.helpful,
                 rating: feedback.rating,
-            });
+             } });
         } catch (error) {
-            logger.error('Error providing optimization feedback:', error);
+            loggingService.error('Error providing optimization feedback:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -673,7 +673,7 @@ export class OptimizationService {
                 totalPotentialSavings: suggestions.reduce((sum: number, s: any) => sum + s.estimatedSavings, 0),
             };
         } catch (error) {
-            logger.error('Error analyzing optimization opportunities:', error);
+            loggingService.error('Error analyzing optimization opportunities:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -697,7 +697,7 @@ export class OptimizationService {
                     });
                     optimizations.push(optimization);
                 } catch (error) {
-                    logger.error(`Error optimizing prompt ${promptData._id}:`, error);
+                    loggingService.error(`Error optimizing prompt ${promptData._id}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
 
@@ -708,7 +708,7 @@ export class OptimizationService {
                 optimizations,
             };
         } catch (error) {
-            logger.error('Error generating bulk optimizations:', error);
+            loggingService.error('Error generating bulk optimizations:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -769,7 +769,7 @@ export class OptimizationService {
 
             return prompts;
         } catch (error: any) {
-            logger.error('Get prompts for bulk optimization error:', error);
+            loggingService.error('Get prompts for bulk optimization error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get prompts for bulk optimization');
         }
     }
@@ -844,7 +844,7 @@ export class OptimizationService {
 
             return templates;
         } catch (error: any) {
-            logger.error('Get optimization templates error:', error);
+            loggingService.error('Get optimization templates error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get optimization templates');
         }
     }
@@ -879,7 +879,7 @@ export class OptimizationService {
                 currentVersion: formattedHistory.length > 0 ? formattedHistory[0].version : 1
             };
         } catch (error: any) {
-            logger.error('Get optimization history error:', error);
+            loggingService.error('Get optimization history error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get optimization history');
         }
     }
@@ -910,18 +910,18 @@ export class OptimizationService {
             await optimization.save();
 
             // Log the reversion
-            logger.info('Optimization reverted:', {
+            loggingService.info('Optimization reverted:', { value:  { 
                 optimizationId,
                 userId,
                 revertedAt: optimization.metadata.revertedAt
-            });
+             } });
 
             return {
                 message: 'Optimization reverted successfully',
                 revertedAt: optimization.metadata.revertedAt
             };
         } catch (error: any) {
-            logger.error('Revert optimization error:', error);
+            loggingService.error('Revert optimization error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to revert optimization');
         }
     }

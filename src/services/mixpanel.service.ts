@@ -1,5 +1,5 @@
 import mixpanel from 'mixpanel';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 interface MixpanelEvent {
     event: string;
@@ -131,10 +131,10 @@ export class MixpanelService {
                 debug: process.env.NODE_ENV === 'development',
                 host: 'api.mixpanel.com'
             });
-            logger.info('Mixpanel service initialized');
+            loggingService.info('Mixpanel service initialized');
         } else {
             this.client = null;
-            logger.warn('Mixpanel not configured - analytics tracking disabled');
+            loggingService.warn('Mixpanel not configured - analytics tracking disabled');
         }
     }
 
@@ -150,7 +150,7 @@ export class MixpanelService {
      */
     public track(event: string, properties: Record<string, any> = {}, userId?: string): void {
         if (!this.isEnabled || !this.client) {
-            logger.debug('Mixpanel tracking disabled, event:', event);
+            loggingService.debug('Mixpanel tracking disabled, event:', { value:  { event  } });
             return;
         }
 
@@ -176,9 +176,9 @@ export class MixpanelService {
                 ...(userId ? { distinct_id: userId } : {})
             };
             this.client.track(event, trackProps);
-            logger.debug('Mixpanel event tracked:', event, properties);
+            loggingService.debug('Mixpanel event tracked:', { value:  { event, properties  } });
         } catch (error) {
-            logger.error('Error tracking Mixpanel event:', error);
+            loggingService.error('Error tracking Mixpanel event:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -492,7 +492,7 @@ export class MixpanelService {
      */
     public setUserProfile(userId: string, properties: Record<string, any>): void {
         if (!this.isEnabled || !this.client) {
-            logger.debug('Mixpanel tracking disabled, user profile update skipped');
+            loggingService.debug('Mixpanel tracking disabled, user profile update skipped');
             return;
         }
 
@@ -502,9 +502,9 @@ export class MixpanelService {
                 $last_seen: new Date().toISOString(),
                 $updated: new Date().toISOString()
             });
-            logger.debug('Mixpanel user profile updated:', userId, properties);
+            loggingService.debug('Mixpanel user profile updated:', { value:  { userId, properties  } });
         } catch (error) {
-            logger.error('Error updating Mixpanel user profile:', error);
+            loggingService.error('Error updating Mixpanel user profile:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -518,9 +518,9 @@ export class MixpanelService {
 
         try {
             this.client.people.increment(userId, property, value);
-            logger.debug('Mixpanel user property incremented:', userId, property, value);
+            loggingService.debug('Mixpanel user property incremented:', { value:  { userId, property, value  } });
         } catch (error) {
-            logger.error('Error incrementing Mixpanel user property:', error);
+            loggingService.error('Error incrementing Mixpanel user property:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -768,7 +768,7 @@ export class MixpanelService {
         if (this.isEnabled && this.client && typeof (this.client as any).flush === 'function') {
             // The mixpanel-node client does not always expose flush, but if it does, call it
             (this.client as any).flush();
-            logger.debug('Mixpanel events flushed');
+            loggingService.debug('Mixpanel events flushed');
         }
     }
 

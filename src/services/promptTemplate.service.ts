@@ -1,7 +1,7 @@
 import { PromptTemplate, IPromptTemplate } from '../models/PromptTemplate';
 import { Project } from '../models/Project';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 import mongoose from 'mongoose';
 
@@ -107,10 +107,10 @@ export class PromptTemplateService {
                 }
             });
 
-            logger.info(`Prompt template created: ${template.name} by user ${userId}`);
+            loggingService.info(`Prompt template created: ${template.name} by user ${userId}`);
             return template;
         } catch (error) {
-            logger.error('Error creating prompt template:', error);
+            loggingService.error('Error creating prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -125,8 +125,8 @@ export class PromptTemplateService {
         pages: number;
     }> {
         try {
-            logger.info('=== PROMPT TEMPLATE SERVICE: getTemplates START ===');
-            logger.info('Query received:', query);
+            loggingService.info('=== PROMPT TEMPLATE SERVICE: getTemplates START ===');
+            loggingService.info('Query received:', { value:  { value: query  } });
 
             const {
                 userId,
@@ -139,7 +139,7 @@ export class PromptTemplateService {
                 limit = 20
             } = query;
 
-            logger.info('Destructured query params:', {
+            loggingService.info('Destructured query params:', { value:  { 
                 userId,
                 projectId,
                 category,
@@ -148,10 +148,10 @@ export class PromptTemplateService {
                 search,
                 page,
                 limit
-            });
+             } });
 
             // Get user's projects for access control
-            logger.info('Getting user projects for access control...');
+            loggingService.info('Getting user projects for access control...');
             const userProjects = await Project.find({
                 $or: [
                     { ownerId: userId },
@@ -160,12 +160,12 @@ export class PromptTemplateService {
                 isActive: true
             }).select('_id');
 
-            logger.info('User projects found:', userProjects.length);
+            loggingService.info('User projects found:', { value:  { value: userProjects.length  } });
             const userProjectIds = userProjects.map(p => p._id.toString());
-            logger.info('User project IDs:', userProjectIds);
+            loggingService.info('User project IDs:', { value:  { value: userProjectIds  } });
 
             // Build query
-            logger.info('Building filter query...');
+            loggingService.info('Building filter query...');
             const filter: any = {
                 isActive: true,
                 isDeleted: false,
@@ -182,35 +182,35 @@ export class PromptTemplateService {
 
             if (projectId) {
                 filter.projectId = projectId;
-                logger.info('Added projectId filter:', projectId);
+                loggingService.info('Added projectId filter:', { value:  { value: projectId  } });
             }
 
             if (category) {
                 filter.category = category;
-                logger.info('Added category filter:', category);
+                loggingService.info('Added category filter:', { value:  { value: category  } });
             }
 
             if (tags && tags.length > 0) {
                 filter['metadata.tags'] = { $in: tags };
-                logger.info('Added tags filter:', tags);
+                loggingService.info('Added tags filter:', { value:  { value: tags  } });
             }
 
             if (visibility) {
                 filter['sharing.visibility'] = visibility;
-                logger.info('Added visibility filter:', visibility);
+                loggingService.info('Added visibility filter:', { value:  { value: visibility  } });
             }
 
             if (search) {
                 filter.$text = { $search: search };
-                logger.info('Added search filter:', search);
+                loggingService.info('Added search filter:', { value:  { value: search  } });
             }
 
-            logger.info('Final filter:', JSON.stringify(filter, null, 2));
+            loggingService.info('Final filter:', { value: JSON.stringify(filter, null, 2) });
 
             const skip = (page - 1) * limit;
-            logger.info('Pagination:', { skip, limit, page });
+            loggingService.info('Pagination:', { value:  {  skip, limit, page  } });
 
-            logger.info('Executing MongoDB queries...');
+            loggingService.info('Executing MongoDB queries...');
             const [templates, total] = await Promise.all([
                 PromptTemplate.find(filter)
                     .populate('createdBy', 'name email')
@@ -220,8 +220,8 @@ export class PromptTemplateService {
                 PromptTemplate.countDocuments(filter)
             ]);
 
-            logger.info('MongoDB queries completed');
-            logger.info('Results:', {
+            loggingService.info('MongoDB queries completed');
+            loggingService.info('Results:', {
                 templatesFound: templates.length,
                 totalCount: total,
                 page,
@@ -235,12 +235,12 @@ export class PromptTemplateService {
                 pages: Math.ceil(total / limit)
             };
 
-            logger.info('=== PROMPT TEMPLATE SERVICE: getTemplates END ===');
+            loggingService.info('=== PROMPT TEMPLATE SERVICE: getTemplates END ===');
             return result;
         } catch (error: any) {
-            logger.error('=== PROMPT TEMPLATE SERVICE: getTemplates ERROR ===');
-            logger.error('Error getting prompt templates:', error);
-            logger.error('Error stack:', error.stack);
+            loggingService.error('=== PROMPT TEMPLATE SERVICE: getTemplates ERROR ===');
+            loggingService.error('Error getting prompt templates:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error stack:', error.stack);
             throw error;
         }
     }
@@ -309,7 +309,7 @@ export class PromptTemplateService {
                 estimatedCost: template.metadata.estimatedCost
             };
         } catch (error) {
-            logger.error('Error using prompt template:', error);
+            loggingService.error('Error using prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -365,7 +365,7 @@ export class PromptTemplateService {
 
             return forkedTemplate;
         } catch (error) {
-            logger.error('Error forking prompt template:', error);
+            loggingService.error('Error forking prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -388,7 +388,7 @@ export class PromptTemplateService {
                 }
             });
         } catch (error) {
-            logger.error('Error updating template usage:', error);
+            loggingService.error('Error updating template usage:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -428,7 +428,7 @@ export class PromptTemplateService {
 
             await template.save();
         } catch (error) {
-            logger.error('Error adding template feedback:', error);
+            loggingService.error('Error adding template feedback:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -493,7 +493,7 @@ export class PromptTemplateService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting template analytics:', error);
+            loggingService.error('Error getting template analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

@@ -1,7 +1,7 @@
-import { logger } from '../utils/logger';
 import { redisService } from './redis.service';
 import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
+import { loggingService } from './logging.service';
 
 /**
  * Advanced Workflow Orchestrator
@@ -184,14 +184,14 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 { ttl: 86400 * 30 } // 30 days
             );
         } catch (error) {
-            logger.warn('Failed to store workflow template in Redis:', error);
+            loggingService.warn('Failed to store workflow template in Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
 
-        logger.info('Workflow template created', {
+        loggingService.info('Workflow template created', { value:  { 
             templateId: workflowTemplate.id,
             name: workflowTemplate.name,
             stepCount: workflowTemplate.steps.length
-        });
+         } });
 
         return workflowTemplate;
     }
@@ -250,7 +250,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 { ttl: 86400 * 7 } // 7 days
             );
         } catch (error) {
-            logger.warn('Failed to store workflow execution in Redis:', error);
+            loggingService.warn('Failed to store workflow execution in Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
 
         // Emit workflow started event
@@ -258,7 +258,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
 
         // Start execution asynchronously
         this.runWorkflowExecution(execution, template, options?.variables).catch(error => {
-            logger.error('Workflow execution failed', { executionId: execution.id, error });
+            loggingService.error('Workflow execution failed', { executionId: execution.id, error });
         });
 
         return execution;
@@ -273,11 +273,11 @@ export class WorkflowOrchestratorService extends EventEmitter {
         variables?: Record<string, any>
     ): Promise<void> {
         try {
-            logger.info('Starting workflow execution', {
+            loggingService.info('Starting workflow execution', { value:  { 
                 executionId: execution.id,
                 workflowName: execution.name,
                 stepCount: execution.steps.length
-            });
+             } });
 
             // Execute steps based on dependencies and conditions
             const completedSteps = new Set<string>();
@@ -337,13 +337,13 @@ export class WorkflowOrchestratorService extends EventEmitter {
             // Emit completion event
             this.emit('workflow:completed', execution);
 
-            logger.info('Workflow execution completed', {
+            loggingService.info('Workflow execution completed', { value:  { 
                 executionId: execution.id,
                 status: execution.status,
                 duration: execution.duration,
                 totalCost: execution.metadata?.totalCost,
                 totalTokens: execution.metadata?.totalTokens
-            });
+             } });
 
         } catch (error) {
             execution.status = 'failed';
@@ -355,7 +355,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
             this.activeExecutions.delete(execution.id);
 
             this.emit('workflow:failed', execution);
-            logger.error('Workflow execution failed', { executionId: execution.id, error });
+            loggingService.error('Workflow execution failed', { executionId: execution.id, error });
         }
     }
 
@@ -373,12 +373,11 @@ export class WorkflowOrchestratorService extends EventEmitter {
         this.emit('step:started', { execution, step });
 
         try {
-            logger.debug('Executing workflow step', {
-                executionId: execution.id,
+            loggingService.debug('Executing workflow step', { value:  { executionId: execution.id,
                 stepId: step.id,
                 stepName: step.name,
                 stepType: step.type
-            });
+             } });
 
             // Execute step based on type
             switch (step.type) {
@@ -417,7 +416,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
             step.duration = step.endTime ? step.endTime.getTime() - step.startTime!.getTime() : 0;
 
             this.emit('step:failed', { execution, step });
-            logger.error('Step execution failed', {
+            loggingService.error('Step execution failed', {
                 executionId: execution.id,
                 stepId: step.id,
                 stepName: step.name,
@@ -474,7 +473,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`LLM step executed: ${step.name}`, {
+            loggingService.info(`LLM step executed: ${step.name}`, {
                 model,
                 provider,
                 tokens: response.usage.total,
@@ -578,7 +577,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`Data processing step executed: ${step.name}`, {
+            loggingService.info(`Data processing step executed: ${step.name}`, {
                 processingType,
                 latency,
                 recordsProcessed: step.output.recordsProcessed
@@ -631,7 +630,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`API call step executed: ${step.name}`, {
+            loggingService.info(`API call step executed: ${step.name}`, {
                 endpoint,
                 method,
                 latency,
@@ -677,7 +676,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`Conditional step executed: ${step.name}`, {
+            loggingService.info(`Conditional step executed: ${step.name}`, {
                 condition,
                 result: conditionResult,
                 nextStep,
@@ -720,7 +719,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`Parallel step executed: ${step.name}`, {
+            loggingService.info(`Parallel step executed: ${step.name}`, {
                 tasksExecuted: parallelTasks.length,
                 concurrency: maxConcurrency,
                 latency
@@ -765,7 +764,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 realExecution: true
             };
             
-            logger.info(`Custom step executed: ${step.name}`, {
+            loggingService.info(`Custom step executed: ${step.name}`, {
                 function: customFunction,
                 latency
             });
@@ -894,7 +893,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 return template;
             }
         } catch (error) {
-            logger.warn('Failed to check workflow template in Redis:', error);
+            loggingService.warn('Failed to check workflow template in Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
 
         return null;
@@ -920,7 +919,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 try {
                     templateKeys = await redisServiceInternal.client.keys(pattern);
                 } catch (error) {
-                    logger.warn('Failed to get template keys from Redis:', error);
+                    loggingService.warn('Failed to get template keys from Redis:', { error: error instanceof Error ? error.message : String(error) });
                     return [];
                 }
             }
@@ -939,7 +938,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                         }
                     }
                 } catch (error) {
-                    logger.warn(`Failed to parse template from key ${key}:`, error);
+                    loggingService.warn(`Failed to parse template from key ${key}:`, { error: error instanceof Error ? error.message : String(error) });
                     continue;
                 }
             }
@@ -949,7 +948,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             );
         } catch (error) {
-            logger.error('Failed to list templates:', error);
+            loggingService.error('Failed to list templates:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -970,7 +969,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 return cacheResult.data;
             }
         } catch (error) {
-            logger.warn('Failed to check workflow execution in Redis:', error);
+            loggingService.warn('Failed to check workflow execution in Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
 
         return null;
@@ -1045,7 +1044,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 trends: this.calculateTrends(executions)
             };
         } catch (error) {
-            logger.error('Failed to get workflow metrics:', error);
+            loggingService.error('Failed to get workflow metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1065,7 +1064,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 try {
                     executionKeys = await redisService['client'].keys(pattern);
                 } catch (error) {
-                    logger.warn('Failed to get execution keys from Redis:', error);
+                    loggingService.warn('Failed to get execution keys from Redis:', { error: error instanceof Error ? error.message : String(error) });
                     return [];
                 }
             }
@@ -1102,7 +1101,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                         }
                     }
                 } catch (error) {
-                    logger.warn(`Failed to parse execution from key ${key}:`, error);
+                    loggingService.warn(`Failed to parse execution from key ${key}:`, { error: error instanceof Error ? error.message : String(error) });
                     continue;
                 }
             }
@@ -1112,7 +1111,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
             );
         } catch (error) {
-            logger.error('Failed to get executions for workflow:', error);
+            loggingService.error('Failed to get executions for workflow:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -1232,7 +1231,7 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 { ttl: 86400 * 7 } // 7 days
             );
         } catch (error) {
-            logger.warn('Failed to update workflow execution in Redis:', error);
+            loggingService.warn('Failed to update workflow execution in Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 

@@ -1,17 +1,47 @@
 import { Response } from 'express';
 import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export class MonitoringController {
     /**
      * Trigger intelligent monitoring for a specific user
      */
     static async triggerUserMonitoring(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('User monitoring trigger initiated', {
+                userId,
+                hasUserId: !!userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            loggingService.info('User monitoring processing started', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             await IntelligentMonitoringService.monitorUserUsage(userId);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User monitoring triggered successfully', {
+                userId,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_monitoring_triggered',
+                category: 'monitoring_operations',
+                value: duration,
+                metadata: {
+                    userId
+                }
+            });
             
             res.json({
                 success: true,
@@ -23,7 +53,16 @@ export class MonitoringController {
                 }
             });
         } catch (error: any) {
-            logger.error('Error triggering user monitoring:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('User monitoring trigger failed', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to trigger monitoring',
@@ -36,8 +75,20 @@ export class MonitoringController {
      * Get user's current usage status and predictions
      */
     static async getUserUsageStatus(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('User usage status retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            loggingService.info('User usage status processing started', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             // Get current month usage
             const startOfMonth = new Date();
@@ -129,6 +180,48 @@ export class MonitoringController {
                 });
             }
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User usage status retrieved successfully', {
+                userId,
+                duration,
+                monthlyUsageCount: monthlyUsage.length,
+                dailyUsageCount: dailyUsage.length,
+                monthlyGPT4Count,
+                monthlyGPT35Count,
+                totalMonthlyCost,
+                averageTokensPerRequest: Math.round(averageTokensPerRequest),
+                detectedPlan,
+                monthlyUsagePercentage: Math.round(monthlyUsagePercentage * 100) / 100,
+                dailyUsagePercentage: Math.round(dailyUsagePercentage * 100) / 100,
+                projectedMonthlyUsage,
+                warningsCount: warnings.length,
+                hasWarnings: warnings.length > 0,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_usage_status_retrieved',
+                category: 'monitoring_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    monthlyUsageCount: monthlyUsage.length,
+                    dailyUsageCount: dailyUsage.length,
+                    monthlyGPT4Count,
+                    monthlyGPT35Count,
+                    totalMonthlyCost,
+                    averageTokensPerRequest: Math.round(averageTokensPerRequest),
+                    detectedPlan,
+                    monthlyUsagePercentage: Math.round(monthlyUsagePercentage * 100) / 100,
+                    dailyUsagePercentage: Math.round(dailyUsagePercentage * 100) / 100,
+                    projectedMonthlyUsage,
+                    warningsCount: warnings.length,
+                    hasWarnings: warnings.length > 0
+                }
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -174,14 +267,23 @@ export class MonitoringController {
                         ...(monthlyGPT4Count > monthlyGPT35Count && monthlyUsage.length > 20 ? [{
                             type: 'model_selection',
                             message: 'You use GPT-4 frequently. Many tasks could work with GPT-3.5 at 95% lower cost.',
-                            potential_savings: 'Up to 95% cost reduction on suitable tasks'
+                            potential_benefit: 'Up to 95% cost reduction on suitable tasks'
                         }] : [])
                     ]
                 }
             });
 
         } catch (error: any) {
-            logger.error('Error getting user usage status:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('User usage status retrieval failed', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get usage status',
@@ -194,8 +296,20 @@ export class MonitoringController {
      * Get smart recommendations for the user
      */
     static async getSmartRecommendations(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('Smart recommendations retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            loggingService.info('Smart recommendations processing started', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             // This would normally come from a cache or recent analysis
             // For now, we'll trigger a quick analysis
@@ -214,6 +328,29 @@ export class MonitoringController {
             const recommendations = [];
 
             if (recentUsage.length === 0) {
+                const duration = Date.now() - startTime;
+
+                loggingService.info('Smart recommendations retrieved successfully - no usage data', {
+                    userId,
+                    duration,
+                    recentUsageCount: recentUsage.length,
+                    recommendationsCount: recommendations.length,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                // Log business event
+                loggingService.logBusiness({
+                    event: 'smart_recommendations_retrieved',
+                    category: 'monitoring_operations',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        recentUsageCount: recentUsage.length,
+                        recommendationsCount: recommendations.length,
+                        hasRecommendations: false
+                    }
+                });
+
                 res.json({
                     success: true,
                     data: {
@@ -276,6 +413,40 @@ export class MonitoringController {
                 url: `${process.env.FRONTEND_URL}/analytics?source=recommendations`
             });
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Smart recommendations retrieved successfully', {
+                userId,
+                duration,
+                recentUsageCount: recentUsage.length,
+                recommendationsCount: recommendations.length,
+                hasRecommendations: recommendations.length > 0,
+                avgTokens: Math.round(avgTokens),
+                gpt4Usage,
+                gpt4UsagePercentage: Math.round((gpt4Usage / recentUsage.length) * 100),
+                longPrompts,
+                longPromptsPercentage: Math.round((longPrompts / recentUsage.length) * 100),
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'smart_recommendations_retrieved',
+                category: 'monitoring_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    recentUsageCount: recentUsage.length,
+                    recommendationsCount: recommendations.length,
+                    hasRecommendations: recommendations.length > 0,
+                    avgTokens: Math.round(avgTokens),
+                    gpt4Usage,
+                    gpt4UsagePercentage: Math.round((gpt4Usage / recentUsage.length) * 100),
+                    longPrompts,
+                    longPromptsPercentage: Math.round((longPrompts / recentUsage.length) * 100)
+                }
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -286,7 +457,16 @@ export class MonitoringController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting smart recommendations:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Smart recommendations retrieval failed', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get recommendations',
@@ -299,9 +479,28 @@ export class MonitoringController {
      * Manually trigger daily monitoring for all users (admin only)
      */
     static async triggerDailyMonitoring(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const userRole = req.user?.role;
+
         try {
+            loggingService.info('Daily monitoring trigger initiated', {
+                userId,
+                hasUserId: !!userId,
+                userRole,
+                hasUserRole: !!userRole,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // Check if user is admin
             if (req.user.role !== 'admin') {
+                loggingService.warn('Daily monitoring trigger failed - admin access required', {
+                    userId,
+                    userRole,
+                    hasUserRole: !!userRole,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(403).json({
                     success: false,
                     error: 'Admin access required'
@@ -309,10 +508,42 @@ export class MonitoringController {
                 return;
             }
 
+            loggingService.info('Daily monitoring trigger processing started', {
+                userId,
+                userRole,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // Run monitoring in background
             IntelligentMonitoringService.runDailyMonitoring().catch(error => 
-                logger.error('Background monitoring failed:', error)
+                loggingService.error('Background monitoring failed', {
+                    userId,
+                    userRole,
+                    error: error.message || 'Unknown error',
+                    stack: error.stack,
+                    requestId: req.headers['x-request-id'] as string
+                })
             );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Daily monitoring triggered successfully for all users', {
+                userId,
+                userRole,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'daily_monitoring_triggered',
+                category: 'monitoring_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    userRole
+                }
+            });
 
             res.json({
                 success: true,
@@ -321,7 +552,18 @@ export class MonitoringController {
             });
 
         } catch (error: any) {
-            logger.error('Error triggering daily monitoring:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Daily monitoring trigger failed', {
+                userId,
+                userRole,
+                hasUserRole: !!userRole,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to trigger daily monitoring',

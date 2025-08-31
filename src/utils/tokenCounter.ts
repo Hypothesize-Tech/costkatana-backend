@@ -1,4 +1,5 @@
 import { AIProvider } from '../types/aiCostTracker.types';
+import { MODEL_PRICING, ModelPricing } from './pricing';
 
 /**
  * Simple token estimation for text
@@ -305,50 +306,155 @@ export function calculateTokenBudget(
 }
 
 /**
- * Estimate tokens for different model context windows
+ * Get context window limits and pricing information for models
  */
-export function getContextWindowLimits(_provider: AIProvider, model: string): number {
-    const contextLimits: Record<string, number> = {
-        // OpenAI
-        'gpt-4': 8192,
-        'gpt-4-32k': 32768,
-        'gpt-4-turbo': 128000,
-        'gpt-4-turbo-preview': 128000,
-        'gpt-3.5-turbo': 4096,
-        'gpt-3.5-turbo-16k': 16384,
-        'text-davinci-003': 4097,
-
-        // Anthropic
-        'claude-3-5-sonnet-20241022': 200000,
-        'claude-3-sonnet-20240229': 200000,
-        'claude-3-haiku-20240307': 200000,
-        'claude-instant-v1': 100000,
-        'claude-v2': 100000,
-
-        // AWS Bedrock
-        'anthropic.claude-sonnet-4-20250514-v1:0': 200000,
-        'anthropic.claude-3-sonnet-20240229-v1:0': 200000,
-        'anthropic.claude-3-haiku-20240307-v1:0': 200000,
-        'anthropic.claude-instant-v1': 100000,
-        'anthropic.claude-v2:1': 100000,
-        'amazon.titan-text-express-v1': 8000,
-        'amazon.titan-text-lite-v1': 4000,
-
-        // Google
-        'gemini-pro': 30720,
-        'gemini-1.5-pro': 1048576,
-        'gemini-1.5-flash': 1048576,
-
-        // Cohere
-        'command': 4096,
-        'command-light': 4096
+export function getContextWindowLimits(provider: AIProvider, model: string): number {
+    // First try to find exact model match
+    const exactMatch = MODEL_PRICING.find(p => 
+        p.modelId.toLowerCase() === model.toLowerCase() ||
+        p.modelName.toLowerCase() === model.toLowerCase()
+    );
+    
+    if (exactMatch?.contextWindow) {
+        return exactMatch.contextWindow;
+    }
+    
+    // Try partial matching for common model patterns
+    const partialMatch = MODEL_PRICING.find(p => 
+        p.modelId.toLowerCase().includes(model.toLowerCase()) ||
+        p.modelName.toLowerCase().includes(model.toLowerCase())
+    );
+    
+    if (partialMatch?.contextWindow) {
+        return partialMatch.contextWindow;
+    }
+    
+    // Fallback to default based on provider
+    const defaultLimits: Record<AIProvider, number> = {
+        [AIProvider.OpenAI]: 4096,
+        [AIProvider.Azure]: 4096,
+        [AIProvider.Anthropic]: 200000,
+        [AIProvider.AWSBedrock]: 200000,
+        [AIProvider.Google]: 30720,
+        [AIProvider.Gemini]: 30720,
+        [AIProvider.Cohere]: 4096,
+        [AIProvider.DeepSeek]: 8192,
+        [AIProvider.Groq]: 8192,
+        [AIProvider.HuggingFace]: 4096,
+        [AIProvider.Ollama]: 4096,
+        [AIProvider.Replicate]: 4096
     };
-
-    return contextLimits[model] || 4096; // Default fallback
+    
+    return defaultLimits[provider] || 4096;
 }
 
 /**
- * Validate token usage against model limits
+ * Get model pricing information from the pricing database
+ */
+export function getModelPricingInfo(model: string): ModelPricing | undefined {
+    // First try to find exact model match
+    const exactMatch = MODEL_PRICING.find(p => 
+        p.modelId.toLowerCase() === model.toLowerCase() ||
+        p.modelName.toLowerCase() === model.toLowerCase()
+    );
+    
+    if (exactMatch) {
+        return exactMatch;
+    }
+    
+    // Try partial matching for common model patterns
+    const partialMatch = MODEL_PRICING.find(p => 
+        p.modelId.toLowerCase().includes(model.toLowerCase()) ||
+        p.modelName.toLowerCase().includes(model.toLowerCase())
+    );
+    
+    return partialMatch;
+}
+
+/**
+ * Get all available models for a specific provider
+ */
+export function getProviderModels(provider: AIProvider): ModelPricing[] {
+    const providerName = provider.toLowerCase();
+    return MODEL_PRICING.filter(p => 
+        p.provider.toLowerCase() === providerName ||
+        p.provider.toLowerCase().includes(providerName)
+    );
+}
+
+/**
+ * Get models by capability (e.g., 'vision', 'reasoning', 'multimodal')
+ */
+export function getModelsByCapability(capability: string): ModelPricing[] {
+    return MODEL_PRICING.filter(p => 
+        p.capabilities?.some(cap => 
+            cap.toLowerCase().includes(capability.toLowerCase())
+        )
+    );
+}
+
+/**
+ * Get models by category (e.g., 'text', 'vision', 'code')
+ */
+export function getModelsByCategory(category: string): ModelPricing[] {
+    return MODEL_PRICING.filter(p => 
+        p.category?.toLowerCase() === category.toLowerCase()
+    );
+}
+
+/**
+ * Get latest models for each provider
+ */
+export function getLatestModels(): ModelPricing[] {
+    return MODEL_PRICING.filter(p => p.isLatest === true);
+}
+
+/**
+ * Calculate estimated cost for a model based on token usage
+ */
+export function calculateEstimatedCost(
+    model: string,
+    promptTokens: number,
+    completionTokens: number
+): { promptCost: number; completionCost: number; totalCost: number; currency: string } | null {
+    const pricing = getModelPricingInfo(model);
+    
+    if (!pricing) {
+        return null;
+    }
+    
+    let promptCost = 0;
+    let completionCost = 0;
+    
+    // Convert pricing to per-token cost based on unit
+    if (pricing.unit === 'PER_1M_TOKENS') {
+        promptCost = (promptTokens / 1_000_000) * pricing.inputPrice;
+        completionCost = (completionTokens / 1_000_000) * pricing.outputPrice;
+    } else if (pricing.unit === 'PER_1K_TOKENS') {
+        promptCost = (promptTokens / 1_000) * pricing.inputPrice;
+        completionCost = (completionTokens / 1_000) * pricing.outputPrice;
+    } else {
+        // For per-request pricing, assume average token usage
+        const totalTokens = promptTokens + completionTokens;
+        const avgTokensPerRequest = 1000; // Default assumption
+        const costPerRequest = pricing.inputPrice; // Use inputPrice as cost per request
+        
+        if (totalTokens > 0) {
+            promptCost = (promptTokens / avgTokensPerRequest) * costPerRequest;
+            completionCost = (completionTokens / avgTokensPerRequest) * costPerRequest;
+        }
+    }
+    
+    return {
+        promptCost: Number(promptCost.toFixed(6)),
+        completionCost: Number(completionCost.toFixed(6)),
+        totalCost: Number((promptCost + completionCost).toFixed(6)),
+        currency: 'USD'
+    };
+}
+
+/**
+ * Validate token usage against model limits and provide cost insights
  */
 export function validateTokenUsage(
     provider: AIProvider,
@@ -361,11 +467,17 @@ export function validateTokenUsage(
     maxTokens: number;
     utilizationPercentage: number;
     warnings: string[];
+    costEstimate?: { promptCost: number; completionCost: number; totalCost: number; currency: string };
+    modelInfo?: ModelPricing;
 } {
     const maxTokens = getContextWindowLimits(provider, model);
     const totalTokens = promptTokens + expectedCompletionTokens;
     const utilizationPercentage = (totalTokens / maxTokens) * 100;
     const warnings: string[] = [];
+    
+    // Get model pricing information
+    const modelInfo = getModelPricingInfo(model);
+    const costEstimate = modelInfo ? calculateEstimatedCost(model, promptTokens, expectedCompletionTokens) || undefined : undefined;
 
     if (totalTokens > maxTokens) {
         warnings.push(`Total tokens (${totalTokens}) exceed model limit (${maxTokens})`);
@@ -378,12 +490,114 @@ export function validateTokenUsage(
     if (promptTokens > maxTokens * 0.8) {
         warnings.push(`Prompt tokens are very high (${promptTokens}), leaving little room for completion`);
     }
+    
+    // Add cost-related warnings if pricing is available
+    if (costEstimate && costEstimate.totalCost > 0.01) {
+        warnings.push(`Estimated cost: $${costEstimate.totalCost.toFixed(4)} (prompt: $${costEstimate.promptCost.toFixed(4)}, completion: $${costEstimate.completionCost.toFixed(4)})`);
+    }
 
     return {
         isValid: totalTokens <= maxTokens,
         totalTokens,
         maxTokens,
         utilizationPercentage,
-        warnings
+        warnings,
+        costEstimate,
+        modelInfo
+    };
+}
+
+/**
+ * Find cost-effective alternatives for a given model and use case
+ */
+export function findCostEffectiveAlternatives(
+    currentModel: string,
+    promptTokens: number,
+    completionTokens: number,
+    maxBudget?: number
+): {
+    alternatives: ModelPricing[];
+    currentCost: number;
+    potentialSavings: number;
+    recommendations: string[];
+} {
+    const currentPricing = getModelPricingInfo(currentModel);
+    if (!currentPricing) {
+        return {
+            alternatives: [],
+            currentCost: 0,
+            potentialSavings: 0,
+            recommendations: []
+        };
+    }
+    
+    const currentCost = calculateEstimatedCost(currentModel, promptTokens, completionTokens);
+    if (!currentCost) {
+        return {
+            alternatives: [],
+            currentCost: 0,
+            potentialSavings: 0,
+            recommendations: []
+        };
+    }
+    
+    // Find models with similar capabilities but lower cost
+    const alternatives = MODEL_PRICING.filter(p => {
+        // Skip the current model
+        if (p.modelId === currentModel || p.modelName === currentModel) {
+            return false;
+        }
+        
+        // Check if model has similar capabilities
+        const hasSimilarCapabilities = currentPricing.capabilities?.some((cap: string) => 
+            p.capabilities?.includes(cap)
+        ) || false;
+        
+        // Check if model has sufficient context window
+        const hasSufficientContext = p.contextWindow && p.contextWindow >= (promptTokens + completionTokens);
+        
+        // Check if model meets budget constraints
+        const alternativeCost = calculateEstimatedCost(p.modelId, promptTokens, completionTokens);
+        const meetsBudget = !maxBudget || !alternativeCost || alternativeCost.totalCost <= maxBudget;
+        
+        return hasSimilarCapabilities && hasSufficientContext && meetsBudget;
+    });
+    
+    // Sort by cost (lowest first)
+    alternatives.sort((a, b) => {
+        const costA = calculateEstimatedCost(a.modelId, promptTokens, completionTokens);
+        const costB = calculateEstimatedCost(b.modelId, promptTokens, completionTokens);
+        
+        if (!costA && !costB) return 0;
+        if (!costA) return 1;
+        if (!costB) return -1;
+        
+        return costA.totalCost - costB.totalCost;
+    });
+    
+    // Calculate potential savings
+    const bestAlternative = alternatives[0];
+    const bestAlternativeCost = bestAlternative ? calculateEstimatedCost(bestAlternative.modelId, promptTokens, completionTokens) : null;
+    const potentialSavings = bestAlternativeCost ? currentCost.totalCost - bestAlternativeCost.totalCost : 0;
+    
+    // Generate recommendations
+    const recommendations: string[] = [];
+    if (bestAlternative && potentialSavings > 0) {
+        recommendations.push(`Consider switching to ${bestAlternative.modelName} for potential savings of $${potentialSavings.toFixed(4)} per request`);
+        
+        if (bestAlternative.isLatest) {
+            recommendations.push(`${bestAlternative.modelName} is the latest model with improved capabilities`);
+        }
+        
+        if (bestAlternative.capabilities?.includes('vision') && !currentPricing.capabilities?.includes('vision')) {
+            recommendations.push(`${bestAlternative.modelName} adds vision capabilities`);
+        }
+    }
+    
+    return {
+        alternatives: alternatives.slice(0, 5), // Top 5 alternatives
+        currentCost: currentCost.totalCost,
+        potentialSavings,
+        recommendations
     };
 } 

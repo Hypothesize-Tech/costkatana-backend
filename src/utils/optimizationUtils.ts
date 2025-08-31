@@ -10,6 +10,7 @@ import {
 } from '../types/aiCostTracker.types';
 import { estimateTokens, estimateConversationTokens } from './tokenCounter';
 import { calculateCost, getModelPricing } from './pricing';
+import { loggingService } from '../services/logging.service';
 
 /**
  * Convert AIProvider enum to string for pricing functions
@@ -415,7 +416,14 @@ export function generateOptimizationSuggestions(
     try {
         originalCost = calculateCost(originalTokens, 150, providerEnumToString(provider), model);
     } catch (error) {
-        console.warn(`Failed to calculate cost for ${provider}/${model}, using fallback pricing`);
+        loggingService.warn('Failed to calculate cost for model, using fallback pricing', {
+            component: 'optimizationUtils',
+            operation: 'generateOptimizationSuggestions',
+            provider,
+            model,
+            error: error instanceof Error ? error.message : String(error),
+            fallbackPricing: 'GPT-4o-mini rates'
+        });
         // Use fallback pricing (GPT-4o-mini rates as default)
         originalCost = (originalTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
     }
@@ -428,7 +436,15 @@ export function generateOptimizationSuggestions(
         try {
             compressedCost = calculateCost(compressedTokens, 150, providerEnumToString(provider), model);
         } catch (error) {
-            console.warn(`Failed to calculate compressed cost for ${provider}/${model}, using fallback pricing`);
+            loggingService.warn('Failed to calculate compressed cost for model, using fallback pricing', {
+                component: 'optimizationUtils',
+                operation: 'generateOptimizationSuggestions',
+                provider,
+                model,
+                error: error instanceof Error ? error.message : String(error),
+                fallbackPricing: 'GPT-4o-mini rates',
+                optimizationType: 'prompt-compression'
+            });
             compressedCost = (compressedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
         }
         const savings = originalCost - compressedCost;
@@ -456,7 +472,15 @@ export function generateOptimizationSuggestions(
             try {
                 jsonCompressedCost = calculateCost(jsonCompressedTokens, 150, providerEnumToString(provider), model);
             } catch (error) {
-                console.warn(`Failed to calculate JSON compressed cost for ${provider}/${model}, using fallback pricing`);
+                loggingService.warn('Failed to calculate JSON compressed cost for model, using fallback pricing', {
+                    component: 'optimizationUtils',
+                    operation: 'generateOptimizationSuggestions',
+                    provider,
+                    model,
+                    error: error instanceof Error ? error.message : String(error),
+                    fallbackPricing: 'GPT-4o-mini rates',
+                    optimizationType: 'json-compression'
+                });
                 jsonCompressedCost = (jsonCompressedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
             }
             const jsonSavings = originalCost - jsonCompressedCost;
@@ -485,7 +509,15 @@ export function generateOptimizationSuggestions(
             try {
                 contextCost = calculateCost(contextTokens, 150, providerEnumToString(provider), model);
             } catch (error) {
-                console.warn(`Failed to calculate context cost for ${provider}/${model}, using fallback pricing`);
+                loggingService.warn('Failed to calculate context cost for model, using fallback pricing', {
+                    component: 'optimizationUtils',
+                    operation: 'generateOptimizationSuggestions',
+                    provider,
+                    model,
+                    error: error instanceof Error ? error.message : String(error),
+                    fallbackPricing: 'GPT-4o-mini rates',
+                    optimizationType: 'context-trimming'
+                });
                 contextCost = (contextTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
             }
             const contextSavings = originalCost - contextCost;
@@ -546,7 +578,14 @@ function suggestAlternativeModel(
     try {
         currentCost = calculateCost(tokenCount, 150, providerEnumToString(provider), currentModel);
     } catch (error) {
-        console.warn(`Failed to calculate current cost for ${provider}/${currentModel}, using fallback pricing`);
+        loggingService.warn('Failed to calculate current cost for model, using fallback pricing', {
+            component: 'optimizationUtils',
+            operation: 'suggestAlternativeModel',
+            provider,
+            currentModel,
+            error: error instanceof Error ? error.message : String(error),
+            fallbackPricing: 'GPT-4o-mini rates'
+        });
         currentCost = (tokenCount / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
     }
 
@@ -575,7 +614,14 @@ function suggestAlternativeModel(
             try {
                 altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
             } catch (error) {
-                console.warn(`Failed to calculate alternative cost for ${provider}/${altModel}, skipping`);
+                loggingService.warn('Failed to calculate alternative cost for model, skipping', {
+                    component: 'optimizationUtils',
+                    operation: 'suggestAlternativeModel',
+                    provider,
+                    currentModel,
+                    alternativeModel: altModel,
+                    error: error instanceof Error ? error.message : String(error)
+                });
                 continue;
             }
             const savings = currentCost - altCost;

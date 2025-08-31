@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { User } from '../models/User';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import crypto from 'crypto';
 
 export interface IApiKey {
@@ -17,11 +17,24 @@ export class ApiKeyController {
      * Generate a new API key for ChatGPT integration
      */
     static async generateApiKey(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+        const { name } = req.body;
+
         try {
-            const userId = req.user!.id;
-            const { name } = req.body;
+            loggingService.info('API key generation request initiated', {
+                userId,
+                keyName: name,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!name || name.trim() === '') {
+                loggingService.warn('API key generation failed - missing name', {
+                    userId,
+                    keyName: name,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'API key name is required'
@@ -36,6 +49,12 @@ export class ApiKeyController {
             // Get user and add API key
             const user = await User.findById(userId);
             if (!user) {
+                loggingService.warn('API key generation failed - user not found', {
+                    userId,
+                    keyName: name,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     error: 'User not found'
@@ -51,6 +70,14 @@ export class ApiKeyController {
             // Check if user already has too many API keys (limit 5)
             const activeKeys = user.apiKeys.filter((key: any) => key.isActive);
             if (activeKeys.length >= 5) {
+                loggingService.warn('API key generation failed - maximum keys limit reached', {
+                    userId,
+                    keyName: name,
+                    currentActiveKeys: activeKeys.length,
+                    maxAllowed: 5,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Maximum of 5 active API keys allowed. Please deactivate an existing key first.'
@@ -69,11 +96,31 @@ export class ApiKeyController {
             user.apiKeys.push(newApiKey);
             await user.save();
 
-            logger.info(`API key generated for user ${userId}`, {
+            const duration = Date.now() - startTime;
+
+            loggingService.info('API key generated successfully', {
                 userId,
                 keyName: name,
-                keyId: newApiKey.id
+                keyId: newApiKey.id,
+                duration,
+                totalActiveKeys: activeKeys.length + 1,
+                requestId: req.headers['x-request-id'] as string
             });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'api_key_generated',
+                category: 'api_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    keyName: name,
+                    keyId: newApiKey.id,
+                    totalActiveKeys: activeKeys.length + 1
+                }
+            });
+
+
 
             res.status(201).json({
                 success: true,
@@ -91,7 +138,17 @@ export class ApiKeyController {
                 }
             });
         } catch (error: any) {
-            logger.error('Generate API key error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('API key generation failed', {
+                userId,
+                keyName: name,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate API key',
@@ -104,11 +161,27 @@ export class ApiKeyController {
      * List user's API keys (without exposing actual keys)
      */
     static async listApiKeys(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('API keys list request initiated', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             const user = await User.findById(userId).select('apiKeys');
             if (!user || !user.apiKeys) {
+                const duration = Date.now() - startTime;
+
+                loggingService.info('API keys list retrieved - no keys found', {
+                    userId,
+                    duration,
+                    totalKeys: 0,
+                    activeKeys: 0,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.json({
                     success: true,
                     data: [],
@@ -127,14 +200,48 @@ export class ApiKeyController {
                 status: key.isActive ? 'Active' : 'Inactive'
             }));
 
+            const duration = Date.now() - startTime;
+            const activeKeys = apiKeysList.filter(k => k.is_active).length;
+
+            loggingService.info('API keys list retrieved successfully', {
+                userId,
+                duration,
+                totalKeys: apiKeysList.length,
+                activeKeys,
+                inactiveKeys: apiKeysList.length - activeKeys,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'api_keys_listed',
+                category: 'api_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    totalKeys: apiKeysList.length,
+                    activeKeys,
+                    inactiveKeys: apiKeysList.length - activeKeys
+                }
+            });
+
             res.json({
                 success: true,
                 data: apiKeysList,
                 total: apiKeysList.length,
-                active: apiKeysList.filter(k => k.is_active).length
+                active: activeKeys
             });
         } catch (error: any) {
-            logger.error('List API keys error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('API keys list retrieval failed', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to list API keys',
@@ -147,12 +254,25 @@ export class ApiKeyController {
      * Deactivate an API key
      */
     static async deactivateApiKey(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+        const { keyId } = req.params;
+
         try {
-            const userId = req.user!.id;
-            const { keyId } = req.params;
+            loggingService.info('API key deactivation request initiated', {
+                userId,
+                keyId,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             const user = await User.findById(userId);
             if (!user || !user.apiKeys) {
+                loggingService.warn('API key deactivation failed - user or API keys not found', {
+                    userId,
+                    keyId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     error: 'API key not found'
@@ -162,6 +282,12 @@ export class ApiKeyController {
 
             const apiKeyIndex = user.apiKeys.findIndex((key: any) => key.id === keyId);
             if (apiKeyIndex === -1) {
+                loggingService.warn('API key deactivation failed - key not found', {
+                    userId,
+                    keyId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     error: 'API key not found'
@@ -169,26 +295,59 @@ export class ApiKeyController {
                 return;
             }
 
+            const keyName = user.apiKeys[apiKeyIndex].name;
+            const wasActive = user.apiKeys[apiKeyIndex].isActive;
+
             user.apiKeys[apiKeyIndex].isActive = false;
             await user.save();
 
-            logger.info(`API key deactivated for user ${userId}`, {
+            const duration = Date.now() - startTime;
+
+            loggingService.info('API key deactivated successfully', {
                 userId,
                 keyId,
-                keyName: user.apiKeys[apiKeyIndex].name
+                keyName,
+                wasActive,
+                duration,
+                requestId: req.headers['x-request-id'] as string
             });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'api_key_deactivated',
+                category: 'api_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    keyId,
+                    keyName,
+                    wasActive
+                }
+            });
+
+
 
             res.json({
                 success: true,
                 message: 'API key deactivated successfully',
                 data: {
                     id: keyId,
-                    name: user.apiKeys[apiKeyIndex].name,
+                    name: keyName,
                     status: 'Inactive'
                 }
             });
         } catch (error: any) {
-            logger.error('Deactivate API key error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('API key deactivation failed', {
+                userId,
+                keyId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to deactivate API key',
@@ -201,10 +360,25 @@ export class ApiKeyController {
      * Validate an API key and return user info (for internal use by ChatGPT controller)
      */
     static async validateApiKey(apiKey: string): Promise<{ userId: string; user: any } | null> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('API key validation initiated', {
+                apiKeyPreview: `${apiKey.substring(0, 20)}...${apiKey.slice(-4)}`,
+                requestId: 'internal'
+            });
+
             // Extract userId from API key format: ck_user_{userId}_{random}
             const userIdMatch = apiKey.match(/ck_user_([a-f0-9]{24})/);
             if (!userIdMatch) {
+                const duration = Date.now() - startTime;
+
+                loggingService.warn('API key validation failed - invalid format', {
+                    apiKeyPreview: `${apiKey.substring(0, 20)}...${apiKey.slice(-4)}`,
+                    duration,
+                    requestId: 'internal'
+                });
+
                 return null;
             }
 
@@ -212,6 +386,15 @@ export class ApiKeyController {
             const user = await User.findById(userId);
             
             if (!user || !user.apiKeys) {
+                const duration = Date.now() - startTime;
+
+                loggingService.warn('API key validation failed - user not found', {
+                    userId,
+                    apiKeyPreview: `${apiKey.substring(0, 20)}...${apiKey.slice(-4)}`,
+                    duration,
+                    requestId: 'internal'
+                });
+
                 return null;
             }
 
@@ -221,6 +404,15 @@ export class ApiKeyController {
             );
 
             if (!matchingKey) {
+                const duration = Date.now() - startTime;
+
+                loggingService.warn('API key validation failed - key not found or inactive', {
+                    userId,
+                    apiKeyPreview: `${apiKey.substring(0, 20)}...${apiKey.slice(-4)}`,
+                    duration,
+                    requestId: 'internal'
+                });
+
                 return null;
             }
 
@@ -228,9 +420,41 @@ export class ApiKeyController {
             matchingKey.lastUsed = new Date();
             await user.save();
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('API key validation successful', {
+                userId,
+                keyId: matchingKey.id,
+                keyName: matchingKey.name,
+                duration,
+                requestId: 'internal'
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'api_key_validated',
+                category: 'api_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    keyId: matchingKey.id,
+                    keyName: matchingKey.name
+                }
+            });
+
             return { userId, user };
-        } catch (error) {
-            logger.error('API key validation error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('API key validation failed', {
+                apiKeyPreview: `${apiKey.substring(0, 20)}...${apiKey.slice(-4)}`,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: 'internal'
+            });
+
+
             return null;
         }
     }
@@ -239,12 +463,25 @@ export class ApiKeyController {
      * Regenerate an API key
      */
     static async regenerateApiKey(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user!.id;
+        const { keyId } = req.params;
+
         try {
-            const userId = req.user!.id;
-            const { keyId } = req.params;
+            loggingService.info('API key regeneration request initiated', {
+                userId,
+                keyId,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             const user = await User.findById(userId);
             if (!user || !user.apiKeys) {
+                loggingService.warn('API key regeneration failed - user or API keys not found', {
+                    userId,
+                    keyId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     error: 'API key not found'
@@ -254,6 +491,12 @@ export class ApiKeyController {
 
             const apiKeyIndex = user.apiKeys.findIndex((key: any) => key.id === keyId);
             if (apiKeyIndex === -1) {
+                loggingService.warn('API key regeneration failed - key not found', {
+                    userId,
+                    keyId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     error: 'API key not found'
@@ -262,6 +505,7 @@ export class ApiKeyController {
             }
 
             const oldKeyName = user.apiKeys[apiKeyIndex].name;
+            const oldKeyPreview = `${user.apiKeys[apiKeyIndex].key.substring(0, 20)}...${user.apiKeys[apiKeyIndex].key.slice(-4)}`;
 
             // Generate new key
             const randomSuffix = crypto.randomBytes(16).toString('hex');
@@ -275,11 +519,31 @@ export class ApiKeyController {
 
             await user.save();
 
-            logger.info(`API key regenerated for user ${userId}`, {
+            const duration = Date.now() - startTime;
+
+            loggingService.info('API key regenerated successfully', {
                 userId,
                 keyId,
-                keyName: oldKeyName
+                keyName: oldKeyName,
+                oldKeyPreview,
+                duration,
+                requestId: req.headers['x-request-id'] as string
             });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'api_key_regenerated',
+                category: 'api_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    keyId,
+                    keyName: oldKeyName,
+                    oldKeyPreview
+                }
+            });
+
+
 
             res.json({
                 success: true,
@@ -293,7 +557,17 @@ export class ApiKeyController {
                 }
             });
         } catch (error: any) {
-            logger.error('Regenerate API key error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('API key regeneration failed', {
+                userId,
+                keyId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to regenerate API key',

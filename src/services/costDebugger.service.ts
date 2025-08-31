@@ -1,8 +1,8 @@
-import { logger } from '../utils/logger';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
 import { calculateCost, getModelPricing, getProviderModels } from '../utils/pricing';
 import { BedrockService } from './bedrock.service';
+import { loggingService } from './logging.service';
 
 export interface TokenAttribution {
   systemPrompt: { tokens: number; cost: number; impact: 'high' | 'medium' | 'low' };
@@ -77,41 +77,41 @@ export class CostDebuggerService {
     } = {}
   ): Promise<CostDebuggerAnalysis> {
     try {
-      logger.info('🚀 analyzePrompt method entered', { prompt, provider, model, options });
-      logger.info('🔍 Starting prompt cost analysis');
+      loggingService.info('🚀 analyzePrompt method entered', { value:  {  prompt, provider, model, options  } });
+      loggingService.info('� analyzePrompt method entered', { value:  {  prompt, provider, model, options  } });
 
       // Get model pricing information
-      logger.info('🔍 Getting model pricing...');
+      loggingService.info('🔍 Getting model pricing...');
       const modelPricing = getModelPricing(provider, model);
       if (!modelPricing) {
         throw new Error(`No pricing data found for ${provider}/${model}`);
       }
-      logger.info('✅ Model pricing retrieved successfully', { modelPricing });
+      loggingService.info('✅ Model pricing retrieved successfully', { value:  {  modelPricing  } });
 
       // Parse prompt into sections
-      logger.info('🔍 Parsing prompt sections...');
+      loggingService.info('🔍 Parsing prompt sections...');
       const sections = await this.parsePromptSections(prompt, provider, options);
-      logger.info('✅ Prompt sections parsed successfully', { sectionsCount: sections.length });
+      loggingService.info('✅ Prompt sections parsed successfully', { value:  {  sectionsCount: sections.length  } });
       
       // Calculate token attribution with dynamic pricing
-      logger.info('🔍 Calculating token attribution...');
+      loggingService.info('🔍 Calculating token attribution...');
       const tokenAttribution = await this.calculateTokenAttribution(sections, provider, model, modelPricing);
-      logger.info('✅ Token attribution calculated successfully', { tokenAttribution });
+      loggingService.info('✅ Token attribution calculated successfully', { value:  {  tokenAttribution  } });
       
       // Analyze optimization opportunities
-      logger.info('🔍 About to call analyzeOptimizationOpportunities', { sectionsCount: sections.length, provider, model });
+      loggingService.info('🔍 About to call analyzeOptimizationOpportunities', { value:  {  sectionsCount: sections.length, provider, model  } });
       const optimizationOpportunities = await this.analyzeOptimizationOpportunities(sections, provider, model);
-      logger.info('✅ analyzeOptimizationOpportunities completed successfully', { optimizationOpportunities });
+      loggingService.info('✅ analyzeOptimizationOpportunities completed successfully', { value:  {  optimizationOpportunities  } });
       
       // Assess quality metrics
-      logger.info('🔍 About to call assessPromptQuality', { sectionsCount: sections.length, provider, model });
+      loggingService.info('🔍 About to call assessPromptQuality', { value:  {  sectionsCount: sections.length, provider, model  } });
       let qualityMetrics;
       try {
-       logger.info('🚀 Calling assessPromptQuality method...');
+        loggingService.info('🚀 Calling assessPromptQuality method...');
         qualityMetrics = await this.assessPromptQuality(sections, provider, model);
-        logger.info('✅ assessPromptQuality completed successfully', { qualityMetrics });
+        loggingService.info('✅ assessPromptQuality completed successfully', { value:  {  qualityMetrics  } });
       } catch (error) {
-        logger.error('❌ assessPromptQuality failed:', error);
+        loggingService.error('❌ assessPromptQuality failed:', { error: error instanceof Error ? error.message : String(error) });
         // Provide fallback quality metrics
         qualityMetrics = {
           instructionClarity: 70,
@@ -119,7 +119,7 @@ export class CostDebuggerService {
           exampleEfficiency: 70,
           overallScore: 70
         };
-        logger.info('🔄 Using fallback quality metrics', { qualityMetrics });
+        loggingService.info('🔄 Using fallback quality metrics', { value:  {  qualityMetrics  } });
       }
 
       const analysis: CostDebuggerAnalysis = {
@@ -141,11 +141,11 @@ export class CostDebuggerService {
         }
       };
 
-      logger.info(`✅ Prompt analysis complete: ${analysis.totalTokens} tokens, $${analysis.totalCost.toFixed(6)} cost`);
+      loggingService.info(`✅ Prompt analysis complete: ${analysis.totalTokens} tokens, $${analysis.totalCost.toFixed(6)} cost`);
       return analysis;
 
     } catch (error) {
-      logger.error('❌ Error analyzing prompt:', error);
+      loggingService.error('❌ Error analyzing prompt:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to analyze prompt: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -315,7 +315,7 @@ export class CostDebuggerService {
       const cost = calculateCost(tokens, 0, provider, model); // 0 output tokens for input-only sections
       return cost;
     } catch (error) {
-      logger.warn(`Failed to calculate cost using pricing system for ${provider}/${model}, using fallback:`, error);
+      loggingService.warn(`Failed to calculate cost using pricing system for ${provider}/${model}, using fallback:`, { error: error instanceof Error ? error.message : String(error) });
       // Fallback to modelPricing if available
       if (modelPricing) {
         const inputCost = (tokens / 1_000_000) * modelPricing.inputPrice;
@@ -343,7 +343,7 @@ export class CostDebuggerService {
       const aiOptimizations = await this.performAIOptimizationAnalysis(sections, provider, model);
       return aiOptimizations;
     } catch (error) {
-      logger.warn('AI optimization analysis failed, falling back to heuristic analysis:', error);
+      loggingService.warn('AI optimization analysis failed, falling back to heuristic analysis:', { error: error instanceof Error ? error.message : String(error) });
       return this.fallbackOptimizationAnalysis(sections, provider, model);
     }
   }
@@ -370,11 +370,11 @@ export class CostDebuggerService {
         section.optimizationSuggestions = optimizations.sectionSuggestions[section.id] || [];
       }
       
-      logger.info('AI optimization analysis completed successfully', { optimizations });
+      loggingService.info('AI optimization analysis completed successfully', { value:  {  optimizations  } });
       return optimizations;
       
     } catch (error) {
-      logger.error('AI optimization analysis failed:', error);
+      loggingService.error('AI optimization analysis failed:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -456,7 +456,7 @@ Be specific about what to change and estimated savings.`;
         sectionSuggestions: parsed.sectionSuggestions || {}
       };
     } catch (error) {
-      logger.error('Failed to parse AI optimization suggestions:', error);
+      loggingService.error('Failed to parse AI optimization suggestions:', { error: error instanceof Error ? error.message : String(error) });
       return {
         highImpact: [],
         mediumImpact: [],
@@ -612,23 +612,23 @@ Be specific about what to change and estimated savings.`;
     exampleEfficiency: number;
     overallScore: number;
   }> {
-    logger.info('🔍 Starting quality assessment', { 
+    loggingService.info('🔍 Starting quality assessment', { value:  {  
       sectionsCount: sections.length, 
       provider, 
       model 
-    });
+     } });
     
     try {
       // Use AI-powered quality assessment for better accuracy
-      logger.info('🤖 Attempting AI-powered quality analysis...');
+      loggingService.info('🤖 Attempting AI-powered quality analysis...');
       const qualityAnalysis = await this.performAIQualityAnalysis(sections, provider, model);
-      logger.info('✅ AI quality analysis completed successfully', { qualityAnalysis });
+      loggingService.info('✅ AI quality analysis completed successfully', { value:  {  qualityAnalysis  } });
       return qualityAnalysis;
     } catch (error) {
-      logger.error('❌ AI quality analysis failed with error:', error);
-      logger.warn('⚠️ Falling back to heuristic scoring');
+      loggingService.error('❌ AI quality analysis failed with error:', { error: error instanceof Error ? error.message : String(error) });
+      loggingService.warn('⚠️ Falling back to heuristic scoring');
       const fallbackScores = this.fallbackQualityAssessment(sections);
-      logger.info('🔄 Using fallback quality scores', { fallbackScores });
+      loggingService.info('🔄 Using fallback quality scores', { value:  {  fallbackScores  } });
       return fallbackScores;
     }
   }
@@ -647,17 +647,17 @@ Be specific about what to change and estimated savings.`;
       // Prepare the prompt for AI analysis
       const analysisPrompt = this.buildQualityAnalysisPrompt(sections);
       
-      logger.info('🚀 Starting AI quality analysis', { 
+      loggingService.info('🚀 Starting AI quality analysis', { value:  {  
         sectionsCount: sections.length, 
         promptLength: analysisPrompt.length,
         provider,
         model
-      });
+       } });
       
       // Use Bedrock service for AI-powered analysis - use a more cost-effective model
       const aiResponse = await BedrockService.invokeModel(analysisPrompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
       
-      logger.info('✅ AI quality analysis completed successfully', { 
+      loggingService.info('✅ AI quality analysis completed successfully', { 
         responseLength: aiResponse.length,
         responsePreview: aiResponse.substring(0, 200) + '...'
       });
@@ -667,15 +667,15 @@ Be specific about what to change and estimated savings.`;
       
       // Validate that we got meaningful scores
       if (qualityScores.overallScore > 0) {
-        logger.info('🎯 Quality scores parsed successfully', { qualityScores });
+        loggingService.info('🎯 Quality scores parsed successfully', { value:  {  qualityScores  } });
         return qualityScores;
       } else {
-        logger.warn('⚠️ AI returned zero scores, falling back to heuristic analysis');
+        loggingService.warn('⚠️ AI returned zero scores, falling back to heuristic analysis');
         return this.fallbackQualityAssessment(sections);
       }
       
     } catch (error) {
-      logger.warn('⚠️ AI quality analysis failed, falling back to heuristic scoring', { 
+      loggingService.warn('⚠️ AI quality analysis failed, falling back to heuristic scoring', { 
         error: error instanceof Error ? error.message : String(error),
         provider,
         model
@@ -740,7 +740,7 @@ Focus on clarity, conciseness, and effectiveness.`;
         overallScore: Math.max(0, Math.min(100, Number(parsed.overallScore) || 0))
       };
     } catch (error) {
-      logger.error('Failed to parse AI quality scores:', error);
+      loggingService.error('Failed to parse AI quality scores:', { error: error instanceof Error ? error.message : String(error) });
       // Return default scores if parsing fails
       return {
         instructionClarity: 70,
@@ -778,12 +778,12 @@ Focus on clarity, conciseness, and effectiveness.`;
 
     const overallScore = Math.round((instructionClarity + contextRelevance + exampleEfficiency) / 3);
 
-    logger.info('Using fallback quality assessment', { 
+    loggingService.info('Using fallback quality assessment', { value:  {  
       instructionClarity, 
       contextRelevance, 
       exampleEfficiency, 
       overallScore 
-    });
+     } });
 
     return {
       instructionClarity,
@@ -869,12 +869,12 @@ Focus on clarity, conciseness, and effectiveness.`;
         const aiDeadWeight = await this.performAIDeadWeightAnalysis(analysis, provider, model);
         return aiDeadWeight;
       } catch (error) {
-        logger.warn('AI dead weight analysis failed, falling back to heuristic detection:', error);
+        loggingService.warn('AI dead weight analysis failed, falling back to heuristic detection:', { error: error instanceof Error ? error.message : String(error) });
         return this.fallbackDeadWeightDetection(analysis);
       }
 
     } catch (error) {
-      logger.error('❌ Error detecting dead weight:', error);
+      loggingService.error('❌ Error detecting dead weight:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to detect dead weight: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -890,11 +890,11 @@ Focus on clarity, conciseness, and effectiveness.`;
       
       const deadWeight = this.parseDeadWeightAnalysis(aiResponse);
       
-      logger.info('AI dead weight analysis completed successfully', { deadWeight });
+      loggingService.info('AI dead weight analysis completed successfully', { value:  {  deadWeight  } });
       return deadWeight;
       
     } catch (error) {
-      logger.error('AI dead weight analysis failed:', error);
+      loggingService.error('AI dead weight analysis failed:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -966,7 +966,7 @@ Focus on identifying content that can be removed or simplified without losing th
         confidence: Number(parsed.confidence) || 0.85
       };
     } catch (error) {
-      logger.error('Failed to parse AI dead weight analysis:', error);
+      loggingService.error('Failed to parse AI dead weight analysis:', { error: error instanceof Error ? error.message : String(error) });
       return {
         redundantInstructions: [],
         unnecessaryExamples: [],
@@ -1041,7 +1041,7 @@ Focus on identifying content that can be removed or simplified without losing th
       try {
         aiInsights = await this.getAIComparisonInsights(originalAnalysis, optimizedAnalysis, provider, model);
       } catch (error) {
-        logger.warn('AI comparison insights failed, using basic analysis:', error);
+        loggingService.warn('AI comparison insights failed, using basic analysis:', { error: error instanceof Error ? error.message : String(error) });
         aiInsights = this.generateBasicComparisonInsights(originalAnalysis, optimizedAnalysis);
       }
 
@@ -1058,7 +1058,7 @@ Focus on identifying content that can be removed or simplified without losing th
       };
 
     } catch (error) {
-      logger.error('❌ Error comparing prompt versions:', error);
+      loggingService.error('❌ Error comparing prompt versions:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to compare prompt versions: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -1075,11 +1075,11 @@ Focus on identifying content that can be removed or simplified without losing th
       
       const insights = this.parseComparisonInsights(aiResponse);
       
-      logger.info('AI comparison insights generated successfully', { insights });
+      loggingService.info('AI comparison insights generated successfully', { value:  {  insights  } });
       return insights;
       
     } catch (error) {
-      logger.error('AI comparison insights failed:', error);
+      loggingService.error('AI comparison insights failed:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -1143,7 +1143,7 @@ Be specific about what changed and the impact of those changes.`;
       
       return [];
     } catch (error) {
-      logger.error('Failed to parse AI comparison insights:', error);
+      loggingService.error('Failed to parse AI comparison insights:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -1203,7 +1203,7 @@ Be specific about what changed and the impact of those changes.`;
               pricing: modelPricing
             };
           } catch (error) {
-            logger.warn(`Failed to analyze for ${provider}/${model}:`, error);
+            loggingService.warn(`Failed to analyze for ${provider}/${model}:`, { error: error instanceof Error ? error.message : String(error) });
             return {
               provider,
               model,
@@ -1219,7 +1219,7 @@ Be specific about what changed and the impact of those changes.`;
 
       return comparisons;
     } catch (error) {
-      logger.error('❌ Error getting provider comparison:', error);
+      loggingService.error('❌ Error getting provider comparison:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Failed to get provider comparison: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { UsageService } from '../services/usage.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 const router = Router();
 
@@ -44,7 +44,7 @@ router.post('/sync', authenticate, async (req, res, next) => {
 
         // Run sync in background
         UsageService.syncHistoricalData(userId, days).catch((err: any) => {
-            logger.error('Background sync failed:', err);
+            loggingService.error('Background sync failed:', err);
         });
 
         res.json({

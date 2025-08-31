@@ -1,7 +1,7 @@
-import { logger } from '../utils/logger';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
 import { mixpanelService } from './mixpanel.service';
+import { loggingService } from './logging.service';
 
 interface AnalyticsQuery {
     userId: string;
@@ -24,7 +24,7 @@ interface TimeSeriesData {
 export class AnalyticsService {
     static async getAnalytics(filters: any, options: { groupBy?: string; includeProjectBreakdown?: boolean } = {}) {
         try {
-            logger.debug('Getting analytics with filters:', filters);
+            loggingService.debug('Getting analytics with filters:', { value:  { value: filters } });
 
             const match: any = {
                 userId: new mongoose.Types.ObjectId(filters.userId),
@@ -66,7 +66,7 @@ export class AnalyticsService {
                 projectBreakdown
             };
 
-            logger.debug('Analytics result:', result);
+            loggingService.debug('Analytics result:', { value:  { value: result } });
             
             // Track analytics access
             if (filters.userId) {
@@ -89,14 +89,14 @@ export class AnalyticsService {
             
             return result;
         } catch (error) {
-            logger.error('Error getting analytics:', error);
+            loggingService.error('Error getting analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     static async getProjectAnalytics(projectId: string, filters: any, options: { groupBy?: string } = {}) {
         try {
-            logger.debug('Getting project analytics for:', projectId);
+            loggingService.debug('Getting project analytics for:', { value:  { value: projectId } });
 
             const match = {
                 ...filters,
@@ -120,14 +120,14 @@ export class AnalyticsService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting project analytics:', error);
+            loggingService.error('Error getting project analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     static async compareProjects(projectIds: string[], options: { startDate?: Date; endDate?: Date; metric?: string } = {}) {
         try {
-            logger.debug('Comparing projects:', projectIds);
+            loggingService.debug('Comparing projects:', { value:  { value: projectIds } });
 
             const match: any = {
                 projectId: { $in: projectIds.map(id => new mongoose.Types.ObjectId(id)) }
@@ -178,7 +178,7 @@ export class AnalyticsService {
                 metric: options.metric || 'cost'
             };
         } catch (error) {
-            logger.error('Error comparing projects:', error);
+            loggingService.error('Error comparing projects:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -254,10 +254,10 @@ export class AnalyticsService {
 
             const recentUsage = await Usage.aggregate(pipeline);
             
-            logger.debug(`Retrieved ${recentUsage.length} recent usage records`);
+            loggingService.debug(`Retrieved ${recentUsage.length} recent usage records`);
             return recentUsage;
         } catch (error) {
-            logger.error('Error getting recent usage:', error);
+            loggingService.error('Error getting recent usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -299,7 +299,7 @@ export class AnalyticsService {
 
             return breakdown;
         } catch (error) {
-            logger.error('Error calculating project breakdown:', error);
+            loggingService.error('Error calculating project breakdown:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -310,7 +310,7 @@ export class AnalyticsService {
         period2: { startDate: Date; endDate: Date }
     ) {
         try {
-            logger.debug('Getting comparative analytics for user:', userId);
+            loggingService.debug('Getting comparative analytics for user:', { value:  { value: userId } });
 
             const [data1, data2] = await Promise.all([
                 this.getAnalytics({ userId, startDate: period1.startDate, endDate: period1.endDate }),
@@ -362,7 +362,7 @@ export class AnalyticsService {
                 comparison,
             };
         } catch (error) {
-            logger.error('Error getting comparative analytics:', error);
+            loggingService.error('Error getting comparative analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -386,7 +386,7 @@ export class AnalyticsService {
 
             return csvRows.join('\n');
         } catch (error) {
-            logger.error('Error exporting analytics:', error);
+            loggingService.error('Error exporting analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

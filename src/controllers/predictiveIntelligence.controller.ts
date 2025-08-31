@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { PredictiveCostIntelligenceService } from '../services/predictiveCostIntelligence.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export class PredictiveIntelligenceController {
 
@@ -68,7 +68,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting predictive intelligence:', error);
+            loggingService.error('Error getting predictive intelligence:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to generate predictive intelligence',
@@ -133,7 +133,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting proactive alerts:', error);
+            loggingService.error('Error getting proactive alerts:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve proactive alerts',
@@ -193,7 +193,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting budget projections:', error);
+            loggingService.error('Error getting budget projections:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve budget projections',
@@ -273,7 +273,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting intelligent optimizations:', error);
+            loggingService.error('Error getting intelligent optimizations:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve intelligent optimizations',
@@ -346,7 +346,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting scenario simulations:', error);
+            loggingService.error('Error getting scenario simulations:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve scenario simulations',
@@ -405,7 +405,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting token trends:', error);
+            loggingService.error('Error getting token trends:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve token trends',
@@ -478,7 +478,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting model patterns:', error);
+            loggingService.error('Error getting model patterns:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve model patterns',
@@ -548,7 +548,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting cross-platform insights:', error);
+            loggingService.error('Error getting cross-platform insights:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve cross-platform insights',
@@ -640,7 +640,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error getting dashboard summary:', error);
+            loggingService.error('Error getting dashboard summary:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve dashboard summary',
@@ -672,7 +672,7 @@ export class PredictiveIntelligenceController {
                 });
             }
 
-            logger.info(`Auto-optimizing alert ${alertId} for user ${userId}`);
+            loggingService.info(`Auto-optimizing alert ${alertId} for user ${userId}`);
 
             // For demonstration purposes, we'll simulate different types of auto-optimizations
             let optimizationResult;
@@ -705,7 +705,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            logger.error('Error in auto-optimization:', error);
+            loggingService.error('Error in auto-optimization:', error);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to auto-optimize',
@@ -718,7 +718,7 @@ export class PredictiveIntelligenceController {
      * Handle optimization recommendation auto-implementation
      */
     private static async handleOptimizationAutoImplementation(alertId: string, userId: string) {
-        logger.info(`Implementing optimization ${alertId} for user ${userId}`);
+        loggingService.info(`Implementing optimization ${alertId} for user ${userId}`);
         
         // Get user's current usage to calculate realistic savings
         const Usage = (await import('../models/Usage')).Usage;
@@ -755,7 +755,7 @@ export class PredictiveIntelligenceController {
      * Handle budget alert optimization
      */
     private static async handleBudgetAlertOptimization(alertId: string, userId: string) {
-        logger.info(`Implementing budget optimization ${alertId} for user ${userId}`);
+        loggingService.info(`Implementing budget optimization ${alertId} for user ${userId}`);
         
         // Get current project spending to calculate realistic savings
         const Usage = (await import('../models/Usage')).Usage;
@@ -794,7 +794,7 @@ export class PredictiveIntelligenceController {
      * Handle cost spike optimization
      */
     private static async handleCostSpikeOptimization(alertId: string, userId: string) {
-        logger.info(`Implementing cost spike optimization ${alertId} for user ${userId}`);
+        loggingService.info(`Implementing cost spike optimization ${alertId} for user ${userId}`);
         
         // Get recent high-cost requests to calculate realistic spike prevention savings
         const Usage = (await import('../models/Usage')).Usage;
@@ -832,7 +832,7 @@ export class PredictiveIntelligenceController {
      * Handle generic optimization
      */
     private static async handleGenericOptimization(alertId: string, userId: string) {
-        logger.info(`Implementing generic optimization ${alertId} for user ${userId}`);
+        loggingService.info(`Implementing generic optimization ${alertId} for user ${userId}`);
         
         // Get user's overall usage to calculate generic optimization savings
         const Usage = (await import('../models/Usage')).Usage;

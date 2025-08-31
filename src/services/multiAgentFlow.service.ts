@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { StateGraph, Annotation } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
@@ -131,7 +131,7 @@ export class MultiAgentFlowService {
             ...RetryConfigs.bedrock,
             maxRetries: 3, // Slightly fewer retries for multi-agent to avoid long delays
             onRetry: (error: Error, attempt: number) => {
-                logger.warn(`🔄 Multi-agent retry attempt ${attempt}: ${error.message}`);
+                loggingService.warn(`🔄 Multi-agent retry attempt ${attempt}: ${error.message}`);
             }
         });
     }
@@ -257,17 +257,17 @@ export class MultiAgentFlowService {
             const result = await this.graph.invoke(initialState);
             
             // Debug logging to understand the entire result structure
-            logger.info('🔍 Multi-agent result structure:', {
+            loggingService.info('🔍 Multi-agent result structure:', { value:  { 
                 messagesCount: result.messages?.length || 0,
                 agentPath: result.agentPath,
                 hasMessages: !!result.messages,
                 lastMessageIndex: result.messages ? result.messages.length - 1 : -1
-            });
+             } });
             
             const finalMessage = result.messages[result.messages.length - 1];
             
             // Debug logging to understand the final message structure
-            logger.info('🔍 Multi-agent final message structure:', {
+            loggingService.info('🔍 Multi-agent final message structure:', {
                 hasFinalMessage: !!finalMessage,
                 messageType: finalMessage?.constructor?.name,
                 contentType: typeof finalMessage?.content,
@@ -280,7 +280,7 @@ export class MultiAgentFlowService {
             
             // Check if the final message is a retry wrapper
             if (finalMessage && typeof finalMessage === 'object' && 'success' in finalMessage && 'result' in finalMessage) {
-                logger.info('🔄 Detected retry wrapper, extracting actual result');
+                loggingService.info('🔄 Detected retry wrapper, extracting actual result');
                 // This is a retry wrapper, extract the actual result
                 const actualResult = finalMessage.result;
                 if (actualResult && typeof actualResult.content === 'string') {
@@ -350,7 +350,7 @@ export class MultiAgentFlowService {
             };
 
         } catch (error) {
-            logger.error('❌ Multi-agent flow processing failed:', error);
+            loggingService.error('❌ Multi-agent flow processing failed:', { error: error instanceof Error ? error.message : String(error) });
             
             // End LangSmith run with error
             if (runId) {
@@ -384,7 +384,7 @@ export class MultiAgentFlowService {
             const promptCost = this.estimatePromptCost(lastMessage.content);
             const complexity = this.analyzeComplexity(lastMessage.content);
             
-            logger.info(`💰 Prompt cost estimate: $${promptCost.toFixed(6)}, Complexity: ${complexity}`);
+            loggingService.info(`💰 Prompt cost estimate: $${promptCost.toFixed(6)}, Complexity: ${complexity}`);
 
             // Check if prompt needs refinement
             const needsRefinement = promptCost > (state.costBudget || 0.10) || complexity === 'high';
@@ -407,7 +407,7 @@ export class MultiAgentFlowService {
                 agentPath: ['prompt_acceptable']
             };
         } catch (error) {
-            logger.error('❌ Prompt analysis failed:', error);
+            loggingService.error('❌ Prompt analysis failed:', { error: error instanceof Error ? error.message : String(error) });
             return { agentPath: ['prompt_analysis_error'], failureCount: 1 };
         }
     }
@@ -423,7 +423,7 @@ export class MultiAgentFlowService {
             const cacheResult = await this.getCachedResponse(lastMessage.content);
             
             if (cacheResult && cacheResult.cacheHit) {
-                logger.info('🎯 Semantic cache hit! Returning cached response');
+                loggingService.info('🎯 Semantic cache hit! Returning cached response');
                 return {
                     messages: [...state.messages, new AIMessage(cacheResult.response)],
                     cacheHit: true,
@@ -444,7 +444,7 @@ export class MultiAgentFlowService {
                 agentPath: [...(state.agentPath || []), 'cache_miss']
             };
         } catch (error) {
-            logger.error('❌ Semantic cache failed:', error);
+            loggingService.error('❌ Semantic cache failed:', { error: error instanceof Error ? error.message : String(error) });
             return { agentPath: [...(state.agentPath || []), 'cache_error'], failureCount: (state.failureCount || 0) + 1 };
         }
     }
@@ -503,7 +503,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 }
             };
         } catch (error) {
-            logger.error('❌ Master agent failed:', error);
+            loggingService.error('❌ Master agent failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 agentPath: [...(state.agentPath || []), 'master_agent_error'],
                 failureCount: (state.failureCount || 0) + 1
@@ -547,7 +547,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 riskLevel: this.assessRiskLevel(qualityMetrics.score, state.optimizationsApplied)
             };
         } catch (error) {
-            logger.error('❌ Quality analyst failed:', error);
+            loggingService.error('❌ Quality analyst failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 agentPath: ['quality_analyst_error'],
                 failureCount: (state.failureCount || 0) + 1
@@ -557,7 +557,7 @@ Would you like me to help you with anything else, or would you prefer to check t
 
     private async failureRecoveryNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
-            logger.warn(`🔄 Failure recovery activated. Failure count: ${state.failureCount}`);
+            loggingService.warn(`🔄 Failure recovery activated. Failure count: ${state.failureCount}`);
             
             // Implement exponential backoff
             const delay = Math.min(1000 * Math.pow(2, state.failureCount || 0), 30000);
@@ -580,7 +580,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 }
             };
         } catch (error) {
-            logger.error('❌ Failure recovery failed:', error);
+            loggingService.error('❌ Failure recovery failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 messages: [new HumanMessage("I apologize, but I'm experiencing technical difficulties. Please try again later.")],
                 agentPath: ['failure_recovery_final'],
@@ -598,19 +598,19 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             const query = lastMessage.content;
-            logger.info(`🔍 Analyzing query with smart tags: "${query}"`);
+            loggingService.info(`🔍 Analyzing query with smart tags: "${query}"`);
             
             // Generate smart tags for better platform detection
             const smartTags = await this.smartTagGenerator.generateSmartTags(query);
             const trendingAnalysis = await this.trendingDetector.analyzeQuery(query);
             
-            logger.info(`🏷️ Smart tags generated:`, {
+            loggingService.info(`🏷️ Smart tags generated:`, {
                 primaryTags: smartTags.primaryTags.map(t => ({ tag: t.tag, confidence: t.confidence, platform: t.platform })),
                 recommendedPlatforms: smartTags.recommendedPlatforms,
                 optimizedQuery: smartTags.searchQuery
             });
             
-            logger.info(`🎯 Trending analysis result:`, {
+            loggingService.info(`🎯 Trending analysis result:`, {
                 needsWebData: trendingAnalysis.needsRealTimeData,
                 confidence: trendingAnalysis.confidence,
                 queryType: trendingAnalysis.queryType,
@@ -644,7 +644,7 @@ Would you like me to help you with anything else, or would you prefer to check t
             };
 
         } catch (error) {
-            logger.error('❌ Smart tag generation failed:', error);
+            loggingService.error('❌ Smart tag generation failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 needsWebData: false,
                 agentPath: ['trending_detection_error'], 
@@ -665,13 +665,13 @@ Would you like me to help you with anything else, or would you prefer to check t
             const sources = state.webSources || [];
             
             if (sources.length === 0) {
-                logger.warn('No web sources provided for scraping');
+                loggingService.warn('No web sources provided for scraping');
                 return { agentPath: ['web_scraping_no_sources'] };
             }
 
-            logger.info(`🕷️ Starting intelligent web scraping from ${sources.length} sources...`);
+            loggingService.info(`🕷️ Starting intelligent web scraping from ${sources.length} sources...`);
             if (smartTags?.recommendedPlatforms) {
-                logger.info(`🎯 Target platforms: ${smartTags.recommendedPlatforms.join(', ')}`);
+                loggingService.info(`🎯 Target platforms: ${smartTags.recommendedPlatforms.join(', ')}`);
             }
             
             const scrapingResults = [];
@@ -681,7 +681,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 const source = sources[i];
                 
                 try {
-                    logger.info(`📄 Scraping: ${source}`);
+                    loggingService.info(`📄 Scraping: ${source}`);
                     
                     // Get smart navigation strategy for this source
                     const navigationStrategy = smartTags?.navigationStrategies?.find((nav: any) => nav.url === source);
@@ -716,21 +716,21 @@ Would you like me to help you with anything else, or would you prefer to check t
                     
                     if (parsedResult.success) {
                         scrapingResults.push(parsedResult);
-                        logger.info(`✅ Successfully scraped: ${source}`);
-                        logger.info(`📄 Extracted content length: ${parsedResult.data?.extractedText?.length || 0} chars`);
-                        logger.info(`📄 Title: ${parsedResult.data?.title || 'No title'}`);
-                        logger.info(`📄 Content preview: ${(parsedResult.data?.extractedText || '').substring(0, 200)}...`);
+                        loggingService.info(`✅ Successfully scraped: ${source}`);
+                        loggingService.info(`📄 Extracted content length: ${parsedResult.data?.extractedText?.length || 0} chars`);
+                        loggingService.info(`📄 Title: ${parsedResult.data?.title || 'No title'}`);
+                        loggingService.info(`📄 Content preview: ${(parsedResult.data?.extractedText || '').substring(0, 200)}...`);
                     } else {
-                        logger.warn(`❌ Failed to scrape: ${source} - ${parsedResult.error}`);
+                        loggingService.warn(`❌ Failed to scrape: ${source} - ${parsedResult.error}`);
                     }
 
                 } catch (error) {
-                    logger.error(`❌ Error scraping ${source}:`, error);
+                    loggingService.error(`❌ Error scraping ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
 
             if (scrapingResults.length === 0) {
-                logger.warn('❌ All web scraping failed, providing fallback response');
+                loggingService.warn('❌ All web scraping failed, providing fallback response');
                 return { 
                     agentPath: ['web_scraping_failed'],
                     failureCount: 1,
@@ -742,7 +742,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 };
             }
 
-            logger.info(`🎉 Successfully scraped ${scrapingResults.length} sources`);
+            loggingService.info(`🎉 Successfully scraped ${scrapingResults.length} sources`);
 
             return {
                 scrapingResults,
@@ -758,7 +758,7 @@ Would you like me to help you with anything else, or would you prefer to check t
             };
 
         } catch (error) {
-            logger.error('❌ Web scraping failed:', error);
+            loggingService.error('❌ Web scraping failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 agentPath: ['web_scraping_error'], 
                 failureCount: 1 
@@ -774,7 +774,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 return { agentPath: ['content_summarizer_skipped'] };
             }
 
-            logger.info(`📝 Summarizing content from ${scrapingResults.length} sources...`);
+            loggingService.info(`📝 Summarizing content from ${scrapingResults.length} sources...`);
 
             // Combine all scraped content
             const combinedContent = scrapingResults
@@ -786,7 +786,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 }))
                 .filter(item => item.content.length > 0);
 
-            logger.info(`📝 Combined content details:`, {
+            loggingService.info(`📝 Combined content details:`, {
                 totalSources: scrapingResults.length,
                 validSources: combinedContent.length,
                 contentLengths: combinedContent.map(item => ({
@@ -832,7 +832,7 @@ Provide a direct, helpful answer that directly addresses the user's question. Fo
             });
 
             // Debug logging to see what the AI model returned
-            logger.info('🔍 Summary response structure:', {
+            loggingService.info('🔍 Summary response structure:', {
                 hasResponse: !!summaryResponse,
                 responseType: summaryResponse?.constructor?.name,
                 hasContent: !!summaryResponse?.content,
@@ -846,20 +846,20 @@ Provide a direct, helpful answer that directly addresses the user's question. Fo
             
             // Check if response is wrapped by retry mechanism
             if (summaryResponse && typeof summaryResponse === 'object' && 'success' in summaryResponse && 'result' in summaryResponse) {
-                logger.info('🔄 Detected retry wrapper in summary response, extracting actual result');
+                loggingService.info('🔄 Detected retry wrapper in summary response, extracting actual result');
                 actualResponse = summaryResponse.result;
             }
             
             const comprehensiveSummary = actualResponse?.content?.toString() || 'Unable to generate summary from web content.';
 
-            logger.info('✅ Content summarization completed');
+            loggingService.info('✅ Content summarization completed');
 
             // Create the summary message
             const summaryMessage = new AIMessage(`${comprehensiveSummary}
 
 Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).join(', ')}`);
 
-            logger.info('✅ Content summarization completed - adding summary message to state');
+            loggingService.info('✅ Content summarization completed - adding summary message to state');
 
             return {
                 messages: [summaryMessage], // Return only the new message, LangGraph will merge it
@@ -876,7 +876,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             };
 
         } catch (error) {
-            logger.error('❌ Content summarization failed:', error);
+            loggingService.error('❌ Content summarization failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 agentPath: ['content_summarizer_error'], 
                 failureCount: 1 
@@ -890,7 +890,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             const query = lastMessage?.content?.toString() || '';
             const queryType = state.metadata?.trendingAnalysis?.queryType;
             
-            logger.info(`🎯 Processing Life Utility query: ${queryType}`);
+            loggingService.info(`🎯 Processing Life Utility query: ${queryType}`);
             
             let lifeUtilityRequest: any = {};
             
@@ -970,7 +970,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                     }
                 };
             } else {
-                logger.warn('❌ Life Utility operation failed:', parsedResult.error);
+                loggingService.warn('❌ Life Utility operation failed:', { value:  { value: parsedResult.error } });
                 return {
                     agentPath: ['life_utility_failed'],
                     failureCount: 1
@@ -978,7 +978,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             }
             
         } catch (error) {
-            logger.error('❌ Life Utility node failed:', error);
+            loggingService.error('❌ Life Utility node failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 agentPath: ['life_utility_error'],
                 failureCount: 1
@@ -1080,7 +1080,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         // Route life utility queries directly to Life Utility Agent
         if (['health', 'travel', 'shopping', 'reverse_search'].includes(queryType) || 
             (queryType === 'weather' && state.messages[state.messages.length - 1]?.content?.toString().includes('wear'))) {
-            logger.info(`🎯 Routing to Life Utility Agent for ${queryType} query`);
+            loggingService.info(`🎯 Routing to Life Utility Agent for ${queryType} query`);
             return 'life_utility';
         }
         
@@ -1117,7 +1117,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
     private routeAfterContentSummarization(state: MultiAgentState): string {
         // If we have web scraping results, end here
         if (state.metadata?.contentSummary?.sourcesUsed > 0) {
-            logger.info('✅ Web scraping completed successfully, ending flow');
+            loggingService.info('✅ Web scraping completed successfully, ending flow');
             return '__end__';
         }
         
@@ -1204,7 +1204,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                     cacheEntry.hits++;
                     cacheEntry.timestamp = Date.now();
                     
-                    logger.info(`🎯 Semantic cache hit with similarity: ${similarity.toFixed(3)}`);
+                    loggingService.info(`🎯 Semantic cache hit with similarity: ${similarity.toFixed(3)}`);
                     return {
                         response: cacheEntry.response,
                         cacheHit: true
@@ -1214,7 +1214,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             
             return null;
         } catch (error) {
-            logger.error('❌ Semantic cache lookup failed:', error);
+            loggingService.error('❌ Semantic cache lookup failed:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -1238,9 +1238,9 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 hits: 0
             });
             
-            logger.info(`💾 Stored response in semantic cache (${this.semanticCache.size} entries)`);
+            loggingService.info(`💾 Stored response in semantic cache (${this.semanticCache.size} entries)`);
         } catch (error) {
-            logger.error('❌ Failed to store in semantic cache:', error);
+            loggingService.error('❌ Failed to store in semantic cache:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -1459,7 +1459,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 }
             };
         } catch (error) {
-            logger.error('❌ Predictive cost analytics failed:', error);
+            loggingService.error('❌ Predictive cost analytics failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 predictedCost: 0.01,
                 trend: 'unknown',
@@ -1557,7 +1557,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
      */
     private async memoryReaderNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
-            logger.info(`🧠 Memory Reader processing for user: ${state.userId}`);
+            loggingService.info(`🧠 Memory Reader processing for user: ${state.userId}`);
 
             // Create memory agent state
             const memoryState: MemoryAgentState = {
@@ -1585,7 +1585,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 ...memoryResult
             };
 
-            logger.info(`✅ Memory Reader completed for user: ${state.userId}`);
+            loggingService.info(`✅ Memory Reader completed for user: ${state.userId}`);
 
             return {
                 memoryContext: updatedMemoryContext,
@@ -1603,7 +1603,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 }
             };
         } catch (error) {
-            logger.error('❌ Memory Reader failed:', error);
+            loggingService.error('❌ Memory Reader failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 memoryContext: null,
                 personalizedRecommendations: [],
@@ -1621,7 +1621,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
      */
     private async memoryWriterNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
-            logger.info(`💾 Memory Writer processing for user: ${state.userId}`);
+            loggingService.info(`💾 Memory Writer processing for user: ${state.userId}`);
 
             // Get the final response from messages
             const finalMessage = state.messages[state.messages.length - 1];
@@ -1672,7 +1672,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 cost: state.metadata?.totalCost || 0
             });
 
-            logger.info(`✅ Memory Writer completed for user: ${state.userId}`);
+            loggingService.info(`✅ Memory Writer completed for user: ${state.userId}`);
 
             return {
                 agentPath: [...state.agentPath, 'memory_writer'],
@@ -1684,7 +1684,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 }
             };
         } catch (error) {
-            logger.error('❌ Memory Writer failed:', error);
+            loggingService.error('❌ Memory Writer failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 agentPath: [...state.agentPath, 'memory_writer_error'],
                 metadata: {
@@ -1711,9 +1711,9 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             // Reset EventEmitter max listeners to default
             EventEmitter.defaultMaxListeners = 10;
             
-            logger.info('🧹 Multi-agent flow service cleanup completed');
+            loggingService.info('🧹 Multi-agent flow service cleanup completed');
         } catch (error) {
-            logger.error('❌ Cleanup failed:', error);
+            loggingService.error('❌ Cleanup failed:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 }

@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { loggingService } from '../services/logging.service';
 
 /**
  * AWS Bedrock specific retry configuration
@@ -135,7 +135,7 @@ export class BedrockRetry {
                 
                 // Log success on retry
                 if (attempt > 0) {
-                    logger.info('Bedrock operation succeeded after retry', {
+                    loggingService.info('Bedrock operation succeeded after retry', {
                         attempt,
                         totalAttempts: attempt + 1,
                         duration: Date.now() - startTime,
@@ -151,7 +151,7 @@ export class BedrockRetry {
                 
                 // Check if error is retryable
                 if (!this.isRetryableError(error)) {
-                    logger.warn('Non-retryable Bedrock error', {
+                    loggingService.warn('Non-retryable Bedrock error', {
                         error: error.name || error.code,
                         message: error.message,
                         modelId: context.modelId,
@@ -163,7 +163,7 @@ export class BedrockRetry {
 
                 // If this is the last attempt, throw the error
                 if (attempt === this.config.maxRetries) {
-                    logger.error('Bedrock operation failed after all retries', {
+                    loggingService.error('Bedrock operation failed after all retries', {
                         totalAttempts: attempt + 1,
                         duration: Date.now() - startTime,
                         error: error.name || error.code,
@@ -178,7 +178,7 @@ export class BedrockRetry {
                 // Calculate delay for next attempt
                 const delay = this.calculateDelay(attempt);
                 
-                logger.info('Bedrock operation failed, retrying', {
+                loggingService.info('Bedrock operation failed, retrying', {
                     attempt: attempt + 1,
                     totalAttempts: this.config.maxRetries + 1,
                     delay: Math.round(delay),

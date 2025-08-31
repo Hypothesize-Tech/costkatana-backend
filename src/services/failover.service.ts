@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosResponse, AxiosError, AxiosRequestConfig } from 'axios';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import {
     FailoverTarget,
     FailoverPolicy,
@@ -52,7 +52,7 @@ export class FailoverService {
 
             return policy;
         } catch (error) {
-            logger.error('Failed to parse failover policy:', error);
+            loggingService.error('Failed to parse failover policy:', { error: error instanceof Error ? error.message : String(error) });
             throw new FailoverError(
                 'Invalid failover policy format',
                 'INVALID_POLICY',
@@ -174,11 +174,11 @@ export class FailoverService {
             finalError: null
         };
 
-        logger.info('Starting failover sequence', {
+        loggingService.info('Starting failover sequence', { value:  { 
             requestId,
             totalTargets: policy.targets.length,
             globalTimeout: policy.globalTimeout
-        });
+         } });
 
         // Set global timeout
         const globalTimeoutPromise = new Promise((_, reject) => {
@@ -199,7 +199,7 @@ export class FailoverService {
             await Promise.race([failoverPromise, globalTimeoutPromise]);
         } catch (error) {
             result.finalError = error;
-            logger.error('Failover sequence failed', { requestId, error });
+            loggingService.error('Failover sequence failed', { requestId, error: error instanceof Error ? error.message : String(error) });
         }
 
         result.totalDuration = Date.now() - startTime;
@@ -224,7 +224,7 @@ export class FailoverService {
             context.currentAttemptIndex = i;
             result.providersAttempted++;
 
-            logger.info(`Attempting provider ${i + 1}/${context.policy.targets.length}`, {
+            loggingService.info(`Attempting provider ${i + 1}/${context.policy.targets.length}`, {
                 requestId,
                 targetUrl: target['target-url'],
                 attempt: i + 1
@@ -251,7 +251,7 @@ export class FailoverService {
                     timestamp: attemptStartTime
                 });
 
-                logger.info(`Provider ${i + 1} succeeded`, {
+                loggingService.info(`Provider ${i + 1} succeeded`, {
                     requestId,
                     targetUrl: target['target-url'],
                     statusCode: response.status,
@@ -293,7 +293,7 @@ export class FailoverService {
 
                 this.updateProviderStats(target['target-url'], false, attemptDuration);
 
-                logger.warn(`Provider ${i + 1} failed`, {
+                loggingService.warn(`Provider ${i + 1} failed`, {
                     requestId,
                     targetUrl: target['target-url'],
                     statusCode,
@@ -314,13 +314,13 @@ export class FailoverService {
                     this.metrics.failureReasons[failureReason] = (this.metrics.failureReasons[failureReason] || 0) + 1;
                     
                     if (i === context.policy.targets.length - 1) {
-                        logger.error('All providers failed', { requestId, totalAttempts: i + 1 });
+                        loggingService.error('All providers failed', { requestId, totalAttempts: i + 1 });
                     }
                     return;
                 }
 
                 // Continue to next provider
-                logger.info(`Failing over to next provider`, {
+                loggingService.info(`Failing over to next provider`, {
                     requestId,
                     currentProvider: i + 1,
                     nextProvider: i + 2,
@@ -365,7 +365,7 @@ export class FailoverService {
 
                 transformed.data = transformedBody;
             } catch (error) {
-                logger.warn('Failed to apply body key overrides', { error });
+                loggingService.warn('Failed to apply body key overrides', { error: error instanceof Error ? error.message : String(error) });
                 // Continue with original body
             }
         }
@@ -403,7 +403,7 @@ export class FailoverService {
                     retryConfig.maxDelay!
                 );
 
-                logger.debug(`Retrying provider request in ${delay}ms`, {
+                loggingService.debug(`Retrying provider request in ${delay}ms`, {
                     attempt: attempt + 1,
                     maxRetries: retryConfig.maxRetries,
                     targetUrl: target['target-url']

@@ -1,6 +1,6 @@
 import { QualityScore, IQualityScore } from '../models/QualityScore';
 import { BedrockService } from './bedrock.service';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 
 export interface QualityAssessment {
@@ -59,7 +59,7 @@ export class QualityService {
 
             return assessment;
         } catch (error) {
-            logger.error('Error scoring response:', error);
+            loggingService.error('Error scoring response:', { error: error instanceof Error ? error.message : String(error) });
             return this.getDefaultScore();
         }
     }
@@ -83,7 +83,7 @@ export class QualityService {
 
             return this.parseScoringResult(result);
         } catch (error) {
-            logger.error('Error in AI model scoring:', error);
+            loggingService.error('Error in AI model scoring:', { error: error instanceof Error ? error.message : String(error) });
             return this.getDefaultScore();
         }
     }
@@ -217,7 +217,7 @@ Provide your response in JSON format:
                 explanation: parsed.explanation
             };
         } catch (error) {
-            logger.error('Error parsing scoring result:', error);
+            loggingService.error('Error parsing scoring result:', { error: error instanceof Error ? error.message : String(error) });
             return this.getDefaultScore();
         }
     }
@@ -273,7 +273,7 @@ Provide your response in JSON format:
                 costSavings
             };
         } catch (error) {
-            logger.error('Error comparing quality:', error);
+            loggingService.error('Error comparing quality:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 originalScore: 75,
                 optimizedScore: 75,
@@ -307,7 +307,7 @@ Provide your response in JSON format:
 
             return qualityScore;
         } catch (error) {
-            logger.error('Error saving quality score:', error);
+            loggingService.error('Error saving quality score:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -364,7 +364,7 @@ Provide your response in JSON format:
                 optimizationTypes: stats.types
             };
         } catch (error) {
-            logger.error('Error getting quality stats:', error);
+            loggingService.error('Error getting quality stats:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -388,7 +388,7 @@ Provide your response in JSON format:
                 }
             });
         } catch (error) {
-            logger.error('Error updating user feedback:', error);
+            loggingService.error('Error updating user feedback:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

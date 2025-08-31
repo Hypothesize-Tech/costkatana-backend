@@ -1,6 +1,6 @@
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { WebScraperTool } from '../tools/webScraper.tool';
 
 export interface WeatherAdviceRequest {
@@ -82,7 +82,7 @@ export class LifeUtilityAgentService {
      */
     async getWeatherAdvice(request: WeatherAdviceRequest): Promise<string> {
         try {
-            logger.info(`🌤️ Processing weather advice request for ${request.location}`);
+            loggingService.info(`🌤️ Processing weather advice request for ${request.location}`);
 
             // First, get real-time weather data
             const weatherSources = [
@@ -119,7 +119,7 @@ Keep the response conversational and helpful.`;
             return response.content.toString();
 
         } catch (error) {
-            logger.error('❌ Weather advice failed:', error);
+            loggingService.error('❌ Weather advice failed:', { error: error instanceof Error ? error.message : String(error) });
             return `I couldn't get real-time weather data for ${request.location}. Please check a reliable weather app for current conditions.`;
         }
     }
@@ -129,7 +129,7 @@ Keep the response conversational and helpful.`;
      */
     async getHealthGuidance(request: HealthQueryRequest): Promise<string> {
         try {
-            logger.info(`🏥 Processing health query for symptoms: ${request.symptoms.join(', ')}`);
+            loggingService.info(`🏥 Processing health query for symptoms: ${request.symptoms.join(', ')}`);
 
             // Scrape latest health information from reliable sources including government portals
             const healthSources = [
@@ -169,7 +169,7 @@ ALWAYS emphasize that this is informational only and not a substitute for profes
             return response.content.toString();
 
         } catch (error) {
-            logger.error('❌ Health guidance failed:', error);
+            loggingService.error('❌ Health guidance failed:', { error: error instanceof Error ? error.message : String(error) });
             return 'I recommend consulting with a healthcare professional for medical advice. If this is an emergency, please call emergency services immediately.';
         }
     }
@@ -179,7 +179,7 @@ ALWAYS emphasize that this is informational only and not a substitute for profes
      */
     async planTravel(request: TravelPlanRequest): Promise<string> {
         try {
-            logger.info(`✈️ Planning travel from ${request.from} to ${request.to}`);
+            loggingService.info(`✈️ Planning travel from ${request.from} to ${request.to}`);
 
             // Scrape travel booking sites for live data - comprehensive Indian travel sources
             const travelSources = [
@@ -223,7 +223,7 @@ Be practical and cost-effective in your suggestions.`;
             return response.content.toString();
 
         } catch (error) {
-            logger.error('❌ Travel planning failed:', error);
+            loggingService.error('❌ Travel planning failed:', { error: error instanceof Error ? error.message : String(error) });
             return `I couldn't fetch live travel data. Please check travel booking websites like MakeMyTrip, Goibibo, or IRCTC for current prices and availability.`;
         }
     }
@@ -233,7 +233,7 @@ Be practical and cost-effective in your suggestions.`;
      */
     async trackPrice(request: PriceTrackRequest): Promise<string> {
         try {
-            logger.info(`💰 Setting up price tracking for: ${request.product}`);
+            loggingService.info(`💰 Setting up price tracking for: ${request.product}`);
 
             // Scrape e-commerce sites for current prices - comprehensive Indian shopping sources
             const shoppingSources = [
@@ -271,12 +271,12 @@ Set up tracking confirmation message.`;
 
             const response = await this.priceAgent.invoke([new HumanMessage(pricePrompt)]);
             
-            logger.info(`📊 Price tracking set up for user ${request.userId}`);
+            loggingService.info(`📊 Price tracking set up for user ${request.userId}`);
             
             return response.content.toString();
 
         } catch (error) {
-            logger.error('❌ Price tracking failed:', error);
+            loggingService.error('❌ Price tracking failed:', { error: error instanceof Error ? error.message : String(error) });
             return `I couldn't set up price tracking for ${request.product}. Please check e-commerce sites directly for current prices.`;
         }
     }
@@ -309,12 +309,12 @@ Set up tracking confirmation message.`;
                         results.push(parsedResult.data.extractedText.substring(0, 1000));
                     }
                 } catch (error) {
-                    logger.warn(`Failed to scrape weather from ${source}:`, error);
+                    loggingService.warn(`Failed to scrape weather from ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             return results.join('\n---\n') || 'No weather data available';
         } catch (error) {
-            logger.error('Weather scraping failed:', error);
+            loggingService.error('Weather scraping failed:', { error: error instanceof Error ? error.message : String(error) });
             return 'Weather data unavailable';
         }
     }
@@ -345,12 +345,12 @@ Set up tracking confirmation message.`;
                         results.push(parsedResult.data.extractedText.substring(0, 1500));
                     }
                 } catch (error) {
-                    logger.warn(`Failed to scrape health data from ${source}:`, error);
+                    loggingService.warn(`Failed to scrape health data from ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             return results.join('\n---\n') || 'No health data available';
         } catch (error) {
-            logger.error('Health data scraping failed:', error);
+            loggingService.error('Health data scraping failed:', { error: error instanceof Error ? error.message : String(error) });
             return 'Health data unavailable';
         }
     }
@@ -382,12 +382,12 @@ Set up tracking confirmation message.`;
                         results.push(parsedResult.data.extractedText.substring(0, 1500));
                     }
                 } catch (error) {
-                    logger.warn(`Failed to scrape travel data from ${source}:`, error);
+                    loggingService.warn(`Failed to scrape travel data from ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             return results.join('\n---\n') || 'No travel data available';
         } catch (error) {
-            logger.error('Travel data scraping failed:', error);
+            loggingService.error('Travel data scraping failed:', { error: error instanceof Error ? error.message : String(error) });
             return 'Travel data unavailable';
         }
     }
@@ -419,12 +419,12 @@ Set up tracking confirmation message.`;
                         results.push(parsedResult.data.extractedText.substring(0, 1000));
                     }
                 } catch (error) {
-                    logger.warn(`Failed to scrape price data from ${source}:`, error);
+                    loggingService.warn(`Failed to scrape price data from ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             return results.join('\n---\n') || 'No price data available';
         } catch (error) {
-            logger.error('Price data scraping failed:', error);
+            loggingService.error('Price data scraping failed:', { error: error instanceof Error ? error.message : String(error) });
             return 'Price data unavailable';
         }
     }
@@ -433,7 +433,7 @@ Set up tracking confirmation message.`;
         try {
             await this.webScraper.cleanup();
         } catch (error) {
-            logger.error('Cleanup failed:', error);
+            loggingService.error('Cleanup failed:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 }

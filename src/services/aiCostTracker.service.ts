@@ -1,4 +1,3 @@
-import { logger } from '../utils/logger';
 import { ProjectService } from './project.service';
 import { Usage } from '../models/Usage';
 import { User } from '../models/User';
@@ -15,6 +14,7 @@ import {
 import { calculateCost, estimateCost, getModelPricing } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions, applyOptimizations } from '../utils/optimizationUtils';
+import { loggingService } from './logging.service';
 
 export class AICostTrackerService {
     private static config: TrackerConfig | null = null;
@@ -66,7 +66,7 @@ export class AICostTrackerService {
         }
 
         if (providers.length === 0) {
-            logger.warn('No AI provider API keys configured. Adding default OpenAI provider for tracking purposes only.');
+            loggingService.warn('No AI provider API keys configured. Adding default OpenAI provider for tracking purposes only.');
             providers.push({
                 provider: AIProvider.OpenAI,
                 apiKey: 'dummy-key-for-tracking-only'
@@ -117,7 +117,7 @@ export class AICostTrackerService {
 
         this.initialized = true;
 
-        logger.info('Internal AI Cost Tracker initialized successfully', {
+        loggingService.info('Internal AI Cost Tracker initialized successfully', {
             providersConfigured: providers.length,
             providers: providers.map(p => p.provider)
         });
@@ -232,7 +232,7 @@ export class AICostTrackerService {
                     });
                     workflowSequence = existingCount + 1;
                 } catch (error) {
-                    logger.warn('Could not calculate workflow sequence:', error);
+                    loggingService.warn('Could not calculate workflow sequence:', { error: error instanceof Error ? error.message : String(error) });
                     workflowSequence = 1; // Default to 1 if count fails
                 }
             }
@@ -302,16 +302,15 @@ export class AICostTrackerService {
                 });
             }
 
-            logger.debug('Usage tracked successfully', {
-                userId,
+            loggingService.debug('Usage tracked successfully', { value:  { userId,
                 model: request.model,
                 tokens: finalTotalTokens,
                 cost: estimatedCost,
                 projectId: metadata?.projectId
-            });
+             } });
 
         } catch (error) {
-            logger.error('Error tracking usage:', error);
+            loggingService.error('Error tracking usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

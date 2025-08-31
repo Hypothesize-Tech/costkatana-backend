@@ -1,6 +1,6 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { Span } from '@opentelemetry/api';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
 
 interface EnrichmentContext {
@@ -64,7 +64,7 @@ export class OTelEnricherService {
       
       return { ...enrichment, cacheHit: false };
     } catch (error) {
-      logger.error('Failed to enrich span:', error);
+      loggingService.error('Failed to enrich span:', { error: error instanceof Error ? error.message : String(error) });
       return {
         enrichedAttributes: {},
         insights: [],
@@ -113,7 +113,7 @@ export class OTelEnricherService {
       }
 
     } catch (error) {
-      logger.error('Failed to auto-enrich span:', error);
+      loggingService.error('Failed to auto-enrich span:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -143,7 +143,7 @@ export class OTelEnricherService {
       
       return this.parseEnrichmentResponse(responseBody.content[0].text);
     } catch (error) {
-      logger.error('Bedrock enrichment failed:', error);
+      loggingService.error('Bedrock enrichment failed:', { error: error instanceof Error ? error.message : String(error) });
       return {
         enrichedAttributes: {},
         insights: ['Enrichment failed - using fallback'],
@@ -287,7 +287,7 @@ Respond in JSON format:
         priceUsd: parsed.priceUsd
       };
     } catch (error) {
-      logger.error('Failed to parse enrichment response:', error);
+      loggingService.error('Failed to parse enrichment response:', { error: error instanceof Error ? error.message : String(error) });
       return {
         enrichedAttributes: {},
         insights: ['Failed to parse AI response'],
@@ -332,7 +332,7 @@ Respond in JSON format:
       // Also cache in memory for faster access
       this.enrichmentCache.set(key, enrichment);
     } catch (error) {
-      logger.error('Failed to cache enrichment:', error);
+      loggingService.error('Failed to cache enrichment:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -355,7 +355,7 @@ Respond in JSON format:
 
       return null;
     } catch (error) {
-      logger.error('Failed to get cached enrichment:', error);
+      loggingService.error('Failed to get cached enrichment:', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

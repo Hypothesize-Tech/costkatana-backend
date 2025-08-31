@@ -1,15 +1,16 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { User } from '../models/User';
 import { Project } from '../models/Project';
 import { Activity } from '../models/Activity';
 import { Alert } from '../models/Alert';
 import { EmailService } from './email.service';
 import { Response } from 'express';
-import { MODEL_PRICING } from '../utils/pricing';
+
 import { Usage } from '../models/Usage';
 import mongoose from 'mongoose';
+import { MODEL_PRICING } from '../utils/pricing';
 
-// Subscription plan limits based on costkatana.com pricing
+// Subscription plan limits based on costkxatana.com pricing
 export interface PlanLimits {
     tokensPerMonth: number;
     requestsPerMonth: number;
@@ -157,7 +158,7 @@ export class GuardrailsService {
             const planLimits = this.SUBSCRIPTION_PLANS[planName];
             
             if (!planLimits) {
-                logger.error('Unknown subscription plan:', planName);
+                loggingService.error('Unknown subscription plan:', { planName });
                 return null;
             }
 
@@ -264,7 +265,7 @@ export class GuardrailsService {
 
             return null;
         } catch (error) {
-            logger.error('Error checking guardrails:', error);
+            loggingService.error('Error checking guardrails:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -331,7 +332,7 @@ export class GuardrailsService {
                 await this.checkRequestGuardrails(userId, 'request', 0);
             }
         } catch (error) {
-            logger.error('Error tracking usage:', error);
+            loggingService.error('Error tracking usage:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -343,11 +344,11 @@ export class GuardrailsService {
             // Check cache first
             const cacheKey = `usage:${userId}`;
             const cached = this.usageCache.get(cacheKey);
-            logger.info(`Cache lookup for ${cacheKey}: ${cached ? 'Hit' : 'Miss'}`);
+            loggingService.info(`Cache lookup for ${cacheKey}: ${cached ? 'Hit' : 'Miss'}`);
             if (cached) return cached;
 
             const user = await User.findById(userId);
-            logger.info(`User lookup for ${userId}: ${user ? 'Found' : 'Not found'}`);
+            loggingService.info(`User lookup for ${userId}: ${user ? 'Found' : 'Not found'}`);
             if (!user) {
                 return {
                     tokens: 0,
@@ -370,7 +371,7 @@ export class GuardrailsService {
             });
             
             // Debug logging for projects
-            logger.info(`Project count for user ${userId}: ${projectCount}`);
+            loggingService.info(`Project count for user ${userId}: ${projectCount}`);
             
             // Count unique workflows for the user this month
             const startOfMonth = new Date();
@@ -440,7 +441,7 @@ export class GuardrailsService {
 
             return usage;
         } catch (error) {
-            logger.error('Error getting current usage:', error);
+            loggingService.error('Error getting current usage:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 tokens: 0,
                 requests: 0,
@@ -459,7 +460,7 @@ export class GuardrailsService {
     static clearUserCache(userId: string): void {
         this.usageCache.delete(`user:${userId}`);
         this.usageCache.delete(`usage:${userId}`);
-        logger.info(`Cache cleared for user ${userId}`);
+        loggingService.info(`Cache cleared for user ${userId}`);
     }
 
     /**
@@ -467,7 +468,7 @@ export class GuardrailsService {
      */
     static async resetMonthlyUsage(): Promise<void> {
         try {
-            logger.info('Resetting monthly usage for all users');
+            loggingService.info('Resetting monthly usage for all users');
             
             await User.updateMany(
                 {},
@@ -486,9 +487,9 @@ export class GuardrailsService {
             // Clear all usage caches
             this.usageCache.clear();
             
-            logger.info('Monthly usage reset completed');
+            loggingService.info('Monthly usage reset completed');
         } catch (error) {
-            logger.error('Error resetting monthly usage:', error);
+            loggingService.error('Error resetting monthly usage:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -534,7 +535,7 @@ export class GuardrailsService {
                 recommendations: this.generateRecommendations(usage, planLimits, percentages)
             };
         } catch (error) {
-            logger.error('Error getting user usage stats:', error);
+            loggingService.error('Error getting user usage stats:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -610,7 +611,7 @@ export class GuardrailsService {
 
             next();
         } catch (error) {
-            logger.error('Error enforcing guardrails:', error);
+            loggingService.error('Error enforcing guardrails:', { error: error instanceof Error ? error.message : String(error) });
             next(); // Don't block on errors
         }
     }
@@ -676,11 +677,11 @@ export class GuardrailsService {
                     };
                     await EmailService.sendAlertNotification(user, alertForEmail as any);
                 } catch (emailError) {
-                    logger.error('Failed to send usage alert email:', emailError);
+                    loggingService.error('Failed to send usage alert email:', { error: emailError instanceof Error ? emailError.message : String(emailError) });
                 }
             }
         } catch (error) {
-            logger.error('Error sending usage alert:', error);
+            loggingService.error('Error sending usage alert:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -721,7 +722,7 @@ export class GuardrailsService {
     ): number {
         try {
             // Use the combined pricing data from utils/pricing
-            const modelPricing = MODEL_PRICING.find(p => 
+            const modelPricing = MODEL_PRICING.find((p: any) => 
                 p.modelId === modelId || 
                 p.modelName.toLowerCase().includes(modelId.toLowerCase())
             );
@@ -737,7 +738,7 @@ export class GuardrailsService {
             
             return inputCost + outputCost;
         } catch (error) {
-            logger.error('Error calculating token cost:', error);
+            loggingService.error('Error calculating token cost:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }

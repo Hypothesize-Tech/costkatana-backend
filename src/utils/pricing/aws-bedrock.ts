@@ -1,4 +1,4 @@
-import { ModelPricing, PricingUnit } from '../pricing';
+import { ModelPricing, PricingUnit } from './types';
 
 export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     // AI21 Labs Models

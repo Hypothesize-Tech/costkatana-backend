@@ -1,6 +1,7 @@
 import { Tool } from "@langchain/core/tools";
 import { Project } from "../models/Project";
 import { User } from "../models/User";
+import { loggingService } from '../services/logging.service';
 
 interface ProjectOperation {
     operation: 'create' | 'update' | 'get' | 'list' | 'delete' | 'configure';
@@ -85,7 +86,13 @@ export class ProjectManagerTool extends Tool {
             }
 
         } catch (error) {
-            console.error('Project management operation failed:', error);
+            loggingService.error('Project management operation failed', {
+                component: 'projectManagerTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorType: error instanceof SyntaxError ? 'SyntaxError' : 'Unknown'
+            });
             
             if (error instanceof SyntaxError) {
                 return "Invalid JSON input. Please provide a valid operation object.";
@@ -503,9 +510,25 @@ export class ProjectManagerTool extends Tool {
     private async createProjectActivity(projectId: string, userId: string, action: string, details: any) {
         try {
             // This would create an activity record - simplified for now
-            console.log(`Project Activity: ${action} by ${userId} on ${projectId}`, details);
+            loggingService.info('Project activity created', {
+                component: 'projectManagerTool',
+                operation: 'createProjectActivity',
+                step: 'success',
+                projectId,
+                userId,
+                action,
+                details: JSON.stringify(details)
+            });
         } catch (error) {
-            console.error('Failed to create project activity:', error);
+            loggingService.error('Failed to create project activity', {
+                component: 'projectManagerTool',
+                operation: 'createProjectActivity',
+                step: 'error',
+                projectId,
+                userId,
+                action,
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     }
 

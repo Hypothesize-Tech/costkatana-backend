@@ -1,6 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import { LifeUtilityAgentService } from '../services/lifeUtilityAgent.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export interface LifeUtilityRequest {
     operation: 'weather_advice' | 'health_guidance' | 'travel_plan' | 'price_track' | 'reverse_search';
@@ -88,7 +88,13 @@ export class LifeUtilityTool extends Tool {
 
     async _call(input: string): Promise<string> {
         try {
-            logger.info('🎯 Life Utility Tool called with input:', input.substring(0, 200));
+            loggingService.info('🎯 Life Utility Tool called with input', {
+                component: 'lifeUtilityTool',
+                operation: '_call',
+                step: 'inputReceived',
+                inputLength: input.length,
+                inputPreview: input.substring(0, 200) + (input.length > 200 ? '...' : '')
+            });
             
             const request: LifeUtilityRequest = JSON.parse(input);
             
@@ -117,7 +123,12 @@ export class LifeUtilityTool extends Tool {
             }
             
         } catch (error) {
-            logger.error('❌ Life Utility Tool error:', error);
+            loggingService.error('❌ Life Utility Tool error', {
+                component: 'lifeUtilityTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error)
+            });
             return JSON.stringify({
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -249,7 +260,7 @@ export class LifeUtilityTool extends Tool {
                 });
             }
 
-            logger.info(`🔍 Processing reverse search for: ${description}`);
+            loggingService.info(`🔍 Processing reverse search for: ${description}`);
 
             // Use web scraping to search for similar products/objects
             const searchSources = [
@@ -285,7 +296,13 @@ export class LifeUtilityTool extends Tool {
                         results.push(parsedResult.data.extractedText.substring(0, 1000));
                     }
                 } catch (error) {
-                    logger.warn(`Failed to scrape reverse search from ${source}:`, error);
+                    loggingService.warn('Failed to scrape reverse search from source', {
+                        component: 'lifeUtilityTool',
+                        operation: 'handleReverseSearch',
+                        step: 'error',
+                        source,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
                 }
             }
 
@@ -338,7 +355,12 @@ Be specific and helpful in your identification.`;
         try {
             await this.lifeUtilityService.cleanup();
         } catch (error) {
-            logger.error('Life Utility Tool cleanup failed:', error);
+            loggingService.error('Life Utility Tool cleanup failed', {
+                component: 'lifeUtilityTool',
+                operation: 'cleanup',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
     }
 }

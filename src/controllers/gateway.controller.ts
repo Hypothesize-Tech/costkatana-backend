@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import axios, { AxiosResponse, AxiosError } from 'axios';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
@@ -61,10 +61,11 @@ export class GatewayController {
         try {
             const context = req.gatewayContext!;
             
-            logger.info('=== INTELLIGENT ROUTING REQUEST STARTED ===', {
+            loggingService.info('=== INTELLIGENT ROUTING REQUEST STARTED ===', {
                 requestId: context.requestId,
                 userId: context.userId,
-                intelligentRouting: true
+                intelligentRouting: true,
+                headerRequestId: req.headers['x-request-id'] as string
             });
 
             // Parse optimization strategy from headers
@@ -77,11 +78,12 @@ export class GatewayController {
                 (context as any).availableProviders
             );
 
-            logger.info('Intelligent routing decision made', {
+            loggingService.info('Intelligent routing decision made', {
                 selectedProvider: routingDecision.selectedProvider,
                 selectedModel: routingDecision.selectedModel,
                 cpiScore: routingDecision.confidence,
-                reasoning: routingDecision.reasoning
+                reasoning: routingDecision.reasoning,
+                requestId: req.headers['x-request-id'] as string
             });
 
             // Update context with selected provider
@@ -99,8 +101,12 @@ export class GatewayController {
             // Proceed with standard routing using the selected provider
             await this.handleStandardRouting(req, res);
 
-        } catch (error) {
-            logger.error('Intelligent routing failed, falling back to standard routing:', error);
+        } catch (error: any) {
+            loggingService.error('Intelligent routing failed, falling back to standard routing', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             // Fall back to standard routing
             await this.handleStandardRouting(req, res);
@@ -113,7 +119,7 @@ export class GatewayController {
     private static async handleStandardRouting(req: Request, res: Response): Promise<void> {
         const context = req.gatewayContext!;
         
-                    logger.info('=== GATEWAY PROXY REQUEST STARTED ===', {
+                    loggingService.info('=== GATEWAY PROXY REQUEST STARTED ===', {
                 targetUrl: context.targetUrl,
                 userId: context.userId,
                 cacheEnabled: context.cacheEnabled,
@@ -126,7 +132,8 @@ export class GatewayController {
                 } : null,
                 cacheUserScope: context.cacheUserScope,
                 cacheTTL: context.cacheTTL,
-                cacheBucketMaxSize: context.cacheBucketMaxSize
+                cacheBucketMaxSize: context.cacheBucketMaxSize,
+                requestId: req.headers['x-request-id'] as string
             });
 
         try {
@@ -134,7 +141,9 @@ export class GatewayController {
             if (context.cacheEnabled) {
                 const cachedResponse = await GatewayController.checkCache(req);
                 if (cachedResponse) {
-                    logger.info('Cache hit - returning cached response');
+                    loggingService.info('Cache hit - returning cached response', {
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     res.setHeader('CostKatana-Cache-Status', 'HIT');
                     
                     // Add CostKatana-Request-Id header for feedback tracking
@@ -214,7 +223,10 @@ export class GatewayController {
 
             if (context.failoverEnabled && context.failoverPolicy) {
                 // Handle failover request
-                logger.info('Processing failover request', { requestId: context.requestId });
+                loggingService.info('Processing failover request', { 
+                    requestId: context.requestId,
+                    headerRequestId: req.headers['x-request-id'] as string
+                });
                 
                 try {
                     const policy = FailoverService.parseFailoverPolicy(context.failoverPolicy);
@@ -238,19 +250,22 @@ export class GatewayController {
                         failoverProviderIndex = failoverResult.successfulProviderIndex;
                         requestSuccess = true;
 
-                        logger.info('Failover request succeeded', {
+                        loggingService.info('Failover request succeeded', {
                             requestId: context.requestId,
                             successfulProviderIndex: failoverProviderIndex,
                             totalDuration: failoverResult.totalDuration,
-                            providersAttempted: failoverResult.providersAttempted
+                            providersAttempted: failoverResult.providersAttempted,
+                            headerRequestId: req.headers['x-request-id'] as string
                         });
                     } else {
                         throw new Error(`All ${failoverResult.providersAttempted} providers failed: ${failoverResult.finalError?.message || 'Unknown error'}`);
                     }
-                } catch (error) {
-                    logger.error('Failover request failed', {
+                } catch (error: any) {
+                    loggingService.error('Failover request failed', {
                         requestId: context.requestId,
-                        error: error instanceof Error ? error.message : 'Unknown error'
+                        error: error.message || 'Unknown error',
+                        stack: error.stack,
+                        headerRequestId: req.headers['x-request-id'] as string
                     });
                     throw error;
                 }
@@ -280,7 +295,9 @@ export class GatewayController {
                     requestSuccess = true;
                 } catch (error) {
                     // If the main request fails, try with a different approach
-                    logger.warn('Primary request failed, trying fallback approach');
+                    loggingService.warn('Primary request failed, trying fallback approach', {
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     
                     // Try with different headers or endpoint
                     const fallbackRequest = { ...proxyRequest };
@@ -361,25 +378,34 @@ export class GatewayController {
 
             res.send(moderatedResponse.response);
 
-        } catch (error) {
-            logger.error('Gateway proxy error:', error);
+        } catch (error: any) {
+            loggingService.error('Gateway proxy error', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
             
             if (axios.isAxiosError(error)) {
                 const axiosError = error as AxiosError;
                 const statusCode = axiosError.response?.status || 500;
                 const errorData = axiosError.response?.data || { error: 'Request failed' };
                 
-                logger.error('Axios error details:', {
+                loggingService.error('Axios error details', {
                     status: statusCode,
                     data: errorData,
                     url: axiosError.config?.url,
                     method: axiosError.config?.method,
-                    headers: axiosError.config?.headers
+                    headers: axiosError.config?.headers,
+                    requestId: req.headers['x-request-id'] as string
                 });
                 
                 res.status(statusCode).json(errorData);
             } else {
-                logger.error('Non-axios error:', error);
+                loggingService.error('Non-axios error', {
+                    error: error.message || 'Unknown error',
+                    stack: error.stack,
+                    requestId: req.headers['x-request-id'] as string
+                });
                 res.status(500).json({
                     error: 'Gateway error',
                     message: 'Internal server error in gateway',
@@ -399,7 +425,9 @@ export class GatewayController {
             // Extract prompt from request body
             const prompt = GatewayController.extractPromptFromRequest(req.body);
             if (!prompt) {
-                logger.info('No prompt found in request, skipping cache');
+                loggingService.info('No prompt found in request, skipping cache', {
+                    requestId: req.headers['x-request-id'] as string
+                });
                 return null;
             }
             
@@ -414,10 +442,11 @@ export class GatewayController {
             });
             
             if (cacheResult.hit) {
-                logger.info('Redis cache hit', { 
+                loggingService.info('Redis cache hit', { 
                     strategy: cacheResult.strategy,
                     similarity: cacheResult.similarity,
-                    userId: context.userId
+                    userId: context.userId,
+                    requestId: req.headers['x-request-id'] as string
                 });
                 
                 // Convert to CacheEntry format
@@ -429,8 +458,12 @@ export class GatewayController {
                     userScope: context.userId
                 };
             }
-        } catch (error) {
-            logger.error('Redis cache check failed:', error);
+        } catch (error: any) {
+            loggingService.error('Redis cache check failed', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
         }
         
         return null;
@@ -472,15 +505,20 @@ export class GatewayController {
                     enableDeduplication: context.deduplicationEnabled !== false
                 });
                 
-                logger.info('Response cached in Redis', { 
+                loggingService.info('Response cached in Redis', { 
                     userId: context.userId,
                     model: req.body?.model,
                     provider: context.provider,
-                    ttl: context.cacheTTL || DEFAULT_CACHE_TTL
+                    ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
+                    requestId: req.headers['x-request-id'] as string
                 });
             }
-        } catch (error) {
-            logger.error('Failed to cache in Redis:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to cache in Redis', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
         }
     }
 
@@ -517,8 +555,12 @@ export class GatewayController {
             }
 
             return { allowed: true };
-        } catch (error) {
-            logger.error('Budget check error:', error);
+        } catch (error: any) {
+            loggingService.error('Budget check error', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
             return { allowed: true }; // Allow on error to prevent blocking
         }
     }
@@ -552,24 +594,29 @@ export class GatewayController {
         if (context.providerKey) {
             // Use the resolved provider API key from proxy key authentication
             providerApiKey = context.providerKey;
-            logger.info('Using resolved proxy key for provider:', { 
+            loggingService.info('Using resolved proxy key for provider', { 
                 hostname: targetUrl.hostname, 
                 provider: context.provider,
-                proxyKeyId: context.proxyKeyId
+                proxyKeyId: context.proxyKeyId,
+                requestId: req.headers['x-request-id'] as string
             });
         } else {
             // Fall back to environment variables
             providerApiKey = GatewayController.getProviderApiKey(targetUrl.hostname);
-            logger.info('Using environment API key for provider:', { 
+            loggingService.info('Using environment API key for provider', { 
                 hostname: targetUrl.hostname, 
-                hasKey: !!providerApiKey 
+                hasKey: !!providerApiKey,
+                requestId: req.headers['x-request-id'] as string
             });
         }
         
         if (providerApiKey) {
             headers['authorization'] = `Bearer ${providerApiKey}`;
         } else {
-            logger.warn('No API key found for provider:', { hostname: targetUrl.hostname });
+            loggingService.warn('No API key found for provider', { 
+                hostname: targetUrl.hostname,
+                requestId: req.headers['x-request-id'] as string
+            });
         }
 
         // Override model if specified
@@ -643,7 +690,11 @@ export class GatewayController {
             
             if (breaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
                 breaker.state = 'OPEN';
-                logger.warn(`Circuit breaker opened for ${provider} after ${breaker.failures} failures`);
+                loggingService.warn(`Circuit breaker opened for ${provider} after ${breaker.failures} failures`, {
+                    provider,
+                    failures: breaker.failures,
+                    threshold: CIRCUIT_BREAKER_THRESHOLD
+                });
             }
         }
 
@@ -689,7 +740,9 @@ export class GatewayController {
             return process.env.HUGGINGFACE_API_KEY || null;
         }
         
-        logger.warn(`No API key configured for provider: ${hostname}`);
+        loggingService.warn(`No API key configured for provider: ${hostname}`, {
+            hostname
+        });
         return null;
     }
 
@@ -709,7 +762,7 @@ export class GatewayController {
         let lastError: Error;
         let retryAttempts = 0;
         
-        logger.info('Starting request with retry configuration', {
+        loggingService.info('Starting request with retry configuration', {
             maxRetries,
             retryFactor,
             minTimeout,
@@ -720,14 +773,14 @@ export class GatewayController {
             try {
                 // Log attempt
                 if (attempt > 0) {
-                    logger.info(`Retry attempt ${attempt}/${maxRetries}`);
+                    loggingService.info(`Retry attempt ${attempt}/${maxRetries}`);
                 }
                 
                 const response = await axios(requestConfig);
                 
                 // Log successful response after retries
                 if (attempt > 0) {
-                    logger.info(`Request succeeded after ${attempt} retry attempts`, {
+                    loggingService.info(`Request succeeded after ${attempt} retry attempts`, {
                         status: response.status,
                         totalAttempts: attempt + 1
                     });
@@ -743,7 +796,7 @@ export class GatewayController {
                     retryAttempts++;
                     const delay = GatewayController.calculateRetryDelay(attempt, retryFactor, minTimeout, maxTimeout);
                     
-                    logger.warn(`Request failed with status ${response.status}, retrying in ${delay}ms`, {
+                    loggingService.warn(`Request failed with status ${response.status}, retrying in ${delay}ms`, {
                         attempt: attempt + 1,
                         maxRetries: maxRetries + 1,
                         status: response.status,
@@ -774,7 +827,7 @@ export class GatewayController {
                             ? `HTTP ${axiosError.response.status}` 
                             : axiosError.code || 'Network Error';
                         
-                        logger.warn(`Request failed with ${errorInfo}, retrying in ${delay}ms`, {
+                        loggingService.warn(`Request failed with ${errorInfo}, retrying in ${delay}ms`, {
                             attempt: attempt + 1,
                             maxRetries: maxRetries + 1,
                             error: errorInfo,
@@ -788,7 +841,7 @@ export class GatewayController {
                 
                 // If we can't or shouldn't retry, throw the error
                 if (attempt === maxRetries) {
-                    logger.error(`Request failed after ${maxRetries + 1} attempts`, {
+                    loggingService.error(`Request failed after ${maxRetries + 1} attempts`, {
                         totalAttempts: maxRetries + 1,
                         retryAttempts,
                         error: lastError.message
@@ -869,7 +922,9 @@ export class GatewayController {
 
         // Apply privacy settings if configured
         if (context.omitResponse) {
-            logger.info('Response content omitted due to privacy settings');
+            loggingService.info('Response content omitted due to privacy settings', {
+                requestId: req.headers['x-request-id'] as string
+            });
             responseData = { 
                 message: 'Response content omitted for privacy',
                 costKatanaNote: 'Original response was processed but not returned due to CostKatana-Omit-Response header'
@@ -923,7 +978,9 @@ export class GatewayController {
             const responseContent = GatewayController.extractContentFromResponse(responseData);
             
             if (!responseContent) {
-                logger.debug('No content found to moderate in response');
+                loggingService.info('No content found to moderate in response', {
+                    requestId: req.headers['x-request-id'] as string
+                });
                 return {
                     response: responseData,
                     moderationApplied: false,
@@ -934,7 +991,7 @@ export class GatewayController {
             }
 
             // Apply output moderation
-            const { OutputModerationService } = await import('../services/outputModerationService');
+            const { OutputModerationService } = await import('../services/outputModeration.service');
             const moderationResult = await OutputModerationService.moderateOutput(
                 responseContent,
                 moderationConfig,
@@ -942,11 +999,12 @@ export class GatewayController {
                 GatewayController.inferModelFromRequest(req)
             );
 
-            logger.info('Output moderation completed', {
+            loggingService.info('Output moderation completed', {
                 requestId: context.requestId,
                 isBlocked: moderationResult.isBlocked,
                 action: moderationResult.action,
-                violationCategories: moderationResult.violationCategories
+                violationCategories: moderationResult.violationCategories,
+                headerRequestId: req.headers['x-request-id'] as string
             });
 
             // Handle different moderation actions
@@ -990,8 +1048,12 @@ export class GatewayController {
                 isBlocked: moderationResult.isBlocked
             };
 
-        } catch (error) {
-            logger.error('Output moderation error:', error);
+        } catch (error: any) {
+            loggingService.error('Output moderation error', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
             // In case of moderation error, return original response (fail-open)
             return {
                 response: responseData,
@@ -1043,8 +1105,11 @@ export class GatewayController {
             // If we can't find specific content fields, stringify the whole response
             return JSON.stringify(responseData);
             
-        } catch (error) {
-            logger.warn('Error extracting content from response:', error);
+        } catch (error: any) {
+            loggingService.warn('Error extracting content from response', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return null;
         }
     }
@@ -1082,8 +1147,11 @@ export class GatewayController {
             
             return modifiedResponse;
             
-        } catch (error) {
-            logger.warn('Error replacing content in response:', error);
+        } catch (error: any) {
+            loggingService.warn('Error replacing content in response', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return responseData;
         }
     }
@@ -1105,7 +1173,7 @@ export class GatewayController {
             if (url.includes('llama')) return 'llama';
             
             return 'unknown';
-        } catch (error) {
+        } catch (error: any) {
             return 'unknown';
         }
     }
@@ -1132,9 +1200,13 @@ export class GatewayController {
                         extractedPrompt = req.body.input;
                     }
                 }
-            } catch (error) {
-                logger.warn('Could not extract prompt from request:', error);
-            }
+                    } catch (error: any) {
+            loggingService.warn('Could not extract prompt from request', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
+        }
 
             // Don't track if request content should be omitted
             const trackingRequest = context.omitRequest ? 
@@ -1157,9 +1229,13 @@ export class GatewayController {
                 } else if (context.modelOverride) {
                     model = context.modelOverride;
                 }
-            } catch (error) {
-                logger.warn('Could not extract model from request:', error);
-            }
+                    } catch (error: any) {
+            loggingService.warn('Could not extract model from request', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
+        }
 
             // Build metadata for tracking
             const metadata = {
@@ -1221,18 +1297,23 @@ export class GatewayController {
                     const { KeyVaultService } = await import('../services/keyVault.service');
                     await KeyVaultService.updateProxyKeyUsage(context.proxyKeyId, estimatedCost, 1);
                     
-                    logger.info('Proxy key usage updated', {
+                    loggingService.info('Proxy key usage updated', {
                         proxyKeyId: context.proxyKeyId,
                         cost: estimatedCost,
-                        userId: context.userId
+                        userId: context.userId,
+                        requestId: req.headers['x-request-id'] as string
                     });
-                } catch (error) {
-                    logger.warn('Failed to update proxy key usage:', error);
+                } catch (error: any) {
+                    loggingService.warn('Failed to update proxy key usage', {
+                        error: error.message || 'Unknown error',
+                        stack: error.stack,
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     // Don't fail the request if proxy key usage tracking fails
                 }
             }
 
-            logger.info('Gateway usage tracked successfully', {
+            loggingService.info('Gateway usage tracked successfully', {
                 userId: context.userId,
                 service: metadata.service,
                 projectId: context.budgetId,
@@ -1241,11 +1322,16 @@ export class GatewayController {
                 workflowStep: context.workflowStep,
                 retryAttempts: retryAttempts || 0,
                 retryEnabled: context.retryEnabled,
-                proxyKeyId: context.proxyKeyId
+                proxyKeyId: context.proxyKeyId,
+                requestId: req.headers['x-request-id'] as string
             });
 
-        } catch (error) {
-            logger.error('Failed to track gateway usage:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to track gateway usage', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: req.headers['x-request-id'] as string
+            });
             // Don't fail the request if tracking fails
         }
     }
@@ -1289,8 +1375,11 @@ export class GatewayController {
             // Fallback estimation based on request size
             const requestSize = JSON.stringify(requestBody || {}).length;
             return Math.max(0.001, requestSize * 0.000001); // Minimum $0.001
-        } catch (error) {
-            logger.warn('Failed to estimate request cost:', error);
+        } catch (error: any) {
+            loggingService.warn('Failed to estimate request cost', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return 0.001; // Default minimum cost
         }
     }
@@ -1325,8 +1414,11 @@ export class GatewayController {
                 success: true,
                 data: stats
             });
-        } catch (error) {
-            logger.error('Failed to get gateway stats:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to get gateway stats', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve gateway statistics'
@@ -1351,8 +1443,11 @@ export class GatewayController {
                     }
                 }
             });
-        } catch (error) {
-            logger.error('Failed to get cache stats:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to get cache stats', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve cache statistics'
@@ -1378,8 +1473,11 @@ export class GatewayController {
                 message: `Redis cache cleared successfully`,
                 clearedEntries: clearedCount
             });
-        } catch (error) {
-            logger.error('Failed to clear cache:', error);
+        } catch (error: any) {
+            loggingService.error('Failed to clear cache', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({
                 success: false,
                 message: 'Failed to clear cache'
@@ -1446,7 +1544,7 @@ export class GatewayController {
             } else if (result.containmentAction === 'sandbox') {
                 // For sandbox, we could implement request sandboxing
                 // For now, we'll allow but log as sandboxed
-                logger.info('Request sandboxed - proceeding with monitoring', {
+                loggingService.info('Request sandboxed - proceeding with monitoring', {
                     requestId,
                     userId: context.userId,
                     threatCategory: result.threatCategory,
@@ -1464,7 +1562,7 @@ export class GatewayController {
             // Standard block/allow behavior
             if (context.userId && result.isBlocked) {
                 // Enhanced logging with new security data
-                logger.info('Security system blocked request', {
+                loggingService.info('Security system blocked request', {
                     requestId,
                     userId: context.userId,
                     threatCategory: result.threatCategory,
@@ -1479,8 +1577,10 @@ export class GatewayController {
 
             return result;
 
-        } catch (error) {
-            logger.error('Error in security check', error as Error, {
+        } catch (error: any) {
+            loggingService.error('Error in security check', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
                 userId: context.userId,
                 targetUrl: context.targetUrl
             });
@@ -1542,8 +1642,11 @@ export class GatewayController {
 
             return null;
 
-        } catch (error) {
-            logger.error('Error extracting prompt from request', error as Error);
+        } catch (error: any) {
+            loggingService.error('Error extracting prompt from request', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return null;
         }
     }
@@ -1585,8 +1688,11 @@ export class GatewayController {
 
             return undefined;
 
-        } catch (error) {
-            logger.warn('Error extracting tool calls from request', error as Error);
+        } catch (error: any) {
+            loggingService.warn('Error extracting tool calls from request', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             return undefined;
         }
     }
@@ -1607,8 +1713,11 @@ export class GatewayController {
                     timestamp: new Date().toISOString()
                 }
             });
-        } catch (error) {
-            logger.error('Error getting failover analytics:', error);
+        } catch (error: any) {
+            loggingService.error('Error getting failover analytics', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve failover analytics'
@@ -1636,8 +1745,11 @@ export class GatewayController {
                 data: analytics
             });
 
-        } catch (error) {
-            logger.error('Error getting firewall analytics', error as Error);
+        } catch (error: any) {
+            loggingService.error('Error getting firewall analytics', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({
                 success: false,
                 message: 'Failed to get firewall analytics'
@@ -1654,9 +1766,12 @@ export class GatewayController {
         if (strategyHeader) {
             try {
                 return JSON.parse(strategyHeader as string);
-            } catch (error) {
-                logger.warn('Invalid optimization strategy header, using default');
-            }
+                    } catch (error: any) {
+            loggingService.warn('Invalid optimization strategy header, using default', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+        }
         }
 
         // Default balanced strategy

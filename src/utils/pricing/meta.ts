@@ -1,4 +1,4 @@
-import { ModelPricing, PricingUnit } from '../pricing';
+import { ModelPricing, PricingUnit } from './types';
 
 export const META_PRICING: ModelPricing[] = [
   // Llama 4 Scout - Class-leading natively multimodal model

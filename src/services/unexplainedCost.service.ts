@@ -1,8 +1,7 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { TelemetryService } from './telemetry.service';
 import { BedrockService } from './bedrock.service';
-import { ITelemetry } from '../models/Telemetry';
-import mongoose from 'mongoose';
+
 
 export interface CostDriver {
   driver_type: 'system_prompt' | 'tool_calls' | 'context_window' | 'retries' | 'cache_miss' | 'model_switching' | 'network' | 'database';
@@ -96,7 +95,7 @@ export class UnexplainedCostService {
     timeframe: string = '24h'
   ): Promise<CostAnalysis> {
     try {
-      logger.info(`Analyzing unexplained costs for user ${userId} in timeframe ${timeframe}`);
+      loggingService.info(`Analyzing unexplained costs for user ${userId} in timeframe ${timeframe}`);
 
       // Add timeout handling for the entire operation
       const timeoutPromise = new Promise((_, reject) => {
@@ -109,7 +108,7 @@ export class UnexplainedCostService {
       const result = await Promise.race([analysisPromise, timeoutPromise]);
       return result as CostAnalysis;
     } catch (error) {
-      logger.error(`Failed to analyze unexplained costs for user ${userId}:`, error);
+      loggingService.error(`Failed to analyze unexplained costs for user ${userId}:`, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -165,7 +164,7 @@ export class UnexplainedCostService {
         anomaly_score: anomalyScore
       };
     } catch (error) {
-      logger.error(`Failed to analyze unexplained costs for user ${userId}:`, error);
+      loggingService.error(`Failed to analyze unexplained costs for user ${userId}:`, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -179,7 +178,7 @@ export class UnexplainedCostService {
     date: string
   ): Promise<DailyCostReport> {
     try {
-      logger.info(`Generating daily cost report for user ${userId} on ${date}`);
+      loggingService.info(`Generating daily cost report for user ${userId} on ${date}`);
 
       // Get telemetry data for the specific date
       const telemetryData = await TelemetryService.getPerformanceMetrics({
@@ -234,7 +233,7 @@ export class UnexplainedCostService {
         cost_story: costStory
       };
     } catch (error) {
-      logger.error(`Failed to generate daily cost report for user ${userId}:`, error);
+      loggingService.error(`Failed to generate daily cost report for user ${userId}:`, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -259,7 +258,7 @@ export class UnexplainedCostService {
     cost_story: string;
   }> {
     try {
-      logger.info(`Getting cost attribution for trace ${traceId} for user ${userId}`);
+      loggingService.info(`Getting cost attribution for trace ${traceId} for user ${userId}`);
 
       // Get telemetry data for the specific trace
       const traceData = await TelemetryService.getTraceDetails(traceId);
@@ -281,7 +280,7 @@ export class UnexplainedCostService {
         cost_story: costStory
       };
     } catch (error) {
-      logger.error(`Failed to get trace cost attribution for ${traceId}:`, error);
+      loggingService.error(`Failed to get trace cost attribution for ${traceId}:`, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -295,7 +294,7 @@ export class UnexplainedCostService {
     workspaceId: string = 'default'
   ): Promise<CostTrends> {
     try {
-      logger.info(`Getting cost trends for user ${userId} for period ${period}`);
+      loggingService.info(`Getting cost trends for user ${userId} for period ${period}`);
 
       // Get historical telemetry data for trend analysis
       const historicalData = await TelemetryService.getPerformanceMetrics({
@@ -320,7 +319,7 @@ export class UnexplainedCostService {
         predictions
       };
     } catch (error) {
-      logger.error(`Failed to get cost trends for user ${userId}:`, error);
+      loggingService.error(`Failed to get cost trends for user ${userId}:`, { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -362,7 +361,7 @@ export class UnexplainedCostService {
         confidence_level: confidenceLevel
       };
     } catch (error) {
-      logger.error('Failed to calculate baseline costs:', error);
+      loggingService.error('Failed to calculate baseline costs:', { error: error instanceof Error ? error.message : String(error) });
       return {
         expected_daily_cost: 0,
         historical_average: 0,
@@ -446,7 +445,7 @@ export class UnexplainedCostService {
 
       return costDrivers;
     } catch (error) {
-      logger.error('Failed to analyze cost drivers:', error);
+      loggingService.error('Failed to analyze cost drivers:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -493,7 +492,7 @@ FORMAT: Return a clear, structured explanation with bullet points and sections.`
           throw new Error('Empty or invalid AI response');
         }
       } catch (aiError) {
-        logger.warn('AI generation failed, falling back to dynamic analysis:', aiError);
+        loggingService.warn('AI generation failed, falling back to dynamic analysis:', { error: aiError instanceof Error ? aiError.message : String(aiError) });
         
         // Fallback to dynamic analysis if AI fails
         const topDriver = costDrivers[0];
@@ -504,7 +503,7 @@ FORMAT: Return a clear, structured explanation with bullet points and sections.`
         }
       }
     } catch (error) {
-      logger.error('Failed to generate cost story:', error);
+      loggingService.error('Failed to generate cost story:', { error: error instanceof Error ? error.message : String(error) });
       return 'Cost analysis unavailable.';
     }
   }
@@ -574,7 +573,7 @@ CRITICAL: Return ONLY the JSON object above. No explanations, no markdown, no ad
               return parsedResponse.recommendations;
             }
           } catch (parseError) {
-            logger.warn('Failed to parse AI response as JSON:', parseError);
+            loggingService.warn('Failed to parse AI response as JSON:', { error: parseError instanceof Error ? parseError.message : String(parseError) });
             // Try to extract JSON from the response if it contains other text
             const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
@@ -584,17 +583,17 @@ CRITICAL: Return ONLY the JSON object above. No explanations, no markdown, no ad
                   return extractedJson.recommendations;
                 }
               } catch (extractError) {
-                logger.warn('Failed to extract JSON from AI response:', extractError);
+                loggingService.warn('Failed to extract JSON from AI response:', { error: extractError instanceof Error ? extractError.message : String(extractError) });
               }
             }
           }
         }
         
         // If we get here, AI didn't return valid JSON, so fall back to rule-based recommendations
-        logger.warn('AI response format invalid, using fallback recommendations');
+        loggingService.warn('AI response format invalid, using fallback recommendations');
         
       } catch (aiError) {
-        logger.warn('AI generation failed, falling back to rule-based recommendations:', aiError);
+        loggingService.warn('AI generation failed, falling back to rule-based recommendations:', { error: aiError instanceof Error ? aiError.message : String(aiError) });
       }
       
       // Fallback to rule-based recommendations if AI fails or returns invalid format
@@ -703,7 +702,7 @@ CRITICAL: Return ONLY the JSON object above. No explanations, no markdown, no ad
 
       return recommendations;
     } catch (error) {
-      logger.error('Failed to generate optimization recommendations:', error);
+      loggingService.error('Failed to generate optimization recommendations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -758,7 +757,7 @@ CRITICAL: Return ONLY the JSON object above. No explanations, no markdown, no ad
       
       return Math.min(score, 100);
     } catch (error) {
-      logger.error('Failed to calculate anomaly score:', error);
+      loggingService.error('Failed to calculate anomaly score:', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -952,13 +951,13 @@ Write in a professional but accessible tone, suitable for developers and cost an
           throw new Error('Empty or invalid AI response');
         }
       } catch (aiError) {
-        logger.warn('AI generation failed, falling back to dynamic analysis:', aiError);
+        loggingService.warn('AI generation failed, falling back to dynamic analysis:', { error: aiError instanceof Error ? aiError.message : String(aiError) });
         
         // Fallback to dynamic analysis if AI fails
         return this.generateFallbackCostStory(traceData, costAttribution);
       }
     } catch (error) {
-      logger.error('Failed to generate trace cost story:', error);
+      loggingService.error('Failed to generate trace cost story:', { error: error instanceof Error ? error.message : String(error) });
       return 'Cost analysis unavailable for this trace.';
     }
   }
@@ -1196,7 +1195,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
         cost_drivers_trend: costDriversTrend
       };
     } catch (error) {
-      logger.error('Failed to calculate cost trends:', error);
+      loggingService.error('Failed to calculate cost trends:', { error: error instanceof Error ? error.message : String(error) });
       return {
         daily_average: 0,
         weekly_growth: 0,
@@ -1287,7 +1286,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
         unexplained_cost: Math.max(0, totalCost - (systemPromptCost + toolCallsCost + contextWindowCost + retryCost))
       };
     } catch (error) {
-      logger.error('Failed to calculate dynamic cost attribution:', error);
+      loggingService.error('Failed to calculate dynamic cost attribution:', { error: error instanceof Error ? error.message : String(error) });
       // Fallback to intelligent analysis based on available data
       const spans = data.spans || [];
       const hasAnyToolCalls = spans.some((span: any) => span.operation_name?.includes('tool_call'));
@@ -1344,7 +1343,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
       
       return (currentWeek.total_cost_usd - previousWeek.total_cost_usd) / previousWeek.total_cost_usd;
     } catch (error) {
-      logger.error('Failed to calculate weekly growth:', error);
+      loggingService.error('Failed to calculate weekly growth:', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -1369,7 +1368,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
       
       return (currentMonth.total_cost_usd - previousMonth.total_cost_usd) / previousMonth.total_cost_usd;
     } catch (error) {
-      logger.error('Failed to calculate monthly growth:', error);
+      loggingService.error('Failed to calculate monthly growth:', { error: error instanceof Error ? error.message : String(error) });
       return 0;
     }
   }
@@ -1434,7 +1433,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
       
       return trends;
     } catch (error) {
-      logger.error('Failed to calculate cost driver trends:', error);
+      loggingService.error('Failed to calculate cost driver trends:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -1498,13 +1497,13 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
               };
             }
           } catch (parseError) {
-            logger.warn('Failed to parse AI response for predictions:', parseError);
+            loggingService.warn('Failed to parse AI response for predictions:', { error: parseError instanceof Error ? parseError.message : String(parseError) });
           }
         }
         
         throw new Error('Invalid AI response format');
       } catch (aiError) {
-        logger.warn('AI generation failed, falling back to trend-based calculations:', aiError);
+        loggingService.warn('AI generation failed, falling back to trend-based calculations:', { error: aiError instanceof Error ? aiError.message : String(aiError) });
         
         // Fallback to trend-based calculations if AI fails
         const nextWeek = trends.daily_average * (1 + trends.weekly_growth);
@@ -1518,7 +1517,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
         };
       }
     } catch (error) {
-      logger.error('Failed to generate cost predictions:', error);
+      loggingService.error('Failed to generate cost predictions:', { error: error instanceof Error ? error.message : String(error) });
       
       // Fallback to simple calculations
       const nextWeek = trends.daily_average * (1 + trends.weekly_growth);
@@ -1548,7 +1547,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
       const storyPromise = this.generateCostStory(costDrivers, telemetryData, baselineCosts);
       return await Promise.race([storyPromise, timeoutPromise]) as string;
     } catch (error) {
-      logger.warn('Cost story generation timed out, using fallback:', error);
+      loggingService.warn('Cost story generation timed out, using fallback:', { error: error instanceof Error ? error.message : String(error) });
       return this.generateFallbackCostStory(costDrivers, telemetryData, baselineCosts);
     }
   }
@@ -1578,7 +1577,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
         implementation_effort: 'low' | 'medium' | 'high';
       }>;
     } catch (error) {
-      logger.warn('Recommendations generation timed out, using fallback:', error);
+      loggingService.warn('Recommendations generation timed out, using fallback:', { error: error instanceof Error ? error.message : String(error) });
       return this.generateFallbackRecommendations(costDrivers);
     }
   }
@@ -1601,7 +1600,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
         return this.generateAnalysisFallbackCostStory(data, costAttributionOrDrivers, baselineCosts);
       }
     } catch (error) {
-      logger.error('Failed to generate fallback cost story:', error);
+      loggingService.error('Failed to generate fallback cost story:', { error: error instanceof Error ? error.message : String(error) });
       return 'Cost analysis unavailable due to processing errors.';
     }
   }
@@ -1673,7 +1672,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
       
       return costStory;
     } catch (error) {
-      logger.error('Failed to generate trace fallback cost story:', error);
+      loggingService.error('Failed to generate trace fallback cost story:', { error: error instanceof Error ? error.message : String(error) });
       return 'Cost analysis unavailable for this trace.';
     }
   }
@@ -1696,7 +1695,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
       
       return `Cost analysis shows ${deviation > 0 ? 'an increase' : 'a decrease'} of ${Math.abs(deviation).toFixed(1)}% from the expected baseline of $${baselineCost.toFixed(4)}. The primary cost driver is ${driverType}, contributing $${topDriver?.cost_impact.toFixed(4) || '0.00'} to the total cost of $${totalCost.toFixed(4)}. This suggests ${deviation > 0 ? 'increased usage or inefficiencies' : 'improved optimization or reduced usage'} in the AI operations.`;
     } catch (error) {
-      logger.error('Failed to generate analysis fallback cost story:', error);
+      loggingService.error('Failed to generate analysis fallback cost story:', { error: error instanceof Error ? error.message : String(error) });
       return 'Cost analysis unavailable due to processing errors.';
     }
   }
@@ -1752,7 +1751,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
 
       return recommendations;
     } catch (error) {
-      logger.error('Failed to generate fallback recommendations:', error);
+      loggingService.error('Failed to generate fallback recommendations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }

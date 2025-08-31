@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 
@@ -50,12 +50,12 @@ export class PromptFirewallService {
                         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
                     }
                 });
-                logger.info('AWS Bedrock client initialized for firewall');
+                loggingService.info('AWS Bedrock client initialized for firewall');
             } catch (error) {
-                logger.warn('Failed to initialize AWS Bedrock client, using fallback firewall only', error as Error);
+                loggingService.warn('Failed to initialize AWS Bedrock client, using fallback firewall only', { error: (error as Error).message });
             }
         } else {
-            logger.info('AWS credentials not configured, using pattern-matching firewall only');
+            loggingService.info('AWS credentials not configured, using pattern-matching firewall only');
         }
     }
 
@@ -106,7 +106,8 @@ export class PromptFirewallService {
             };
 
         } catch (error) {
-            logger.error('Error in prompt firewall check', error as Error, {
+            loggingService.error('Error in prompt firewall check', {
+                error: error instanceof Error ? error.message : String(error),
                 requestId,
                 promptLength: prompt.length
             });
@@ -186,7 +187,7 @@ export class PromptFirewallService {
                 };
 
             } catch (error) {
-                logger.warn('Bedrock Prompt Guard failed, using fallback', error as Error);
+                loggingService.warn('Bedrock Prompt Guard failed, using fallback', { value:  { value: error as Error } });
                 // Fall through to pattern matching
             }
         }
@@ -258,7 +259,7 @@ export class PromptFirewallService {
                 };
 
             } catch (error) {
-                logger.warn('Bedrock Llama Guard failed, using fallback', error as Error);
+                loggingService.warn('Bedrock Llama Guard failed, using fallback', { value:  { value: error as Error } });
                 // Fall through to pattern matching
             }
         }
@@ -542,7 +543,7 @@ export class PromptFirewallService {
             };
 
         } catch (error) {
-            logger.warn('RAG security check failed, allowing request', error as Error);
+            loggingService.warn('RAG security check failed, allowing request', { value:  { value: error as Error } });
             return {
                 isBlocked: false,
                 confidence: 0.0,
@@ -706,7 +707,7 @@ export class PromptFirewallService {
             };
 
         } catch (error) {
-            logger.warn('Tool security check failed, blocking request', error as Error);
+            loggingService.warn('Tool security check failed, blocking request', { value:  { value: error as Error } });
             return {
                 isBlocked: true,
                 confidence: 1.0,
@@ -759,16 +760,17 @@ export class PromptFirewallService {
 
             await threatLog.save();
 
-            logger.info('Threat detected and logged', {
+            loggingService.info('Threat detected and logged', { value:  { 
                 requestId,
                 threatCategory: result.threatCategory,
                 confidence: result.confidence,
                 stage: result.stage,
                 costSaved: estimatedCost
-            });
+             } });
 
         } catch (error) {
-            logger.error('Error logging threat detection', error as Error, {
+            loggingService.error('Error logging threat detection', {
+                error: error instanceof Error ? error.message : String(error),
                 requestId,
                 threatCategory: result.threatCategory
             });
@@ -852,7 +854,10 @@ export class PromptFirewallService {
             };
 
         } catch (error) {
-            logger.error('Error getting firewall analytics', error as Error, { userId });
+            loggingService.error('Error getting firewall analytics', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
             
             return {
                 totalRequests: 0,

@@ -1,6 +1,6 @@
 import { Usage, IUsage } from '../models/Usage';
 import { QualityScore } from '../models/QualityScore';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface PerformanceMetrics {
     latency: number; // in milliseconds
@@ -229,7 +229,7 @@ export class PerformanceCostAnalysisService {
 
             return correlations;
         } catch (error) {
-            logger.error('Error analyzing cost-performance correlation:', error);
+            loggingService.error('Error analyzing cost-performance correlation:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -261,7 +261,7 @@ export class PerformanceCostAnalysisService {
                 recommendations
             };
         } catch (error) {
-            logger.error('Error comparing services:', error);
+            loggingService.error('Error comparing services:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -313,7 +313,7 @@ export class PerformanceCostAnalysisService {
 
             return trends.sort((a, b) => a.period.localeCompare(b.period));
         } catch (error) {
-            logger.error('Error getting performance trends:', error);
+            loggingService.error('Error getting performance trends:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -368,7 +368,7 @@ export class PerformanceCostAnalysisService {
                 .filter(opp => opp.savings >= minSavings)
                 .sort((a, b) => b.priority - a.priority);
         } catch (error) {
-            logger.error('Error identifying optimization opportunities:', error);
+            loggingService.error('Error identifying optimization opportunities:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -435,7 +435,7 @@ export class PerformanceCostAnalysisService {
                 anomalies
             };
         } catch (error) {
-            logger.error('Error getting detailed metrics:', error);
+            loggingService.error('Error getting detailed metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

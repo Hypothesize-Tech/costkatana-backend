@@ -1,7 +1,7 @@
 import { TrainingDataset, ITrainingDataset } from '../models/TrainingDataset';
 import { RequestScore } from '../models/RequestScore';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { PIIDetectionService } from './piiDetection.service';
 import mongoose from 'mongoose';
 
@@ -113,11 +113,11 @@ export class TrainingDatasetService {
                 });
             }
 
-            logger.info(`Created training dataset: ${savedDataset.name} v${version} for user ${userId}`);
+            loggingService.info(`Created training dataset: ${savedDataset.name} v${version} for user ${userId}`);
             
             return savedDataset;
         } catch (error) {
-            logger.error('Error creating training dataset:', error);
+            loggingService.error('Error creating training dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -131,7 +131,7 @@ export class TrainingDatasetService {
                 userId: new mongoose.Types.ObjectId(userId)
             }).sort({ updatedAt: -1 });
         } catch (error) {
-            logger.error('Error getting user datasets:', error);
+            loggingService.error('Error getting user datasets:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -146,7 +146,7 @@ export class TrainingDatasetService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
         } catch (error) {
-            logger.error('Error getting dataset:', error);
+            loggingService.error('Error getting dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -171,7 +171,7 @@ export class TrainingDatasetService {
                 throw new Error('Dataset not found');
             }
 
-            logger.info(`Processing ${items.length} items for PII detection and validation`);
+            loggingService.info(`Processing ${items.length} items for PII detection and validation`);
 
             // Process each item with PII detection
             const processedItems = [];
@@ -211,11 +211,11 @@ export class TrainingDatasetService {
             await this.recalculateDatasetStats(dataset);
 
             const updatedDataset = await dataset.save();
-            logger.info(`Added ${items.length} items to dataset ${datasetId}`);
+            loggingService.info(`Added ${items.length} items to dataset ${datasetId}`);
 
             return updatedDataset;
         } catch (error) {
-            logger.error('Error adding dataset items:', error);
+            loggingService.error('Error adding dataset items:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -260,7 +260,7 @@ export class TrainingDatasetService {
 
             return await this.createDataset(userId, newDatasetData);
         } catch (error) {
-            logger.error('Error creating dataset version:', error);
+            loggingService.error('Error creating dataset version:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -421,11 +421,11 @@ export class TrainingDatasetService {
             await this.calculateDatasetStats(dataset, usageRecords, scores);
 
             const updatedDataset = await dataset.save();
-            logger.info(`Populated dataset ${datasetId} with ${validRequestIds.length} requests`);
+            loggingService.info(`Populated dataset ${datasetId} with ${validRequestIds.length} requests`);
 
             return updatedDataset;
         } catch (error) {
-            logger.error('Error populating dataset:', error);
+            loggingService.error('Error populating dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -452,11 +452,11 @@ export class TrainingDatasetService {
             await this.recalculateDatasetStats(dataset);
 
             const updatedDataset = await dataset.save();
-            logger.info(`Added ${newRequestIds.length} requests to dataset ${datasetId}`);
+            loggingService.info(`Added ${newRequestIds.length} requests to dataset ${datasetId}`);
 
             return updatedDataset;
         } catch (error) {
-            logger.error('Error adding requests to dataset:', error);
+            loggingService.error('Error adding requests to dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -482,11 +482,11 @@ export class TrainingDatasetService {
             await this.recalculateDatasetStats(dataset);
 
             const updatedDataset = await dataset.save();
-            logger.info(`Removed ${requestIds.length} requests from dataset ${datasetId}`);
+            loggingService.info(`Removed ${requestIds.length} requests from dataset ${datasetId}`);
 
             return updatedDataset;
         } catch (error) {
-            logger.error('Error removing requests from dataset:', error);
+            loggingService.error('Error removing requests from dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -563,7 +563,7 @@ export class TrainingDatasetService {
             dataset.status = 'exported';
             await dataset.save();
 
-            logger.info(`Exported dataset ${datasetId} in ${exportFormat.format} format`);
+            loggingService.info(`Exported dataset ${datasetId} in ${exportFormat.format} format`);
 
             return {
                 data: exportData,
@@ -571,7 +571,7 @@ export class TrainingDatasetService {
                 contentType
             };
         } catch (error) {
-            logger.error('Error exporting dataset:', error);
+            loggingService.error('Error exporting dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -586,10 +586,10 @@ export class TrainingDatasetService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
-            logger.info(`Deleted dataset ${datasetId} for user ${userId}`);
+            loggingService.info(`Deleted dataset ${datasetId} for user ${userId}`);
             return result.deletedCount > 0;
         } catch (error) {
-            logger.error('Error deleting dataset:', error);
+            loggingService.error('Error deleting dataset:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

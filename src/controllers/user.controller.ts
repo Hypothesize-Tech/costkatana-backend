@@ -3,7 +3,7 @@ import { User } from '../models/User';
 import { Alert } from '../models/Alert';
 import { updateProfileSchema, updateSubscriptionSchema } from '../utils/validators';
 import { encrypt } from '../utils/helpers';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { AppError } from '../middleware/error.middleware';
 import { S3Service } from '../services/s3.service';
 import { AuthService } from '../services/auth.service';
@@ -34,37 +34,109 @@ const createApiKeySchema = z.object({
 
 export class UserController {
     static async getProfile(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('User profile retrieval initiated', {
+                requestId,
+                userId,
+                hasUserId: !!userId
+            });
 
             const user = await User.findById(userId).select('-password -resetPasswordToken -resetPasswordExpires -verificationToken');
 
             if (!user) {
+                loggingService.warn('User profile retrieval failed - user not found', {
+                    requestId,
+                    userId
+                });
+
                 res.status(404).json({
                     success: false,
                     message: 'User not found',
                 });
+                return;
             }
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User profile retrieved successfully', {
+                requestId,
+                duration,
+                userId,
+                hasUser: !!user,
+                userEmail: user.email,
+                userName: user.name,
+                hasAvatar: !!user.avatar,
+                hasPreferences: !!user.preferences
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_profile_retrieved',
+                category: 'user_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    userEmail: user.email,
+                    userName: user.name
+                }
+            });
 
             res.json({
                 success: true,
                 data: user,
             });
         } catch (error: any) {
-            logger.error('Get profile error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('User profile retrieval failed', {
+                requestId,
+                userId,
+                hasUserId: !!userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            
             next(error);
         }
         return;
     }
 
     static async updateProfile(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('User profile update initiated', {
+                requestId,
+                userId,
+                hasUserId: !!userId
+            });
+
             const { name, preferences, avatar } = updateProfileSchema.parse(req.body);
+
+            loggingService.info('User profile update parameters received', {
+                requestId,
+                userId,
+                hasName: !!name,
+                hasPreferences: !!preferences,
+                hasAvatar: !!avatar,
+                preferencesKeys: preferences ? Object.keys(preferences) : []
+            });
 
             const user = await User.findById(userId);
 
             if (!user) {
+                loggingService.warn('User profile update failed - user not found', {
+                    requestId,
+                    userId
+                });
+
                 return next(new AppError('User not found', 404));
             }
 
@@ -75,6 +147,36 @@ export class UserController {
             }
 
             await user.save();
+            const duration = Date.now() - startTime;
+
+            const updatedFields = [];
+            if (name) updatedFields.push('name');
+            if (preferences) updatedFields.push('preferences');
+            if (avatar) updatedFields.push('avatar');
+
+            loggingService.info('User profile updated successfully', {
+                requestId,
+                duration,
+                userId,
+                userEmail: user.email,
+                userName: user.name,
+                hasAvatar: !!user.avatar,
+                hasPreferences: !!user.preferences,
+                updatedFields
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_profile_updated',
+                category: 'user_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    userEmail: user.email,
+                    userName: user.name,
+                    updatedFields
+                }
+            });
 
             res.json({
                 success: true,
@@ -82,19 +184,74 @@ export class UserController {
                 data: user,
             });
         } catch (error: any) {
-            logger.error(`Error updating profile for user ${req.user!.id}:`, error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('User profile update failed', {
+                requestId,
+                userId,
+                hasUserId: !!userId,
+                name: req.body?.name,
+                hasPreferences: !!req.body?.preferences,
+                hasAvatar: !!req.body?.avatar,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            
             next(error);
         }
     }
 
     static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user!.id;
+
         try {
-            const userId = req.user!.id;
+            loggingService.info('Presigned avatar URL generation initiated', {
+                requestId,
+                userId,
+                hasUserId: !!userId
+            });
+
             const { fileName, fileType } = presignedUrlSchema.parse(req.body);
+
+            loggingService.info('Presigned avatar URL parameters received', {
+                requestId,
+                userId,
+                fileName,
+                fileType,
+                hasFileName: !!fileName,
+                hasFileType: !!fileType
+            });
 
             const { uploadUrl, key } = await S3Service.getPresignedAvatarUploadUrl(userId, fileName, fileType);
 
             const finalUrl = `https://${process.env.AWS_S3_BUCKETNAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Presigned avatar URL generated successfully', {
+                requestId,
+                duration,
+                userId,
+                fileName,
+                fileType,
+                hasUploadUrl: !!uploadUrl,
+                hasKey: !!key,
+                hasFinalUrl: !!finalUrl
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'presigned_avatar_url_generated',
+                category: 'user_management',
+                value: duration,
+                metadata: {
+                    userId,
+                    fileName,
+                    fileType
+                }
+            });
 
             res.json({
                 success: true,
@@ -104,8 +261,20 @@ export class UserController {
                     finalUrl
                 },
             });
-        } catch (error) {
-            logger.error('Error getting pre-signed URL:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Get presigned avatar URL failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                fileName: req.body?.fileName,
+                fileType: req.body?.fileType,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            
             next(error);
         }
     }
@@ -144,7 +313,16 @@ export class UserController {
                 },
             });
         } catch (error: any) {
-            logger.error('Get alerts error:', error);
+            loggingService.error('Get alerts failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                page: req.query.page,
+                limit: req.query.limit,
+                unreadOnly: req.query.unreadOnly,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -172,7 +350,14 @@ export class UserController {
                 message: 'Alert marked as read',
             });
         } catch (error: any) {
-            logger.error('Mark alert as read error:', error);
+            loggingService.error('Mark alert as read failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                alertId: req.params.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -192,7 +377,13 @@ export class UserController {
                 message: 'All alerts marked as read',
             });
         } catch (error: any) {
-            logger.error('Mark all alerts as read error:', error);
+            loggingService.error('Mark all alerts as read failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -216,7 +407,14 @@ export class UserController {
                 message: 'Alert deleted successfully',
             });
         } catch (error: any) {
-            logger.error('Delete alert error:', error);
+            loggingService.error('Delete alert failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                alertId: req.params.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -261,7 +459,13 @@ export class UserController {
                 data: settings,
             });
         } catch (error: any) {
-            logger.error('Get alert settings error:', error);
+            loggingService.error('Get alert settings failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -298,7 +502,15 @@ export class UserController {
                 message: 'Alert settings updated successfully',
             });
         } catch (error: any) {
-            logger.error('Update alert settings error:', error);
+            loggingService.error('Update alert settings failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                hasEmailSettings: !!req.body?.email,
+                hasThresholds: !!req.body?.thresholds,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -337,7 +549,14 @@ export class UserController {
                 message: `Test ${type} alert created successfully`,
             });
         } catch (error: any) {
-            logger.error('Test alert error:', error);
+            loggingService.error('Test alert failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                alertType: req.body?.type,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -375,7 +594,13 @@ export class UserController {
                 data: result,
             });
         } catch (error: any) {
-            logger.error('Get unread alert count error:', error);
+            loggingService.error('Get unread alert count failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -424,7 +649,15 @@ export class UserController {
                 message: 'Alert snoozed successfully',
             });
         } catch (error: any) {
-            logger.error('Snooze alert error:', error);
+            loggingService.error('Snooze alert failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                alertId: req.params.id,
+                snoozeUntil: req.body?.until,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -541,7 +774,16 @@ export class UserController {
                 data: result,
             });
         } catch (error: any) {
-            logger.error('Get alert history error:', error);
+            loggingService.error('Get alert history failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                page: req.query.page,
+                limit: req.query.limit,
+                groupBy: req.query.groupBy,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -579,7 +821,13 @@ export class UserController {
                 data: subscriptionData,
             });
         } catch (error: any) {
-            logger.error('Get subscription error:', error);
+            loggingService.error('Get subscription failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -656,7 +904,14 @@ export class UserController {
                 data: user.subscription,
             });
         } catch (error: any) {
-            logger.error('Update subscription error:', error);
+            loggingService.error('Update subscription failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                plan: req.body?.plan,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -821,7 +1076,13 @@ export class UserController {
                 data: stats,
             });
         } catch (error: any) {
-            logger.error('Get user stats error:', error);
+            loggingService.error('Get user stats failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -849,7 +1110,18 @@ export class UserController {
                 pagination: result.pagination
             });
         } catch (error: any) {
-            logger.error('Get user activities error:', error);
+            loggingService.error('Get user activities failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                page: req.query.page,
+                limit: req.query.limit,
+                type: req.query.type,
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -920,7 +1192,16 @@ export class UserController {
                 },
             });
         } catch (error: any) {
-            logger.error('Create dashboard API key error:', error);
+            loggingService.error('Create dashboard API key failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                name: req.body?.name,
+                permissions: req.body?.permissions,
+                expiresAt: req.body?.expiresAt,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -955,7 +1236,13 @@ export class UserController {
                 data: apiKeys,
             });
         } catch (error: any) {
-            logger.error('Get dashboard API keys error:', error);
+            loggingService.error('Get dashboard API keys failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -995,7 +1282,14 @@ export class UserController {
                 },
             });
         } catch (error: any) {
-            logger.error('Delete dashboard API key error:', error);
+            loggingService.error('Delete dashboard API key failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                keyId: req.params.keyId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -1059,7 +1353,17 @@ export class UserController {
                 },
             });
         } catch (error: any) {
-            logger.error('Update dashboard API key error:', error);
+            loggingService.error('Update dashboard API key failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user!.id,
+                hasUserId: !!req.user!.id,
+                keyId: req.params.keyId,
+                name: req.body?.name,
+                permissions: req.body?.permissions,
+                expiresAt: req.body?.expiresAt,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;

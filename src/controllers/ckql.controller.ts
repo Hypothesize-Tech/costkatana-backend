@@ -1,17 +1,34 @@
 import { Request, Response } from 'express';
 import { ckqlService } from '../services/ckql.service';
 import { telemetryVectorizationService } from '../services/telemetryVectorization.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export class CKQLController {
   /**
    * Execute natural language query
    */
   static async executeQuery(req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { query, tenant_id, workspace_id, timeframe, limit, offset } = req.body;
+
     try {
-      const { query, tenant_id, workspace_id, timeframe, limit, offset } = req.body;
+      loggingService.info('CKQL query execution initiated', {
+        queryLength: query?.length || 0,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        timeframe,
+        limit: parseInt(limit) || 50,
+        offset: parseInt(offset) || 0,
+        requestId: req.headers['x-request-id'] as string
+      });
 
       if (!query || typeof query !== 'string') {
+        loggingService.warn('CKQL query execution failed - invalid query', {
+          hasQuery: !!query,
+          queryType: typeof query,
+          requestId: req.headers['x-request-id'] as string
+        });
+
         return res.status(400).json({
           success: false,
           error: 'Query is required and must be a string'
@@ -31,6 +48,37 @@ export class CKQLController {
         offset: parseInt(offset) || 0
       });
 
+      const duration = Date.now() - startTime;
+
+      loggingService.info('CKQL query executed successfully', {
+        queryLength: query.length,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        duration,
+        executionTime: result.executionTime,
+        totalCount: result.totalCount,
+        resultsCount: result.results?.length || 0,
+        hasInsights: !!result.insights,
+        hasSuggestedFilters: !!result.query.suggestedFilters,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'ckql_query_executed',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          queryLength: query.length,
+          tenantId: tenant_id,
+          workspaceId: workspace_id,
+          executionTime: result.executionTime,
+          totalCount: result.totalCount,
+          resultsCount: result.results?.length || 0,
+          hasInsights: !!result.insights
+        }
+      });
+
       return res.json({
         success: true,
         query: result.query.naturalLanguage,
@@ -41,8 +89,19 @@ export class CKQLController {
         insights: result.insights,
         suggested_filters: result.query.suggestedFilters
       });
-    } catch (error) {
-      logger.error('CKQL query execution failed:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('CKQL query execution failed', {
+        queryLength: query?.length || 0,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to execute query',
@@ -55,10 +114,23 @@ export class CKQLController {
    * Get query suggestions based on partial input
    */
   static async getSuggestions(req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { partial_query } = req.query;
+
     try {
-      const { partial_query } = req.query;
+      loggingService.info('CKQL suggestions request initiated', {
+        partialQuery: partial_query,
+        partialQueryLength: partial_query?.length || 0,
+        requestId: req.headers['x-request-id'] as string
+      });
 
       if (!partial_query || typeof partial_query !== 'string') {
+        loggingService.warn('CKQL suggestions failed - invalid partial query', {
+          hasPartialQuery: !!partial_query,
+          partialQueryType: typeof partial_query,
+          requestId: req.headers['x-request-id'] as string
+        });
+
         return res.status(400).json({
           success: false,
           error: 'partial_query is required'
@@ -67,12 +139,44 @@ export class CKQLController {
 
       const suggestions = CKQLController.generateSuggestions(partial_query);
 
+      const duration = Date.now() - startTime;
+
+      loggingService.info('CKQL suggestions generated successfully', {
+        partialQuery: partial_query,
+        partialQueryLength: partial_query.length,
+        suggestionsCount: suggestions.length,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'ckql_suggestions_generated',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          partialQuery: partial_query,
+          partialQueryLength: partial_query.length,
+          suggestionsCount: suggestions.length
+        }
+      });
+
       return res.json({
         success: true,
         suggestions
       });
-    } catch (error) {
-      logger.error('Failed to get query suggestions:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to get query suggestions', {
+        partialQuery: partial_query,
+        partialQueryLength: partial_query?.length || 0,
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to get suggestions'
@@ -84,8 +188,17 @@ export class CKQLController {
    * Start vectorization of telemetry data
    */
   static async startVectorization(req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { timeframe, tenant_id, workspace_id, force_reprocess } = req.body;
+
     try {
-      const { timeframe, tenant_id, workspace_id, force_reprocess } = req.body;
+      loggingService.info('Telemetry vectorization initiated', {
+        timeframe,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        forceReprocess: force_reprocess,
+        requestId: req.headers['x-request-id'] as string
+      });
 
       const job = await telemetryVectorizationService.startVectorization({
         timeframe,
@@ -94,12 +207,52 @@ export class CKQLController {
         forceReprocess: force_reprocess
       });
 
+      const duration = Date.now() - startTime;
+
+      loggingService.info('Telemetry vectorization started successfully', {
+        timeframe,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        forceReprocess: force_reprocess,
+        jobId: job.id,
+        jobStatus: job.status,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'telemetry_vectorization_started',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          timeframe,
+          tenantId: tenant_id,
+          workspaceId: workspace_id,
+          forceReprocess: force_reprocess,
+          jobId: job.id,
+          jobStatus: job.status
+        }
+      });
+
       return res.json({
         success: true,
         job
       });
-    } catch (error) {
-      logger.error('Failed to start vectorization:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to start vectorization', {
+        timeframe,
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        forceReprocess: force_reprocess,
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : 'Failed to start vectorization'
@@ -111,11 +264,47 @@ export class CKQLController {
    * Get vectorization job status
    */
   static async getVectorizationStatus(req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const tenant_id = req.query.tenant_id as string;
+    const workspace_id = req.query.workspace_id as string;
+
     try {
-      const job = await telemetryVectorizationService.getJobStatus();
+      loggingService.info('Vectorization status request initiated', {
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      const job: any = await telemetryVectorizationService.getJobStatus();
       const stats = await telemetryVectorizationService.getVectorizationStats({
-        tenant_id: req.query.tenant_id as string,
-        workspace_id: req.query.workspace_id as string
+        tenant_id,
+        workspace_id
+      });
+
+      const duration = Date.now() - startTime;
+
+      loggingService.info('Vectorization status retrieved successfully', {
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        duration,
+        jobStatus: job?.status,
+        jobId: job?.id,
+        hasStats: !!stats,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'vectorization_status_retrieved',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          tenantId: tenant_id,
+          workspaceId: workspace_id,
+          jobStatus: job?.status,
+          jobId: job?.id,
+          hasStats: !!stats
+        }
       });
 
       return res.json({
@@ -123,8 +312,18 @@ export class CKQLController {
         current_job: job,
         statistics: stats
       });
-    } catch (error) {
-      logger.error('Failed to get vectorization status:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to get vectorization status', {
+        tenantId: tenant_id,
+        workspaceId: workspace_id,
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to get vectorization status'
@@ -136,15 +335,47 @@ export class CKQLController {
    * Cancel vectorization job
    */
   static async cancelVectorization(_req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+
     try {
+      loggingService.info('Vectorization cancellation initiated', {
+        requestId: _req.headers['x-request-id'] as string
+      });
+
       const cancelled = await telemetryVectorizationService.cancelVectorization();
+
+      const duration = Date.now() - startTime;
+
+      loggingService.info('Vectorization cancellation completed', {
+        duration,
+        cancelled,
+        requestId: _req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'vectorization_cancelled',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          cancelled
+        }
+      });
 
       return res.json({
         success: true,
         cancelled
       });
-    } catch (error) {
-      logger.error('Failed to cancel vectorization:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to cancel vectorization', {
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: _req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to cancel vectorization'
@@ -156,10 +387,23 @@ export class CKQLController {
    * Get cost narratives for specific records
    */
   static async getCostNarratives(req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { record_ids } = req.body;
+
     try {
-      const { record_ids } = req.body;
+      loggingService.info('Cost narratives request initiated', {
+        recordIdsCount: record_ids?.length || 0,
+        recordIds: record_ids,
+        requestId: req.headers['x-request-id'] as string
+      });
 
       if (!Array.isArray(record_ids)) {
+        loggingService.warn('Cost narratives failed - invalid record IDs', {
+          hasRecordIds: !!record_ids,
+          recordIdsType: typeof record_ids,
+          requestId: req.headers['x-request-id'] as string
+        });
+
         return res.status(400).json({
           success: false,
           error: 'record_ids must be an array'
@@ -174,12 +418,44 @@ export class CKQLController {
         generated_at: new Date().toISOString()
       }));
 
+      const duration = Date.now() - startTime;
+
+      loggingService.info('Cost narratives generated successfully', {
+        recordIdsCount: record_ids.length,
+        recordIds: record_ids,
+        narrativesCount: narratives.length,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'cost_narratives_generated',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          recordIdsCount: record_ids.length,
+          recordIds: record_ids,
+          narrativesCount: narratives.length
+        }
+      });
+
       return res.json({
         success: true,
         narratives
       });
-    } catch (error) {
-      logger.error('Failed to get cost narratives:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to get cost narratives', {
+        recordIdsCount: record_ids?.length || 0,
+        recordIds: record_ids,
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to get cost narratives'
@@ -191,7 +467,13 @@ export class CKQLController {
    * Get example queries for different use cases
    */
   static async getExampleQueries(_req: Request, res: Response): Promise<Response> {
+    const startTime = Date.now();
+
     try {
+      loggingService.info('Example queries request initiated', {
+        requestId: _req.headers['x-request-id'] as string
+      });
+
       const examples = [
         {
           category: "Cost Analysis",
@@ -240,12 +522,40 @@ export class CKQLController {
         }
       ];
 
+      const duration = Date.now() - startTime;
+
+      loggingService.info('Example queries retrieved successfully', {
+        duration,
+        categoriesCount: examples.length,
+        totalQueriesCount: examples.reduce((sum, cat) => sum + cat.queries.length, 0),
+        requestId: _req.headers['x-request-id'] as string
+      });
+
+      // Log business event
+      loggingService.logBusiness({
+        event: 'example_queries_retrieved',
+        category: 'ckql_operations',
+        value: duration,
+        metadata: {
+          categoriesCount: examples.length,
+          totalQueriesCount: examples.reduce((sum, cat) => sum + cat.queries.length, 0)
+        }
+      });
+
       return res.json({
         success: true,
         examples
       });
-    } catch (error) {
-      logger.error('Failed to get example queries:', error);
+    } catch (error: any) {
+      const duration = Date.now() - startTime;
+      
+      loggingService.error('Failed to get example queries', {
+        error: error.message || 'Unknown error',
+        stack: error.stack,
+        duration,
+        requestId: _req.headers['x-request-id'] as string
+      });
+
       return res.status(500).json({
         success: false,
         error: 'Failed to get example queries'

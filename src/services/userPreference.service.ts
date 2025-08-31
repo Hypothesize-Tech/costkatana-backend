@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { UserPreference } from '../models/Memory';
 
 export interface UserPreferenceData {
@@ -56,7 +56,7 @@ export class UserPreferenceService {
 
             return preferences;
         } catch (error) {
-            logger.error('❌ Failed to get user preferences:', error);
+            loggingService.error('❌ Failed to get user preferences:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -66,7 +66,7 @@ export class UserPreferenceService {
      */
     async updatePreferences(userId: string, updates: Partial<UserPreferenceData>): Promise<void> {
         try {
-            logger.info(`🔧 Updating preferences for user: ${userId}`);
+            loggingService.info(`🔧 Updating preferences for user: ${userId}`);
 
             // Get existing preferences
             let userPreference = await UserPreference.findOne({ userId });
@@ -104,9 +104,9 @@ export class UserPreferenceService {
                 timestamp: Date.now()
             });
 
-            logger.info(`✅ Updated preferences for user: ${userId}`);
+            loggingService.info(`✅ Updated preferences for user: ${userId}`);
         } catch (error) {
-            logger.error('❌ Failed to update user preferences:', error);
+            loggingService.error('❌ Failed to update user preferences:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -142,7 +142,7 @@ export class UserPreferenceService {
             // Default model
             return 'amazon.nova-pro-v1:0';
         } catch (error) {
-            logger.error('❌ Failed to get recommended model:', error);
+            loggingService.error('❌ Failed to get recommended model:', { error: error instanceof Error ? error.message : String(error) });
             return 'amazon.nova-pro-v1:0';
         }
     }
@@ -167,7 +167,7 @@ export class UserPreferenceService {
 
             return 'balanced'; // Default
         } catch (error) {
-            logger.error('❌ Failed to get recommended chat mode:', error);
+            loggingService.error('❌ Failed to get recommended chat mode:', { error: error instanceof Error ? error.message : String(error) });
             return 'balanced';
         }
     }
@@ -211,9 +211,9 @@ export class UserPreferenceService {
                 });
             }
 
-            logger.info(`📚 Learned from interaction for user: ${userId}`);
+            loggingService.info(`📚 Learned from interaction for user: ${userId}`);
         } catch (error) {
-            logger.error('❌ Failed to learn from interaction:', error);
+            loggingService.error('❌ Failed to learn from interaction:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -283,7 +283,7 @@ export class UserPreferenceService {
                 ? summary.join(' • ')
                 : "Learning your preferences from interactions...";
         } catch (error) {
-            logger.error('❌ Failed to get preference summary:', error);
+            loggingService.error('❌ Failed to get preference summary:', { error: error instanceof Error ? error.message : String(error) });
             return "Unable to load preferences";
         }
     }
@@ -293,14 +293,14 @@ export class UserPreferenceService {
      */
     async resetPreferences(userId: string): Promise<void> {
         try {
-            logger.info(`🔄 Resetting preferences for user: ${userId}`);
+            loggingService.info(`🔄 Resetting preferences for user: ${userId}`);
 
             await UserPreference.deleteOne({ userId });
             this.preferenceCache.delete(userId);
 
-            logger.info(`✅ Reset preferences for user: ${userId}`);
+            loggingService.info(`✅ Reset preferences for user: ${userId}`);
         } catch (error) {
-            logger.error('❌ Failed to reset user preferences:', error);
+            loggingService.error('❌ Failed to reset user preferences:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -325,7 +325,7 @@ export class UserPreferenceService {
             const preferences = await this.getUserPreferences(userId);
             return preferences || {};
         } catch (error) {
-            logger.error('❌ Failed to export preferences:', error);
+            loggingService.error('❌ Failed to export preferences:', { error: error instanceof Error ? error.message : String(error) });
             return {};
         }
     }

@@ -1,5 +1,5 @@
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface ForecastData {
     period: string;
@@ -128,7 +128,7 @@ export class ForecastingService {
 
             return forecast;
         } catch (error) {
-            logger.error('Error generating cost forecast:', error);
+            loggingService.error('Error generating cost forecast:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -209,7 +209,7 @@ export class ForecastingService {
 
             return alerts;
         } catch (error) {
-            logger.error('Error getting predictive alerts:', error);
+            loggingService.error('Error getting predictive alerts:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -264,7 +264,7 @@ export class ForecastingService {
                 anomalies
             };
         } catch (error) {
-            logger.error('Error analyzing spending patterns:', error);
+            loggingService.error('Error analyzing spending patterns:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -326,7 +326,7 @@ export class ForecastingService {
 
             return aggregatedData;
         } catch (error) {
-            logger.error('Error getting historical data:', error);
+            loggingService.error('Error getting historical data:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { User } from '../models/User';
 import { ProjectService } from '../services/project.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
@@ -10,16 +10,43 @@ const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
 export class OnboardingController {
     static async generateMagicLink(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { email, name, source = 'ChatGPT' } = req.body;
+
         try {
-            const { email, name, source = 'ChatGPT' } = req.body;
+            loggingService.info('Magic link generation initiated', {
+                email,
+                hasEmail: !!email,
+                name,
+                hasName: !!name,
+                source,
+                hasSource: !!source,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!email) {
+                loggingService.warn('Magic link generation failed - email is required', {
+                    name,
+                    hasName: !!name,
+                    source,
+                    hasSource: !!source,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Email is required'
                 });
                 return;
             }
+
+            loggingService.info('Magic link generation processing started', {
+                email,
+                name,
+                hasName: !!name,
+                source,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             // Generate session ID and tokens (shorter for URL compatibility)
             const sessionId = crypto.randomBytes(8).toString('hex'); // Reduced from 16 to 8 bytes
@@ -42,7 +69,31 @@ export class OnboardingController {
             const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
             const magicLink = `${frontendUrl}/connect/chatgpt?token=${token}&data=${encodedData}`;
 
-            logger.info('Magic link generated', { email, sessionId, source });
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Magic link generated successfully', {
+                email,
+                sessionId,
+                source,
+                duration,
+                hasMagicLink: !!magicLink,
+                frontendUrl,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'magic_link_generated',
+                category: 'onboarding_operations',
+                value: duration,
+                metadata: {
+                    email,
+                    sessionId,
+                    source,
+                    hasMagicLink: !!magicLink,
+                    frontendUrl
+                }
+            });
 
             res.json({
                 success: true,
@@ -60,8 +111,22 @@ export class OnboardingController {
                 }
             });
 
-        } catch (error) {
-            logger.error('Generate magic link error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Magic link generation failed', {
+                email,
+                hasEmail: !!email,
+                name,
+                hasName: !!name,
+                source,
+                hasSource: !!source,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate magic link',
@@ -71,10 +136,24 @@ export class OnboardingController {
     }
 
     static async completeMagicLink(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { token, data } = req.query;
+
         try {
-            const { token, data } = req.query;
+            loggingService.info('Magic link completion initiated', {
+                hasToken: !!token,
+                hasData: !!data,
+                tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!token || !data) {
+                loggingService.warn('Magic link completion failed - invalid magic link format', {
+                    hasToken: !!token,
+                    hasData: !!data,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Invalid magic link format.'
@@ -82,13 +161,28 @@ export class OnboardingController {
                 return;
             }
 
+            loggingService.info('Magic link completion processing started', {
+                hasToken: !!token,
+                hasData: !!data,
+                tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // Decode and parse the magic link data
             let magicLinkData;
             try {
                 const decodedData = Buffer.from(data as string, 'base64').toString('utf-8');
                 magicLinkData = JSON.parse(decodedData);
-            } catch (parseError) {
-                logger.error('Failed to parse magic link data:', parseError);
+            } catch (parseError: any) {
+                loggingService.error('Magic link completion failed - data parsing error', {
+                    hasToken: !!token,
+                    hasData: !!data,
+                    tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
+                    error: parseError.message || 'Unknown parse error',
+                    stack: parseError.stack,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Invalid magic link format.'
@@ -107,6 +201,14 @@ export class OnboardingController {
             }
             
             if (isExpired) {
+                loggingService.warn('Magic link completion failed - link expired', {
+                    hasToken: !!token,
+                    hasData: !!data,
+                    tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
+                    isExpired,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Magic link has expired. Please generate a new one.'
@@ -118,7 +220,16 @@ export class OnboardingController {
             const email = magicLinkData.e || magicLinkData.email;
             const name = magicLinkData.n || magicLinkData.name;
             const source = magicLinkData.s || magicLinkData.source;
-            logger.info('Processing onboarding completion', { token: token.toString().substring(0, 10) + '...', email });
+
+            loggingService.info('Processing onboarding completion', { 
+                token: token.toString().substring(0, 10) + '...', 
+                email,
+                name,
+                hasName: !!name,
+                source,
+                hasSource: !!source,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             // Find existing user and clean up any corrupted data
             let user = await User.findOne({ email });
@@ -131,10 +242,11 @@ export class OnboardingController {
                 );
                 
                 if (cleanApiKeys.length !== user.dashboardApiKeys.length) {
-                    logger.info('Cleaning corrupted API keys for user', { 
+                    loggingService.info('Cleaning corrupted API keys for user', { 
                         email, 
                         originalCount: user.dashboardApiKeys.length, 
-                        cleanCount: cleanApiKeys.length 
+                        cleanCount: cleanApiKeys.length,
+                        requestId: req.headers['x-request-id'] as string
                     });
                     
                     // Update user with cleaned data
@@ -183,7 +295,14 @@ export class OnboardingController {
                 });
                 await user.save();
                 isNewUser = true;
-                logger.info('New user created via magic link with API key', { email, userId: user._id, keyId });
+
+                loggingService.info('New user created via magic link with API key', { 
+                    email, 
+                    userId: user._id.toString(), 
+                    keyId,
+                    hasTempPassword: !!tempPassword,
+                    requestId: req.headers['x-request-id'] as string
+                });
                 
                 // Send welcome email with login credentials
                 try {
@@ -258,9 +377,18 @@ export class OnboardingController {
                         </html>
                         `
                     });
-                    logger.info('Welcome email sent with login credentials', { email });
-                } catch (emailError) {
-                    logger.error('Failed to send welcome email:', emailError);
+
+                    loggingService.info('Welcome email sent with login credentials', { 
+                        email,
+                        requestId: req.headers['x-request-id'] as string
+                    });
+                } catch (emailError: any) {
+                    loggingService.error('Failed to send welcome email', {
+                        email,
+                        error: emailError.message || 'Unknown email error',
+                        stack: emailError.stack,
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     // Don't fail the onboarding if email fails
                 }
                 
@@ -275,7 +403,11 @@ export class OnboardingController {
                 );
                 
                 if (existingChatGPTKey) {
-                    logger.info('User already has ChatGPT API key', { email, userId: user._id });
+                    loggingService.info('User already has ChatGPT API key', { 
+                        email, 
+                        userId: user._id.toString(),
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     // Return existing setup instead of creating duplicate
                     const alreadyConnectedNonce = crypto.randomBytes(16).toString('base64');
                     const successHtml = `
@@ -334,12 +466,21 @@ export class OnboardingController {
             if (!isNewUser) {
                 // Generate unique keyId first to avoid conflicts
                 keyId = crypto.randomBytes(16).toString('hex');
-                logger.info('Generated initial keyId:', keyId);
+                loggingService.info('Generated initial keyId for existing user', { 
+                    keyId,
+                    email,
+                    userId: user._id.toString(),
+                    requestId: req.headers['x-request-id'] as string
+                });
                 
                 try {
                     // Try using AuthService first
                     const { AuthService } = await import('../services/auth.service');
-                    logger.info('About to call AuthService.generateDashboardApiKey');
+                    loggingService.info('About to call AuthService.generateDashboardApiKey', {
+                        email,
+                        userId: user._id.toString(),
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     
                     const result = AuthService.generateDashboardApiKey(
                         user as any, 
@@ -347,16 +488,34 @@ export class OnboardingController {
                         ['read', 'write']
                     );
                     
-                    logger.info('AuthService result:', result);
+                    loggingService.info('AuthService result received', {
+                        email,
+                            userId: user._id.toString() ,
+                        hasResult: !!result,
+                        hasKeyId: !!(result && result.keyId),
+                        hasApiKey: !!(result && result.apiKey),
+                        hasMaskedKey: !!(result && result.maskedKey),
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     
                     // Validate the result
                     if (result && result.keyId && result.apiKey && result.maskedKey) {
                         apiKey = result.apiKey;
                         keyId = result.keyId;
                         maskedKey = result.maskedKey;
-                        logger.info('Using AuthService generated keyId:', keyId);
+                        loggingService.info('Using AuthService generated keyId', { 
+                            keyId,
+                            email,
+                                userId: user._id.toString(),
+                            requestId: req.headers['x-request-id'] as string
+                        });
                     } else {
-                        logger.error('AuthService returned invalid data:', result);
+                        loggingService.error('AuthService returned invalid data', {
+                            email,
+                            userId: user._id.toString(),
+                            result,
+                            requestId: req.headers['x-request-id'] as string
+                        });
                         throw new Error('AuthService returned invalid API key data');
                     }
 
@@ -381,8 +540,14 @@ export class OnboardingController {
 
                     user.dashboardApiKeys.push(newApiKey);
                     
-                } catch (keyGenError) {
-                    logger.error('Error with AuthService, using fallback API key generation:', keyGenError);
+                } catch (keyGenError: any) {
+                    loggingService.error('Error with AuthService, using fallback API key generation', {
+                        email,
+                        userId: user._id.toString(),
+                        error: keyGenError.message || 'Unknown key generation error',
+                        stack: keyGenError.stack,
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     
                     // Fallback to simple but robust API key generation
                     const userId = user._id ? user._id.toString() : 'unknown';
@@ -390,7 +555,14 @@ export class OnboardingController {
                     apiKey = `ck_${userId}_${keyId}_${keySecret}`;
                     maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
                     
-                    logger.info('Fallback API key generated:', { keyId, apiKey: apiKey.substring(0, 20) + '...', maskedKey });
+                    loggingService.info('Fallback API key generated', { 
+                        keyId, 
+                        apiKey: apiKey.substring(0, 20) + '...', 
+                        maskedKey,
+                        email,
+                        userId: user._id.toString(),
+                        requestId: req.headers['x-request-id'] as string
+                    });
 
                     // Initialize dashboardApiKeys array if it doesn't exist
                     if (!user.dashboardApiKeys) {
@@ -406,9 +578,19 @@ export class OnboardingController {
                         createdAt: new Date(),
                     };
 
-                    logger.info('About to push API key to user:', { keyId: newApiKey.keyId, name: newApiKey.name });
+                    loggingService.info('About to push API key to user', { 
+                        keyId: newApiKey.keyId, 
+                        name: newApiKey.name,
+                        email,
+                            userId: user._id.toString(),
+                        requestId: req.headers['x-request-id'] as string
+                    });
                     user.dashboardApiKeys.push(newApiKey);
-                    logger.info('API key pushed successfully');
+                    loggingService.info('API key pushed successfully', {
+                        email,
+                        userId: user._id.toString(),
+                        requestId: req.headers['x-request-id'] as string
+                    });
                 }
             }
 
@@ -433,17 +615,38 @@ export class OnboardingController {
                 await user.save();
             }
 
-            logger.info('Magic link onboarding completed', { 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Magic link onboarding completed successfully', { 
                 email, 
-                userId: user._id, 
+                userId: user._id.toString(), 
                 projectId: defaultProject._id,
-                isNewUser
+                isNewUser,
+                duration,
+                source,
+                hasApiKey: !!(apiKey || (user.dashboardApiKeys && user.dashboardApiKeys.length > 0)),
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'magic_link_onboarding_completed',
+                category: 'onboarding_operations',
+                value: duration,
+                metadata: {
+                    email,
+                    userId: user._id.toString(),
+                    projectId: defaultProject._id,
+                    isNewUser,
+                    source,
+                    hasApiKey: !!(apiKey || (user.dashboardApiKeys && user.dashboardApiKeys.length > 0))
+                }
             });
 
             // Create JWT token for authentication
             const jwtToken = jwt.sign(
                 { 
-                    userId: user._id, 
+                    userId: user._id.toString(), 
                     email: user.email,
                     sessionId: magicLinkData.sid || magicLinkData.sessionId
                 },
@@ -521,7 +724,7 @@ export class OnboardingController {
                     // Store auth data for potential use
                     const authData = {
                         token: '${jwtToken}',
-                        userId: '${user._id}',
+                        userId: '${user._id.toString()}',
                         email: '${user.email}',
                         projectId: '${defaultProject._id}'
                     };
@@ -612,8 +815,19 @@ export class OnboardingController {
             res.setHeader('Content-Type', 'text/html');
             res.send(successHtml);
 
-        } catch (error) {
-            logger.error('Complete magic link onboarding error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Magic link onboarding completion failed', {
+                hasToken: !!token,
+                hasData: !!data,
+                tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to complete onboarding',
@@ -623,10 +837,21 @@ export class OnboardingController {
     }
 
     static async verifyMagicLink(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { token } = req.params;
+
         try {
-            const { token } = req.params;
-            
+            loggingService.info('Magic link verification initiated', {
+                hasToken: !!token,
+                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!token) {
+                loggingService.warn('Magic link verification failed - token is required', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Token is required'
@@ -634,15 +859,51 @@ export class OnboardingController {
                 return;
             }
 
+            loggingService.info('Magic link verification processing started', {
+                hasToken: !!token,
+                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // For now, return success if token exists
             // In production, you'd verify against stored tokens
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Magic link verified successfully', {
+                hasToken: !!token,
+                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'magic_link_verified',
+                category: 'onboarding_operations',
+                value: duration,
+                metadata: {
+                    hasToken: !!token,
+                    tokenPreview: token ? token.substring(0, 10) + '...' : 'none'
+                }
+            });
+
             res.json({
                 success: true,
                 message: 'Magic link verified successfully'
             });
 
-        } catch (error) {
-            logger.error('Verify magic link error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Magic link verification failed', {
+                hasToken: !!token,
+                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to verify magic link',

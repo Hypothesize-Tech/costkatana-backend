@@ -3,7 +3,7 @@
  * Automatically routes AI requests to the best provider based on CPI scores
  */
 
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { CPIService } from './cpi.service';
 import { 
     CPIRoutingDecision, 
@@ -31,7 +31,7 @@ export class IntelligentRoutingService {
             const cached = this.routingCache.get(cacheKey);
             
             if (cached && Date.now() - Date.now() < this.cacheTTL) {
-                logger.debug('Returning cached routing decision', { cacheKey });
+                loggingService.debug('Returning cached routing decision', { value:  { cacheKey  } });
                 return cached;
             }
 
@@ -81,17 +81,17 @@ export class IntelligentRoutingService {
             // Cache the decision
             this.routingCache.set(cacheKey, decision);
 
-            logger.info('Intelligent routing decision generated', {
+            loggingService.info('Intelligent routing decision generated', { value:  { 
                 selectedProvider: decision.selectedProvider,
                 selectedModel: decision.selectedModel,
                 cpiScore: selectedModel.cpiScore,
                 strategy: strategy.strategy,
                 alternativesCount: alternatives.length
-            });
+             } });
 
             return decision;
         } catch (error) {
-            logger.error('Error generating routing decision:', error);
+            loggingService.error('Error generating routing decision:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -133,7 +133,7 @@ export class IntelligentRoutingService {
                     }
                 }
             } catch (error) {
-                logger.warn(`Failed to get models for provider ${provider}:`, error);
+                loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
             }
         }
 
@@ -168,7 +168,7 @@ export class IntelligentRoutingService {
                     modelName: model.modelName
                 }));
             } catch (error) {
-                logger.warn(`Failed to get models for provider ${provider}:`, error);
+                loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
                 return [];
             }
     }
@@ -231,7 +231,7 @@ export class IntelligentRoutingService {
                     metrics
                 });
             } catch (error) {
-                logger.warn(`Failed to calculate CPI for ${model.provider}:${model.modelId}:`, error);
+                loggingService.warn(`Failed to calculate CPI for ${model.provider}:${model.modelId}:`, { error: error instanceof Error ? error.message : String(error) });
             }
         }
 
@@ -530,7 +530,7 @@ export class IntelligentRoutingService {
             try {
                 return await estimateTokens(request.prompt, 'openai' as any);
             } catch (error) {
-                logger.warn('Failed to estimate prompt tokens, using fallback calculation:', error);
+                loggingService.warn('Failed to estimate prompt tokens, using fallback calculation:', { error: error instanceof Error ? error.message : String(error) });
                 // Fallback: rough estimation based on character count
                 return Math.ceil(request.prompt.length / 4);
             }
@@ -737,7 +737,7 @@ export class IntelligentRoutingService {
                 return recentLatency[0].avgLatency;
             }
         } catch (error) {
-            logger.warn(`Failed to get real latency data for ${provider}:${modelId}:`, error);
+            loggingService.warn(`Failed to get real latency data for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
         }
 
         // Fallback: Use model specifications and provider reputation
@@ -767,7 +767,7 @@ export class IntelligentRoutingService {
                 return baseLatency * (providerAdjustments[provider] || 1.0);
             }
         } catch (error) {
-            logger.warn(`Failed to get pricing data for ${provider}:${modelId}:`, error);
+            loggingService.warn(`Failed to get pricing data for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
         }
         
         // Final fallback: conservative estimate

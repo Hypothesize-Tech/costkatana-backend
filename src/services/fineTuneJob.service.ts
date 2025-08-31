@@ -1,6 +1,6 @@
 import { FineTuneJob, IFineTuneJob } from '../models/FineTuneJob';
 import { TrainingDataset } from '../models/TrainingDataset';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
 import { 
     BedrockClient, 
@@ -132,14 +132,14 @@ export class FineTuneJobService {
             dataset.lineage.relatedFineTuneJobs.push(savedJob._id?.toString() || savedJob.id);
             await dataset.save();
 
-            logger.info(`Created fine-tune job: ${savedJob.name} for user ${userId}`);
+            loggingService.info(`Created fine-tune job: ${savedJob.name} for user ${userId}`);
 
             // Queue the job for execution
             await this.queueJobExecution(savedJob._id?.toString() || savedJob.id);
 
             return savedJob;
         } catch (error) {
-            logger.error('Error creating fine-tune job:', error);
+            loggingService.error('Error creating fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -155,7 +155,7 @@ export class FineTuneJobService {
             .populate('datasetId', 'name version stats')
             .sort({ createdAt: -1 });
         } catch (error) {
-            logger.error('Error getting user fine-tune jobs:', error);
+            loggingService.error('Error getting user fine-tune jobs:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -168,9 +168,9 @@ export class FineTuneJobService {
             return await FineTuneJob.findOne({
                 _id: new mongoose.Types.ObjectId(jobId),
                 userId: new mongoose.Types.ObjectId(userId)
-            }).populate('datasetId', 'name version stats items');
+            }            ).populate('datasetId', 'name version stats items');
         } catch (error) {
-            logger.error('Error getting fine-tune job:', error);
+            loggingService.error('Error getting fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -198,11 +198,11 @@ export class FineTuneJobService {
             job.timing.completedAt = new Date();
             
             const updatedJob = await job.save();
-            logger.info(`Cancelled fine-tune job: ${jobId}`);
+            loggingService.info(`Cancelled fine-tune job: ${jobId}`);
 
             return updatedJob;
         } catch (error) {
-            logger.error('Error cancelling fine-tune job:', error);
+            loggingService.error('Error cancelling fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -242,7 +242,7 @@ export class FineTuneJobService {
 
             await FineTuneJob.findByIdAndUpdate(jobId, { $set: updateData });
         } catch (error) {
-            logger.error('Error updating job progress:', error);
+            loggingService.error('Error updating job progress:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -258,7 +258,7 @@ export class FineTuneJobService {
             }
 
             if (job.status !== 'queued') {
-                logger.warn(`Job ${jobId} is not in queued state: ${job.status}`);
+                loggingService.warn(`Job ${jobId} is not in queued state: ${job.status}`);
                 return;
             }
 
@@ -280,7 +280,7 @@ export class FineTuneJobService {
             }
 
         } catch (error) {
-            logger.error(`Error executing fine-tune job ${jobId}:`, error);
+            loggingService.error(`Error executing fine-tune job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
             
             // Update job with error
             await FineTuneJob.findByIdAndUpdate(jobId, {
@@ -357,7 +357,7 @@ export class FineTuneJobService {
         job.status = 'running';
         await job.save();
 
-        logger.info(`Started Bedrock fine-tune job: ${jobName}`);
+        loggingService.info(`Started Bedrock fine-tune job: ${jobName}`);
 
         // Start monitoring the job
         this.monitorBedrockJob(job._id?.toString() || job.id);
@@ -403,7 +403,7 @@ export class FineTuneJobService {
         job.status = 'running';
         await job.save();
 
-        logger.info(`Started OpenAI fine-tune job: ${fineTune.id}`);
+        loggingService.info(`Started OpenAI fine-tune job: ${fineTune.id}`);
 
         // Start monitoring the job
         this.monitorOpenAIJob(job._id?.toString() || job.id);
@@ -442,7 +442,7 @@ export class FineTuneJobService {
                         );
                     }
                     await job.save();
-                    logger.info(`Bedrock fine-tune job completed: ${job.providerJobId}`);
+                    loggingService.info(`Bedrock fine-tune job completed: ${job.providerJobId}`);
                     
                     // Auto-trigger evaluation
                     await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(jobId);
@@ -466,7 +466,7 @@ export class FineTuneJobService {
                 }
 
             } catch (error) {
-                logger.error(`Error monitoring Bedrock job ${jobId}:`, error);
+                loggingService.error(`Error monitoring Bedrock job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
                 setTimeout(monitor, checkInterval); // Retry after interval
             }
         };
@@ -512,7 +512,7 @@ export class FineTuneJobService {
                                 job.results = { modelId: fineTune.fine_tuned_model || undefined };
                                 job.timing.completedAt = new Date();
                                 await job.save();
-                                logger.info(`OpenAI fine-tune job completed: ${job.providerJobId}`);
+                                loggingService.info(`OpenAI fine-tune job completed: ${job.providerJobId}`);
                                 
                                 // Auto-trigger evaluation
                                 await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(jobId);
@@ -526,7 +526,7 @@ export class FineTuneJobService {
                                     timestamp: new Date()
                                 };
                                 await job.save();
-                                logger.error(`OpenAI fine-tune job failed: ${job.providerJobId}`);
+                                loggingService.error(`OpenAI fine-tune job failed: ${job.providerJobId}`);
                                 return;
                             case 'cancelled':
                                 job.status = 'cancelled';
@@ -536,7 +536,7 @@ export class FineTuneJobService {
 
                         await this.updateJobProgress(jobId, { percentage });
                     } catch (apiError) {
-                        logger.error(`OpenAI API error for job ${jobId}:`, apiError);
+                        loggingService.error(`OpenAI API error for job ${jobId}:`, { error: apiError instanceof Error ? apiError.message : String(apiError) });
                     }
                 }
 
@@ -554,7 +554,7 @@ export class FineTuneJobService {
                 }
 
             } catch (error) {
-                logger.error(`Error monitoring OpenAI job ${jobId}:`, error);
+                loggingService.error(`Error monitoring OpenAI job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
                 setTimeout(monitor, checkInterval);
             }
         };
@@ -583,7 +583,7 @@ export class FineTuneJobService {
                     break;
             }
         } catch (error) {
-            logger.error(`Error cancelling provider job for ${job.provider}:`, error);
+            loggingService.error(`Error cancelling provider job for ${job.provider}:`, { error: error instanceof Error ? error.message : String(error) });
             // Don't throw - we still want to mark our job as cancelled
         }
     }
@@ -651,7 +651,7 @@ export class FineTuneJobService {
         // For now, we'll execute immediately with a small delay
         setTimeout(() => {
             this.executeFineTuneJob(jobId).catch(error => {
-                logger.error(`Failed to execute queued job ${jobId}:`, error);
+                loggingService.error(`Failed to execute queued job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
             });
         }, 5000); // 5 second delay to allow transaction completion
     }
@@ -666,10 +666,10 @@ export class FineTuneJobService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
-            logger.info(`Deleted fine-tune job ${jobId} for user ${userId}`);
+            loggingService.info(`Deleted fine-tune job ${jobId} for user ${userId}`);
             return result.deletedCount > 0;
         } catch (error) {
-            logger.error('Error deleting fine-tune job:', error);
+            loggingService.error('Error deleting fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

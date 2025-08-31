@@ -1,7 +1,7 @@
 import { createClient, RedisClientType } from 'redis';
 import dotenv from 'dotenv';
 import * as crypto from 'crypto';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from '@langchain/aws';
 import { resolveRedisUrl, getRedisOptions, getRedisErrorDiagnostic } from '../config/redis';
 
@@ -73,12 +73,12 @@ export class RedisService {
         this.isLocalDev = process.env.NODE_ENV === 'development' && !process.env.REDIS_HOST;
         
         if (this.isLocalDev) {
-            logger.info('🔧 Redis: Local development mode - using in-memory cache (no Redis required)');
+            loggingService.info('🔧 Redis: Local development mode - using in-memory cache (no Redis required)');
             this.client = this.createMockClient();
             this.readerClient = this.createMockClient();
             this._isConnected = true;
         } else {
-            logger.info('🔧 Redis: Production mode - attempting Redis connection');
+            loggingService.info('🔧 Redis: Production mode - attempting Redis connection');
             // Only create Redis clients if we have Redis configuration
             this.setupRedisClients();
         }
@@ -99,9 +99,9 @@ export class RedisService {
             this.client.on('error', (err: any) => {
                 // Reduce error logging severity for timeout errors which are common
                 if (err && err.message && err.message.includes('Connection timeout')) {
-                    logger.warn('Redis client timeout error - will retry automatically');
+                    loggingService.warn('Redis client timeout error - will retry automatically');
                 } else {
-                    logger.error('Redis Client Error:', err);
+                    loggingService.error('Redis Client Error:', err);
                 }
                 // Only set to disconnected for non-timeout errors
                 if (!(err && err.message && err.message.includes('Connection timeout'))) {
@@ -110,20 +110,20 @@ export class RedisService {
             });
 
             this.client.on('connect', () => {
-                logger.info('Redis Client Connected');
+                loggingService.info('Redis Client Connected');
                 this._isConnected = true;
             });
 
             this.client.on('ready', () => {
-                logger.info('Redis Client Ready');
+                loggingService.info('Redis Client Ready');
             });
 
             this.readerClient.on('error', (err: any) => {
                 // Reduce error logging severity for timeout errors which are common
                 if (err && err.message && err.message.includes('Connection timeout')) {
-                    logger.warn('Redis reader client timeout error - will retry automatically');
+                    loggingService.warn('Redis reader client timeout error - will retry automatically');
                 } else {
-                    logger.error('Redis Reader Client Error:', err);
+                    loggingService.error('Redis Reader Client Error:', err);
                 }
             });
         }
@@ -255,28 +255,28 @@ export class RedisService {
             // Handle connection errors - fallback immediately
             this.client.on('error', (err: any) => {
                 const diagnostic = getRedisErrorDiagnostic(err);
-                logger.warn(`Redis client error: ${diagnostic}`);
+                loggingService.warn(`Redis client error: ${diagnostic}`);
                 this.fallbackToInMemory();
             });
 
             this.readerClient.on('error', (err: any) => {
                 const diagnostic = getRedisErrorDiagnostic(err);
-                logger.warn(`Redis reader client error: ${diagnostic}`);
+                loggingService.warn(`Redis reader client error: ${diagnostic}`);
             });
 
             // Handle successful connections
             this.client.on('connect', () => {
-                logger.info('✅ Redis client connected');
+                loggingService.info('✅ Redis client connected');
             });
 
             this.readerClient.on('connect', () => {
-                logger.info('✅ Redis reader client connected');
+                loggingService.info('✅ Redis reader client connected');
             });
 
         } catch (error) {
             const diagnostic = getRedisErrorDiagnostic(error);
-            logger.warn(`Failed to setup Redis clients: ${diagnostic}`);
-            logger.warn('Falling back to in-memory cache');
+            loggingService.warn(`Failed to setup Redis clients: ${diagnostic}`);
+            loggingService.warn('Falling back to in-memory cache');
             this.fallbackToInMemory();
         }
     }
@@ -286,7 +286,7 @@ export class RedisService {
      */
     private fallbackToInMemory(): void {
         if (!this.isLocalDev) {
-            logger.info('🔄 Switching to in-memory cache mode');
+            loggingService.info('🔄 Switching to in-memory cache mode');
             
             // Attempt to gracefully close existing clients if they exist
             try {
@@ -296,7 +296,7 @@ export class RedisService {
                     
                     if (typeof this.client.quit === 'function') {
                         this.client.quit().catch(err => 
-                            logger.debug('Error while closing Redis client:', err)
+                            loggingService.debug('Error while closing Redis client:', { error: err instanceof Error ? err.message : String(err) })
                         );
                     }
                 }
@@ -306,12 +306,12 @@ export class RedisService {
                     
                     if (typeof this.readerClient.quit === 'function') {
                         this.readerClient.quit().catch(err => 
-                            logger.debug('Error while closing Redis reader client:', err)
+                            loggingService.debug('Error while closing Redis reader client:', { error: err instanceof Error ? err.message : String(err) })
                         );
                     }
                 }
             } catch (err) {
-                logger.debug('Error during Redis client cleanup:', err);
+                loggingService.debug('Error during Redis client cleanup:', { error: err instanceof Error ? err.message : String(err) });
             }
             
             // Switch to in-memory mode
@@ -321,19 +321,19 @@ export class RedisService {
             this._isConnected = true;
             
             // Log success message
-            logger.info('✅ Successfully switched to in-memory cache mode');
+            loggingService.info('✅ Successfully switched to in-memory cache mode');
         }
     }
 
     public async connect(): Promise<void> {
         if (this.isLocalDev) {
-            logger.info('✅ Redis: Using in-memory cache for local development');
+            loggingService.info('✅ Redis: Using in-memory cache for local development');
             return;
         }
 
         // Prevent multiple concurrent connection attempts
         if (this.connectionInProgress) {
-            logger.info('Redis connection already in progress, skipping duplicate attempt');
+            loggingService.info('Redis connection already in progress, skipping duplicate attempt');
             return;
         }
 
@@ -343,30 +343,30 @@ export class RedisService {
             // Get Redis URL from centralized configuration
             const redisUrl = resolveRedisUrl();
             const maskedUrl = redisUrl.replace(/\/\/([^@]*@)?/, '//');
-            logger.info(`🔌 Connecting to Redis at ${maskedUrl}`);
+            loggingService.info(`🔌 Connecting to Redis at ${maskedUrl}`);
 
             // Simplified connection approach - let node-redis handle retries
             const connectIfNeeded = async (client: any, name: string) => {
                 if (client.isOpen) {
-                    logger.info(`${name} is already open`);
+                    loggingService.info(`${name} is already open`);
                     return;
                 }
                 
                 if (client.isReady) {
-                    logger.info(`${name} is already ready`);
+                    loggingService.info(`${name} is already ready`);
                     return;
                 }
                 
-                logger.info(`Connecting to ${name}...`);
+                loggingService.info(`Connecting to ${name}...`);
                 
                 try {
                     // Let node-redis manage retry internally
                     await client.connect();
-                    logger.info(`✅ ${name} connected successfully`);
+                    loggingService.info(`✅ ${name} connected successfully`);
                 } catch (error) {
                     const connectErr = error as Error;
                     if (connectErr && connectErr.message && connectErr.message.includes('Socket already opened')) {
-                        logger.info(`${name} socket already opened, considering connected`);
+                        loggingService.info(`${name} socket already opened, considering connected`);
                         return;
                     }
                     throw error;
@@ -378,11 +378,11 @@ export class RedisService {
             await connectIfNeeded(this.readerClient, 'Redis reader');
             
             this._isConnected = true;
-            logger.info('✅ Redis connected successfully');
+            loggingService.info('✅ Redis connected successfully');
         } catch (error) {
             const diagnostic = getRedisErrorDiagnostic(error);
-            logger.warn(`❌ Redis connection failed: ${diagnostic}`);
-            logger.warn('Falling back to in-memory cache');
+            loggingService.warn(`❌ Redis connection failed: ${diagnostic}`);
+            loggingService.warn('Falling back to in-memory cache');
             this.fallbackToInMemory();
         } finally {
             this.connectionInProgress = false;
@@ -398,9 +398,9 @@ export class RedisService {
                 this.inMemoryCache.clear();
             }
             this._isConnected = false;
-            logger.info('Redis disconnected');
+            loggingService.info('Redis disconnected');
         } catch (error) {
-            logger.error('Error disconnecting from Redis:', error);
+            loggingService.error('Error disconnecting from Redis:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -468,7 +468,7 @@ export class RedisService {
                     throw new Error('AWS Bedrock not available');
                 }
             } catch (awsError) {
-                logger.warn('AWS Bedrock embedding failed, using fallback:', awsError);
+                loggingService.warn('AWS Bedrock embedding failed, using fallback:', { error: awsError instanceof Error ? awsError.message : String(awsError) });
                 
                 // Fallback: Using a simple hash-based pseudo-embedding
                 const hash = crypto.createHash('sha256').update(text).digest();
@@ -483,7 +483,7 @@ export class RedisService {
             
             return embedding;
         } catch (error) {
-            logger.error('Failed to generate embedding:', error);
+            loggingService.error('Failed to generate embedding:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -548,7 +548,7 @@ export class RedisService {
                 await this.incrementStat('exactMatches');
                 const data = JSON.parse(exactMatch);
                 await this.updateCacheMetadata(exactKey, { hits: 1, lastAccessed: Date.now() });
-                logger.info('Cache hit (exact match)', { key: exactKey.substring(0, 20) });
+                loggingService.info('Cache hit (exact match)', { key: exactKey.substring(0, 20) });
                 return { hit: true, data, strategy: 'exact' };
             }
 
@@ -560,7 +560,7 @@ export class RedisService {
                 if (dedupData) {
                     await this.incrementStat('hits');
                     await this.incrementStat('deduplicationCount');
-                    logger.info('Cache hit (deduplication)', { key: dedupKey.substring(0, 20) });
+                    loggingService.info('Cache hit (deduplication)', { key: dedupKey.substring(0, 20) });
                     return { hit: true, data: JSON.parse(dedupData), strategy: 'deduplication' };
                 }
             }
@@ -578,10 +578,10 @@ export class RedisService {
                     const bestMatch = semanticResults[0];
                     await this.incrementStat('hits');
                     await this.incrementStat('semanticMatches');
-                    logger.info('Cache hit (semantic)', { 
+                    loggingService.info('Cache hit (semantic)', { value:  {  
                         similarity: bestMatch.similarity,
                         threshold: similarityThreshold 
-                    });
+                     } });
                     return { 
                         hit: true, 
                         data: bestMatch.data, 
@@ -593,11 +593,11 @@ export class RedisService {
 
             // Cache miss
             await this.incrementStat('misses');
-            logger.info('Cache miss', { prompt: prompt.substring(0, 50) });
+            loggingService.info('Cache miss', { prompt: prompt.substring(0, 50) });
             return { hit: false };
 
         } catch (error) {
-            logger.error('Cache check failed:', error);
+            loggingService.error('Cache check failed:', { error: error instanceof Error ? error.message : String(error) });
             return { hit: false };
         }
     }
@@ -640,7 +640,7 @@ export class RedisService {
             return matches.slice(0, 5); // Return top 5 matches
 
         } catch (error) {
-            logger.error('Semantic match search failed:', error);
+            loggingService.error('Semantic match search failed:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -731,14 +731,14 @@ export class RedisService {
                 await this.updateUserStats(userId, { requests: 1, tokens, cost });
             }
 
-            logger.info('Cache stored successfully', { 
+            loggingService.info('Cache stored successfully', { 
                 key: exactKey.substring(0, 20),
                 ttl,
                 strategies: ['exact', enableDeduplication && 'dedup', enableSemantic && 'semantic'].filter(Boolean)
             });
 
         } catch (error) {
-            logger.error('Failed to store cache:', error);
+            loggingService.error('Failed to store cache:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -778,7 +778,7 @@ export class RedisService {
                 topUsers: userStats
             };
         } catch (error) {
-            logger.error('Failed to get cache stats:', error);
+            loggingService.error('Failed to get cache stats:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 hits: 0,
                 misses: 0,
@@ -826,12 +826,12 @@ export class RedisService {
             
             if (keys.length > 0) {
                 await this.client.del(keys);
-                logger.info(`Cleared ${keys.length} cache entries`, { pattern });
+                loggingService.info(`Cleared ${keys.length} cache entries`, { pattern });
             }
             
             return keys.length;
         } catch (error) {
-            logger.error('Failed to clear cache:', error);
+            loggingService.error('Failed to clear cache:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }
@@ -843,7 +843,7 @@ export class RedisService {
         try {
             await this.client.hIncrBy(`${this.STATS_PREFIX}global`, stat, value);
         } catch (error) {
-            logger.error(`Failed to increment stat ${stat}:`, error);
+            loggingService.error(`Failed to increment stat ${stat}:`, { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -862,7 +862,7 @@ export class RedisService {
                 }
             }
         } catch (error) {
-            logger.error('Failed to update cache metadata:', error);
+            loggingService.error('Failed to update cache metadata:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -883,7 +883,7 @@ export class RedisService {
             // Set expiry to 30 days
             await this.client.expire(userKey, 30 * 24 * 3600);
         } catch (error) {
-            logger.error('Failed to update user stats:', error);
+            loggingService.error('Failed to update user stats:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -909,7 +909,7 @@ export class RedisService {
                 .sort((a, b) => b.hits - a.hits)
                 .slice(0, limit);
         } catch (error) {
-            logger.error('Failed to get top models:', error);
+            loggingService.error('Failed to get top models:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -935,7 +935,7 @@ export class RedisService {
                 .sort((a, b) => b.hits - a.hits)
                 .slice(0, limit);
         } catch (error) {
-            logger.error('Failed to get top users:', error);
+            loggingService.error('Failed to get top users:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -945,15 +945,15 @@ export class RedisService {
      */
     public async warmupCache(queries: { prompt: string; response: any; metadata?: any }[]): Promise<void> {
         try {
-            logger.info(`Warming up cache with ${queries.length} entries`);
+            loggingService.info(`Warming up cache with ${queries.length} entries`);
             
             for (const query of queries) {
                 await this.storeCache(query.prompt, query.response, query.metadata);
             }
             
-            logger.info('Cache warmup completed');
+            loggingService.info('Cache warmup completed');
         } catch (error) {
-            logger.error('Cache warmup failed:', error);
+            loggingService.error('Cache warmup failed:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -977,7 +977,7 @@ export class RedisService {
             
             return { entries, stats };
         } catch (error) {
-            logger.error('Failed to export cache:', error);
+            loggingService.error('Failed to export cache:', { error: error instanceof Error ? error.message : String(error) });
             return { entries: [], stats: await this.getCacheStats() };
         }
     }
@@ -987,7 +987,7 @@ export class RedisService {
      */
     public async importCache(data: { entries: CacheEntry[] }): Promise<void> {
         try {
-            logger.info(`Importing ${data.entries.length} cache entries`);
+            loggingService.info(`Importing ${data.entries.length} cache entries`);
             
             for (const entry of data.entries) {
                 await this.client.setEx(
@@ -997,10 +997,229 @@ export class RedisService {
                 );
             }
             
-            logger.info('Cache import completed');
+            loggingService.info('Cache import completed');
         } catch (error) {
-            logger.error('Failed to import cache:', error);
+            loggingService.error('Failed to import cache:', { error: error instanceof Error ? error.message : String(error) });
         }
+    }
+
+    /**
+     * Basic Redis operations for middleware caching
+     */
+    
+    /**
+     * Set a key with value and TTL
+     */
+    public async set(key: string, value: any, ttl: number = 3600): Promise<void> {
+        try {
+            if (this.isLocalDev) {
+                // In-memory fallback for development
+                this.inMemoryCache.set(key, {
+                    value: JSON.stringify(value),
+                    expiry: Date.now() + (ttl * 1000)
+                });
+                return;
+            }
+
+            if (this.client && this._isConnected) {
+                await this.client.setEx(key, ttl, JSON.stringify(value));
+            }
+        } catch (error) {
+            loggingService.warn('Redis set failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+            // Fallback to in-memory
+            this.inMemoryCache.set(key, {
+                value: JSON.stringify(value),
+                expiry: Date.now() + (ttl * 1000)
+            });
+        }
+    }
+
+    /**
+     * Get a value by key
+     */
+    public async get(key: string): Promise<any | null> {
+        try {
+            if (this.isLocalDev) {
+                // In-memory fallback for development
+                const entry = this.inMemoryCache.get(key);
+                if (entry && entry.expiry > Date.now()) {
+                    return JSON.parse(entry.value);
+                }
+                return null;
+            }
+
+            if (this.readerClient && this._isConnected) {
+                const value = await this.readerClient.get(key);
+                if (value) {
+                    return JSON.parse(value);
+                }
+            }
+        } catch (error) {
+            loggingService.warn('Redis get failed, trying in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Fallback to in-memory
+        try {
+            const entry = this.inMemoryCache.get(key);
+            if (entry && entry.expiry > Date.now()) {
+                return JSON.parse(entry.value);
+            }
+        } catch (error) {
+            loggingService.warn('In-memory fallback also failed:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        return null;
+    }
+
+    /**
+     * Delete a key
+     */
+    public async del(key: string): Promise<void> {
+        try {
+            if (this.isLocalDev) {
+                this.inMemoryCache.delete(key);
+                return;
+            }
+
+            if (this.client && this._isConnected) {
+                await this.client.del(key);
+            }
+        } catch (error) {
+            loggingService.warn('Redis del failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Always delete from in-memory as fallback
+        this.inMemoryCache.delete(key);
+    }
+
+    /**
+     * Check if a key exists
+     */
+    public async exists(key: string): Promise<boolean> {
+        try {
+            if (this.isLocalDev) {
+                return this.inMemoryCache.has(key) && 
+                       this.inMemoryCache.get(key)!.expiry > Date.now();
+            }
+
+            if (this.readerClient && this._isConnected) {
+                const exists = await this.readerClient.exists(key);
+                return exists === 1;
+            }
+        } catch (error) {
+            loggingService.warn('Redis exists failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Fallback to in-memory
+        const entry = this.inMemoryCache.get(key);
+        return !!(entry && entry.expiry > Date.now());
+    }
+
+    /**
+     * Get TTL for a key
+     */
+    public async getTTL(key: string): Promise<number> {
+        try {
+            if (this.isLocalDev) {
+                const entry = this.inMemoryCache.get(key);
+                if (entry && entry.expiry > Date.now()) {
+                    return Math.ceil((entry.expiry - Date.now()) / 1000);
+                }
+                return -1;
+            }
+
+            if (this.readerClient && this._isConnected) {
+                return await this.readerClient.ttl(key);
+            }
+        } catch (error) {
+            loggingService.warn('Redis TTL failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Fallback to in-memory
+        const entry = this.inMemoryCache.get(key);
+        if (entry && entry.expiry > Date.now()) {
+            return Math.ceil((entry.expiry - Date.now()) / 1000);
+        }
+        return -1;
+    }
+
+    /**
+     * Increment a counter
+     */
+    public async incr(key: string, amount: number = 1): Promise<number> {
+        try {
+            if (this.isLocalDev) {
+                const entry = this.inMemoryCache.get(key);
+                let currentValue = 0;
+                
+                if (entry && entry.expiry > Date.now()) {
+                    try {
+                        currentValue = parseInt(entry.value) || 0;
+                    } catch (error) {
+                        currentValue = 0;
+                    }
+                }
+                
+                const newValue = currentValue + amount;
+                this.inMemoryCache.set(key, {
+                    value: newValue.toString(),
+                    expiry: Date.now() + (3600 * 1000) // 1 hour default
+                });
+                
+                return newValue;
+            }
+
+            if (this.client && this._isConnected) {
+                if (amount === 1) {
+                    return await this.client.incr(key);
+                } else {
+                    return await this.client.incrBy(key, amount);
+                }
+            }
+        } catch (error) {
+            loggingService.warn('Redis incr failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Fallback to in-memory
+        const entry = this.inMemoryCache.get(key);
+        let currentValue = 0;
+        
+        if (entry && entry.expiry > Date.now()) {
+            try {
+                currentValue = parseInt(entry.value) || 0;
+            } catch (error) {
+                currentValue = 0;
+            }
+        }
+        
+        const newValue = currentValue + amount;
+        this.inMemoryCache.set(key, {
+            value: newValue.toString(),
+            expiry: Date.now() + (3600 * 1000) // 1 hour default
+        });
+        
+        return newValue;
+    }
+
+    /**
+     * Flush all keys in current database
+     */
+    public async flushDB(): Promise<void> {
+        try {
+            if (this.isLocalDev) {
+                this.inMemoryCache.clear();
+                return;
+            }
+
+            if (this.client && this._isConnected) {
+                await this.client.flushDb();
+            }
+        } catch (error) {
+            loggingService.warn('Redis flushDB failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Always clear in-memory as fallback
+        this.inMemoryCache.clear();
     }
 }
 

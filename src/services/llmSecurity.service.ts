@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { PromptFirewallService, ThreatDetectionResult } from './promptFirewall.service';
 import { ThreatLog } from '../models/ThreatLog';
 import { Types } from 'mongoose';
@@ -108,7 +108,8 @@ export class LLMSecurityService {
             };
 
         } catch (error) {
-            logger.error('LLM security check failed', error as Error, {
+            loggingService.error('LLM security check failed', {
+                error: error instanceof Error ? error.message : String(error),
                 requestId,
                 userId,
                 promptLength: prompt.length
@@ -180,11 +181,15 @@ export class LLMSecurityService {
                 }
             };
 
-            logger.info('Security trace event', traceData);
+            loggingService.info('Security trace event', { value:  { value: traceData  } });
             return traceData;
 
         } catch (error) {
-            logger.error('Failed to create security trace event', error as Error, { requestId, userId });
+            loggingService.error('Failed to create security trace event', {
+                error: error instanceof Error ? error.message : String(error),
+                requestId,
+                userId
+            });
             return null;
         }
     }
@@ -224,17 +229,17 @@ export class LLMSecurityService {
             if (request && request.status === 'pending') {
                 request.status = 'expired';
                 this.humanReviewQueue.set(reviewId, request);
-                logger.info('Human review request expired', { reviewId, requestId });
+                loggingService.info('Human review request expired', { value:  {  reviewId, requestId  } });
             }
         }, expirationTime);
 
-        logger.info('Created human review request', {
+        loggingService.info('Created human review request', { value:  { 
             reviewId,
             requestId,
             userId,
             threatCategory: threatResult.threatCategory,
             riskScore: threatResult.riskScore
-        });
+         } });
 
         return reviewId;
     }
@@ -275,12 +280,12 @@ export class LLMSecurityService {
 
         this.humanReviewQueue.set(reviewId, request);
 
-        logger.info('Human review completed', {
+        loggingService.info('Human review completed', { value:  { 
             reviewId,
             reviewerId,
             decision,
             requestId: request.requestId
-        });
+         } });
 
         return true;
     }
@@ -311,7 +316,7 @@ export class LLMSecurityService {
                 try {
                     matchQuery.userId = new Types.ObjectId(userId);
                 } catch (idError) {
-                    logger.warn('Invalid userId format, skipping user filter:', userId);
+                    loggingService.warn('Invalid userId format, skipping user filter:', { value:  { value: userId } });
                     // Continue without user filter if userId is invalid
                 }
             }
@@ -321,7 +326,7 @@ export class LLMSecurityService {
             try {
                 threatLogs = await ThreatLog.find(matchQuery).sort({ timestamp: -1 });
             } catch (dbError) {
-                logger.error('Error fetching threat logs from database:', dbError);
+                loggingService.error('Error fetching threat logs from database:', { error: dbError instanceof Error ? dbError.message : String(dbError) });
                 threatLogs = []; // Default to empty array if database query fails
             }
 
@@ -400,7 +405,10 @@ export class LLMSecurityService {
             };
 
         } catch (error) {
-            logger.error('Failed to get security analytics', error as Error, { userId });
+            loggingService.error('Failed to get security analytics', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
             
             // Return empty analytics
             return {
@@ -460,7 +468,7 @@ export class LLMSecurityService {
         });
 
         if (expiredKeys.length > 0) {
-            logger.info(`Cleaned up ${expiredKeys.length} expired human review requests`);
+            loggingService.info(`Cleaned up ${expiredKeys.length} expired human review requests`);
         }
     }
 
@@ -483,7 +491,7 @@ export class LLMSecurityService {
                 try {
                     matchQuery.userId = new Types.ObjectId(userId);
                 } catch (idError) {
-                    logger.warn('Invalid userId format in metrics, skipping user filter:', userId);
+                    loggingService.warn('Invalid userId format in metrics, skipping user filter:', { value:  { value: userId } });
                     // Continue without user filter if userId is invalid
                 }
             }
@@ -498,7 +506,7 @@ export class LLMSecurityService {
                     timestamp: { $gte: fifteenDaysAgo }
                 });
             } catch (dbError) {
-                logger.error('Error fetching threat logs for metrics:', dbError);
+                loggingService.error('Error fetching threat logs for metrics:', { error: dbError instanceof Error ? dbError.message : String(dbError) });
                 // Return default values if database query fails
                 return {
                     totalThreatsDetected: 0,
@@ -542,7 +550,10 @@ export class LLMSecurityService {
             };
 
         } catch (error) {
-            logger.error('Failed to get security metrics summary', error as Error, { userId });
+            loggingService.error('Failed to get security metrics summary', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
             return {
                 totalThreatsDetected: 0,
                 totalCostSaved: 0,

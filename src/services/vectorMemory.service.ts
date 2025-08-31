@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 
@@ -76,7 +76,7 @@ export class VectorMemoryService {
             
             return embedding;
         } catch (error) {
-            logger.error('❌ Failed to generate embedding:', error);
+            loggingService.error('❌ Failed to generate embedding:', { error: error instanceof Error ? error.message : String(error) });
             // Fallback: generate a simple hash-based embedding
             return this.generateHashBasedEmbedding(text);
         }
@@ -96,7 +96,7 @@ export class VectorMemoryService {
                 throw new Error('Invalid embedding format');
             }
         } catch (error) {
-            logger.warn('⚠️ Failed to parse AI embedding, using fallback');
+            loggingService.warn('⚠️ Failed to parse AI embedding, using fallback');
             return this.generateHashBasedEmbedding(embeddingText);
         }
     }
@@ -196,7 +196,7 @@ export class VectorMemoryService {
         metadata: any;
     }): Promise<void> {
         try {
-            logger.info(`📊 Storing vector for conversation: ${item.id}`);
+            loggingService.info(`📊 Storing vector for conversation: ${item.id}`);
             
             // Generate embedding for the query
             const queryEmbedding = await this.generateEmbedding(item.query);
@@ -221,9 +221,9 @@ export class VectorMemoryService {
             }
             this.userVectorIndex.get(item.userId)!.add(item.id);
             
-            logger.info(`✅ Vector stored successfully for conversation: ${item.id}`);
+            loggingService.info(`✅ Vector stored successfully for conversation: ${item.id}`);
         } catch (error) {
-            logger.error('❌ Failed to store conversation vector:', error);
+            loggingService.error('❌ Failed to store conversation vector:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -238,7 +238,7 @@ export class VectorMemoryService {
         minSimilarity: number = 0.5
     ): Promise<SimilarityResult[]> {
         try {
-            logger.info(`🔍 Finding similar conversations for user: ${userId}`);
+            loggingService.info(`🔍 Finding similar conversations for user: ${userId}`);
             
             // Generate embedding for the query
             const queryEmbedding = await this.generateEmbedding(query);
@@ -246,7 +246,7 @@ export class VectorMemoryService {
             // Get user's conversation vectors
             const userVectorIds = this.userVectorIndex.get(userId);
             if (!userVectorIds || userVectorIds.size === 0) {
-                logger.info(`No conversation vectors found for user: ${userId}`);
+                loggingService.info(`No conversation vectors found for user: ${userId}`);
                 return [];
             }
             
@@ -274,10 +274,10 @@ export class VectorMemoryService {
             similarities.sort((a, b) => b.similarity - a.similarity);
             const results = similarities.slice(0, limit);
             
-            logger.info(`✅ Found ${results.length} similar conversations`);
+            loggingService.info(`✅ Found ${results.length} similar conversations`);
             return results;
         } catch (error) {
-            logger.error('❌ Failed to find similar conversations:', error);
+            loggingService.error('❌ Failed to find similar conversations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -291,7 +291,7 @@ export class VectorMemoryService {
         minSimilarity: number = 0.7
     ): Promise<SimilarityResult[]> {
         try {
-            logger.info(`🔍 Finding similar patterns globally`);
+            loggingService.info(`🔍 Finding similar patterns globally`);
             
             // Generate embedding for the query
             const queryEmbedding = await this.generateEmbedding(query);
@@ -320,10 +320,10 @@ export class VectorMemoryService {
             similarities.sort((a, b) => b.similarity - a.similarity);
             const results = similarities.slice(0, limit);
             
-            logger.info(`✅ Found ${results.length} similar patterns globally`);
+            loggingService.info(`✅ Found ${results.length} similar patterns globally`);
             return results;
         } catch (error) {
-            logger.error('❌ Failed to find similar patterns globally:', error);
+            loggingService.error('❌ Failed to find similar patterns globally:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -333,7 +333,7 @@ export class VectorMemoryService {
      */
     async clearUserVectors(userId: string): Promise<void> {
         try {
-            logger.info(`🗑️ Clearing vectors for user: ${userId}`);
+            loggingService.info(`🗑️ Clearing vectors for user: ${userId}`);
             
             const userVectorIds = this.userVectorIndex.get(userId);
             if (userVectorIds) {
@@ -343,9 +343,9 @@ export class VectorMemoryService {
                 this.userVectorIndex.delete(userId);
             }
             
-            logger.info(`✅ Cleared all vectors for user: ${userId}`);
+            loggingService.info(`✅ Cleared all vectors for user: ${userId}`);
         } catch (error) {
-            logger.error('❌ Failed to clear user vectors:', error);
+            loggingService.error('❌ Failed to clear user vectors:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -384,7 +384,7 @@ export class VectorMemoryService {
         // In production, you might want to track timestamps
         if (this.embeddingCache.size > 10000) {
             this.embeddingCache.clear();
-            logger.info('🧹 Cleared embedding cache');
+            loggingService.info('🧹 Cleared embedding cache');
         }
     }
 }

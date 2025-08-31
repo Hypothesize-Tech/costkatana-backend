@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 import { memoryService, MemoryContext, MemoryInsight } from './memory.service';
@@ -39,7 +39,7 @@ export class MemoryWriterAgent {
      */
     async processMemoryWrite(state: MemoryAgentState): Promise<Partial<MemoryAgentState>> {
         try {
-            logger.info(`📝 MemoryWriterAgent processing for user: ${state.userId}`);
+            loggingService.info(`📝 MemoryWriterAgent processing for user: ${state.userId}`);
 
             const operations: string[] = [];
 
@@ -65,7 +65,7 @@ export class MemoryWriterAgent {
             await this.generateLearningInsights(state);
             operations.push('learning_insights_generated');
 
-            logger.info(`✅ MemoryWriterAgent completed ${operations.length} operations`);
+            loggingService.info(`✅ MemoryWriterAgent completed ${operations.length} operations`);
 
             return {
                 memoryOperations: operations,
@@ -76,7 +76,7 @@ export class MemoryWriterAgent {
                 }
             };
         } catch (error) {
-            logger.error('❌ MemoryWriterAgent failed:', error);
+            loggingService.error('❌ MemoryWriterAgent failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 memoryOperations: ['error'],
                 metadata: {
@@ -137,7 +137,7 @@ export class MemoryWriterAgent {
 
         try {
             const response = await this.writerAgent.invoke([new HumanMessage(analysisPrompt)]);
-            const analysis = JSON.parse(response.content.toString());
+            const analysis = this.parseAIResponse(response.content.toString());
 
             // Update user preferences based on analysis
             const preferenceUpdates: any = {};
@@ -176,7 +176,7 @@ export class MemoryWriterAgent {
                 await userPreferenceService.updatePreferences(state.userId, preferenceUpdates);
             }
         } catch (error) {
-            logger.error('❌ Failed to analyze preferences:', error);
+            loggingService.error('❌ Failed to analyze preferences:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -188,7 +188,7 @@ export class MemoryWriterAgent {
 
         // Store security-related memory entries
         // This would integrate with your existing security logging system
-        logger.warn(`🚨 Security flags for user ${state.userId}: ${state.securityFlags.join(', ')}`);
+        loggingService.warn(`🚨 Security flags for user ${state.userId}: ${state.securityFlags.join(', ')}`);
     }
 
     /**
@@ -211,12 +211,37 @@ export class MemoryWriterAgent {
             ["insight1", "insight2", "insight3"]`;
 
             const response = await this.writerAgent.invoke([new HumanMessage(insightPrompt)]);
-            const insights = JSON.parse(response.content.toString());
+            const insights = this.parseAIResponse(response.content.toString());
 
             return Array.isArray(insights) ? insights : [];
         } catch (error) {
-            logger.error('❌ Failed to generate learning insights:', error);
+            loggingService.error('❌ Failed to generate learning insights:', { error: error instanceof Error ? error.message : String(error) });
             return [];
+        }
+    }
+
+    /**
+     * Parse AI response that might be wrapped in markdown code blocks
+     */
+    private parseAIResponse(content: string): any {
+        try {
+            // First try to parse as-is
+            return JSON.parse(content);
+        } catch (error) {
+            // If that fails, try to extract JSON from markdown code blocks
+            const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```/);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[1]);
+            }
+            
+            // Try to find JSON object or array without code blocks
+            const objectMatch = content.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+            if (objectMatch) {
+                return JSON.parse(objectMatch[0]);
+            }
+            
+            // If all else fails, throw the original error
+            throw error;
         }
     }
 }
@@ -241,7 +266,7 @@ export class MemoryReaderAgent {
      */
     async processMemoryRead(state: MemoryAgentState): Promise<Partial<MemoryAgentState>> {
         try {
-            logger.info(`🔍 MemoryReaderAgent processing for user: ${state.userId}`);
+            loggingService.info(`🔍 MemoryReaderAgent processing for user: ${state.userId}`);
 
             const [
                 memoryInsights,
@@ -263,7 +288,7 @@ export class MemoryReaderAgent {
                 securityFlags.push(securityCheck.content);
             }
 
-            logger.info(`✅ MemoryReaderAgent retrieved insights for user: ${state.userId}`);
+            loggingService.info(`✅ MemoryReaderAgent retrieved insights for user: ${state.userId}`);
 
             return {
                 memoryInsights,
@@ -280,7 +305,7 @@ export class MemoryReaderAgent {
                 }
             };
         } catch (error) {
-            logger.error('❌ MemoryReaderAgent failed:', error);
+            loggingService.error('❌ MemoryReaderAgent failed:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 memoryInsights: [],
                 similarConversations: [],
@@ -336,10 +361,10 @@ export class MemoryReaderAgent {
             const response = await this.readerAgent.invoke([new HumanMessage(enhancementPrompt)]);
             const enhancedQuery = response.content.toString().trim();
 
-            logger.info(`🎯 Enhanced query with memory context`);
+            loggingService.info(`🎯 Enhanced query with memory context`);
             return enhancedQuery;
         } catch (error) {
-            logger.error('❌ Failed to enhance prompt with memory:', error);
+            loggingService.error('❌ Failed to enhance prompt with memory:', { error: error instanceof Error ? error.message : String(error) });
             return state.query; // Fallback to original query
         }
     }
@@ -379,7 +404,7 @@ export class MemoryReaderAgent {
             const response = await this.readerAgent.invoke([new HumanMessage(guidancePrompt)]);
             return response.content.toString();
         } catch (error) {
-            logger.error('❌ Failed to generate response guidance:', error);
+            loggingService.error('❌ Failed to generate response guidance:', { error: error instanceof Error ? error.message : String(error) });
             return 'No specific guidance available';
         }
     }

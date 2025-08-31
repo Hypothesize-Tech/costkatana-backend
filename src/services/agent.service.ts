@@ -12,7 +12,7 @@ import { WebScraperTool } from "../tools/webScraper.tool";
 import { LifeUtilityTool } from "../tools/lifeUtility.tool";
 import { vectorStoreService } from "./vectorStore.service";
 import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
-import { logger } from "../utils/logger";
+import { loggingService } from "./logging.service";
 
 export interface AgentQuery {
     userId: string;
@@ -38,6 +38,8 @@ export interface AgentResponse {
         sources?: string[];
         executionTime?: number;
         errorType?: string;
+        knowledgeEnhanced?: boolean;
+        knowledgeContextLength?: number;
     };
     thinking?: {
         title: string;
@@ -60,10 +62,8 @@ export class AgentService {
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
 
     constructor() {
-        // Initialize Nova Pro for most tasks (efficient and cost-effective)
-        // Use environment variable or default to Nova Pro as requested
         const defaultModel = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-        const isMasterAgent = process.env.AGENT_TYPE === 'master'; // For complex reasoning tasks
+        const isMasterAgent = process.env.AGENT_TYPE === 'master';
         const selectedModel = isMasterAgent ? 'anthropic.claude-3-5-sonnet-20241022-v2:0' : defaultModel;
         
         this.model = new ChatBedrockConverse({
@@ -77,7 +77,7 @@ export class AgentService {
             maxTokens: isMasterAgent ? 8000 : 5000, // More tokens for complex tasks
         });
 
-        console.log(`🤖 Initialized ${isMasterAgent ? 'Master' : 'Standard'} Agent`);
+        loggingService.info(`🤖 Initialized ${isMasterAgent ? 'Master' : 'Standard'} Agent`);
 
         // Initialize tools - comprehensive access to all backend features
         this.tools = [
@@ -96,7 +96,7 @@ export class AgentService {
         this.retryExecutor = RetryWithBackoff.createBedrockRetry({
             ...RetryConfigs.bedrock,
             onRetry: (error: Error, attempt: number) => {
-                logger.warn(`🔄 Agent retry attempt ${attempt}: ${error.message}`);
+                loggingService.warn(`🔄 Agent retry attempt ${attempt}: ${error.message}`);
             }
         });
     }
@@ -108,14 +108,32 @@ export class AgentService {
         if (this.initialized) return;
 
         try {
-            console.log('🤖 Initializing AIOps Agent...');
+            loggingService.info('🤖 Initializing AIOps Agent...');
 
             // Initialize vector store first
             await vectorStoreService.initialize();
 
             // Create the agent prompt template
             const prompt = ChatPromptTemplate.fromMessages([
-                SystemMessagePromptTemplate.fromTemplate(`You are an AI Cost Optimization Agent. Answer user questions using available tools.
+                SystemMessagePromptTemplate.fromTemplate(`You are an AI Cost Optimization Agent with access to comprehensive knowledge about the AI Cost Optimizer platform. You have deep understanding of:
+
+🎯 CORE PLATFORM KNOWLEDGE:
+- Cost optimization strategies (prompt compression, context trimming, model switching)
+- AI insights and analytics (usage patterns, cost trends, predictive analytics)
+- Multi-agent workflows and coordination patterns
+- System architecture (controllers, services, APIs, infrastructure)
+- Real-time monitoring and observability features
+- Security monitoring and threat detection capabilities
+- User management and authentication patterns
+- Webhook management and delivery systems
+- Training dataset management and PII analysis
+- Comprehensive logging and business intelligence
+
+🤖 MULTIAGENT COORDINATION:
+- You can coordinate with other specialized agents (optimizer, analyst, scraper, UX agents)
+- Use knowledge_base_search to find specific information about system capabilities
+- Leverage system documentation for accurate technical guidance
+- Provide context-aware recommendations based on platform knowledge
 
 Available tools: {tools}
 
@@ -138,6 +156,14 @@ CRITICAL STOPPING RULES - YOU MUST FOLLOW THESE EXACTLY:
 6. If you get "Invalid operation", try ONE different operation, then provide Final Answer
 
 COMPREHENSIVE TOOL USAGE RULES - FOLLOW THESE EXACTLY:
+
+📚 KNOWLEDGE & DOCUMENTATION QUERIES → knowledge_base_search:
+- "How does [feature] work?", "What is [component]?", "Best practices for [topic]"
+- System architecture questions, API documentation, integration guides
+- "How to optimize costs?", "What are the available features?"
+- "How do I set up webhooks?", "What security features are available?"
+- "How does multi-agent coordination work?", "What analytics are available?"
+- Use this FIRST for any questions about platform capabilities, features, or documentation
 
 🔍 TOKEN USAGE QUERIES → analytics_manager with "token_usage":
 - "Token usage", "tokens", "token consumption", "token breakdown"
@@ -292,10 +318,10 @@ Thought:{agent_scratchpad}`),
             });
 
             this.initialized = true;
-            console.log('✅ AIOps Agent initialized successfully');
+            loggingService.info('✅ AIOps Agent initialized successfully');
             
         } catch (error) {
-            console.error('❌ Failed to initialize agent:', error);
+            loggingService.error('❌ Failed to initialize agent:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Agent initialization failed');
         }
     }
@@ -343,14 +369,14 @@ Thought:{agent_scratchpad}`),
             if (result.success && result.result) {
                 // This is wrapped by retry mechanism, extract the actual result
                 actualResult = result.result;
-                console.log('🔄 Detected retry wrapper, extracting actual result');
+                loggingService.info('🔄 Detected retry wrapper, extracting actual result');
             }
             
             // Process the result to ensure we always have a proper response
             let finalResponse = actualResult.output;
             
             // Debug logging to understand what we got from the agent
-            console.log('🔍 Agent Result Debug:', {
+            loggingService.info('🔍 Agent Result Debug:', {
                 isWrapped: result.success && result.result,
                 hasOutput: !!actualResult.output,
                 outputLength: actualResult.output?.length || 0,
@@ -363,14 +389,14 @@ Thought:{agent_scratchpad}`),
             
             // If the agent hit max iterations without a proper Final Answer, extract useful info
             if (!finalResponse || finalResponse.includes('Agent stopped due to max iterations')) {
-                console.log('⚠️ Agent output is falsy or contains max iterations, extracting from intermediate steps...');
+                loggingService.info('⚠️ Agent output is falsy or contains max iterations, extracting from intermediate steps...');
                 finalResponse = this.extractUsefulResponse(actualResult, queryData.query);
-                console.log('📋 Extracted response:', {
+                loggingService.info('📋 Extracted response:', {
                     length: finalResponse?.length || 0,
                     preview: finalResponse?.substring(0, 200) + '...'
                 });
             } else {
-                console.log('✅ Agent provided proper output directly');
+                loggingService.info('✅ Agent provided proper output directly');
             }
 
             return {
@@ -385,7 +411,7 @@ Thought:{agent_scratchpad}`),
             };
 
         } catch (error) {
-            console.error('Agent query failed:', error);
+            loggingService.error('Agent query failed:', { error: error instanceof Error ? error.message : String(error) });
             
             // Handle specific error types
             let errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -438,15 +464,15 @@ Thought:{agent_scratchpad}`),
                         lastToolOutput = typeof step.observation === 'string' 
                             ? JSON.parse(step.observation) 
                             : step.observation;
-                        console.log('🔧 Found tool output in intermediate steps:', {
+                        loggingService.info('🔧 Found tool output in intermediate steps:', { value:  { 
                             success: lastToolOutput?.success,
                             operation: lastToolOutput?.operation,
                             hasData: !!lastToolOutput?.data
-                        });
+                         } });
                     } catch (e) {
                         // If it's not JSON, keep as string
                         lastToolOutput = step.observation;
-                        console.log('🔧 Found non-JSON tool output:', step.observation?.substring(0, 100) + '...');
+                        loggingService.info('🔧 Found non-JSON tool output:', { output: step.observation?.substring(0, 100) + '...' });
                     }
                 }
             }
@@ -475,7 +501,7 @@ Thought:{agent_scratchpad}`),
                 
                 // PRIORITY: If we have successful tool output, use it regardless of agent completion status
                 if (lastToolOutput && typeof lastToolOutput === 'object') {
-                    console.log('🎯 Processing tool output:', {
+                    loggingService.info('🎯 Processing tool output:', {
                         success: lastToolOutput.success,
                         operation: lastToolOutput.operation,
                         hasData: !!lastToolOutput.data,
@@ -694,7 +720,7 @@ Thought:{agent_scratchpad}`),
             
             // CRITICAL: Before falling back to error messages, check if we actually had successful tool output
             if (lastToolOutput && lastToolOutput.success) {
-                console.log('⚠️ Had successful tool output but couldn\'t format it properly. Returning raw success message.');
+                loggingService.info('⚠️ Had successful tool output but couldn\'t format it properly. Returning raw success message.');
                 if (lastToolOutput.summary) {
                     return lastToolOutput.summary;
                 } else if (lastToolOutput.data && lastToolOutput.data.message) {
@@ -707,7 +733,7 @@ Thought:{agent_scratchpad}`),
             // Comprehensive fallback response based on query type (only if no successful tool output)
             const queryLower = originalQuery.toLowerCase();
             
-            console.log('🚨 No successful tool output found, using fallback for query:', queryLower);
+            loggingService.info('🚨 No successful tool output found, using fallback for query:', { value:  {  query: queryLower  } });
             
             if (queryLower.includes('token')) {
                 return "I couldn't find any token usage data for your account. This might mean you're new to the platform or haven't made API calls recently. Would you like me to help you set up API tracking?";
@@ -730,7 +756,7 @@ Thought:{agent_scratchpad}`),
             }
             
         } catch (error) {
-            console.error('Error extracting useful response:', error);
+            loggingService.error('Error extracting useful response:', { error: error instanceof Error ? error.message : String(error) });
             return "I encountered an issue processing your request. Please try asking a more specific question, such as 'What did I spend this month?' or 'Show my token usage.'";
         }
     }
@@ -767,7 +793,7 @@ Thought:{agent_scratchpad}`),
                 learningSource: 'agent_interaction'
             });
         } catch (error) {
-            console.error('Failed to add learning:', error);
+            loggingService.error('Failed to add learning:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -1258,6 +1284,270 @@ Thought:{agent_scratchpad}`),
         }
 
         return [...new Set(sources)]; // Remove duplicates
+    }
+
+    /**
+     * Enhanced query processing with knowledge base integration for multiagent coordination
+     */
+    async processQueryWithKnowledgeContext(query: AgentQuery): Promise<AgentResponse> {
+        const startTime = Date.now();
+        
+        try {
+            loggingService.info('Knowledge-enhanced agent query initiated', { value:  { 
+                userId: query.userId,
+                query: query.query,
+                hasContext: !!query.context,
+                agentType: process.env.AGENT_TYPE || 'standard'
+             } });
+
+            // First, search knowledge base for relevant context
+            const knowledgeBaseTool = new KnowledgeBaseTool();
+            
+            // Enhance the knowledge base query with existing context
+            let contextualKnowledgeQuery = query.query;
+            if (query.context) {
+                // Add conversation context for better knowledge base search
+                if (query.context.previousMessages && query.context.previousMessages.length > 0) {
+                    const recentContext = query.context.previousMessages
+                        .slice(-2) // Last 2 messages for context
+                        .map((msg: any) => `${msg.role}: ${msg.content}`)
+                        .join('\n');
+                    
+                    contextualKnowledgeQuery = `Conversation context:\n${recentContext}\n\nCurrent query: ${query.query}`;
+                }
+
+                // Add project context if available
+                if (query.context.projectId) {
+                    contextualKnowledgeQuery += `\n\nProject context: ${query.context.projectId}`;
+                }
+
+                // Add conversation ID for tracking
+                if (query.context.conversationId) {
+                    contextualKnowledgeQuery += `\n\nConversation: ${query.context.conversationId}`;
+                }
+            }
+            
+            const knowledgeContext = await knowledgeBaseTool._call(contextualKnowledgeQuery);
+
+            // Enhance the query with knowledge context
+            const enhancedQuery: AgentQuery = {
+                ...query,
+                context: {
+                    ...query.context,
+                    knowledgeBaseContext: knowledgeContext,
+                    systemCapabilities: [
+                        'cost_optimization',
+                        'usage_analytics', 
+                        'workflow_management',
+                        'security_monitoring',
+                        'user_management',
+                        'webhook_delivery',
+                        'training_datasets',
+                        'comprehensive_logging'
+                    ],
+                    availableAgentTypes: ['master', 'optimizer', 'analyst', 'scraper', 'ux']
+                }
+            };
+
+            // Process with enhanced context
+            const response = await this.query(enhancedQuery);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Knowledge-enhanced agent query completed', { value:  { 
+                userId: query.userId,
+                success: response.success,
+                duration,
+                hasKnowledgeContext: !!knowledgeContext,
+                usedContextualQuery: contextualKnowledgeQuery !== query.query,
+                contextualQueryLength: contextualKnowledgeQuery.length,
+                agentType: process.env.AGENT_TYPE || 'standard'
+             } });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'knowledge_enhanced_agent_query',
+                category: 'multiagent_coordination',
+                value: duration,
+                metadata: {
+                    userId: query.userId,
+                    success: response.success,
+                    agentType: process.env.AGENT_TYPE || 'standard',
+                    hasKnowledgeContext: !!knowledgeContext
+                }
+            });
+
+            return {
+                ...response,
+                metadata: {
+                    ...response.metadata,
+                    knowledgeEnhanced: true,
+                    knowledgeContextLength: knowledgeContext?.length || 0,
+                    executionTime: duration
+                }
+            };
+
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Knowledge-enhanced agent query failed', {
+                userId: query.userId,
+                query: query.query,
+                error: error.message,
+                stack: error.stack,
+                duration,
+                agentType: process.env.AGENT_TYPE || 'standard'
+            });
+
+            return {
+                success: false,
+                error: `Knowledge-enhanced processing failed: ${error.message}`,
+                metadata: {
+                    errorType: 'knowledge_enhancement_error',
+                    executionTime: duration
+                }
+            };
+        }
+    }
+
+    /**
+     * Get agent-specific knowledge context
+     */
+    async getAgentKnowledgeContext(agentType: string, topic?: string): Promise<string> {
+        try {
+            const knowledgeBaseTool = new KnowledgeBaseTool();
+            
+            // Build agent-specific query
+            let query = `${agentType} agent capabilities and responsibilities`;
+            if (topic) {
+                query += ` related to ${topic}`;
+            }
+
+            const context = await knowledgeBaseTool._call(query);
+            
+            loggingService.info('Agent knowledge context retrieved', { value:  { 
+                agentType,
+                topic,
+                contextLength: context.length
+             } });
+
+            return context;
+
+        } catch (error: any) {
+            loggingService.error('Failed to get agent knowledge context', {
+                agentType,
+                topic,
+                error: error.message
+            });
+            
+            return `Error retrieving knowledge context for ${agentType} agent: ${error.message}`;
+        }
+    }
+
+    /**
+     * Coordinate with other agents using knowledge base context
+     */
+    async coordinateWithAgents(
+        primaryQuery: string,
+        requiredAgentTypes: string[],
+        userId: string
+    ): Promise<{
+        coordinationPlan: string;
+        agentContexts: { [agentType: string]: string };
+        recommendations: string[];
+    }> {
+        try {
+            loggingService.info('Multi-agent coordination initiated', { value:  { 
+                userId,
+                primaryQuery,
+                requiredAgentTypes,
+                agentCount: requiredAgentTypes.length
+             } });
+
+            // Get knowledge context for each required agent type
+            const agentContexts: { [agentType: string]: string } = {};
+            
+            for (const agentType of requiredAgentTypes) {
+                agentContexts[agentType] = await this.getAgentKnowledgeContext(agentType, primaryQuery);
+            }
+
+            // Generate coordination plan based on knowledge
+            const knowledgeBaseTool = new KnowledgeBaseTool();
+            const coordinationContext = await knowledgeBaseTool._call(
+                `multi-agent coordination patterns and workflow management for: ${primaryQuery}`
+            );
+
+            // Generate recommendations
+            const recommendations = this.generateCoordinationRecommendations(
+                primaryQuery,
+                requiredAgentTypes,
+                coordinationContext
+            );
+
+            loggingService.info('Multi-agent coordination completed', {
+                userId,
+                primaryQuery,
+                agentTypesProcessed: Object.keys(agentContexts).length,
+                recommendationsCount: recommendations.length
+            });
+
+            return {
+                coordinationPlan: coordinationContext,
+                agentContexts,
+                recommendations
+            };
+
+        } catch (error: any) {
+            loggingService.error('Multi-agent coordination failed', {
+                userId,
+                primaryQuery,
+                requiredAgentTypes,
+                error: error.message,
+                stack: error.stack
+            });
+
+            throw new Error(`Multi-agent coordination failed: ${error.message}`);
+        }
+    }
+
+    /**
+     * Generate coordination recommendations based on query and agent types
+     */
+    private generateCoordinationRecommendations(
+        query: string,
+        agentTypes: string[],
+        coordinationContext: string
+    ): string[] {
+        const recommendations: string[] = [];
+        const queryLower = query.toLowerCase();
+
+        // Analyze query for specific coordination patterns
+        if (queryLower.includes('cost') || queryLower.includes('optimization')) {
+            recommendations.push('Coordinate optimizer and analyst agents for comprehensive cost analysis');
+        }
+
+        if (queryLower.includes('data') || queryLower.includes('scraping')) {
+            recommendations.push('Use scraper agent to gather data, then analyst agent to process insights');
+        }
+
+        if (queryLower.includes('user') || queryLower.includes('interface')) {
+            recommendations.push('Involve UX agent for user experience considerations');
+        }
+
+        if (queryLower.includes('workflow') || queryLower.includes('process')) {
+            recommendations.push('Leverage workflow management capabilities for automated coordination');
+        }
+
+        if (agentTypes.includes('master')) {
+            recommendations.push('Master agent should orchestrate and validate all agent responses');
+        }
+
+        // Add general coordination recommendations
+        recommendations.push('Use knowledge base context to ensure consistent responses across agents');
+        recommendations.push('Implement proper error handling and fallback mechanisms');
+        recommendations.push('Log all agent interactions for observability and debugging');
+
+        return recommendations;
     }
 }
 

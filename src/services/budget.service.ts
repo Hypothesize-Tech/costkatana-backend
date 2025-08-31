@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
 import { webhookEventEmitter } from './webhookEventEmitter.service';
@@ -77,7 +77,7 @@ export class BudgetService {
         recommendations,
       };
     } catch (error) {
-      logger.error('Error getting budget status:', error);
+      loggingService.error('Error getting budget status:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -267,7 +267,7 @@ export class BudgetService {
       
       // Emit webhook event for cost alert
       try {
-        logger.info('Emitting cost alert webhook', { userId, cost: overall.cost });
+        loggingService.info('Emitting cost alert webhook', { value:  {  userId, cost: overall.cost  } });
         webhookEventEmitter.emitCostAlert(
           userId,
           undefined, // No specific project
@@ -276,7 +276,7 @@ export class BudgetService {
           'USD'
         );
       } catch (error) {
-        logger.error('Failed to emit cost alert webhook', { error });
+        loggingService.error('Failed to emit cost alert webhook', { error: error instanceof Error ? error.message : String(error) });
       }
     }
 

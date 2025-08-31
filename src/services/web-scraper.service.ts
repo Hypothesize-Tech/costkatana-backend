@@ -1,6 +1,6 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 // Add DOM types for browser context
 declare global {
@@ -52,7 +52,7 @@ export class WebScraperService {
             };
         }
 
-        logger.info(`Starting to scrape pricing for ${provider} from ${url}`);
+        loggingService.info(`Starting to scrape pricing for ${provider} from ${url}`);
 
         // Try multiple methods for scraping
         let content = '';
@@ -64,11 +64,11 @@ export class WebScraperService {
             content = await this.scrapeWithAxios(url);
             if (content && content.length > 1000) { // Reasonable content length
                 success = true;
-                logger.info(`Successfully scraped ${provider} with Axios (${content.length} chars)`);
+                loggingService.info(`Successfully scraped ${provider} with Axios (${content.length} chars)`);
             }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : String(err);
-            logger.warn(`Axios scraping failed for ${provider}: ${errorMessage}`);
+            loggingService.warn(`Axios scraping failed for ${provider}: ${errorMessage}`);
         }
 
         // Method 2: If simple request failed, try alternative headers/approaches
@@ -78,12 +78,12 @@ export class WebScraperService {
                 content = await this.scrapeWithAlternativeMethod(url);
                 if (content && content.length > 1000) {
                     success = true;
-                    logger.info(`Successfully scraped ${provider} with alternative method (${content.length} chars)`);
+                    loggingService.info(`Successfully scraped ${provider} with alternative method (${content.length} chars)`);
                 }
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : String(err);
                 error = `Both scraping methods failed: ${errorMessage}`;
-                logger.error(`Alternative scraping failed for ${provider}: ${errorMessage}`);
+                loggingService.error(`Alternative scraping failed for ${provider}:`, { error: errorMessage });
             }
         }
 
@@ -92,7 +92,7 @@ export class WebScraperService {
             content = await this.getFallbackContent(provider);
             if (content) {
                 success = true;
-                logger.info(`Using fallback content for ${provider}`);
+                loggingService.info(`Using fallback content for ${provider}`);
             }
         }
 
@@ -367,7 +367,7 @@ export class WebScraperService {
         const providers = Object.keys(this.PROVIDER_URLS);
         const results: ScrapedPricingData[] = [];
 
-        logger.info(`Starting to scrape pricing data for ${providers.length} providers`);
+        loggingService.info(`Starting to scrape pricing data for ${providers.length} providers`);
 
         // Scrape providers in parallel but with some delay to avoid rate limiting
         for (let i = 0; i < providers.length; i++) {
@@ -383,7 +383,7 @@ export class WebScraperService {
                 }
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Failed to scrape ${provider}: ${errorMessage}`);
+                loggingService.error(`Failed to scrape ${provider}: ${errorMessage}`);
                 results.push({
                     provider,
                     url: this.PROVIDER_URLS[provider as keyof typeof this.PROVIDER_URLS] || '',
@@ -396,13 +396,13 @@ export class WebScraperService {
         }
 
         const successCount = results.filter(r => r.success).length;
-        logger.info(`Completed scraping: ${successCount}/${providers.length} providers successful`);
+        loggingService.info(`Completed scraping: ${successCount}/${providers.length} providers successful`);
 
         return results;
     }
 
     static async testScraping(provider: string): Promise<ScrapedPricingData> {
-        logger.info(`Testing scraping for ${provider}`);
+        loggingService.info(`Testing scraping for ${provider}`);
         return await this.scrapeProviderPricing(provider);
     }
 }

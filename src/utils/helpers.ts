@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { config } from '../config';
+import { loggingService } from '../services/logging.service';
 
 // Encryption/Decryption for API keys
 const algorithm = 'aes-256-gcm';
@@ -203,7 +204,15 @@ export const retry = async <T>(
       const jitter = delay * 0.25 * (Math.random() - 0.5);
       delay = Math.max(0, delay + jitter);
       
-      console.log(`Retry attempt ${attempt + 1}/${maxRetries + 1} after ${Math.round(delay)}ms for error: ${error.name || 'Unknown'}`);
+      loggingService.info('Retry attempt scheduled', {
+        component: 'helpers',
+        operation: 'retry',
+        attempt: attempt + 1,
+        maxRetries: maxRetries + 1,
+        delayMs: Math.round(delay),
+        errorName: error.name || 'Unknown',
+        errorMessage: error.message || 'No message'
+      });
       
       // Wait before retrying
       await new Promise(resolve => setTimeout(resolve, delay));

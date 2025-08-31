@@ -1,14 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { User } from '../models/User';
 import { AuthService } from '../services/auth.service';
 import { decrypt } from '../utils/helpers';
 import { KeyVaultService } from '../services/keyVault.service';
 import { v4 as uuidv4 } from 'uuid';
 import { GuardrailsService } from '../services/guardrails.service';
-
-// In-memory rate limiting store (in production, use Redis)
-const rateLimitStore = new Map<string, { count: number; resetTime: number }>();
+import { cacheService } from '../services/cache.service';
 
 // Extend Request interface to include gateway-specific properties
 declare global {
@@ -101,7 +99,7 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
 
         // Check rate limiting if configured
         if (proxyKey.rateLimit) {
-            const rateLimitResult = await checkRateLimit(proxyKeyId, proxyKey.rateLimit, req, res);
+            const rateLimitResult = await checkRateLimit(req, res);
             if (!rateLimitResult.allowed) {
                 return null; // Rate limit exceeded, response already sent
             }
@@ -111,7 +109,7 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
         if (proxyKey.allowedIPs && proxyKey.allowedIPs.length > 0) {
             const clientIP = req.ip || req.connection.remoteAddress || '';
             if (!proxyKey.allowedIPs.includes(clientIP)) {
-                logger.warn('IP not allowed for proxy key', {
+                loggingService.warn('IP not allowed for proxy key', {
                     proxyKeyId,
                     clientIP,
                     allowedIPs: proxyKey.allowedIPs
@@ -131,7 +129,11 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
             provider: providerKey.provider
         };
     } catch (error) {
-        logger.error('Error handling proxy key authentication', error as Error, {
+        loggingService.logError(error as Error, {
+            component: 'GatewayMiddleware',
+            operation: 'handleProxyKeyAuth',
+            type: 'proxy_key_auth',
+            step: 'error',
             proxyKeyId
         });
         res.status(500).json({
@@ -143,96 +145,369 @@ async function handleProxyKeyAuth(proxyKeyId: string, req: Request, res: Respons
 }
 
 /**
- * Gateway authentication middleware - processes CostKatana-Auth header
+ * Check rate limit for gateway requests with Redis primary and in-memory fallback
  */
-// Rate limiting helper function
-async function checkRateLimit(
-    proxyKeyId: string, 
-    rateLimit: any, 
-    _req: Request, 
-    res: Response
-): Promise<{ allowed: boolean }> {
+async function checkRateLimit(req: any, _res: Response): Promise<{ allowed: boolean; retryAfter?: number }> {
+    const startTime = Date.now();
+    
+    loggingService.info('=== GATEWAY RATE LIMIT CHECK STARTED ===', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        path: req.path,
+        method: req.method
+    });
+
+    loggingService.info('Step 1: Generating rate limit key for gateway request', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'generate_key'
+    });
+
+    // Generate rate limit key based on user or IP
+    const key = req.user?.id || req.ip || 'anonymous';
+    const cacheKey = `gateway_rate_limit:${key}`;
+    const now = Date.now();
+    const windowMs = 60000; // 1 minute
+    const maxRequests = 100;
+
+    loggingService.info('Gateway rate limit key generated', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'key_generated',
+        key,
+        cacheKey,
+        hasUser: !!req.user?.id,
+        hasIP: !!req.ip,
+        maxRequests,
+        windowMs
+    });
+
+    loggingService.info('Step 2: Retrieving gateway rate limit record from cache', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'retrieve_record'
+    });
+
+    // Get rate limit record from Redis/in-memory cache
+    let record: { count: number; resetTime: number } | null = null;
     try {
-        const now = Date.now();
-        const windowMs = rateLimit.windowMs || 60000; // Default 1 minute
-        const maxRequests = rateLimit.maxRequests || 100; // Default 100 requests
-        
-        const key = `rate_limit:${proxyKeyId}`;
-        const rateLimitData = rateLimitStore.get(key);
-        
-        // Reset window if expired
-        if (!rateLimitData || now > rateLimitData.resetTime) {
-            rateLimitStore.set(key, {
-                count: 1,
-                resetTime: now + windowMs
+        const cachedRecord = await cacheService.get(cacheKey);
+        if (cachedRecord) {
+            record = cachedRecord as { count: number; resetTime: number };
+            
+            loggingService.info('Gateway rate limit record retrieved from cache', {
+                component: 'GatewayMiddleware',
+                operation: 'checkRateLimit',
+                type: 'gateway_rate_limit',
+                step: 'record_retrieved',
+                key,
+                cacheKey,
+                currentCount: record.count,
+                resetTime: new Date(record.resetTime).toISOString(),
+                timeUntilReset: record.resetTime - now
             });
-            
-            // Set rate limit headers
-            res.setHeader('X-RateLimit-Limit', maxRequests);
-            res.setHeader('X-RateLimit-Remaining', maxRequests - 1);
-            res.setHeader('X-RateLimit-Reset', new Date(now + windowMs).toISOString());
-            
-            return { allowed: true };
         }
-        
-        // Check if limit exceeded
-        if (rateLimitData.count >= maxRequests) {
-            const resetTime = new Date(rateLimitData.resetTime);
-            
-            res.status(429).json({
-                success: false,
-                error: 'Rate limit exceeded',
-                message: `Too many requests. Limit: ${maxRequests} per ${windowMs}ms`,
-                retryAfter: Math.ceil((rateLimitData.resetTime - now) / 1000)
-            });
-            
-            // Set rate limit headers
-            res.setHeader('X-RateLimit-Limit', maxRequests);
-            res.setHeader('X-RateLimit-Remaining', 0);
-            res.setHeader('X-RateLimit-Reset', resetTime.toISOString());
-            res.setHeader('Retry-After', Math.ceil((rateLimitData.resetTime - now) / 1000));
-            
-            logger.warn('Rate limit exceeded', {
-                proxyKeyId,
-                count: rateLimitData.count,
-                limit: maxRequests,
-                resetTime: resetTime.toISOString()
-            });
-            
-            return { allowed: false };
-        }
-        
-        // Increment counter
-        rateLimitData.count++;
-        rateLimitStore.set(key, rateLimitData);
-        
-        // Set rate limit headers
-        res.setHeader('X-RateLimit-Limit', maxRequests);
-        res.setHeader('X-RateLimit-Remaining', maxRequests - rateLimitData.count);
-        res.setHeader('X-RateLimit-Reset', new Date(rateLimitData.resetTime).toISOString());
-        
-        return { allowed: true };
     } catch (error) {
-        logger.error('Error checking rate limit:', error);
-        // Allow request on error to avoid blocking legitimate traffic
-        return { allowed: true };
+        loggingService.warn('Failed to retrieve gateway rate limit record from cache', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'cache_retrieve_failed',
+            key,
+            cacheKey,
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
     }
+
+    loggingService.info('Step 3: Processing gateway rate limit record', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'process_record'
+    });
+
+    // Check if record exists and is still valid
+    if (!record || record.resetTime < now) {
+        // Create new record
+        record = {
+            count: 1,
+            resetTime: now + windowMs
+        };
+        
+        loggingService.info('New gateway rate limit record created', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'record_created',
+            key,
+            cacheKey,
+            resetTime: new Date(record.resetTime).toISOString(),
+            windowMs
+        });
+    } else {
+        // Increment existing record
+        record.count++;
+        
+        loggingService.info('Existing gateway rate limit record incremented', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'record_incremented',
+            key,
+            cacheKey,
+            newCount: record.count,
+            maxRequests,
+            remaining: maxRequests - record.count
+        });
+    }
+
+    loggingService.info('Step 4: Checking gateway rate limit status', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'check_limit'
+    });
+
+    // Check if limit exceeded
+    if (record.count > maxRequests) {
+        const retryAfter = Math.ceil((record.resetTime - now) / 1000);
+        
+        loggingService.warn('Gateway rate limit exceeded', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'limit_exceeded',
+            key,
+            cacheKey,
+            count: record.count,
+            maxRequests,
+            retryAfter,
+            resetTime: new Date(record.resetTime).toISOString()
+        });
+
+        loggingService.info('Gateway rate limit check completed - limit exceeded', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'check_complete_exceeded',
+            key,
+            allowed: false,
+            retryAfter,
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
+        loggingService.info('=== GATEWAY RATE LIMIT CHECK COMPLETED (LIMIT EXCEEDED) ===', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'completed_limit_exceeded',
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
+        return { allowed: false, retryAfter };
+    }
+
+    loggingService.info('Step 5: Storing updated gateway rate limit record in cache', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'store_record'
+    });
+
+    // Store updated record in cache
+    try {
+        const ttl = Math.ceil((record.resetTime - now) / 1000);
+        await cacheService.set(cacheKey, record, ttl, {
+            type: 'gateway_rate_limit',
+            key,
+            maxRequests,
+            windowMs
+        });
+        
+        loggingService.info('Gateway rate limit record stored in cache successfully', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'record_stored',
+            key,
+            cacheKey,
+            ttl,
+            count: record.count,
+            resetTime: new Date(record.resetTime).toISOString()
+        });
+    } catch (error) {
+        loggingService.warn('Failed to store gateway rate limit record in cache', {
+            component: 'GatewayMiddleware',
+            operation: 'checkRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'cache_store_failed',
+            key,
+            cacheKey,
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+
+    loggingService.info('Gateway rate limit check completed successfully', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'check_complete_allowed',
+        key,
+        allowed: true,
+        currentCount: record.count,
+        maxRequests,
+        remaining: maxRequests - record.count,
+        totalTime: `${Date.now() - startTime}ms`
+    });
+
+    loggingService.info('=== GATEWAY RATE LIMIT CHECK COMPLETED ===', {
+        component: 'GatewayMiddleware',
+        operation: 'checkRateLimit',
+        type: 'gateway_rate_limit',
+        step: 'completed',
+        key,
+        totalTime: `${Date.now() - startTime}ms`
+    });
+
+    return { allowed: true };
 }
 
+/**
+ * Gateway rate limiting middleware with Redis primary and in-memory fallback
+ */
+export function gatewayRateLimit(
+    maxRequests: number = 100,
+    windowMs: number = 60000
+): (req: Request, res: Response, next: NextFunction) => void {
+    return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+        const startTime = Date.now();
+        
+        loggingService.info('=== GATEWAY RATE LIMIT MIDDLEWARE STARTED ===', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayRateLimit',
+            type: 'gateway_rate_limit',
+            path: req.path,
+            method: req.method,
+            maxRequests,
+            windowMs
+        });
+
+        loggingService.info('Step 1: Checking gateway rate limit', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'check_rate_limit'
+        });
+
+        const rateLimitResult = await checkRateLimit(req, res);
+        
+        if (!rateLimitResult.allowed) {
+            loggingService.info('Step 1a: Rate limit exceeded, sending response', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayRateLimit',
+                type: 'gateway_rate_limit',
+                step: 'send_limit_response'
+            });
+
+            res.setHeader('Retry-After', rateLimitResult.retryAfter!.toString());
+            res.status(429).json({
+                error: 'Gateway rate limit exceeded',
+                message: 'Too many requests to gateway, please try again later.',
+                retryAfter: rateLimitResult.retryAfter
+            });
+
+            loggingService.info('Gateway rate limit exceeded response sent', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayRateLimit',
+                type: 'gateway_rate_limit',
+                step: 'response_sent',
+                statusCode: 429,
+                retryAfter: rateLimitResult.retryAfter,
+                totalTime: `${Date.now() - startTime}ms`
+            });
+
+            loggingService.info('=== GATEWAY RATE LIMIT MIDDLEWARE COMPLETED (LIMIT EXCEEDED) ===', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayRateLimit',
+                type: 'gateway_rate_limit',
+                step: 'completed_limit_exceeded',
+                totalTime: `${Date.now() - startTime}ms`
+            });
+
+            return;
+        }
+
+        loggingService.info('Gateway rate limit check passed', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'rate_limit_passed',
+            allowed: true,
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
+        loggingService.info('=== GATEWAY RATE LIMIT MIDDLEWARE COMPLETED ===', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayRateLimit',
+            type: 'gateway_rate_limit',
+            step: 'completed',
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
+        next();
+    };
+}
+
+/**
+ * Gateway authentication middleware - processes CostKatana-Auth header
+ */
 export const gatewayAuth = async (req: any, res: Response, next: NextFunction): Promise<void> => {
     const startTime = Date.now();
-    logger.info('=== GATEWAY AUTHENTICATION STARTED ===');
+    
+    loggingService.info('=== GATEWAY AUTHENTICATION MIDDLEWARE STARTED ===', {
+        component: 'GatewayMiddleware',
+        operation: 'gatewayAuth',
+        type: 'gateway_authentication',
+        path: req.originalUrl,
+        method: req.method
+    });
+
+    loggingService.info('Step 1: Extracting authentication header', {
+        component: 'GatewayMiddleware',
+        operation: 'gatewayAuth',
+        type: 'gateway_authentication',
+        step: 'extract_header'
+    });
 
     try {
         const authHeader = req.headers['costkatana-auth'] as string;
         
         if (!authHeader) {
+            loggingService.warn('CostKatana-Auth header missing', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayAuth',
+                type: 'gateway_authentication',
+                step: 'header_missing',
+                path: req.originalUrl,
+                method: req.method
+            });
             res.status(401).json({
                 error: 'CostKatana-Auth header is required',
                 message: 'Please provide authentication via CostKatana-Auth header'
             });
             return;
         }
+
+        loggingService.info('Step 2: Analyzing authentication type', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'analyze_auth_type'
+        });
 
         // Extract Bearer token or API key
         let token: string | undefined;
@@ -246,8 +521,22 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
             // Check if it's an API key (starts with 'dak_'), proxy key (starts with 'ck-proxy-'), or JWT token
             if (authValue.startsWith('dak_')) {
                 apiKey = authValue;
-                logger.info('Dashboard API key found in CostKatana-Auth header');
+                loggingService.info('Dashboard API key found in CostKatana-Auth header', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'api_key_detected',
+                    authType: 'dashboard_api_key'
+                });
             } else if (authValue.startsWith('ck-proxy-')) {
+                loggingService.info('Proxy key detected, processing authentication', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'proxy_key_detected',
+                    authType: 'proxy_key'
+                });
+                
                 // Handle proxy key authentication
                 const proxyKeyResult = await handleProxyKeyAuth(authValue, req, res);
                 if (!proxyKeyResult) {
@@ -267,10 +556,21 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                     provider: proxyKeyResult.provider
                 };
                 
-                logger.info('Proxy key authenticated successfully', {
+                loggingService.info('Proxy key authenticated successfully', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'proxy_key_success',
                     proxyKeyId: authValue,
                     userId,
                     provider: proxyKeyResult.provider
+                });
+                
+                loggingService.info('Step 3: Processing gateway headers for proxy key', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'process_headers'
                 });
                 
                 // Process gateway headers and continue
@@ -278,9 +578,22 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                 return;
             } else {
                 token = authValue;
-                logger.info('JWT token found in CostKatana-Auth header');
+                loggingService.info('JWT token found in CostKatana-Auth header', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'jwt_token_detected',
+                    authType: 'jwt_token'
+                });
             }
         } else {
+            loggingService.warn('Invalid CostKatana-Auth format', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayAuth',
+                type: 'gateway_authentication',
+                step: 'invalid_format',
+                headerValue: authHeader.substring(0, 20) + '...'
+            });
             res.status(401).json({
                 error: 'Invalid CostKatana-Auth format',
                 message: 'CostKatana-Auth must be in format: Bearer YOUR_TOKEN'
@@ -288,10 +601,31 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
             return;
         }
 
+        loggingService.info('Step 3: Processing authentication', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'process_auth'
+        });
+
         if (apiKey) {
+            loggingService.info('Step 3a: Processing API key authentication', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayAuth',
+                type: 'gateway_authentication',
+                step: 'process_api_key'
+            });
+            
             // Parse API key
             const parsedKey = AuthService.parseApiKey(apiKey);
             if (!parsedKey) {
+                loggingService.warn('Invalid API key format', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'invalid_api_key_format',
+                    apiKey: apiKey.substring(0, 10) + '...'
+                });
                 res.status(401).json({
                     error: 'Invalid API key format',
                     message: 'CostKatana API key format is invalid'
@@ -302,6 +636,13 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
             // Find user and validate API key
             user = await User.findById(parsedKey.userId);
             if (!user) {
+                loggingService.warn('User not found for API key', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'user_not_found',
+                    userId: parsedKey.userId
+                });
                 res.status(401).json({
                     error: 'Invalid API key',
                     message: 'User not found for provided API key'
@@ -312,6 +653,14 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
             // Find matching API key in user's dashboard keys
             const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
             if (!userApiKey) {
+                loggingService.warn('API key not found in user account', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'api_key_not_found',
+                    userId: parsedKey.userId,
+                    keyId: parsedKey.keyId
+                });
                 res.status(401).json({
                     error: 'Invalid API key',
                     message: 'API key not found in user account'
@@ -325,6 +674,14 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                 const decryptedKey = decrypt(encrypted, iv, authTag);
 
                 if (decryptedKey !== apiKey) {
+                    loggingService.warn('API key validation failed', {
+                        component: 'GatewayMiddleware',
+                        operation: 'gatewayAuth',
+                        type: 'gateway_authentication',
+                        step: 'api_key_validation_failed',
+                        userId: parsedKey.userId,
+                        keyId: parsedKey.keyId
+                    });
                     res.status(401).json({
                         error: 'Invalid API key',
                         message: 'API key validation failed'
@@ -332,7 +689,13 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                     return;
                 }
             } catch (error) {
-                logger.error('Error decrypting API key in gateway:', error);
+                loggingService.logError(error as Error, {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'api_key_decryption_error',
+                    apiKeyId: parsedKey.keyId
+                });
                 res.status(401).json({
                     error: 'Invalid API key',
                     message: 'API key validation failed'
@@ -342,6 +705,15 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
 
             // Check if API key is expired
             if (userApiKey.expiresAt && userApiKey.expiresAt < new Date()) {
+                loggingService.warn('API key has expired', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'api_key_expired',
+                    userId: parsedKey.userId,
+                    keyId: parsedKey.keyId,
+                    expiresAt: userApiKey.expiresAt
+                });
                 res.status(401).json({
                     error: 'API key expired',
                     message: 'Your API key has expired'
@@ -350,7 +722,24 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
             }
 
             userId = user._id.toString();
+            
+            loggingService.info('API key authentication successful', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayAuth',
+                type: 'gateway_authentication',
+                step: 'api_key_success',
+                userId,
+                keyId: parsedKey.keyId
+            });
+            
         } else if (token) {
+            loggingService.info('Step 3b: Processing JWT token authentication', {
+                component: 'GatewayMiddleware',
+                operation: 'gatewayAuth',
+                type: 'gateway_authentication',
+                step: 'process_jwt'
+            });
+            
             // JWT token validation (reuse existing logic)
             try {
                 const decoded = AuthService.verifyAccessToken(token);
@@ -358,14 +747,36 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                 user = await User.findById(userId);
                 
                 if (!user) {
+                    loggingService.warn('User not found for JWT token', {
+                        component: 'GatewayMiddleware',
+                        operation: 'gatewayAuth',
+                        type: 'gateway_authentication',
+                        step: 'jwt_user_not_found',
+                        userId: decoded.id
+                    });
                     res.status(401).json({
                         error: 'Invalid token',
                         message: 'User not found for provided token'
                     });
                     return;
                 }
+                
+                loggingService.info('JWT token validation successful', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'jwt_success',
+                    userId
+                });
+                
             } catch (error) {
-                logger.error('JWT validation failed in gateway:', error);
+                loggingService.logError(error as Error, {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'jwt_validation_error',
+                    tokenId: token.substring(0, 10) + '...'
+                });
                 res.status(401).json({
                     error: 'Invalid token',
                     message: 'Token validation failed'
@@ -373,6 +784,13 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                 return;
             }
         }
+
+        loggingService.info('Step 4: Setting up gateway context', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'setup_context'
+        });
 
         // Initialize gateway context
         req.gatewayContext = {
@@ -383,11 +801,35 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
         // Attach user to request
         req.user = user;
 
-        logger.info(`Gateway authentication successful for user: ${userId}`);
+        loggingService.info('Gateway authentication completed successfully', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'completed',
+            userId,
+            authMethod: apiKey ? 'API Key' : 'JWT Token',
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
+        loggingService.info('=== GATEWAY AUTHENTICATION MIDDLEWARE COMPLETED ===', {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'completed',
+            userId,
+            totalTime: `${Date.now() - startTime}ms`
+        });
+
         next();
 
     } catch (error) {
-        logger.error('Gateway authentication error:', error);
+        loggingService.logError(error as Error, {
+            component: 'GatewayMiddleware',
+            operation: 'gatewayAuth',
+            type: 'gateway_authentication',
+            step: 'error',
+            totalTime: `${Date.now() - startTime}ms`
+        });
         res.status(500).json({
             error: 'Authentication failed',
             message: 'Internal server error during authentication'
@@ -417,14 +859,26 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     const projectId = req.headers['costkatana-project-id'] as string;
     if (projectId) {
         context.projectId = projectId;
-        logger.debug('Project ID detected', { projectId, requestId: context.requestId });
+        loggingService.debug('Project ID detected', {
+            component: 'GatewayMiddleware',
+            operation: 'processGatewayHeaders',
+            type: 'project_id_detected',
+            projectId,
+            requestId: context.requestId
+        });
     }
 
     // Process CostKatana-Auth-Method header (for authentication method override)
     const authMethodOverride = req.headers['costkatana-auth-method'] as string;
     if (authMethodOverride && (authMethodOverride === 'gateway' || authMethodOverride === 'standard')) {
         context.authMethodOverride = authMethodOverride as 'gateway' | 'standard';
-        logger.debug('Auth method override detected', { authMethodOverride, requestId: context.requestId });
+        loggingService.debug('Auth method override detected', {
+            component: 'GatewayMiddleware',
+            operation: 'processGatewayHeaders',
+            type: 'auth_method_override',
+            authMethodOverride,
+            requestId: context.requestId
+        });
     }
 
     // Check for failover policy first
@@ -434,7 +888,12 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
         context.failoverPolicy = failoverPolicy;
         context.isFailoverRequest = true;
         // For failover requests, we don't need a single target URL
-        logger.debug('Failover policy detected', { requestId: context.requestId });
+        loggingService.debug('Failover policy detected', {
+            component: 'GatewayMiddleware',
+            operation: 'processGatewayHeaders',
+            type: 'failover_policy',
+            requestId: context.requestId
+        });
     } else {
         // Core routing header (required for non-failover requests)
         const targetUrl = req.headers['costkatana-target-url'] as string;
@@ -582,7 +1041,10 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
         context.properties!['user-id'] = userIdHeader;
     }
 
-    logger.info('Gateway headers processed', {
+    loggingService.info('Gateway headers processed', {
+        component: 'GatewayMiddleware',
+        operation: 'processGatewayHeaders',
+        type: 'headers_processed',
         targetUrl: context.targetUrl,
         cacheEnabled: context.cacheEnabled,
         retryEnabled: context.retryEnabled,
@@ -617,48 +1079,18 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
             }
             next();
         }).catch(error => {
-            logger.error('Error checking guardrails:', error);
+            loggingService.logError(error as Error, {
+                component: 'GatewayMiddleware',
+                operation: 'processGatewayHeaders',
+                type: 'guardrails_check',
+                step: 'error',
+                userId: context.userId
+            });
             next(); // Don't block on errors
         });
     } else {
         next();
     }
-};
-
-/**
- * Rate limiting middleware for gateway requests
- */
-export const gatewayRateLimit = (maxRequests: number = 1000, windowMs: number = 60000) => {
-    const requests = new Map<string, number[]>();
-
-    return (req: Request, res: Response, next: NextFunction): void => {
-        const userId = req.gatewayContext?.userId || req.ip || 'unknown';
-        const now = Date.now();
-        const userRequests = requests.get(userId) || [];
-        
-        // Remove old requests outside the window
-        const validRequests = userRequests.filter(time => now - time < windowMs);
-        
-        if (validRequests.length >= maxRequests) {
-            logger.warn('Gateway rate limit exceeded', { 
-                userId, 
-                requests: validRequests.length,
-                limit: maxRequests 
-            });
-            
-            res.status(429).json({
-                error: 'Rate limit exceeded',
-                message: `Too many requests. Limit: ${maxRequests} per ${windowMs/1000} seconds`,
-                'retry-after': Math.ceil(windowMs / 1000)
-            });
-            return;
-        }
-        
-        validRequests.push(now);
-        requests.set(userId, validRequests);
-        
-        next();
-    };
 };
 
 /**
@@ -706,7 +1138,10 @@ function addResponseMetadata(req: Request, res: Response): void {
         }
     }
 
-    logger.debug('Gateway response headers added', {
+    loggingService.debug('Gateway response headers added', {
+        component: 'GatewayMiddleware',
+        operation: 'addGatewayResponseHeaders',
+        type: 'response_headers_added',
         processingTime,
         userId: context.userId,
         cacheEnabled: context.cacheEnabled

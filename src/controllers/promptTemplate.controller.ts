@@ -1,17 +1,68 @@
 import { Response } from 'express';
 import { PromptTemplateService } from '../services/promptTemplate.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export class PromptTemplateController {
     /**
      * Create a new prompt template
      */
     static async createTemplate(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.user!.id;
-            const templateData = req.body;
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const requestId = req.headers['x-request-id'] as string;
 
+        try {
+            loggingService.info('Prompt template creation initiated', {
+                userId,
+                hasUserId: !!userId,
+                requestId,
+                templateName: req.body?.name,
+                hasTemplateName: !!req.body?.name,
+                templateCategory: req.body?.category,
+                hasTemplateCategory: !!req.body?.category,
+                templateTags: req.body?.tags,
+                hasTemplateTags: !!req.body?.tags,
+                templateVisibility: req.body?.visibility,
+                hasTemplateVisibility: !!req.body?.visibility
+            });
+
+            if (!userId) {
+                loggingService.warn('Prompt template creation failed - user not authenticated', {
+                    requestId
+                });
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const templateData = req.body;
             const template = await PromptTemplateService.createTemplate(userId, templateData);
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Prompt template created successfully', {
+                userId,
+                duration,
+                templateId: template._id,
+                hasTemplateId: !!template._id,
+                templateName: template.name,
+                hasTemplateName: !!template.name,
+                requestId
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'prompt_template_created',
+                category: 'prompt_template',
+                value: duration,
+                metadata: {
+                    userId,
+                    templateId: template._id,
+                    templateName: template.name,
+                    templateCategory: template.category
+                }
+            });
 
             res.status(201).json({
                 success: true,
@@ -19,7 +70,17 @@ export class PromptTemplateController {
                 message: 'Prompt template created successfully'
             });
         } catch (error: any) {
-            logger.error('Error creating prompt template:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Prompt template creation failed', {
+                userId,
+                hasUserId: !!userId,
+                requestId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to create template'
@@ -32,13 +93,13 @@ export class PromptTemplateController {
      */
     static async getTemplates(req: any, res: Response): Promise<void> {
         try {
-            logger.info('=== GET PROMPT TEMPLATES START ===');
-            logger.info('Request headers:', req.headers);
-            logger.info('Request query:', req.query);
-            logger.info('User from auth middleware:', req.user);
+            loggingService.info('=== GET PROMPT TEMPLATES START ===');
+            loggingService.info('Request headers:', req.headers);
+            loggingService.info('Request query:', req.query);
+            loggingService.info('User from auth middleware:', req.user);
 
             const userId = req.user!.id;
-            logger.info('Extracted userId:', userId);
+            loggingService.info('Extracted userId:', userId);
 
             const {
                 projectId,
@@ -61,13 +122,13 @@ export class PromptTemplateController {
                 limit: limit ? parseInt(limit as string) : 20
             };
 
-            logger.info('Filters prepared:', filters);
-            logger.info('Calling PromptTemplateService.getTemplates...');
+            loggingService.info('Filters prepared:', filters);
+            loggingService.info('Calling PromptTemplateService.getTemplates...');
 
             const result = await PromptTemplateService.getTemplates(filters);
 
-            logger.info('Service call completed successfully');
-            logger.info('Result:', {
+            loggingService.info('Service call completed successfully');
+            loggingService.info('Result:', {
                 templatesCount: result.templates?.length || 0,
                 total: result.total,
                 page: result.page,
@@ -84,13 +145,13 @@ export class PromptTemplateController {
                 }
             };
 
-            logger.info('Sending response...');
+            loggingService.info('Sending response...');
             res.json(response);
-            logger.info('=== GET PROMPT TEMPLATES END ===');
+            loggingService.info('=== GET PROMPT TEMPLATES END ===');
         } catch (error: any) {
-            logger.error('=== GET PROMPT TEMPLATES ERROR ===');
-            logger.error('Error getting prompt templates:', error);
-            logger.error('Error stack:', error.stack);
+            loggingService.error('=== GET PROMPT TEMPLATES ERROR ===');
+            loggingService.error('Error getting prompt templates:', error);
+            loggingService.error('Error stack:', error.stack);
             res.status(500).json({
                 success: false,
                 error: error.message || 'Failed to get templates'
@@ -113,7 +174,7 @@ export class PromptTemplateController {
                 data: template
             });
         } catch (error: any) {
-            logger.error('Error getting prompt template:', error);
+            loggingService.error('Error getting prompt template:', error);
             res.status(404).json({
                 success: false,
                 error: error.message || 'Template not found'
@@ -141,7 +202,7 @@ export class PromptTemplateController {
                 data: result
             });
         } catch (error: any) {
-            logger.error('Error using prompt template:', error);
+            loggingService.error('Error using prompt template:', error);
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to use template'
@@ -170,7 +231,7 @@ export class PromptTemplateController {
                 message: 'Template updated successfully'
             });
         } catch (error: any) {
-            logger.error('Error updating prompt template:', error);
+            loggingService.error('Error updating prompt template:', error);
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to update template'
@@ -193,7 +254,7 @@ export class PromptTemplateController {
                 message: 'Template deleted successfully'
             });
         } catch (error: any) {
-            logger.error('Error deleting prompt template:', error);
+            loggingService.error('Error deleting prompt template:', error);
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to delete template'
@@ -222,7 +283,7 @@ export class PromptTemplateController {
                 message: 'Template forked successfully'
             });
         } catch (error: any) {
-            logger.error('Error forking prompt template:', error);
+            loggingService.error('Error forking prompt template:', error);
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to fork template'
@@ -251,7 +312,7 @@ export class PromptTemplateController {
                 message: 'Feedback added successfully'
             });
         } catch (error: any) {
-            logger.error('Error adding template feedback:', error);
+            loggingService.error('Error adding template feedback:', error);
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to add feedback'
@@ -273,7 +334,7 @@ export class PromptTemplateController {
                 data: analytics
             });
         } catch (error: any) {
-            logger.error('Error getting template analytics:', error);
+            loggingService.error('Error getting template analytics:', error);
             res.status(500).json({
                 success: false,
                 error: error.message || 'Failed to get analytics'
@@ -298,7 +359,7 @@ export class PromptTemplateController {
                 data: templates
             });
         } catch (error: any) {
-            logger.error('Error getting popular templates:', error);
+            loggingService.error('Error getting popular templates:', error);
             res.status(500).json({
                 success: false,
                 error: error.message || 'Failed to get popular templates'

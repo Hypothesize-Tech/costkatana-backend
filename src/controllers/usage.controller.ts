@@ -1,7 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { UsageService } from '../services/usage.service';
 import { trackUsageSchema, paginationSchema, sdkTrackUsageSchema } from '../utils/validators';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import jwt from 'jsonwebtoken';
 import { RealtimeUpdateService } from '../services/realtime-update.service';
 import { calculateCost } from '../utils/pricing'; 
@@ -24,20 +24,78 @@ export function getUserIdFromToken(req: any): string | null {
 
 export class UsageController {
     static async trackUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id || req.userId;
+
         try {
-            const userId = req.user?.id || req.userId;
-            
+            loggingService.info('Usage tracking initiated', {
+                requestId,
+                userId,
+                hasUserId: !!userId
+            });
+
             if (!userId) {
+                loggingService.warn('Usage tracking failed - authentication required', {
+                    requestId
+                });
+
                 return res.status(401).json({
                     success: false,
                     message: 'Authentication required',
                 });
             }
+
             const validatedData = trackUsageSchema.parse(req.body);
+
+            loggingService.info('Usage tracking parameters validated', {
+                requestId,
+                userId,
+                service: validatedData.service,
+                model: validatedData.model,
+                hasPrompt: !!validatedData.prompt,
+                hasCompletion: !!validatedData.completion,
+                promptTokens: validatedData.promptTokens,
+                completionTokens: validatedData.completionTokens,
+                totalTokens: validatedData.totalTokens,
+                cost: validatedData.cost,
+                hasProjectId: !!validatedData.projectId,
+                hasTags: !!(validatedData.tags?.length)
+            });
 
             const usage = await UsageService.trackUsage({
                 userId,
                 ...validatedData,
+            });
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Usage tracked successfully', {
+                requestId,
+                duration,
+                userId,
+                usageId: usage?._id,
+                service: validatedData.service,
+                model: validatedData.model,
+                cost: usage?.cost,
+                totalTokens: usage?.totalTokens,
+                optimizationApplied: usage?.optimizationApplied,
+                hasUsage: !!usage
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'usage_tracked',
+                category: 'usage',
+                value: duration,
+                metadata: {
+                    userId,
+                    usageId: usage?._id,
+                    service: validatedData.service,
+                    model: validatedData.model,
+                    cost: usage?.cost,
+                    totalTokens: usage?.totalTokens,
+                    optimizationApplied: usage?.optimizationApplied
+                }
             });
 
             res.status(201).json({
@@ -51,7 +109,19 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
-            logger.error('Track usage error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Usage tracking failed', {
+                requestId,
+                userId,
+                hasUserId: !!userId,
+                service: req.body?.service,
+                model: req.body?.model,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            
             next(error);
         }
     }
@@ -81,7 +151,11 @@ export class UsageController {
                 transformed = true;
             }
             if (transformed) {
-                logger.warn('trackUsageFromSDK: Transformed payload', { original: req.body, transformed: body });
+                loggingService.warn('trackUsageFromSDK: Transformed payload', { 
+                    requestId: req.headers['x-request-id'] as string,
+                    original: req.body, 
+                    transformed: body 
+                });
             }
             
 
@@ -91,7 +165,12 @@ export class UsageController {
                 userId = req.user?.id || req.user?._id || req.userId;
             }
             if (!userId) {
-                logger.error('No user ID found in request or token');
+                loggingService.error('No user ID found in request or token', {
+                    requestId: req.headers['x-request-id'] as string,
+                    hasUser: !!req.user,
+                    hasUserId: !!req.userId,
+                    hasToken: !!req.headers.authorization
+                });
                 res.status(401).json({
                     success: false,
                     error: 'User authentication required'
@@ -102,7 +181,12 @@ export class UsageController {
             // Validate transformed data
             const validationResult = sdkTrackUsageSchema.safeParse(body);
             if (!validationResult.success) {
-                logger.error('SDK usage validation failed:', validationResult.error.issues);
+                loggingService.error('SDK usage validation failed', {
+                    requestId: req.headers['x-request-id'] as string,
+                    userId,
+                    validationErrors: validationResult.error.issues,
+                    errorCount: validationResult.error.issues.length
+                });
                 res.status(400).json({
                     success: false,
                     error: 'Invalid usage data',
@@ -235,7 +319,13 @@ export class UsageController {
                 }
             });
         } catch (error: any) {
-            logger.error('Track usage from SDK error:', error);
+            loggingService.error('Track usage from SDK failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             console.error('Full error:', error);
             // Always return a response
             res.status(500).json({
@@ -304,9 +394,19 @@ export class UsageController {
             };
 
             // Log custom properties for debugging
-            logger.info('Raw query parameters:', req.query);
+            loggingService.info('Raw query parameters received', {
+                requestId: req.headers['x-request-id'] as string,
+                userId,
+                queryParams: req.query,
+                hasCustomProperties: Object.keys(customProperties).length > 0
+            });
             if (Object.keys(customProperties).length > 0) {
-                logger.info('Custom properties filter:', { customProperties, propertyExists });
+                loggingService.info('Custom properties filter applied', {
+                    requestId: req.headers['x-request-id'] as string,
+                    userId,
+                    customProperties,
+                    propertyExists
+                });
             }
 
             // Handle search query
@@ -337,7 +437,13 @@ export class UsageController {
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            logger.error('Get usage error:', error);
+            loggingService.error('Get usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -380,7 +486,14 @@ export class UsageController {
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            logger.error('Get usage by project error:', error);
+            loggingService.error('Get usage by project failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                projectId: req.params.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -405,7 +518,15 @@ export class UsageController {
                 data: stats,
             });
         } catch (error: any) {
-            logger.error('Get usage stats error:', error);
+            loggingService.error('Get usage stats failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                period: req.query.period,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -465,7 +586,14 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
-            logger.error('Bulk upload usage error:', error);
+            loggingService.error('Bulk upload usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                usageDataCount: req.body?.usageData?.length || 0,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -501,7 +629,14 @@ export class UsageController {
                 data: updatedUsage,
             });
         } catch (error: any) {
-            logger.error('Update usage error:', error);
+            loggingService.error('Update usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                usageId: req.params.usageId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -535,7 +670,14 @@ export class UsageController {
                 message: 'Usage deleted successfully',
             });
         } catch (error: any) {
-            logger.error('Delete usage error:', error);
+            loggingService.error('Delete usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                usageId: req.params.usageId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -559,7 +701,14 @@ export class UsageController {
                 data: anomalies,
             });
         } catch (error: any) {
-            logger.error('Detect anomalies error:', error);
+            loggingService.error('Detect anomalies failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -597,7 +746,15 @@ export class UsageController {
                 pagination: result.pagination,
             });
         } catch (error: any) {
-            logger.error('Search usage error:', error);
+            loggingService.error('Search usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                searchQuery: req.query.q,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
         return;
@@ -647,7 +804,15 @@ export class UsageController {
                 res.json(result.data);
             }
         } catch (error: any) {
-            logger.error('Export usage error:', error);
+            loggingService.error('Export usage failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                format: req.query.format,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -671,7 +836,14 @@ export class UsageController {
                 data: summary
             });
         } catch (error: any) {
-            logger.error('Get real-time usage summary error:', error);
+            loggingService.error('Get real-time usage summary failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -695,7 +867,15 @@ export class UsageController {
                 data: requests
             });
         } catch (error: any) {
-            logger.error('Get real-time requests error:', error);
+            loggingService.error('Get real-time requests failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                projectId: req.query.projectId,
+                limit: req.query.limit,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -731,7 +911,18 @@ export class UsageController {
                 data: analytics
             });
         } catch (error: any) {
-            logger.error('Get usage analytics error:', error);
+            loggingService.error('Get usage analytics failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                timeRange: req.query.timeRange,
+                status: req.query.status,
+                model: req.query.model,
+                service: req.query.service,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -761,7 +952,16 @@ export class UsageController {
                 data: analytics
             });
         } catch (error: any) {
-            logger.error('Get CLI analytics error:', error);
+            loggingService.error('Get CLI analytics failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                days: req.query.days,
+                project: req.query.project,
+                user: req.query.user,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -800,7 +1000,17 @@ export class UsageController {
                 data: analytics,
             });
         } catch (error: any) {
-            logger.error('Get property analytics error:', error);
+            loggingService.error('Get property analytics failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                groupBy: req.query.groupBy,
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -831,7 +1041,16 @@ export class UsageController {
                 data: properties,
             });
         } catch (error: any) {
-            logger.error('Get available properties error:', error);
+            loggingService.error('Get available properties failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                startDate: req.query.startDate,
+                endDate: req.query.endDate,
+                projectId: req.query.projectId,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -883,7 +1102,15 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
-            logger.error('Update usage properties error:', error);
+            loggingService.error('Update usage properties failed', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.user?.id || req.userId,
+                hasUserId: !!(req.user?.id || req.userId),
+                usageId: req.params.usageId,
+                propertiesCount: req.body ? Object.keys(req.body).length : 0,
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             next(error);
         }
     }
@@ -901,7 +1128,11 @@ export class UsageController {
                 return;
             }
 
-            logger.info(`Initializing SSE connection for user: ${userId}`);
+            loggingService.info('Initializing SSE connection for user', {
+                requestId: req.headers['x-request-id'] as string,
+                userId,
+                hasUserId: !!userId
+            });
             
             // Initialize SSE connection
             RealtimeUpdateService.initializeSSEConnection(userId, res);
@@ -920,7 +1151,13 @@ export class UsageController {
             })}\n\n`);
 
         } catch (error: any) {
-            logger.error('Error in SSE stream:', error);
+            loggingService.error('SSE stream error', {
+                requestId: req.headers['x-request-id'] as string,
+                userId: req.userId || req.query.userId,
+                hasUserId: !!(req.userId || req.query.userId),
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
             res.status(500).json({ message: 'SSE stream error' });
         }
     }

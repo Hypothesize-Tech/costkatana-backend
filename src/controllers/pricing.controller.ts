@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { RealtimePricingService } from '../services/realtime-pricing.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { 
     MODEL_PRICING, 
     getModelPricing, 
@@ -37,7 +37,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error getting pricing updates:', error);
+            loggingService.error('Error getting pricing updates:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve pricing updates'
@@ -60,7 +60,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error getting all pricing:', error);
+            loggingService.error('Error getting all pricing:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve pricing data'
@@ -96,7 +96,7 @@ export class PricingController {
                 data: pricing
             });
         } catch (error) {
-            logger.error(`Error getting pricing for provider ${req.params.provider}:`, error);
+            loggingService.error(`Error getting pricing for provider ${req.params.provider}:`, { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve provider pricing'
@@ -132,7 +132,7 @@ export class PricingController {
                 data: comparison
             });
         } catch (error) {
-            logger.error('Error comparing pricing:', error);
+            loggingService.error('Error comparing pricing:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to compare pricing'
@@ -146,7 +146,7 @@ export class PricingController {
             // Start force update in background (don't await to avoid timeout)
             RealtimePricingService.forceUpdate().catch(error => {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Force update failed: ${errorMessage}`);
+                loggingService.error(`Force update failed: ${errorMessage}`);
             });
 
             res.json({
@@ -154,7 +154,7 @@ export class PricingController {
                 message: 'Pricing update initiated in background. Updates will be available shortly.'
             });
         } catch (error) {
-            logger.error('Error initiating pricing update:', error);
+            loggingService.error('Error initiating pricing update:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to initiate pricing update'
@@ -175,7 +175,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error getting cache status:', error);
+            loggingService.error('Error getting cache status:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve cache status'
@@ -193,7 +193,7 @@ export class PricingController {
                 message: 'Pricing service initialized successfully'
             });
         } catch (error) {
-            logger.error('Error initializing pricing service:', error);
+            loggingService.error('Error initializing pricing service:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to initialize pricing service'
@@ -231,7 +231,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error testing scraping:', error);
+            loggingService.error('Error testing scraping:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to test scraping'
@@ -270,14 +270,14 @@ export class PricingController {
 
             // Handle scraping completion in background
             scrapingPromise.then(results => {
-                logger.info(`🎉 Web scraping completed for ${results.length} providers`);
+                loggingService.info(`🎉 Web scraping completed for ${results.length} providers`);
             }).catch(error => {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`❌ Web scraping failed: ${errorMessage}`);
+                loggingService.error(`❌ Web scraping failed: ${errorMessage}`);
             });
 
         } catch (error) {
-            logger.error('Error triggering scraping:', error);
+            loggingService.error('Error triggering scraping:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to trigger scraping'
@@ -314,7 +314,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error getting available models:', error);
+            loggingService.error('Error getting available models:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to retrieve available models'
@@ -448,7 +448,7 @@ export class PricingController {
                 data: comparison
             });
         } catch (error) {
-            logger.error('Error comparing models:', error);
+            loggingService.error('Error comparing models:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to compare models'
@@ -458,14 +458,31 @@ export class PricingController {
 
     // Real Bedrock integration methods - ONLY real API calls, no fallbacks
     private static async getBedrockPerformanceMetrics(model1: any, model2: any): Promise<any> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('Bedrock performance metrics testing initiated', {
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId
+            });
+
             const { BedrockRuntimeClient } = await import('@aws-sdk/client-bedrock-runtime');
             
             // Check for required AWS credentials
             if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || 
                 process.env.AWS_ACCESS_KEY_ID.trim() === '' || process.env.AWS_SECRET_ACCESS_KEY.trim() === '') {
-                logger.warn('AWS credentials not configured. Performance testing will show failed results.');
+                loggingService.warn('AWS credentials not configured. Performance testing will show failed results.');
                 // Return empty results instead of throwing error
+                const duration = Date.now() - startTime;
+                loggingService.info('Bedrock performance metrics testing completed (credentials missing)', {
+                    duration
+                });
                 return {
                     model1: {
                         averageLatency: 0,
@@ -522,12 +539,57 @@ export class PricingController {
             const model1Results = await PricingController.runRealBedrockTests(client, model1, testPrompts);
             const model2Results = await PricingController.runRealBedrockTests(client, model2, testPrompts);
             
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Bedrock performance metrics testing completed successfully', {
+                duration,
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'bedrock_performance_metrics_completed',
+                category: 'pricing',
+                value: duration,
+                metadata: {
+                    model1Provider: model1.provider,
+                    hasModel1Provider: !!model1.provider,
+                    model1Id: model1.modelId,
+                    hasModel1Id: !!model1.modelId,
+                    model2Provider: model2.provider,
+                    hasModel2Provider: !!model2.provider,
+                    model2Id: model2.modelId,
+                    hasModel2Id: !!model2.modelId
+                }
+            });
+
             return {
                 model1: model1Results,
                 model2: model2Results
             };
-        } catch (error) {
-            logger.error('Error in Bedrock performance testing:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Error in Bedrock performance testing', {
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
             // Return empty results instead of throwing error
             return {
                 model1: {
@@ -569,6 +631,8 @@ export class PricingController {
     }
 
     private static async runRealBedrockTests(client: any, model: any, prompts: string[]): Promise<any> {
+        const startTime = Date.now();
+
         const latencies: number[] = [];
         const ttfts: number[] = [];
         let successfulCalls = 0;
@@ -624,7 +688,12 @@ export class PricingController {
                     latencies.push(simulatedLatency);
                     successfulCalls++;
                     
-                    logger.info(`✅ Simulated OpenAI call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                    loggingService.info(`✅ Simulated OpenAI call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
                     continue;
                 } else if (model.provider === 'Cohere' || model.modelId.includes('cohere.')) {
                     // Cohere models on Bedrock
@@ -668,7 +737,14 @@ export class PricingController {
                     ttfts.push(ttft);
                     successfulCalls++;
                     
-                    logger.info(`✅ Simulated call for ${model.provider} ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                    loggingService.info(`✅ Simulated call for ${model.provider} ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                        provider: model.provider,
+                        hasProvider: !!model.provider,
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
                     continue;
                 }
 
@@ -733,7 +809,12 @@ export class PricingController {
                         responseLength
                     });
                     
-                    logger.info(`✅ Bedrock call successful for ${model.modelId}: ${latency}ms`);
+                    loggingService.info(`✅ Bedrock call successful for ${model.modelId}: ${latency}ms`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
                 } else {
                     promptResults.push({
                         prompt: prompt.substring(0, 50) + '...',
@@ -741,21 +822,35 @@ export class PricingController {
                         success: false,
                         error: 'Empty response from Bedrock'
                     });
-                    logger.warn(`❌ Empty response from Bedrock for ${model.modelId}`);
+                    loggingService.warn(`❌ Empty response from Bedrock for ${model.modelId}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
                 }
-            } catch (error) {
+            } catch (error: any) {
                 promptResults.push({
                     prompt: prompt.substring(0, 50) + '...',
                     latency: 0,
                     success: false,
                     error: 'Failed to process'
                 });
-                logger.error(`❌ Bedrock call failed for ${model.modelId}:`, error);
+                loggingService.error(`❌ Bedrock call failed for ${model.modelId}: ${error.message || 'Unknown error'}`, {
+                    modelId: model.modelId,
+                    hasModelId: !!model.modelId,
+                    prompt: prompt.substring(0, 50) + '...',
+                    hasPrompt: !!prompt
+                });
             }
         }
 
         // Return results even if all calls failed (for better UX)
         if (successfulCalls === 0) {
+            const duration = Date.now() - startTime;
+            loggingService.info('Bedrock performance metrics testing completed (all calls failed)', {
+                duration
+            });
             return {
                 averageLatency: 0,
                 minLatency: null,
@@ -788,6 +883,17 @@ export class PricingController {
 
         // Calculate throughput (requests per second)
         const throughput = totalCalls / (avgLatency / 1000);
+
+        const duration = Date.now() - startTime;
+        loggingService.info('Bedrock performance metrics calculated successfully', {
+            duration,
+            avgLatency,
+            minLatency,
+            maxLatency,
+            avgTtft,
+            successRate,
+            throughput
+        });
 
         return {
             averageLatency: Math.round(avgLatency),
@@ -836,50 +942,115 @@ export class PricingController {
     }
 
     private static async getBedrockBenchmarks(model1: any, model2: any): Promise<any> {
-        const { BedrockRuntimeClient } = await import('@aws-sdk/client-bedrock-runtime');
-        
-        // Check for required AWS credentials
-        if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || 
-            process.env.AWS_ACCESS_KEY_ID.trim() === '' || process.env.AWS_SECRET_ACCESS_KEY.trim() === '') {
-            throw new Error('AWS credentials not configured for benchmark testing.');
-        }
-        
-        const client = new BedrockRuntimeClient({
-            region: process.env.AWS_REGION || 'us-east-1',
-            credentials: {
-                accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        const startTime = Date.now();
+
+        try {
+            loggingService.info('Bedrock benchmark testing initiated', {
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId
+            });
+
+            const { BedrockRuntimeClient } = await import('@aws-sdk/client-bedrock-runtime');
+            
+            // Check for required AWS credentials
+            if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || 
+                process.env.AWS_ACCESS_KEY_ID.trim() === '' || process.env.AWS_SECRET_ACCESS_KEY.trim() === '') {
+                loggingService.warn('AWS credentials not configured for benchmark testing.');
+                throw new Error('AWS credentials not configured for benchmark testing.');
             }
-        });
+            
+            const client = new BedrockRuntimeClient({
+                region: process.env.AWS_REGION || 'us-east-1',
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+                }
+            });
 
-        // Real benchmark test prompts that test actual capabilities
-        const benchmarkTests = {
-            'MMLU': 'Answer this multiple choice question about science: What is the chemical symbol for gold? A) Au B) Ag C) Go D) Gd. Explain your reasoning.',
-            'BBH': 'Solve this step-by-step: A company\'s revenue increased by 25% in Q1, then decreased by 10% in Q2. If Q2 revenue was $270,000, what was the original revenue before Q1?',
-            'HellaSwag': 'Complete this scenario logically: Sarah was baking cookies when she realized she forgot to preheat the oven. She should...',
-            'HumanEval': 'Write a Python function called "fibonacci" that returns the nth Fibonacci number. Include proper error handling.',
-            'GSM8K': 'Math problem: A store sells notebooks for $3 each and pens for $1.50 each. If Maria buys 4 notebooks and 6 pens, how much does she spend in total?'
-        };
-
-        const model1Scores = await PricingController.runRealBenchmarkTests(client, model1, benchmarkTests);
-        const model2Scores = await PricingController.runRealBenchmarkTests(client, model2, benchmarkTests);
-
-        const comparison: any = {};
-        Object.keys(benchmarkTests).forEach(benchmark => {
-            const score1 = model1Scores[benchmark] || 0;
-            const score2 = model2Scores[benchmark] || 0;
-            comparison[benchmark] = {
-                model1Score: Math.round(score1 * 10) / 10,
-                model2Score: Math.round(score2 * 10) / 10,
-                winner: score1 > score2 ? 'model1' : 'model2',
-                difference: Math.round(Math.abs(score1 - score2) * 10) / 10
+            // Real benchmark test prompts that test actual capabilities
+            const benchmarkTests = {
+                'MMLU': 'Answer this multiple choice question about science: What is the chemical symbol for gold? A) Au B) Ag C) Go D) Gd. Explain your reasoning.',
+                'BBH': 'Solve this step-by-step: A company\'s revenue increased by 25% in Q1, then decreased by 10% in Q2. If Q2 revenue was $270,000, what was the original revenue before Q1?',
+                'HellaSwag': 'Complete this scenario logically: Sarah was baking cookies when she realized she forgot to preheat the oven. She should...',
+                'HumanEval': 'Write a Python function called "fibonacci" that returns the nth Fibonacci number. Include proper error handling.',
+                'GSM8K': 'Math problem: A store sells notebooks for $3 each and pens for $1.50 each. If Maria buys 4 notebooks and 6 pens, how much does she spend in total?'
             };
-        });
 
-        return comparison;
+            const model1Scores = await PricingController.runRealBenchmarkTests(client, model1, benchmarkTests);
+            const model2Scores = await PricingController.runRealBenchmarkTests(client, model2, benchmarkTests);
+
+            const comparison: any = {};
+            Object.keys(benchmarkTests).forEach(benchmark => {
+                const score1 = model1Scores[benchmark] || 0;
+                const score2 = model2Scores[benchmark] || 0;
+                comparison[benchmark] = {
+                    model1Score: Math.round(score1 * 10) / 10,
+                    model2Score: Math.round(score2 * 10) / 10,
+                    winner: score1 > score2 ? 'model1' : 'model2',
+                    difference: Math.round(Math.abs(score1 - score2) * 10) / 10
+                };
+            });
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Bedrock benchmark testing completed successfully', {
+                duration,
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'bedrock_benchmark_completed',
+                category: 'pricing',
+                value: duration,
+                metadata: {
+                    model1Provider: model1.provider,
+                    hasModel1Provider: !!model1.provider,
+                    model1Id: model1.modelId,
+                    hasModel1Id: !!model1.modelId,
+                    model2Provider: model2.provider,
+                    hasModel2Provider: !!model2.provider,
+                    model2Id: model2.modelId,
+                    hasModel2Id: !!model2.modelId
+                }
+            });
+
+            return comparison;
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Error in Bedrock benchmark testing', {
+                model1Provider: model1.provider,
+                hasModel1Provider: !!model1.provider,
+                model1Id: model1.modelId,
+                hasModel1Id: !!model1.modelId,
+                model2Provider: model2.provider,
+                hasModel2Provider: !!model2.provider,
+                model2Id: model2.modelId,
+                hasModel2Id: !!model2.modelId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+            throw new Error('Failed to compare models');
+        }
     }
 
     private static async runRealBenchmarkTests(client: any, model: any, tests: Record<string, string>): Promise<Record<string, number>> {
+        const startTime = Date.now();
+
         const scores: Record<string, number> = {};
         
         for (const [benchmark, prompt] of Object.entries(tests)) {
@@ -915,28 +1086,50 @@ export class PricingController {
                     const baseScore = benchmark === 'MMLU' ? 85 : benchmark === 'BBH' ? 80 : benchmark === 'HellaSwag' ? 90 : 75;
                     const variance = 5 + Math.random() * 10; // Add some realistic variance
                     scores[benchmark] = Math.min(100, baseScore + variance);
-                    logger.info(`✅ Simulated OpenAI benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`);
+                    loggingService.info(`✅ Simulated OpenAI benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark
+                    });
                     continue;
                 } else if (model.provider === 'Cohere' || model.modelId.includes('cohere.')) {
                     // Cohere models - simulate benchmark score based on model capabilities
                     const baseScore = benchmark === 'MMLU' ? 75 : benchmark === 'BBH' ? 70 : benchmark === 'HellaSwag' ? 80 : 65;
                     const variance = 5 + Math.random() * 10; // Add some realistic variance
                     scores[benchmark] = Math.min(100, baseScore + variance);
-                    logger.info(`✅ Simulated Cohere benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`);
+                    loggingService.info(`✅ Simulated Cohere benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark
+                    });
                     continue;
                 } else if (model.provider === 'Mistral AI' || model.modelId.includes('mistral.')) {
                     // Mistral models - simulate benchmark score based on model capabilities
                     const baseScore = benchmark === 'MMLU' ? 80 : benchmark === 'BBH' ? 75 : benchmark === 'HellaSwag' ? 85 : 70;
                     const variance = 5 + Math.random() * 10; // Add some realistic variance
                     scores[benchmark] = Math.min(100, baseScore + variance);
-                    logger.info(`✅ Simulated Mistral benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`);
+                    loggingService.info(`✅ Simulated Mistral benchmark for ${model.modelId} on ${benchmark}: ${scores[benchmark]}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark
+                    });
                     continue;
                 } else {
                     // Other providers - simulate benchmark score
                     const baseScore = benchmark === 'MMLU' ? 70 : benchmark === 'BBH' ? 65 : benchmark === 'HellaSwag' ? 75 : 60;
                     const variance = 5 + Math.random() * 10; // Add some realistic variance
                     scores[benchmark] = Math.min(100, baseScore + variance);
-                    logger.info(`✅ Simulated benchmark for ${model.provider} ${model.modelId} on ${benchmark}: ${scores[benchmark]}`);
+                    loggingService.info(`✅ Simulated benchmark for ${model.provider} ${model.modelId} on ${benchmark}: ${scores[benchmark]}`, {
+                        provider: model.provider,
+                        hasProvider: !!model.provider,
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark
+                    });
                     continue;
                 }
 
@@ -1000,25 +1193,48 @@ export class PricingController {
                     
                     scores[benchmark] = Math.min(100, Math.max(0, qualityScore));
                     
-                    logger.info(`✅ Benchmark ${benchmark} for ${model.modelId}: ${scores[benchmark]} (${responseTime}ms)`);
+                    loggingService.info(`✅ Benchmark ${benchmark} for ${model.modelId}: ${scores[benchmark]} (${responseTime}ms)`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark,
+                        responseTime
+                    });
                 } else {
-                    logger.warn(`❌ Empty response for benchmark ${benchmark} on ${model.modelId}`);
+                    loggingService.warn(`❌ Empty response for benchmark ${benchmark} on ${model.modelId}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        benchmark,
+                        hasBenchmark: !!benchmark
+                    });
                     scores[benchmark] = 0;
                 }
-            } catch (error) {
-                logger.error(`❌ Benchmark ${benchmark} failed for ${model.modelId}:`, error);
+            } catch (error: any) {
+                loggingService.error(`❌ Benchmark ${benchmark} failed for ${model.modelId}: ${error.message || 'Unknown error'}`, {
+                    modelId: model.modelId,
+                    hasModelId: !!model.modelId,
+                    benchmark,
+                    hasBenchmark: !!benchmark
+                });
                 scores[benchmark] = 0;
             }
         }
         
+        const duration = Date.now() - startTime;
+        loggingService.info('Bedrock benchmark testing completed successfully', {
+            duration,
+            modelProvider: model.provider,
+            hasModelProvider: !!model.provider,
+            modelId: model.modelId,
+            hasModelId: !!model.modelId
+        });
+
         return scores;
     }
 
-
-
-
-
     private static getModelRecommendations(model1: any, model2: any, cost1: any, cost2: any): any {
+        const startTime = Date.now();
+
         const recommendations = {
             bestFor: {
                 model1: [] as string[],
@@ -1061,6 +1277,20 @@ export class PricingController {
         recommendations.summary = `${cheaperModel} is ${costSavings}% more cost-effective. ` +
                                  `Choose ${model1.modelName} for ${recommendations.bestFor.model1.length > 0 ? recommendations.bestFor.model1.join(', ') : 'general use'}. ` +
                                  `Choose ${model2.modelName} for ${recommendations.bestFor.model2.length > 0 ? recommendations.bestFor.model2.join(', ') : 'general use'}.`;
+
+        const duration = Date.now() - startTime;
+        loggingService.info('Model recommendations completed successfully', {
+            duration,
+            model1Provider: model1.provider,
+            hasModel1Provider: !!model1.provider,
+            model1Id: model1.modelId,
+            hasModel1Id: !!model1.modelId,
+            model2Provider: model2.provider,
+            hasModel2Provider: !!model2.provider,
+            model2Id: model2.modelId,
+            hasModel2Id: !!model2.modelId,
+            hasRecommendations: !!recommendations
+        });
 
         return recommendations;
     }
@@ -1162,7 +1392,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error calculating costs:', error);
+            loggingService.error('Error calculating costs:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to calculate costs'
@@ -1241,7 +1471,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error running performance benchmark:', error);
+            loggingService.error('Error running performance benchmark:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to run performance benchmark'
@@ -1256,7 +1486,7 @@ export class PricingController {
             // Check for required AWS credentials
             if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || 
                 process.env.AWS_ACCESS_KEY_ID.trim() === '' || process.env.AWS_SECRET_ACCESS_KEY.trim() === '') {
-                logger.warn('AWS credentials not configured. Performance testing will show failed results.');
+                loggingService.warn('AWS credentials not configured. Performance testing will show failed results.');
                 // Return empty results with proper error messages
                 return {
                     averageLatency: 0,
@@ -1350,7 +1580,12 @@ export class PricingController {
                         latencies.push(simulatedLatency);
                         successfulRequests++;
                         
-                        logger.info(`✅ Simulated OpenAI call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                        loggingService.info(`✅ Simulated OpenAI call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                            modelId: model.modelId,
+                            hasModelId: !!model.modelId,
+                            prompt: prompt.substring(0, 50) + '...',
+                            hasPrompt: !!prompt
+                        });
                         continue;
                     } else if (model.provider === 'Cohere' || model.modelId.includes('cohere.')) {
                         // Cohere models - simulate performance based on pricing data
@@ -1367,7 +1602,12 @@ export class PricingController {
                         latencies.push(simulatedLatency);
                         successfulRequests++;
                         
-                        logger.info(`✅ Simulated Cohere call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                        loggingService.info(`✅ Simulated Cohere call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                            modelId: model.modelId,
+                            hasModelId: !!model.modelId,
+                            prompt: prompt.substring(0, 50) + '...',
+                            hasPrompt: !!prompt
+                        });
                         continue;
                     } else if (model.provider === 'Mistral AI' || model.modelId.includes('mistral.')) {
                         // Mistral models - simulate performance based on pricing data
@@ -1384,7 +1624,12 @@ export class PricingController {
                         latencies.push(simulatedLatency);
                         successfulRequests++;
                         
-                        logger.info(`✅ Simulated Mistral call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                        loggingService.info(`✅ Simulated Mistral call for ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                            modelId: model.modelId,
+                            hasModelId: !!model.modelId,
+                            prompt: prompt.substring(0, 50) + '...',
+                            hasPrompt: !!prompt
+                        });
                         continue;
                     } else {
                         // Other providers - simulate performance for non-Bedrock models
@@ -1401,7 +1646,14 @@ export class PricingController {
                         latencies.push(simulatedLatency);
                         successfulRequests++;
                         
-                        logger.info(`✅ Simulated call for ${model.provider} ${model.modelId}: ${Math.round(simulatedLatency)}ms`);
+                        loggingService.info(`✅ Simulated call for ${model.provider} ${model.modelId}: ${Math.round(simulatedLatency)}ms`, {
+                            provider: model.provider,
+                            hasProvider: !!model.provider,
+                            modelId: model.modelId,
+                            hasModelId: !!model.modelId,
+                            prompt: prompt.substring(0, 50) + '...',
+                            hasPrompt: !!prompt
+                        });
                         continue;
                     }
                     
@@ -1459,15 +1711,25 @@ export class PricingController {
                         responseLength
                     });
                     
-                    logger.info(`✅ Bedrock call successful for ${model.modelId}: ${latency}ms`);
-                } catch (error) {
+                    loggingService.info(`✅ Bedrock call successful for ${model.modelId}: ${latency}ms`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
+                } catch (error: any) {
                     results.promptResults.push({
                         prompt: prompt.substring(0, 50) + '...',
                         latency: 0,
                         success: false,
                         error: 'Failed to process'
                     });
-                    logger.error(`❌ Bedrock call failed for ${model.modelId}:`, error);
+                                          loggingService.error(`❌ Bedrock call failed for ${model.modelId}: ${error.message || 'Unknown error'}`, {
+                        modelId: model.modelId,
+                        hasModelId: !!model.modelId,
+                        prompt: prompt.substring(0, 50) + '...',
+                        hasPrompt: !!prompt
+                    });
                 }
             }
 
@@ -1483,7 +1745,7 @@ export class PricingController {
 
             return results;
         } catch (error) {
-            logger.error('Error running model benchmarks:', error);
+            loggingService.error('Error running model benchmarks:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 averageLatency: 0,
                 minLatency: null,
@@ -1597,7 +1859,7 @@ export class PricingController {
                 }
             });
         } catch (error) {
-            logger.error('Error analyzing tokens:', error);
+            loggingService.error('Error analyzing tokens:', { error: error instanceof Error ? error.message : String(error) });
             res.status(500).json({
                 success: false,
                 error: 'Failed to analyze tokens'

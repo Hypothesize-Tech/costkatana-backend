@@ -1,6 +1,6 @@
 import { RequestFeedback, IRequestFeedback } from '../models/RequestFeedback';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface FeedbackData {
     rating: boolean; // true = positive, false = negative
@@ -85,15 +85,15 @@ export class RequestFeedbackService {
 
             await feedbackRecord.save();
 
-            logger.info('Feedback submitted successfully', {
+            loggingService.info('Feedback submitted successfully', { value:  { 
                 requestId,
                 userId,
                 rating: feedbackData.rating,
                 cost: usageRecord?.cost
-            });
+             } });
 
         } catch (error) {
-            logger.error('Error submitting feedback:', error);
+            loggingService.error('Error submitting feedback:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -203,7 +203,7 @@ export class RequestFeedbackService {
             };
 
         } catch (error) {
-            logger.error('Error getting feedback analytics:', error);
+            loggingService.error('Error getting feedback analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -298,7 +298,7 @@ export class RequestFeedbackService {
             };
 
         } catch (error) {
-            logger.error('Error getting global feedback analytics:', error);
+            loggingService.error('Error getting global feedback analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -310,7 +310,7 @@ export class RequestFeedbackService {
         try {
             return await RequestFeedback.findOne({ requestId });
         } catch (error) {
-            logger.error('Error getting feedback by request ID:', error);
+            loggingService.error('Error getting feedback by request ID:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -343,9 +343,9 @@ export class RequestFeedbackService {
                 { upsert: false }
             );
 
-            logger.info('Implicit signals updated', { requestId, signals });
+            loggingService.info('Implicit signals updated', { value:  {  requestId, signals  } });
         } catch (error) {
-            logger.error('Error updating implicit signals:', error);
+            loggingService.error('Error updating implicit signals:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

@@ -3,7 +3,7 @@ import { Usage } from '../models/Usage';
 import { User } from '../models/User';
 import { Alert } from '../models/Alert';
 import { ApprovalRequest, IApprovalRequest } from '../models/ApprovalRequest';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { EmailService } from './email.service';
 import { ActivityService } from './activity.service';
 import mongoose from 'mongoose';
@@ -50,8 +50,8 @@ export class ProjectService {
      */
     static async createProject(ownerId: string, data: CreateProjectDto): Promise<IProject> {
         const startTime = Date.now();
-        logger.info('=== ProjectService.createProject STARTED ===');
-        logger.info('Service input data:', {
+        loggingService.info('=== ProjectService.createProject STARTED ===');
+        loggingService.info('Service input data:', { value:  { 
             ownerId,
             projectName: data.name,
             budgetAmount: data.budget?.amount,
@@ -59,10 +59,10 @@ export class ProjectService {
             alertsCount: data.budget?.alerts?.length,
             membersCount: data.members?.length,
             settingsProvided: !!data.settings
-        });
+         } });
 
         try {
-            logger.info('Step 1: Creating project object');
+            loggingService.info('Step 1: Creating project object');
             const projectObj = {
                 ...data,
                 ownerId,
@@ -94,18 +94,18 @@ export class ProjectService {
                 }
             };
 
-            logger.info('Step 2: Initializing Mongoose Project model');
+            loggingService.info('Step 2: Initializing Mongoose Project model');
             const project = new Project(projectObj);
-            logger.info('Project model created, validating...');
+            loggingService.info('Project model created, validating...');
 
-            logger.info('Step 3: Saving project to database');
+            loggingService.info('Step 3: Saving project to database');
             const savedProject = await project.save();
-            logger.info('Project saved successfully:', {
+            loggingService.info('Project saved successfully:', {
                 projectId: savedProject._id,
                 timeTaken: Date.now() - startTime + 'ms'
             });
 
-            logger.info('Step 4: Tracking activity');
+            loggingService.info('Step 4: Tracking activity');
             try {
                 await ActivityService.trackActivity(ownerId, {
                     type: 'settings_updated',
@@ -116,18 +116,18 @@ export class ProjectService {
                         budget: savedProject.budget.amount
                     }
                 });
-                logger.info('Activity tracked successfully');
+                loggingService.info('Activity tracked successfully');
             } catch (activityError) {
-                logger.warn('Activity tracking failed (non-critical):', activityError);
+                loggingService.warn('Activity tracking failed (non-critical):', { error: activityError instanceof Error ? activityError.message : String(activityError) });
             }
 
-            logger.info('=== ProjectService.createProject COMPLETED ===');
-            logger.info(`Project created: ${savedProject.name} by user ${ownerId}`);
+            loggingService.info('=== ProjectService.createProject COMPLETED ===');
+            loggingService.info(`Project created: ${savedProject.name} by user ${ownerId}`);
             return savedProject;
         } catch (error: any) {
             const timeTaken = Date.now() - startTime;
-            logger.error('=== ProjectService.createProject FAILED ===');
-            logger.error('Service error details:', {
+            loggingService.error('=== ProjectService.createProject FAILED ===');
+            loggingService.error('Service error details:', {
                 message: error.message,
                 name: error.name,
                 code: error.code,
@@ -136,7 +136,7 @@ export class ProjectService {
             });
 
             if (error.name === 'ValidationError') {
-                logger.error('Mongoose validation errors:', error.errors);
+                loggingService.error('Mongoose validation errors:', error.errors);
             }
 
             throw error;
@@ -162,9 +162,9 @@ export class ProjectService {
                 totalRecalculated++;
             }
 
-            logger.info(`Recalculated spending for ${totalRecalculated} user projects`);
+            loggingService.info(`Recalculated spending for ${totalRecalculated} user projects`);
         } catch (error) {
-            logger.error('Error recalculating user project spending:', error);
+            loggingService.error('Error recalculating user project spending:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -182,9 +182,9 @@ export class ProjectService {
                 totalRecalculated++;
             }
 
-            logger.info(`Recalculated spending for ${totalRecalculated} projects`);
+            loggingService.info(`Recalculated spending for ${totalRecalculated} projects`);
         } catch (error) {
-            logger.error('Error recalculating all project spending:', error);
+            loggingService.error('Error recalculating all project spending:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -221,9 +221,9 @@ export class ProjectService {
             project.spending.lastUpdated = new Date();
 
             await project.save();
-            logger.info(`Recalculated spending for project ${projectId}: $${totalSpending}`);
+            loggingService.info(`Recalculated spending for project ${projectId}: $${totalSpending}`);
         } catch (error) {
-            logger.error('Error recalculating project spending:', error);
+            loggingService.error('Error recalculating project spending:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -235,7 +235,7 @@ export class ProjectService {
         try {
             const project = await Project.findById(projectId);
             if (!project) {
-                logger.warn(`Project not found: ${projectId}`);
+                loggingService.warn(`Project not found: ${projectId}`);
                 return;
             }
 
@@ -270,7 +270,7 @@ export class ProjectService {
 
             await project.save();
         } catch (error) {
-            logger.error('Error updating project spending:', error);
+            loggingService.error('Error updating project spending:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -341,7 +341,7 @@ export class ProjectService {
 
             return estimatedCost > project.settings.requireApprovalAbove;
         } catch (error) {
-            logger.error('Error checking approval requirement:', error);
+            loggingService.error('Error checking approval requirement:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -398,7 +398,7 @@ export class ProjectService {
 
             return approvalRequest;
         } catch (error) {
-            logger.error('Error creating approval request:', error);
+            loggingService.error('Error creating approval request:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -548,7 +548,7 @@ export class ProjectService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting project analytics:', error);
+            loggingService.error('Error getting project analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -677,7 +677,7 @@ export class ProjectService {
 
                 return projectObj;
             } catch (error) {
-                logger.error(`Error getting usage stats for project ${project._id}:`, error);
+                loggingService.error(`Error getting usage stats for project ${project._id}:`, { error: error instanceof Error ? error.message : String(error) });
                 // Return project without usage stats on error
                 const projectObj = project.toObject() as any;
                 projectObj.usage = {

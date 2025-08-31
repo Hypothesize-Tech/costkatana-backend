@@ -1,4 +1,4 @@
-import { ModelPricing, PricingUnit } from '../pricing';
+import { ModelPricing, PricingUnit } from './types';
 
 export const GROK_PRICING: ModelPricing[] = [
   // Grok 4 - Latest flagship model

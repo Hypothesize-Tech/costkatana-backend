@@ -1,7 +1,7 @@
 import { emailTransporter, EMAIL_CONFIG } from '../config/email';
 import { IUser } from '../models/User';
 import { IAlert } from '../models/Alert';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { formatCurrency } from '../utils/helpers';
 
 interface EmailOptions {
@@ -36,13 +36,13 @@ export class EmailService {
 
       const info = await transporter.sendMail(mailOptions);
 
-      logger.info('Email sent successfully', {
+      loggingService.info('Email sent successfully', { value:  { 
         messageId: info.messageId,
         to: options.to,
         subject: options.subject,
-      });
+       } });
     } catch (error) {
-      logger.error('Error sending email:', error);
+      loggingService.error('Error sending email:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }

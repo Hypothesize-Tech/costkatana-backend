@@ -1,5 +1,5 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
 
 export interface EmbeddingResult {
@@ -67,7 +67,7 @@ export class EmbeddingsService {
 
       return result;
     } catch (error) {
-      logger.error('Failed to generate embedding:', error);
+      loggingService.error('Failed to generate embedding:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`Embedding generation failed: ${error}`);
     }
   }
@@ -211,7 +211,7 @@ Keep it conversational and actionable.`;
       
       return responseText;
     } catch (error) {
-      logger.error('Failed to generate cost narrative:', error);
+      loggingService.error('Failed to generate cost narrative:', { error: error instanceof Error ? error.message : String(error) });
       return `${telemetryData.operation_name || 'Operation'} completed in ${telemetryData.duration_ms}ms${telemetryData.cost_usd ? ` costing $${telemetryData.cost_usd}` : ''}`;
     }
   }
@@ -267,7 +267,7 @@ Keep it conversational and actionable.`;
     try {
       await redisService.client.setEx(key, this.CACHE_TTL, JSON.stringify(embedding));
     } catch (error) {
-      logger.warn('Failed to cache embedding:', error);
+      loggingService.warn('Failed to cache embedding:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -279,7 +279,7 @@ Keep it conversational and actionable.`;
       const cached = await redisService.client.get(key);
       return cached ? JSON.parse(cached) : null;
     } catch (error) {
-      logger.warn('Failed to get cached embedding:', error);
+      loggingService.warn('Failed to get cached embedding:', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

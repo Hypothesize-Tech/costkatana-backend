@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
 import { calculateCost } from '../utils/pricing';
@@ -94,7 +94,7 @@ export class TrackingService {
         usageImpact,
       };
     } catch (error) {
-      logger.error('Error tracking manual request:', error);
+      loggingService.error('Error tracking manual request:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -103,7 +103,7 @@ export class TrackingService {
     try {
       return calculateCost(tokens, tokens, provider || 'openai', model);
     } catch (error) {
-      logger.warn(`Failed to calculate cost for ${model}, using fallback calculation`);
+      loggingService.warn(`Failed to calculate cost for ${model}, using fallback calculation`);
       // Fallback calculation: $0.002 per 1K tokens
       return (tokens / 1000) * 0.002;
     }
@@ -200,7 +200,7 @@ export class TrackingService {
       await newProject.save();
       return newProject._id;
     } catch (error) {
-      logger.error('Error getting or creating project:', error);
+      loggingService.error('Error getting or creating project:', { error: error instanceof Error ? error.message : String(error) });
       // Return null if project creation fails
       return null;
     }

@@ -1,12 +1,12 @@
 import { BedrockService } from './tracedBedrock.service';
-import { logger } from '../utils/logger';
-import { ExperimentationService } from './experimentation.service';
+import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
 import { agentService } from './agent.service';
 import { conversationalFlowService } from './conversationFlow.service';
 import { multiAgentFlowService } from './multiAgentFlow.service';
 import { TrendingDetectorService } from './trendingDetector.service';
+import { loggingService } from './logging.service';
 
 export interface ChatMessageResponse {
     id: string;
@@ -130,8 +130,9 @@ export class ChatService {
             try {
                 // Check if multi-agent processing is requested or if query needs web scraping
                 const needsWebScraping = this.detectWebScrapingNeeds(request.message);
+                const needsKnowledgeBase = this.detectKnowledgeBaseMention(request.message);
                 
-                if (request.useMultiAgent || request.chatMode || needsWebScraping) {
+                if (request.useMultiAgent || request.chatMode || needsWebScraping || needsKnowledgeBase) {
                     // Use the new multi-agent system
                     const multiAgentResult = await multiAgentFlowService.processMessage(
                         conversation._id.toString(),
@@ -154,7 +155,7 @@ export class ChatService {
                         const analytics = await multiAgentFlowService.getPredictiveCostAnalytics(request.userId);
                         riskLevel = analytics.riskLevel;
                     } catch (error) {
-                        logger.warn('Could not get predictive analytics:', error);
+                        loggingService.warn('Could not get predictive analytics:', { error: error instanceof Error ? error.message : String(error) });
                     }
                 } else {
                     // Use traditional conversational flow service
@@ -176,7 +177,7 @@ export class ChatService {
                     agentPath = ['traditional_flow'];
                     
                     // Debug the conversational flow result
-                    logger.info('Chat Service - Conversational flow result:', {
+                    loggingService.info('Chat Service - Conversational flow result:', {
                         hasResponse: !!flowResult.response,
                         responseLength: flowResult.response?.length || 0,
                         responsePreview: flowResult.response?.substring(0, 100) + '...',
@@ -213,7 +214,7 @@ export class ChatService {
                         ]) as any;
 
                         // Debug logging to understand the response structure
-                        logger.info('Chat Service - Agent response structure:', {
+                        loggingService.info('Chat Service - Agent response structure:', {
                             success: agentResponse.success,
                             hasResponse: !!agentResponse.response,
                             responseLength: agentResponse.response?.length || 0,
@@ -237,21 +238,25 @@ export class ChatService {
                                 };
                             }
                         } else {
-                            logger.warn('MCP action failed - Success:', agentResponse.success, 'Response:', !!agentResponse.response, 'Error:', agentResponse.error);
+                            loggingService.warn('MCP action failed - Success:', { value:  { 
+                                success: agentResponse.success, 
+                                hasResponse: !!agentResponse.response, 
+                                error: agentResponse.error 
+                            } });
                             // If agent was successful but no response, don't treat as failure
                             if (agentResponse.success && !agentResponse.response) {
-                                logger.info('Agent succeeded but returned empty response, treating as success');
+                                loggingService.info('Agent succeeded but returned empty response, treating as success');
                                 response += '\n\nTask completed successfully.';
                             } else {
                                 response += '\n\nI encountered an issue executing the task. Please try again.';
                             }
                         }
                     } catch (mcpError) {
-                        logger.error('Error executing MCP action:', mcpError);
+                        loggingService.error('Error executing MCP action:', { error: mcpError instanceof Error ? mcpError.message : String(mcpError) });
                         
                         // Handle timeout errors specifically
                         if (mcpError instanceof Error && mcpError.message.includes('timeout')) {
-                            logger.warn('MCP action timed out:', mcpError.message);
+                            loggingService.warn('MCP action timed out:', { value:  { value: mcpError.message } });
                             response += '\n\n⏱️ Your query took longer than expected to process. This might be due to complex analysis or high system load. Please try:\n\n' +
                                        '• Asking a simpler, more specific question\n' +
                                        '• Breaking complex requests into smaller parts\n' +
@@ -266,7 +271,7 @@ export class ChatService {
 
             } catch (error) {
                 // Fallback to direct Bedrock call if conversational flow is unavailable
-                logger.warn('Conversational flow service unavailable, falling back to Bedrock:', error);
+                loggingService.warn('Conversational flow service unavailable, falling back to Bedrock:', { error: error instanceof Error ? error.message : String(error) });
                 const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
                 response = await BedrockService.invokeModel(contextualPrompt, request.modelId, request.req);
             }
@@ -305,7 +310,7 @@ export class ChatService {
             conversation.lastMessageAt = new Date();
             await conversation.save();
 
-            logger.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
+            loggingService.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
 
             return {
                 messageId: assistantMessage._id.toString(),
@@ -324,7 +329,7 @@ export class ChatService {
             };
 
         } catch (error) {
-            logger.error('Error sending chat message:', error);
+            loggingService.error('Error sending chat message:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to send chat message');
         }
     }
@@ -370,7 +375,7 @@ export class ChatService {
             };
 
         } catch (error) {
-            logger.error('Error getting conversation history:', error);
+            loggingService.error('Error getting conversation history:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get conversation history');
         }
     }
@@ -404,7 +409,7 @@ export class ChatService {
             };
 
         } catch (error) {
-            logger.error('Error getting user conversations:', error);
+            loggingService.error('Error getting user conversations:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to get user conversations');
         }
     }
@@ -429,12 +434,12 @@ export class ChatService {
 
             await conversation.save();
 
-            logger.info(`New conversation created: ${conversation._id} for user ${request.userId}`);
+            loggingService.info(`New conversation created: ${conversation._id} for user ${request.userId}`);
 
             return this.convertConversationToResponse(conversation);
 
         } catch (error) {
-            logger.error('Error creating conversation:', error);
+            loggingService.error('Error creating conversation:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to create conversation');
         }
     }
@@ -459,10 +464,10 @@ export class ChatService {
                 throw new Error('Conversation not found or access denied');
             }
 
-            logger.info(`Conversation soft deleted: ${conversationId} for user ${userId}`);
+            loggingService.info(`Conversation soft deleted: ${conversationId} for user ${userId}`);
 
         } catch (error) {
-            logger.error('Error deleting conversation:', error);
+            loggingService.error('Error deleting conversation:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to delete conversation');
         }
     }
@@ -483,27 +488,29 @@ export class ChatService {
         };
     }>> {
         try {
-            // Use the experimentation service to get available models
-            const models = await ExperimentationService.getAccessibleBedrockModels();
+            // Use AWS Bedrock pricing data directly to avoid circular dependencies
+            const models = AWS_BEDROCK_PRICING.map(pricing => ({
+                id: pricing.modelId,
+                name: this.getModelDisplayName(pricing.modelId),
+                provider: this.getModelProvider(pricing.modelId),
+                description: this.getModelDescription(pricing.modelId),
+                capabilities: pricing.capabilities || ['text', 'chat'],
+                pricing: {
+                    input: pricing.inputPrice,
+                    output: pricing.outputPrice,
+                    unit: pricing.unit
+                }
+            }));
             
-            // Filter out models with invalid model IDs and transform to expected format
-            return models
-                .filter(model => model && model.model && typeof model.model === 'string' && model.model.trim() !== '')
-                .map(model => ({
-                    id: model.model,
-                    name: this.getModelDisplayName(model.model),
-                    provider: this.getModelProvider(model.model),
-                    description: this.getModelDescription(model.model),
-                    capabilities: ['text', 'chat'],
-                    pricing: model.pricing || undefined
-                }));
+            // Filter out models with invalid model IDs
+            return models.filter(model => model && model.id && typeof model.id === 'string' && model.id.trim() !== '');
 
         } catch (error) {
-            logger.error('Error getting available models:', error);
+            loggingService.error('Error getting available models:', { error: error instanceof Error ? error.message : String(error) });
             
             // Log additional context for debugging
             if (error instanceof Error) {
-                logger.error('Error details:', {
+                loggingService.error('Error details:', {
                     message: error.message,
                     stack: error.stack
                 });
@@ -1119,5 +1126,48 @@ export class ChatService {
     private static detectWebScrapingNeeds(message: string): boolean {
         const trendingDetector = new TrendingDetectorService();
         return trendingDetector.quickCheck(message);
+    }
+
+    /**
+     * Detect if a message mentions the knowledge base
+     */
+    private static detectKnowledgeBaseMention(message: string): boolean {
+        const knowledgeBaseMentions = [
+            '@knowledge-base/',
+            '@knowledge-base',
+            'knowledge base',
+            'knowledge-base',
+            'cost katana',
+            'costkatana',
+            'what is cost katana',
+            'what is costkatana',
+            'cost optimization platform',
+            'ai cost optimizer',
+            'ai cost optimization',
+            'cost optimizer platform',
+            'cost optimization system'
+        ];
+        
+        const messageLower = message.toLowerCase();
+        
+        // Special handling for Cost Katana variations to prevent confusion with sword katana
+        const costKatanaPatterns = [
+            /cost\s*katana/i,
+            /costkatana/i,
+            /what\s+is\s+cost\s*katana/i,
+            /what\s+is\s+costkatana/i,
+            /tell\s+me\s+about\s+cost\s*katana/i,
+            /explain\s+cost\s*katana/i,
+            /ai\s+cost\s+optimizer/i,
+            /cost\s+optimization\s+platform/i
+        ];
+        
+        // Check for Cost Katana specific patterns first
+        if (costKatanaPatterns.some(pattern => pattern.test(message))) {
+            return true;
+        }
+        
+        // Check for general knowledge base mentions
+        return knowledgeBaseMentions.some(mention => messageLower.includes(mention.toLowerCase()));
     }
 } 

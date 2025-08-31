@@ -4,7 +4,7 @@
  */
 
 import { Request, Response } from 'express';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { CPIService } from '../services/cpi.service';
 import { IntelligentRoutingService } from '../services/intelligentRouting.service';
 import { 
@@ -18,10 +18,24 @@ export class CPIController {
      * Calculate CPI metrics for a specific provider and model
      */
     static async calculateCPIMetrics(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { provider, modelId, ...input } = req.body;
+
         try {
-            const { provider, modelId, ...input } = req.body;
+            loggingService.info('CPI metrics calculation initiated', {
+                provider,
+                modelId,
+                inputKeys: Object.keys(input),
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!provider || !modelId) {
+                loggingService.warn('CPI metrics calculation failed - missing required fields', {
+                    hasProvider: !!provider,
+                    hasModelId: !!modelId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Provider and modelId are required'
@@ -30,6 +44,29 @@ export class CPIController {
             }
 
             const metrics = await CPIService.calculateCPIMetrics(provider, modelId, input);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('CPI metrics calculated successfully', {
+                provider,
+                modelId,
+                duration,
+                hasMetrics: !!metrics,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_metrics_calculated',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    provider,
+                    modelId,
+                    inputKeys: Object.keys(input),
+                    hasMetrics: !!metrics
+                }
+            });
 
             res.status(200).json({
                 success: true,
@@ -40,8 +77,19 @@ export class CPIController {
                     timestamp: new Date().toISOString()
                 }
             });
-        } catch (error) {
-            logger.error('Error calculating CPI metrics:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('CPI metrics calculation failed', {
+                provider,
+                modelId,
+                inputKeys: Object.keys(input),
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to calculate CPI metrics',
@@ -54,10 +102,22 @@ export class CPIController {
      * Get intelligent routing decision for a request
      */
     static async getRoutingDecision(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { request, strategy, availableProviders } = req.body;
+
         try {
-            const { request, strategy, availableProviders } = req.body;
+            loggingService.info('Routing decision request initiated', {
+                hasRequest: !!request,
+                hasStrategy: !!strategy,
+                availableProvidersCount: availableProviders?.length || 0,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!request) {
+                loggingService.warn('Routing decision failed - missing request object', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Request object is required'
@@ -77,11 +137,42 @@ export class CPIController {
                 constraints: {}
             };
 
+            loggingService.info('Routing decision processing started', {
+                strategy: defaultStrategy.strategy,
+                weightings: defaultStrategy.weightings,
+                availableProvidersCount: availableProviders?.length || 0,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const routingDecision = await IntelligentRoutingService.getRoutingDecision(
                 request,
                 defaultStrategy,
                 availableProviders
             );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Routing decision generated successfully', {
+                strategy: defaultStrategy.strategy,
+                duration,
+                hasRoutingDecision: !!routingDecision,
+                selectedProvider: routingDecision?.selectedProvider,
+                selectedModel: routingDecision?.selectedModel,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_routing_decision_generated',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    strategy: defaultStrategy.strategy,
+                    availableProvidersCount: availableProviders?.length || 0,
+                    selectedProvider: routingDecision?.selectedProvider,
+                    selectedModel: routingDecision?.selectedModel
+                }
+            });
 
             res.status(200).json({
                 success: true,
@@ -91,8 +182,19 @@ export class CPIController {
                     strategy: defaultStrategy
                 }
             });
-        } catch (error) {
-            logger.error('Error getting routing decision:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Routing decision generation failed', {
+                hasRequest: !!request,
+                hasStrategy: !!strategy,
+                availableProvidersCount: availableProviders?.length || 0,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get routing decision',
@@ -105,18 +207,36 @@ export class CPIController {
      * Compare CPI scores across multiple providers and models
      */
     static async compareProviders(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { 
+            promptTokens, 
+            completionTokens, 
+            useCase = 'general',
+            qualityRequirement = 'medium',
+            latencyRequirement = 'normal',
+            reliabilityRequirement = 'medium',
+            providers = []
+        } = req.body;
+
         try {
-            const { 
-                promptTokens, 
-                completionTokens, 
-                useCase = 'general',
-                qualityRequirement = 'medium',
-                latencyRequirement = 'normal',
-                reliabilityRequirement = 'medium',
-                providers = []
-            } = req.body;
+            loggingService.info('Provider comparison initiated', {
+                promptTokens,
+                completionTokens,
+                useCase,
+                qualityRequirement,
+                latencyRequirement,
+                reliabilityRequirement,
+                providersCount: providers.length,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!promptTokens || !completionTokens) {
+                loggingService.warn('Provider comparison failed - missing required fields', {
+                    hasPromptTokens: !!promptTokens,
+                    hasCompletionTokens: !!completionTokens,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'promptTokens and completionTokens are required'
@@ -135,6 +255,14 @@ export class CPIController {
                 reliabilityRequirement
             };
 
+            loggingService.info('Provider comparison processing started', {
+                promptTokens,
+                completionTokens,
+                useCase,
+                providersCount: providers.length,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // Get all available models if none specified
             const availableModels = await IntelligentRoutingService['getAvailableModels'](providers);
             
@@ -146,6 +274,36 @@ export class CPIController {
 
             // Sort by CPI score
             const sortedResults = comparisonResults.sort((a, b) => b.cpiScore - a.cpiScore);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Provider comparison completed successfully', {
+                promptTokens,
+                completionTokens,
+                useCase,
+                duration,
+                availableModelsCount: availableModels.length,
+                comparisonResultsCount: comparisonResults.length,
+                bestModel: sortedResults[0]?.modelId,
+                bestProvider: sortedResults[0]?.provider,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_provider_comparison_completed',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    promptTokens,
+                    completionTokens,
+                    useCase,
+                    availableModelsCount: availableModels.length,
+                    comparisonResultsCount: comparisonResults.length,
+                    bestModel: sortedResults[0]?.modelId,
+                    bestProvider: sortedResults[0]?.provider
+                }
+            });
 
             res.status(200).json({
                 success: true,
@@ -181,8 +339,20 @@ export class CPIController {
                     timestamp: new Date().toISOString()
                 }
             });
-        } catch (error) {
-            logger.error('Error comparing providers:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Provider comparison failed', {
+                promptTokens,
+                completionTokens,
+                useCase,
+                providersCount: providers.length,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to compare providers',
@@ -195,10 +365,22 @@ export class CPIController {
      * Get optimization recommendations based on current usage patterns
      */
     static async getOptimizationRecommendations(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { userId, projectId, timeframe = '30d' } = req.query;
+
         try {
-            const { userId, projectId, timeframe = '30d' } = req.query;
+            loggingService.info('Optimization recommendations request initiated', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!userId) {
+                loggingService.warn('Optimization recommendations failed - missing userId', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'userId is required'
@@ -206,7 +388,37 @@ export class CPIController {
                 return;
             }
 
-            const recommendations = await CPIController.generateOptimizationRecommendations(userId as string, projectId as string, timeframe as string);
+            const recommendations = await CPIController.generateOptimizationRecommendations(
+                userId as string, 
+                projectId as string, 
+                timeframe as string
+            );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Optimization recommendations generated successfully', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                duration,
+                recommendationsCount: recommendations.length,
+                highImpactCount: recommendations.filter(r => r.impact === 'high').length,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_optimization_recommendations_generated',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    userId: userId as string,
+                    projectId: projectId as string,
+                    timeframe: timeframe as string,
+                    recommendationsCount: recommendations.length,
+                    highImpactCount: recommendations.filter(r => r.impact === 'high').length
+                }
+            });
 
             res.status(200).json({
                 success: true,
@@ -222,8 +434,19 @@ export class CPIController {
                     timestamp: new Date().toISOString()
                 }
             });
-        } catch (error) {
-            logger.error('Error getting optimization recommendations:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Optimization recommendations generation failed', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get optimization recommendations',
@@ -373,8 +596,15 @@ export class CPIController {
             }
 
             return recommendations;
-        } catch (error) {
-            logger.error('Error generating optimization recommendations:', error);
+        } catch (error: any) {
+            loggingService.error('Error generating optimization recommendations', {
+                userId,
+                projectId,
+                timeframe,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: 'background'
+            });
             return [];
         }
     }
@@ -383,10 +613,22 @@ export class CPIController {
      * Get CPI analytics and insights
      */
     static async getCPIAnalytics(req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { userId, projectId, timeframe = '30d' } = req.query;
+
         try {
-            const { userId, projectId, timeframe = '30d' } = req.query;
+            loggingService.info('CPI analytics request initiated', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!userId) {
+                loggingService.warn('CPI analytics failed - missing userId', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'userId is required'
@@ -394,7 +636,39 @@ export class CPIController {
                 return;
             }
 
-            const analytics = await CPIController.generateRealCPIAnalytics(userId as string, projectId as string, timeframe as string);
+            const analytics = await CPIController.generateRealCPIAnalytics(
+                userId as string, 
+                projectId as string, 
+                timeframe as string
+            );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('CPI analytics generated successfully', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                duration,
+                providersCount: analytics.providerComparison.length,
+                insightsCount: analytics.performanceInsights.length,
+                totalCostSavings: analytics.costSavings.totalSaved,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_analytics_generated',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    userId: userId as string,
+                    projectId: projectId as string,
+                    timeframe: timeframe as string,
+                    providersCount: analytics.providerComparison.length,
+                    insightsCount: analytics.performanceInsights.length,
+                    totalCostSavings: analytics.costSavings.totalSaved
+                }
+            });
 
             res.status(200).json({
                 success: true,
@@ -403,8 +677,19 @@ export class CPIController {
                     timestamp: new Date().toISOString()
                 }
             });
-        } catch (error) {
-            logger.error('Error getting CPI analytics:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('CPI analytics generation failed', {
+                userId: userId as string,
+                projectId: projectId as string,
+                timeframe: timeframe as string,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get CPI analytics',
@@ -561,8 +846,15 @@ export class CPIController {
                 },
                 performanceInsights
             };
-        } catch (error) {
-            logger.error('Error generating CPI analytics:', error);
+        } catch (error: any) {
+            loggingService.error('Error generating CPI analytics', {
+                userId,
+                projectId,
+                timeframe,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                requestId: 'background'
+            });
             return {
                 providerComparison: [],
                 costSavings: { totalSaved: 0, percentageSaved: 0, savingsByProvider: {}, savingsByModel: {} },
@@ -677,17 +969,48 @@ export class CPIController {
      * Clear CPI service caches
      */
     static async clearCache(_req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('CPI cache clearing initiated', {
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             CPIService.clearExpiredCache();
             IntelligentRoutingService.clearExpiredCache();
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('CPI cache cleared successfully', {
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'cpi_cache_cleared',
+                category: 'cpi_operations',
+                value: duration,
+                metadata: {
+                    servicesCleared: ['cpiService', 'intelligentRoutingService']
+                }
+            });
 
             res.status(200).json({
                 success: true,
                 message: 'CPI service caches cleared successfully',
                 timestamp: new Date().toISOString()
             });
-        } catch (error) {
-            logger.error('Error clearing CPI caches:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('CPI cache clearing failed', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to clear caches',
@@ -700,7 +1023,16 @@ export class CPIController {
      * Health check for CPI services
      */
     static async healthCheck(_req: Request, res: Response): Promise<void> {
+        const startTime = Date.now();
+
         try {
+            const duration = Date.now() - startTime;
+
+            loggingService.info('CPI health check completed successfully', {
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             res.status(200).json({
                 success: true,
                 status: 'healthy',
@@ -711,8 +1043,16 @@ export class CPIController {
                 },
                 timestamp: new Date().toISOString()
             });
-        } catch (error) {
-            logger.error('CPI health check failed:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('CPI health check failed', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             res.status(503).json({
                 success: false,
                 status: 'unhealthy',

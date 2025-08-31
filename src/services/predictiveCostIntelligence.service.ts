@@ -1,6 +1,6 @@
 import { Usage } from '../models/Usage';
 import { Project } from '../models/Project';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ForecastingService, ForecastData } from './forecasting.service';
 import { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
 import mongoose from 'mongoose';
@@ -218,7 +218,7 @@ export class PredictiveCostIntelligenceService {
                 includeCrossPlatform = true
             } = options;
 
-            logger.info(`Generating predictive intelligence for ${scope}:${scopeId || userId}`);
+            loggingService.info(`Generating predictive intelligence for ${scope}:${scopeId || userId}`);
 
             // Run all analysis in parallel for better performance
             const [
@@ -281,7 +281,7 @@ export class PredictiveCostIntelligenceService {
 
             return intelligenceData;
         } catch (error) {
-            logger.error('Error generating predictive intelligence:', error);
+            loggingService.error('Error generating predictive intelligence:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -353,7 +353,7 @@ export class PredictiveCostIntelligenceService {
 
             return enhancedForecasts;
         } catch (error) {
-            logger.error('Error generating enhanced forecasts:', error);
+            loggingService.error('Error generating enhanced forecasts:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -420,7 +420,7 @@ export class PredictiveCostIntelligenceService {
                 confidenceLevel
             };
         } catch (error) {
-            logger.error('Error analyzing token trends:', error);
+            loggingService.error('Error analyzing token trends:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -480,7 +480,7 @@ export class PredictiveCostIntelligenceService {
                 }
             };
         } catch (error) {
-            logger.error('Error analyzing prompt length growth:', error);
+            loggingService.error('Error analyzing prompt length growth:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -519,7 +519,7 @@ export class PredictiveCostIntelligenceService {
                 predictedSwitches
             };
         } catch (error) {
-            logger.error('Error analyzing model switch patterns:', error);
+            loggingService.error('Error analyzing model switch patterns:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -678,7 +678,7 @@ export class PredictiveCostIntelligenceService {
 
             return projections;
         } catch (error) {
-            logger.error('Error projecting budget exceedances:', error);
+            loggingService.error('Error projecting budget exceedances:', { error: error instanceof Error ? error.message : String(error) });
             return projections;
         }
     }
@@ -732,7 +732,7 @@ export class PredictiveCostIntelligenceService {
                 mitigationStrategies
             };
         } catch (error) {
-            logger.error('Error calculating project budget exceedance:', error);
+            loggingService.error('Error calculating project budget exceedance:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -745,7 +745,7 @@ export class PredictiveCostIntelligenceService {
         scopeId: string | undefined
     ): Promise<IntelligentOptimizationRecommendation[]> {
         // Use scopeId for logging
-        logger.debug(`Generating optimizations for user: ${userId}, scope: ${scopeId}`);
+        loggingService.debug(`Generating optimizations for user: ${userId}, scope: ${scopeId}`);
         try {
             // Get optimization opportunities from existing service
             const opportunities = await PerformanceCostAnalysisService.identifyOptimizationOpportunities(
@@ -847,7 +847,7 @@ export class PredictiveCostIntelligenceService {
 
             return intelligentRecommendations;
         } catch (error) {
-            logger.error('Error generating intelligent optimizations:', error);
+            loggingService.error('Error generating intelligent optimizations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -959,7 +959,7 @@ export class PredictiveCostIntelligenceService {
 
             return scenarios;
         } catch (error) {
-            logger.error('Error simulating scenarios:', error);
+            loggingService.error('Error simulating scenarios:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -973,7 +973,7 @@ export class PredictiveCostIntelligenceService {
     ): Promise<CrossPlatformInsight[]> {
         try {
             // Use parameters to prevent linting warnings
-            logger.info(`Analyzing cross-platform insights for user: ${userId}, scope: ${scopeId}`);
+            loggingService.info(`Analyzing cross-platform insights for user: ${userId}, scope: ${scopeId}`);
             
             // This would integrate with ChatGPT Plugin, Claude Tools, etc.
             // For now, return a structure showing potential insights
@@ -1008,7 +1008,7 @@ export class PredictiveCostIntelligenceService {
                 }
             ];
         } catch (error) {
-            logger.error('Error analyzing cross-platform insights:', error);
+            loggingService.error('Error analyzing cross-platform insights:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -1223,7 +1223,7 @@ export class PredictiveCostIntelligenceService {
         weekly: number[];
     }> {
         // Use historicalData to prevent linting warning
-        logger.debug(`Calculating seasonality factors from ${historicalData.length} data points`);
+        loggingService.debug(`Calculating seasonality factors from ${historicalData.length} data points`);
         
         // Simple seasonality calculation - would be more sophisticated in production
         return {
@@ -1360,7 +1360,7 @@ export class PredictiveCostIntelligenceService {
         costImpact: number;
     }>> {
         // Use modelUsageData to prevent linting warning
-        logger.debug(`Analyzing switch patterns from ${modelUsageData.length} data points`);
+        loggingService.debug(`Analyzing switch patterns from ${modelUsageData.length} data points`);
         
         // Simplified implementation - would be more sophisticated in production
         return [
@@ -1423,7 +1423,7 @@ export class PredictiveCostIntelligenceService {
         confidenceScore: number;
     }>> {
         // Use parameters to prevent linting warnings
-        logger.debug(`Predicting model switches for user: ${userId}, scope: ${scopeId}, patterns: ${preferences.length}`);
+        loggingService.debug(`Predicting model switches for user: ${userId}, scope: ${scopeId}, patterns: ${preferences.length}`);
         
         // Simplified prediction logic - would use ML in production
         const predictions = [];
@@ -1452,7 +1452,7 @@ export class PredictiveCostIntelligenceService {
         totalTokens: number;
     }> {
         // Use targetDate to prevent linting warning
-        logger.debug(`Projecting token usage for ${targetDate.toISOString()}`);
+        loggingService.debug(`Projecting token usage for ${targetDate.toISOString()}`);
         
         // Get recent token usage and project based on trend
         const recentUsage = await this.getTokenHistoricalData(userId, scopeId, 7);
@@ -1484,7 +1484,7 @@ export class PredictiveCostIntelligenceService {
         potentialSavings: number;
     }>> {
         // Use parameters to prevent linting warnings
-        logger.debug(`Generating model recommendations for user: ${userId}, scope: ${scopeId}, tokens: ${projectedTokens}`);
+        loggingService.debug(`Generating model recommendations for user: ${userId}, scope: ${scopeId}, tokens: ${projectedTokens}`);
         
         // Calculate realistic savings based on actual usage data
         const currentModelCost = predictedCost || this.estimateCostFromTokens(projectedTokens);
@@ -1512,7 +1512,7 @@ export class PredictiveCostIntelligenceService {
         impact: number;
     }>> {
         // Use parameters to prevent linting warnings
-        logger.debug(`Assessing risk factors for user: ${userId}, scope: ${scopeId}, tokens: ${tokenProjection.totalTokens}`);
+        loggingService.debug(`Assessing risk factors for user: ${userId}, scope: ${scopeId}, tokens: ${tokenProjection.totalTokens}`);
         
         // Ensure we have a valid predicted cost for impact calculation
         const baseCost = forecast.predictedCost || this.estimateCostFromTokens(tokenProjection.totalTokens);
@@ -1588,7 +1588,7 @@ export class PredictiveCostIntelligenceService {
         timeframe: string;
     }>> {
         // Use projectId to prevent linting warning
-        logger.debug(`Generating mitigation strategies for project: ${projectId}, exceedance: ${exceedanceAmount}`);
+        loggingService.debug(`Generating mitigation strategies for project: ${projectId}, exceedance: ${exceedanceAmount}`);
         
         return [
             {
@@ -1632,12 +1632,11 @@ export class PredictiveCostIntelligenceService {
         
         const score = (forecastConfidence + tokenConfidence + dataQuality) / 3;
         
-        logger.debug('Confidence score calculation:', {
-            forecastConfidence,
+        loggingService.debug('Confidence score calculation:', { value:  { forecastConfidence,
             tokenConfidence, 
             dataQuality,
             finalScore: score
-        });
+         } });
         
         return Math.min(Math.max(score, 0), 1); // Ensure 0-1 range
     }

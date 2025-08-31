@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export interface WorkflowSummary {
     workflowId: string;
@@ -100,7 +100,7 @@ export class WorkflowService {
             };
 
         } catch (error) {
-            logger.error('Error getting workflow details:', error);
+            loggingService.error('Error getting workflow details:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -220,7 +220,7 @@ export class WorkflowService {
             };
 
         } catch (error) {
-            logger.error('Error getting user workflows:', error);
+            loggingService.error('Error getting user workflows:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -335,7 +335,7 @@ export class WorkflowService {
             };
 
         } catch (error) {
-            logger.error('Error getting workflow analytics:', error);
+            loggingService.error('Error getting workflow analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -355,7 +355,7 @@ export class WorkflowService {
             return workflows.filter(wf => wf !== null) as WorkflowSummary[];
 
         } catch (error) {
-            logger.error('Error comparing workflows:', error);
+            loggingService.error('Error comparing workflows:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

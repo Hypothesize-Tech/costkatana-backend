@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { metrics, trace, context, propagation } from '@opentelemetry/api';
 import { TelemetryService } from '../services/telemetry.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 const meter = metrics.getMeter('cost-katana-http', '1.0.0');
 
@@ -37,8 +37,33 @@ const responseSize = meter.createHistogram('http.server.response.size', {
 export function requestMetricsMiddleware(req: Request, res: Response, next: NextFunction): void {
     const startTime = Date.now();
     
+    loggingService.info('=== REQUEST METRICS MIDDLEWARE STARTED ===', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        path: req.path,
+        method: req.method,
+        protocol: req.protocol
+    });
+
+    loggingService.info('Step 1: Initializing request metrics collection', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'init_metrics'
+    });
+    
     // Get route pattern (will be set by Express after routing)
     let route = 'unknown';
+    
+    loggingService.info('Route pattern initialized', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'route_init',
+        initialRoute: route,
+        actualPath: req.path
+    });
     
     // Increment active requests
     const labels = {
@@ -48,21 +73,86 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
     
     activeRequests.add(1, labels);
 
+    loggingService.info('Active requests counter incremented', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'active_requests_incremented',
+        method: req.method,
+        scheme: req.protocol,
+        labels
+    });
+
+    loggingService.info('Step 2: Tracking request size metrics', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'track_request_size'
+    });
+
     // Track request size if body exists
     if (req.body) {
         const size = JSON.stringify(req.body).length;
         requestSize.record(size, { ...labels, route });
+        
+        loggingService.info('Request size metrics recorded', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'request_size_recorded',
+            size,
+            hasBody: true,
+            route
+        });
+    } else {
+        loggingService.debug('No request body, skipping request size metrics', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'no_request_body',
+            hasBody: false
+        });
     }
+
+    loggingService.info('Step 3: Setting up response metrics collection', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'setup_response_metrics'
+    });
 
     // Hook into response finish event
     const originalEnd = res.end;
     res.end = function(...args: any[]) {
+        const responseStartTime = Date.now();
+        
+        loggingService.info('Response end intercepted, collecting final metrics', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'response_intercepted',
+            responseTime: `${responseStartTime - startTime}ms`
+        });
+        
         // Get the actual route that was matched
         route = (req as any).route?.path || req.path || 'unknown';
         
         const duration = Date.now() - startTime;
         const statusCode = res.statusCode;
         const statusClass = `${Math.floor(statusCode / 100)}xx`;
+
+        loggingService.info('Response details extracted', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'response_details_extracted',
+            route,
+            duration,
+            statusCode,
+            statusClass,
+            originalPath: req.path,
+            matchedRoute: (req as any).route?.path
+        });
 
         const finalLabels = {
             method: req.method,
@@ -72,10 +162,35 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
             scheme: req.protocol,
         };
 
+        loggingService.info('Step 4: Recording final request metrics', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'record_final_metrics'
+        });
+
         // Record metrics
         requestCounter.add(1, finalLabels);
         requestDuration.record(duration, finalLabels);
         activeRequests.add(-1, { method: req.method, scheme: req.protocol });
+
+        loggingService.info('Core metrics recorded successfully', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'core_metrics_recorded',
+            requestCount: 1,
+            duration,
+            activeRequestsDecremented: -1,
+            finalLabels
+        });
+
+        loggingService.info('Step 5: Tracking response size metrics', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'track_response_size'
+        });
 
         // Track response size
         let respSize = 0;
@@ -84,8 +199,41 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
             if (!isNaN(size)) {
                 respSize = size;
                 responseSize.record(size, finalLabels);
+                
+                loggingService.info('Response size metrics recorded', {
+                    component: 'RequestMetricsMiddleware',
+                    operation: 'requestMetricsMiddleware',
+                    type: 'request_metrics',
+                    step: 'response_size_recorded',
+                    size,
+                    hasContentLength: true,
+                    finalLabels
+                });
+            } else {
+                loggingService.debug('Invalid content-length header, skipping response size metrics', {
+                    component: 'RequestMetricsMiddleware',
+                    operation: 'requestMetricsMiddleware',
+                    type: 'request_metrics',
+                    step: 'invalid_content_length',
+                    contentLength: res.getHeader('content-length')
+                });
             }
+        } else {
+            loggingService.debug('No content-length header, skipping response size metrics', {
+                component: 'RequestMetricsMiddleware',
+                operation: 'requestMetricsMiddleware',
+                type: 'request_metrics',
+                step: 'no_content_length',
+                hasContentLength: false
+            });
         }
+
+        loggingService.info('Step 6: Collecting telemetry data for storage', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'collect_telemetry_data'
+        });
 
         // Store telemetry data in MongoDB (async, non-blocking)
         const span = trace.getActiveSpan();
@@ -100,7 +248,19 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
                 });
             }
 
-            TelemetryService.storeTelemetryData({
+            loggingService.info('Telemetry data prepared for storage', {
+                component: 'RequestMetricsMiddleware',
+                operation: 'requestMetricsMiddleware',
+                type: 'request_metrics',
+                step: 'telemetry_data_prepared',
+                hasSpan: true,
+                hasBaggage: !!activeBaggage,
+                baggageEntries: Object.keys(baggage),
+                traceId: spanContext.traceId,
+                spanId: spanContext.spanId
+            });
+
+            const telemetryData = {
                 trace_id: spanContext.traceId,
                 span_id: spanContext.spanId,
                 parent_span_id: (span as any).parentSpanId,
@@ -114,8 +274,8 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
                 duration_ms: duration,
                 service_name: 'cost-katana-api',
                 operation_name: `http.${req.method.toLowerCase()}`,
-                span_kind: 'server',
-                status: statusCode >= 400 ? 'error' : 'success',
+                span_kind: 'server' as const,
+                status: statusCode >= 400 ? 'error' as const : 'success' as const,
                 status_message: statusCode >= 400 ? `HTTP ${statusCode}` : undefined,
                 http_route: route,
                 http_method: req.method,
@@ -131,14 +291,75 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
                     response_size: respSize,
                     status_class: statusClass
                 }
-            }).catch(err => {
-                logger.error('Failed to store HTTP telemetry in MongoDB:', err);
+            };
+
+            loggingService.info('Step 7: Storing telemetry data in MongoDB', {
+                component: 'RequestMetricsMiddleware',
+                operation: 'requestMetricsMiddleware',
+                type: 'request_metrics',
+                step: 'store_telemetry_data',
+                telemetryData: {
+                    traceId: telemetryData.trace_id,
+                    spanId: telemetryData.span_id,
+                    tenantId: telemetryData.tenant_id,
+                    workspaceId: telemetryData.workspace_id,
+                    userId: telemetryData.user_id,
+                    requestId: telemetryData.request_id,
+                    duration: telemetryData.duration_ms,
+                    status: telemetryData.status,
+                    route: telemetryData.http_route,
+                    method: telemetryData.http_method,
+                    statusCode: telemetryData.http_status_code
+                }
+            });
+
+            TelemetryService.storeTelemetryData(telemetryData).catch(err => {
+                loggingService.logError(err as Error, {
+                    component: 'RequestMetricsMiddleware',
+                    operation: 'requestMetricsMiddleware',
+                    type: 'request_metrics',
+                    step: 'telemetry_storage_failed',
+                    error: err instanceof Error ? err.message : 'Unknown error'
+                });
+            });
+        } else {
+            loggingService.warn('No active span found, skipping telemetry data storage', {
+                component: 'RequestMetricsMiddleware',
+                operation: 'requestMetricsMiddleware',
+                type: 'request_metrics',
+                step: 'no_active_span',
+                hasSpan: false
             });
         }
+
+        loggingService.info('Response metrics collection completed', {
+            component: 'RequestMetricsMiddleware',
+            operation: 'requestMetricsMiddleware',
+            type: 'request_metrics',
+            step: 'response_metrics_complete',
+            totalDuration: `${Date.now() - startTime}ms`,
+            responseProcessingTime: `${Date.now() - responseStartTime}ms`
+        });
 
         // Call original end
         originalEnd.apply(res, args as any);
     } as any;
+
+    loggingService.info('Response metrics collection setup completed', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'setup_complete',
+        setupTime: `${Date.now() - startTime}ms`
+    });
+
+    loggingService.info('=== REQUEST METRICS MIDDLEWARE COMPLETED ===', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'requestMetricsMiddleware',
+        type: 'request_metrics',
+        step: 'completed',
+        setupTime: `${Date.now() - startTime}ms`
+    });
 
     next();
 }
@@ -147,9 +368,27 @@ export function requestMetricsMiddleware(req: Request, res: Response, next: Next
  * Create custom business metrics
  */
 export function createBusinessMetrics() {
+    const startTime = Date.now();
+    
+    loggingService.info('=== BUSINESS METRICS CREATION STARTED ===', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'createBusinessMetrics',
+        type: 'business_metrics',
+        step: 'creation_started'
+    });
+
     const meter = metrics.getMeter('cost-katana-business', '1.0.0');
 
-    return {
+    loggingService.info('Business metrics meter created', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'createBusinessMetrics',
+        type: 'business_metrics',
+        step: 'meter_created',
+        meterName: 'cost-katana-business',
+        meterVersion: '1.0.0'
+    });
+
+    const businessMetrics = {
         userRegistrations: meter.createCounter('business.user.registrations', {
             description: 'Total number of user registrations',
             unit: '1',
@@ -190,6 +429,26 @@ export function createBusinessMetrics() {
             unit: '1',
         }),
     };
+
+    loggingService.info('Business metrics created successfully', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'createBusinessMetrics',
+        type: 'business_metrics',
+        step: 'metrics_created',
+        metricsCount: Object.keys(businessMetrics).length,
+        metrics: Object.keys(businessMetrics),
+        totalTime: `${Date.now() - startTime}ms`
+    });
+
+    loggingService.info('=== BUSINESS METRICS CREATION COMPLETED ===', {
+        component: 'RequestMetricsMiddleware',
+        operation: 'createBusinessMetrics',
+        type: 'business_metrics',
+        step: 'completed',
+        totalTime: `${Date.now() - startTime}ms`
+    });
+
+    return businessMetrics;
 }
 
 // Export business metrics instance

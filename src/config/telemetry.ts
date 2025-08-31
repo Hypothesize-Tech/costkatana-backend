@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import axios from 'axios';
 
 export interface TelemetryConfig {
@@ -28,8 +28,8 @@ export const telemetryConfig = {
       serviceName: process.env.OTEL_SERVICE_NAME || 'cost-katana-api',
       environment: process.env.NODE_ENV || 'development',
       version: process.env.npm_package_version || '2.0.0',
-      tracesEndpoint: process.env.OTLP_HTTP_TRACES_URL || 'http://localhost:4318/v1/traces',
-      metricsEndpoint: process.env.OTLP_HTTP_METRICS_URL || 'http://localhost:4318/v1/metrics',
+      tracesEndpoint: process.env.OTLP_HTTP_TRACES_URL || '',
+      metricsEndpoint: process.env.OTLP_HTTP_METRICS_URL || '',
       headers: process.env.OTEL_EXPORTER_OTLP_HEADERS ? 
         JSON.parse(process.env.OTEL_EXPORTER_OTLP_HEADERS) : undefined,
       certificate: process.env.OTEL_EXPORTER_OTLP_CERTIFICATE,
@@ -50,7 +50,11 @@ export const telemetryConfig = {
 
     // Check if telemetry is disabled
     if (!config.enabled) {
-      logger.info('📊 Telemetry is disabled via TELEMETRY_ENABLED=false');
+      loggingService.info('📊 Telemetry is disabled via TELEMETRY_ENABLED=false', {
+        component: 'TelemetryConfig',
+        operation: 'validate',
+        type: 'telemetry'
+      });
       return { valid: true, issues: [] };
     }
 
@@ -61,23 +65,23 @@ export const telemetryConfig = {
 
     // Validate endpoints
     if (!config.tracesEndpoint) {
-      issues.push('Missing OTLP_HTTP_TRACES_URL - using default: http://localhost:4318/v1/traces');
+      issues.push('OTLP_HTTP_TRACES_URL not set - traces will be exported to console');
     }
 
     if (!config.metricsEndpoint) {
-      issues.push('Missing OTLP_HTTP_METRICS_URL - using default: http://localhost:4318/v1/metrics');
+      issues.push('OTLP_HTTP_METRICS_URL not set - metrics will be exported to console');
     }
 
     // Validate vendor-specific configurations
-    if (config.tracesEndpoint.includes('datadog') && !config.headers) {
+    if (config.tracesEndpoint && config.tracesEndpoint.includes('datadog') && !config.headers) {
       issues.push('Datadog endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
     }
 
-    if (config.tracesEndpoint.includes('newrelic') && !config.headers) {
+    if (config.tracesEndpoint && config.tracesEndpoint.includes('newrelic') && !config.headers) {
       issues.push('New Relic endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
     }
 
-    if (config.tracesEndpoint.includes('grafana') && !config.headers && !config.tracesEndpoint.includes('localhost')) {
+    if (config.tracesEndpoint && config.tracesEndpoint.includes('grafana') && !config.headers && !config.tracesEndpoint.includes('localhost')) {
       issues.push('Grafana Cloud endpoint detected but no OTEL_EXPORTER_OTLP_HEADERS provided');
     }
 
@@ -105,9 +109,17 @@ export const telemetryConfig = {
 
     // Log validation results
     if (issues.length > 0) {
-      logger.warn('⚠️  Telemetry Configuration Issues:', { issues });
+      loggingService.warn('⚠️  Telemetry Configuration Issues', {
+        component: 'TelemetryConfig',
+        operation: 'validate',
+        type: 'telemetry',
+        issues
+      });
     } else {
-      logger.info('✅ Telemetry Configuration Valid', {
+      loggingService.info('✅ Telemetry Configuration Valid', {
+        component: 'TelemetryConfig',
+        operation: 'validate',
+        type: 'telemetry',
         serviceName: config.serviceName,
         environment: config.environment,
         tracesEndpoint: config.tracesEndpoint,
@@ -133,7 +145,12 @@ export const telemetryConfig = {
       });
       return response.status === 200;
     } catch (error) {
-      logger.debug('Collector health check failed:', error);
+      loggingService.debug('Collector health check failed', {
+        component: 'TelemetryConfig',
+        operation: 'checkCollectorHealth',
+        type: 'telemetry',
+        error: error instanceof Error ? error.message : String(error)
+      });
       return false;
     }
   },
@@ -142,7 +159,12 @@ export const telemetryConfig = {
    * Get collector health endpoint
    */
   getCollectorHealthEndpoint(): string {
-    const tracesUrl = process.env.OTLP_HTTP_TRACES_URL || 'http://localhost:4318/v1/traces';
+    const tracesUrl = process.env.OTLP_HTTP_TRACES_URL;
+    
+    // If no traces URL is configured, return empty string (no health check available)
+    if (!tracesUrl || tracesUrl.trim() === '') {
+      return '';
+    }
     
     // Extract base URL from traces endpoint
     const url = new URL(tracesUrl);

@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { logger } from '../utils/logger';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { SimulationTrackingService } from './simulationTracking.service';
 import { Usage } from '../models/Usage';
+import { loggingService } from './logging.service';
 // import { User } from '../models/User';
 // import { Project } from '../models/Project';
 
@@ -233,7 +233,7 @@ export class AutoRecommendationAgentService {
 
             return behaviorPattern;
         } catch (error) {
-            logger.error('Error analyzing user behavior:', error);
+            loggingService.error('Error analyzing user behavior:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -279,7 +279,7 @@ export class AutoRecommendationAgentService {
 
             return recommendations;
         } catch (error) {
-            logger.error('Error generating recommendations:', error);
+            loggingService.error('Error generating recommendations:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -311,7 +311,7 @@ export class AutoRecommendationAgentService {
 
             return recommendations;
         } catch (error) {
-            logger.error('Error getting user recommendations:', error);
+            loggingService.error('Error getting user recommendations:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -352,9 +352,9 @@ export class AutoRecommendationAgentService {
             // Update user behavior pattern based on interaction
             await this.updateBehaviorFromInteraction(recommendationId, status);
 
-            logger.info(`Updated recommendation ${recommendationId} status to ${status}`);
+            loggingService.info(`Updated recommendation ${recommendationId} status to ${status}`);
         } catch (error) {
-            logger.error('Error updating recommendation status:', error);
+            loggingService.error('Error updating recommendation status:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -631,7 +631,7 @@ Return valid JSON array of recommendations.`;
                 }
             }));
         } catch (error) {
-            logger.error('Error calling AI for recommendations:', error);
+            loggingService.error('Error calling AI for recommendations:', { error: error instanceof Error ? error.message : String(error) });
             
             // Return fallback recommendations
             return [
@@ -676,7 +676,7 @@ Return valid JSON array of recommendations.`;
 
             await recommendation.save();
         } catch (error) {
-            logger.error('Error saving recommendation:', error);
+            loggingService.error('Error saving recommendation:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -711,7 +711,7 @@ Return valid JSON array of recommendations.`;
                 }
             );
         } catch (error) {
-            logger.error('Error updating behavior from interaction:', error);
+            loggingService.error('Error updating behavior from interaction:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 }

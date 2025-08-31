@@ -1,5 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import mongoose from 'mongoose';
+import { loggingService } from '../services/logging.service';
 
 interface MongoQuery {
     collection: string;
@@ -42,7 +43,27 @@ export class MongoDbReaderTool extends Tool {
         'conversations',
         'chatmessages',
         'qualityscores',
-        'tips'
+        'tips',
+        'guardrails',
+        'intelligentmonitoring',
+        'webhooks',
+        'integrations',
+        'costtracking',
+        'modelpricing',
+        'experiments',
+        'feedback',
+        'analytics',
+        'notifications',
+        'sessions',
+        'tokens',
+        'models',
+        'providers',
+        'settings',
+        'logs',
+        'metrics',
+        'traces',
+        'spans',
+        'telemetry'
     ];
 
     private readonly allowedOperations = ['find', 'aggregate', 'count'];
@@ -50,7 +71,13 @@ export class MongoDbReaderTool extends Tool {
     async _call(input: string): Promise<string> {
         try {
             // Log the input for debugging
-            console.log('MongoDB Reader received input:', input.substring(0, 200) + (input.length > 200 ? '...' : ''));
+            loggingService.info('MongoDB Reader received input', {
+                component: 'mongoDbReaderTool',
+                operation: '_call',
+                step: 'inputReceived',
+                inputLength: input.length,
+                inputPreview: input.substring(0, 200) + (input.length > 200 ? '...' : '')
+            });
             
             if (!input || input.trim().length === 0) {
                 return "Error: Empty input provided. Please provide a valid JSON query.";
@@ -177,7 +204,13 @@ export class MongoDbReaderTool extends Tool {
             }, null, 2);
 
         } catch (error) {
-            console.error('MongoDB query failed:', error);
+            loggingService.error('MongoDB query failed', {
+                component: 'mongoDbReaderTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorType: error instanceof SyntaxError ? 'SyntaxError' : 'Unknown'
+            });
             
             if (error instanceof SyntaxError) {
                 return `Invalid JSON input. Please provide a valid single-line JSON query. Example: {"collection": "usages", "operation": "find", "query": {"userId": "user-id"}, "limit": 10}`;

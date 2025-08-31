@@ -1,7 +1,7 @@
 import { EvaluationJob, IEvaluationJob } from '../models/EvaluationJob';
 import { FineTuneJob } from '../models/FineTuneJob';
 import { TrainingDataset } from '../models/TrainingDataset';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
@@ -95,14 +95,14 @@ export class EvaluationJobService {
                 await fineTuneJob.save();
             }
 
-            logger.info(`Created evaluation job: ${savedJob.name} for user ${userId}`);
+            loggingService.info(`Created evaluation job: ${savedJob.name} for user ${userId}`);
 
             // Queue the evaluation for execution
             await this.queueEvaluationExecution(savedJob._id?.toString() || savedJob.id);
 
             return savedJob;
         } catch (error) {
-            logger.error('Error creating evaluation job:', error);
+            loggingService.error('Error creating evaluation job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -119,7 +119,7 @@ export class EvaluationJobService {
             .populate('datasetId', 'name version')
             .sort({ createdAt: -1 });
         } catch (error) {
-            logger.error('Error getting user evaluation jobs:', error);
+            loggingService.error('Error getting user evaluation jobs:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -136,7 +136,7 @@ export class EvaluationJobService {
             .populate('datasetId', 'name version')
             .sort({ createdAt: -1 });
         } catch (error) {
-            logger.error('Error getting evaluations by fine-tune job:', error);
+            loggingService.error('Error getting evaluations by fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -153,7 +153,7 @@ export class EvaluationJobService {
             .populate('fineTuneJobId', 'name status baseModel provider')
             .populate('datasetId', 'name version items stats');
         } catch (error) {
-            logger.error('Error getting evaluation job:', error);
+            loggingService.error('Error getting evaluation job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -169,7 +169,7 @@ export class EvaluationJobService {
             }
 
             if (job.status !== 'queued') {
-                logger.warn(`Job ${jobId} is not in queued state: ${job.status}`);
+                loggingService.warn(`Job ${jobId} is not in queued state: ${job.status}`);
                 return;
             }
 
@@ -184,7 +184,7 @@ export class EvaluationJobService {
             await this.runEvaluation(job);
 
         } catch (error) {
-            logger.error(`Error executing evaluation job ${jobId}:`, error);
+            loggingService.error(`Error executing evaluation job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
             
             // Update job with error
             await EvaluationJob.findByIdAndUpdate(jobId, {
@@ -268,7 +268,7 @@ export class EvaluationJobService {
         
         await job.save();
 
-        logger.info(`Completed evaluation job: ${job.name}`);
+        loggingService.info(`Completed evaluation job: ${job.name}`);
     }
 
     /**
@@ -325,7 +325,7 @@ export class EvaluationJobService {
                 predictions.push(responseText);
 
             } catch (error) {
-                logger.warn(`Failed to generate prediction for item ${item.requestId}:`, error);
+                loggingService.warn(`Failed to generate prediction for item ${item.requestId}:`, { error: error instanceof Error ? error.message : String(error) });
                 predictions.push(''); // Empty prediction for failed cases
             }
         }
@@ -496,7 +496,7 @@ export class EvaluationJobService {
         // In production, add to queue (Redis, SQS, etc.)
         setTimeout(() => {
             this.executeEvaluationJob(jobId).catch(error => {
-                logger.error(`Failed to execute queued evaluation ${jobId}:`, error);
+                loggingService.error(`Failed to execute queued evaluation ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
             });
         }, 3000); // 3 second delay
     }
@@ -513,7 +513,7 @@ export class EvaluationJobService {
 
             const dataset = fineTuneJob.datasetId as any;
             if (!dataset) {
-                logger.warn(`No dataset found for fine-tune job ${fineTuneJobId}`);
+                loggingService.warn(`No dataset found for fine-tune job ${fineTuneJobId}`);
                 return;
             }
 
@@ -530,10 +530,10 @@ export class EvaluationJobService {
             };
 
             await this.createEvaluationJob(fineTuneJob.userId.toString(), evaluationData);
-            logger.info(`Auto-triggered evaluation for fine-tune job: ${fineTuneJobId}`);
+            loggingService.info(`Auto-triggered evaluation for fine-tune job: ${fineTuneJobId}`); 
 
         } catch (error) {
-            logger.error(`Error auto-triggering evaluation for fine-tune job ${fineTuneJobId}:`, error);
+            loggingService.error(`Error auto-triggering evaluation for fine-tune job ${fineTuneJobId}:`, { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -547,10 +547,10 @@ export class EvaluationJobService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
-            logger.info(`Deleted evaluation job ${jobId} for user ${userId}`);
+            loggingService.info(`Deleted evaluation job ${jobId} for user ${userId}`);
             return result.deletedCount > 0;
         } catch (error) {
-            logger.error('Error deleting evaluation job:', error);
+            loggingService.error('Error deleting evaluation job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

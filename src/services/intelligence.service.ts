@@ -1,5 +1,5 @@
 import { Tip, ITip, Usage, IUsage, User, IUser } from '../models';
-import { logger } from '../utils';
+import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 
 export interface TipContext {
@@ -45,7 +45,7 @@ export class IntelligenceService {
 
             return recommendations.slice(0, 5); // Return top 5 tips
         } catch (error) {
-            logger.error('Error analyzing tips:', error);
+            loggingService.error('Error analyzing tips:', error as Error);
             return [];
         }
     }
@@ -267,7 +267,7 @@ export class IntelligenceService {
                 }
             }
         } catch (error) {
-            logger.error('Error tracking tip interaction:', error);
+            loggingService.error('Error tracking tip interaction:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -298,7 +298,7 @@ export class IntelligenceService {
             const recommendations = await this.analyzeAndRecommendTips(context);
             return recommendations.slice(0, limit);
         } catch (error) {
-            logger.error('Error getting personalized tips:', error);
+            loggingService.error('Error getting personalized tips:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -368,7 +368,7 @@ export class IntelligenceService {
             );
         }
 
-        logger.info('Default tips initialized');
+        loggingService.info('Default tips initialized');
     }
 
 

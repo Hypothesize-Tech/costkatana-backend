@@ -1,8 +1,8 @@
 
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { logger } from '../utils/logger';
 import { embeddingsService } from './embeddings.service';
 import { Telemetry } from '../models/Telemetry';
+import { loggingService } from './logging.service';
 
 export interface CKQLQuery {
   naturalLanguage: string;
@@ -63,14 +63,14 @@ export class CKQLService {
 
       try {
         const result = await parseWithTimeout;
-        logger.info(`CKQL query parsed with AI in ${Date.now() - startTime}ms`);
+        loggingService.info(`CKQL query parsed with AI in ${Date.now() - startTime}ms`);
         return result;
       } catch (aiError) {
-        logger.warn('AI parsing failed or timed out, using fallback:', aiError);
+        loggingService.warn('AI parsing failed or timed out, using fallback:', { error: aiError instanceof Error ? aiError.message : String(aiError) });
         return this.parseWithFallback(naturalLanguage, context);
       }
     } catch (error) {
-      logger.error('Failed to parse CKQL query:', error);
+      loggingService.error('Failed to parse CKQL query:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`CKQL parsing failed: ${error}`);
     }
   }
@@ -227,7 +227,7 @@ export class CKQLService {
           
           // If vector search returns no results, try fallback query
           if (results.length === 0) {
-            logger.info('Vector search returned no results, trying fallback query');
+            loggingService.info('Vector search returned no results, trying fallback query');
             const fallbackQuery = this.generateFallbackQuery(query.naturalLanguage);
             const safeFilter = this.ensureSafeFindQuery(fallbackQuery);
             const mongoResults = await Telemetry.find(safeFilter)
@@ -240,7 +240,7 @@ export class CKQLService {
             totalCount = await Telemetry.countDocuments(safeFilter);
           }
         } catch (vectorError) {
-          logger.error('Vector search failed, falling back to regular search:', vectorError);
+          loggingService.error('Vector search failed, falling back to regular search:', { error: vectorError instanceof Error ? vectorError.message : String(vectorError) });
           // Fallback to regular MongoDB query with enhanced pattern matching
           const fallbackQuery = this.generateFallbackQuery(query.naturalLanguage);
           const safeFilter = this.ensureSafeFindQuery(fallbackQuery);
@@ -281,7 +281,7 @@ export class CKQLService {
         insights
       };
     } catch (error) {
-      logger.error('Failed to execute CKQL query:', error);
+      loggingService.error('Failed to execute CKQL query:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`CKQL execution failed: ${error}`);
     }
   }
@@ -403,7 +403,7 @@ Return ONLY the JSON query object:`;
             try {
               mongoQuery = JSON.parse(cleanedQueryText);
             } catch (parseError) {
-              logger.error('JSON parse failed for cleaned query text:', {
+              loggingService.error('JSON parse failed for cleaned query text:', {
                 originalText: queryText,
                 cleanedText: cleanedQueryText,
                 error: parseError
@@ -412,24 +412,24 @@ Return ONLY the JSON query object:`;
               const emergencyClean = this.emergencyQueryCleaning(cleanedQueryText);
               try {
                 mongoQuery = JSON.parse(emergencyClean);
-                logger.info('Emergency cleaning succeeded');
+                loggingService.info('Emergency cleaning succeeded');
               } catch (emergencyError) {
-                logger.error('Emergency cleaning also failed, using fallback');
+                loggingService.error('Emergency cleaning also failed, using fallback');
                 mongoQuery = { timestamp: { $gte: new Date(Date.now() - 3600000) } };
               }
             }
 
       // Fix malformed MongoDB query structures
       mongoQuery = this.fixMalformedQuery(mongoQuery);
-      logger.debug('Query after malformed fix:', JSON.stringify(mongoQuery));
+      loggingService.debug('Query after malformed fix:', { query: JSON.stringify(mongoQuery) });
 
       // Fix data type casting issues
       mongoQuery = this.fixDataTypes(mongoQuery);
-      logger.debug('Query after data type fix:', JSON.stringify(mongoQuery));
+      loggingService.debug('Query after data type fix:', { query: JSON.stringify(mongoQuery) });
 
       // Process time-based placeholders
       mongoQuery = this.processTimeFilters(mongoQuery);
-      logger.debug('Query after time processing:', JSON.stringify(mongoQuery));
+      loggingService.debug('Query after time processing:', { query: JSON.stringify(mongoQuery) });
 
       // Add context filters
       if (context?.tenant_id) {
@@ -441,7 +441,7 @@ Return ONLY the JSON query object:`;
 
       return mongoQuery;
     } catch (error) {
-      logger.error('Failed to generate MongoDB query:', error);
+      loggingService.error('Failed to generate MongoDB query:', { error: error instanceof Error ? error.message : String(error) });
       // Fallback to basic query
       return { timestamp: { $gte: new Date(Date.now() - 3600000) } };
     }
@@ -489,7 +489,7 @@ Return ONLY the JSON query object:`;
       const results = await Telemetry.aggregate(pipeline);
       return results;
     } catch (error) {
-      logger.error('Vector search failed, falling back to regular search:', error);
+      loggingService.error('Vector search failed, falling back to regular search:', { error: error instanceof Error ? error.message : String(error) });
       // Fallback to regular MongoDB query with safe filter
       const safeQuery = this.ensureSafeFindQuery(query.mongoQuery);
       return await Telemetry.find(safeQuery)
@@ -603,7 +603,7 @@ Provide a 1-sentence explanation of what this query will find.`;
 
       return insights;
     } catch (error) {
-      logger.error('Failed to generate insights:', error);
+      loggingService.error('Failed to generate insights:', { error: error instanceof Error ? error.message : String(error) });
       return [`Found ${results.length} results matching your query.`];
     }
   }
@@ -777,7 +777,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
       // Clean up the query recursively
       return this.cleanQueryObject(query, validQueryOperators, validFields);
     } catch (error) {
-      logger.warn('Failed to fix malformed query, using original:', error);
+      loggingService.warn('Failed to fix malformed query, using original:', { error: error instanceof Error ? error.message : String(error) });
       return query;
     }
   }
@@ -787,7 +787,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
    */
   private cleanMongoShellSyntax(queryText: string): string {
     try {
-      logger.debug('Original query text before shell cleaning:', queryText);
+      loggingService.debug('Original query text before shell cleaning:', { value:  { value: queryText } });
       
       // More aggressive ISODate cleaning - handle all possible patterns
       queryText = queryText.replace(/ISODate\s*\(\s*"([^"]+)"\s*\)/g, '"$1"');
@@ -830,10 +830,10 @@ Provide a single, specific recommendation for optimization or investigation.`;
       queryText = queryText.replace(/UUID\s*\([^)]*\)/g, '""');
       queryText = queryText.replace(/HexData\s*\([^)]*\)/g, '""');
       
-      logger.debug('Query text after shell cleaning:', queryText);
+      loggingService.debug('Query text after shell cleaning:', { value:  { value: queryText } });
       return queryText;
     } catch (error) {
-      logger.warn('Failed to clean MongoDB shell syntax:', error);
+      loggingService.warn('Failed to clean MongoDB shell syntax:', { error: error instanceof Error ? error.message : String(error) });
       // Return a safe fallback
       return '{"timestamp": {"$gte": "HOUR_AGO"}}';
     }
@@ -844,7 +844,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
    */
   private emergencyQueryCleaning(queryText: string): string {
     try {
-      logger.debug('Emergency cleaning input:', queryText);
+      loggingService.debug('Emergency cleaning input:', { value:  { value: queryText } });
       
       // Remove any remaining function calls entirely
       queryText = queryText.replace(/\w+\s*\([^)]*\)/g, '""');
@@ -873,10 +873,10 @@ Provide a single, specific recommendation for optimization or investigation.`;
         queryText = '{"timestamp": {"$gte": "HOUR_AGO"}}';
       }
       
-      logger.debug('Emergency cleaning output:', queryText);
+      loggingService.debug('Emergency cleaning output:', { value:  { value: queryText } });
       return queryText;
     } catch (error) {
-      logger.error('Emergency cleaning failed:', error);
+      loggingService.error('Emergency cleaning failed:', { error: error instanceof Error ? error.message : String(error) });
       return '{"timestamp": {"$gte": "HOUR_AGO"}}';
     }
   }
@@ -886,7 +886,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
    */
   private aggressiveQueryCleaning(queryText: string): string {
     try {
-      logger.debug('Query before aggressive cleaning:', queryText);
+      loggingService.debug('Query before aggressive cleaning:', { value:  { value: queryText } });
       
       // Remove common aggregation pipeline patterns - more comprehensive
       queryText = queryText.replace(/\{\s*"\$match"\s*:\s*(\{[^}]+\})\s*\}/g, '$1');
@@ -953,10 +953,10 @@ Provide a single, specific recommendation for optimization or investigation.`;
         queryText = '{"timestamp": {"$gte": "HOUR_AGO"}}';
       }
       
-      logger.debug('Query after aggressive cleaning:', queryText);
+      loggingService.debug('Query after aggressive cleaning:', { value:  { value: queryText } });
       return queryText;
     } catch (error) {
-      logger.warn('Failed to perform aggressive query cleaning:', error);
+      loggingService.warn('Failed to perform aggressive query cleaning:', { error: error instanceof Error ? error.message : String(error) });
       return '{"timestamp": {"$gte": "HOUR_AGO"}}'; // Safe fallback
     }
   }
@@ -1038,11 +1038,11 @@ Provide a single, specific recommendation for optimization or investigation.`;
 
   private ensureSafeFindQuery(query: any): any {
     if (!query || typeof query !== 'object') {
-      logger.debug('Query is null or not object, using default safe query');
+      loggingService.debug('Query is null or not object, using default safe query');
       return { timestamp: { $gte: new Date(Date.now() - 3600000) } };
     }
 
-    logger.debug('Original query before safety check:', JSON.stringify(query));
+    loggingService.debug('Original query before safety check:', { query: JSON.stringify(query) });
     
     // Create a clean copy
     const safeQuery = JSON.parse(JSON.stringify(query));
@@ -1062,7 +1062,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
       const cleaned: any = {};
       for (const key in obj) {
         if (dangerousOperators.includes(key)) {
-          logger.warn(`Removing dangerous operator ${key} from find query`);
+          loggingService.warn(`Removing dangerous operator ${key} from find query`);
           continue;
         }
         cleaned[key] = cleanObject(obj[key]);
@@ -1074,11 +1074,11 @@ Provide a single, specific recommendation for optimization or investigation.`;
     
     // If query becomes empty after cleaning, provide a safe default
     if (Object.keys(cleanedQuery).length === 0) {
-      logger.debug('Query became empty after cleaning, using default safe query');
+      loggingService.debug('Query became empty after cleaning, using default safe query');
       return { timestamp: { $gte: new Date(Date.now() - 3600000) } };
     }
     
-    logger.debug('Final safe query:', JSON.stringify(cleanedQuery));
+    loggingService.debug('Final safe query:', { query: JSON.stringify(cleanedQuery) });
     return cleanedQuery;
   }
 
@@ -1211,7 +1211,7 @@ Provide a single, specific recommendation for optimization or investigation.`;
       } catch (error: any) {
         if (error.name === 'ThrottlingException' && attempt < maxRetries) {
           const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-          logger.warn(`Bedrock throttling, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`);
+          loggingService.warn(`Bedrock throttling, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
@@ -1289,5 +1289,4 @@ Provide a single, specific recommendation for optimization or investigation.`;
 }
 
 export const ckqlService = CKQLService.getInstance();
-
 

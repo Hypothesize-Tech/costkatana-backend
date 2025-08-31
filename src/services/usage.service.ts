@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { Usage, IUsage } from '../models/Usage';
 import { Alert } from '../models/Alert';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { PaginationOptions, paginate } from '../utils/helpers';
 import { BedrockService } from './bedrock.service';
 import { AICostTrackerService } from './aiCostTracker.service';
@@ -47,12 +47,12 @@ export class UsageService {
     static async trackUsage(data: any, req?: any): Promise<IUsage | null> {
         try {
             // DEBUG: Check workflow fields received by service
-            console.log('🔍 WORKFLOW DEBUG - Service received:', {
+            loggingService.info('🔍 WORKFLOW DEBUG - Service received:', { value:  { 
                 workflowId: data.workflowId,
                 workflowName: data.workflowName,
                 workflowStep: data.workflowStep,
                 workflowSequence: data.workflowSequence
-            });
+             } });
 
             // Ensure userId is a valid ObjectId
             let userId = data.userId;
@@ -98,29 +98,28 @@ export class UsageService {
             }
 
             // DEBUG: Check workflow fields before MongoDB save
-            console.log('🔍 WORKFLOW DEBUG - Before MongoDB save:', {
+            loggingService.info('🔍 WORKFLOW DEBUG - Before MongoDB save:', { value:  { 
                 workflowId: usageData.workflowId,
                 workflowName: usageData.workflowName,
                 workflowStep: usageData.workflowStep,
                 workflowSequence: usageData.workflowSequence
-            });
+             } });
 
             const usage = new Usage(usageData);
             const savedUsage = await usage.save();
             
             // DEBUG: Check workflow fields after MongoDB save
-            console.log('🔍 WORKFLOW DEBUG - After MongoDB save:', {
+            loggingService.info('🔍 WORKFLOW DEBUG - After MongoDB save:', { value:  { 
                 _id: savedUsage._id,
                 workflowId: savedUsage.workflowId,
                 workflowName: savedUsage.workflowName,
                 workflowStep: savedUsage.workflowStep,
                 workflowSequence: savedUsage.workflowSequence
-            });
+             } });
             
             return savedUsage;
         } catch (error: any) {
-            console.error('Error in UsageService.trackUsage:', error);
-            console.error('Error stack:', error.stack);
+            loggingService.error('Error in UsageService.trackUsage:', { error: error instanceof Error ? error.message : String(error), stack: error.stack });
             throw error;
         }
     }
@@ -248,7 +247,7 @@ export class UsageService {
 
             return result;
         } catch (error) {
-            logger.error('Error fetching usage:', error);
+            loggingService.error('Error fetching usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -379,7 +378,7 @@ export class UsageService {
 
             return result;
         } catch (error) {
-            logger.error('Error getting usage stats:', error);
+            loggingService.error('Error getting usage stats:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -458,7 +457,7 @@ export class UsageService {
 
             return anomalyResult;
         } catch (error) {
-            logger.error('Error detecting anomalies:', error);
+            loggingService.error('Error detecting anomalies:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -508,7 +507,7 @@ export class UsageService {
 
             return result;
         } catch (error) {
-            logger.error('Error searching usage:', error);
+            loggingService.error('Error searching usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -528,7 +527,7 @@ export class UsageService {
 
             return results;
         } catch (error) {
-            logger.error('Error bulk tracking usage:', error);
+            loggingService.error('Error bulk tracking usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -659,7 +658,7 @@ export class UsageService {
                 }))
             };
         } catch (error) {
-            logger.error('Error getting real-time usage summary:', error);
+            loggingService.error('Error getting real-time usage summary:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -732,7 +731,7 @@ export class UsageService {
                 metadata: req.metadata
             }));
         } catch (error) {
-            logger.error('Error getting real-time requests:', error);
+            loggingService.error('Error getting real-time requests:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -871,7 +870,7 @@ export class UsageService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting usage analytics:', error);
+            loggingService.error('Error getting usage analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1087,7 +1086,7 @@ export class UsageService {
                 insights: insights
             };
         } catch (error) {
-            logger.error('Error getting CLI analytics:', error);
+            loggingService.error('Error getting CLI analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1103,7 +1102,7 @@ export class UsageService {
                 createdAt: { $gte: startDate }
             }).lean();
 
-            logger.info(`Syncing ${historicalUsage.length} historical records for user ${userId}`);
+            loggingService.info(`Syncing ${historicalUsage.length} historical records for user ${userId}`);
 
             // Process in batches to avoid overwhelming the system
             const batchSize = 100;
@@ -1134,9 +1133,9 @@ export class UsageService {
                 }));
             }
 
-            logger.info(`Historical sync completed for user ${userId}`);
+            loggingService.info(`Historical sync completed for user ${userId}`);
         } catch (error) {
-            logger.error('Error syncing historical data:', error);
+            loggingService.error('Error syncing historical data:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1147,7 +1146,7 @@ export class UsageService {
         const jwt = require('jsonwebtoken');
 
         try {
-            console.log('Creating usage with data:', JSON.stringify(data, null, 2));
+            loggingService.info('Creating usage with data:', { data: JSON.stringify(data, null, 2) });
 
             // Get userId from request like in usage.controller.ts
             let userId = getUserIdFromToken(req);
@@ -1201,18 +1200,17 @@ export class UsageService {
                 throw new Error(`Invalid userId: ${usageData.userId}`);
             }
 
-            console.log('Validated usage data:', usageData);
+            loggingService.info('Validated usage data:', { value:  {  usageData  } });
             const usage = new Usage(usageData);
             const savedUsage = await usage.save();
-            console.log('Usage saved successfully:', savedUsage._id);
+            loggingService.info('Usage saved successfully:', { value:  {  usageId: savedUsage._id  } });
             return savedUsage;
         } catch (error: any) {
-            console.error('Error in createUsage:', error);
-            console.error('Error details:', {
+            loggingService.error('Error in createUsage:', { error: error instanceof Error ? error.message : String(error), details: {
                 name: error.name,
                 message: error.message,
                 errors: error.errors
-            });
+            }});
             throw error;
         }
     }
@@ -1288,7 +1286,7 @@ export class UsageService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting property analytics:', error);
+            loggingService.error('Error getting property analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1391,7 +1389,7 @@ export class UsageService {
             const results = [...filteredMetadata, ...tagsResults].sort((a, b) => b.count - a.count);
             return results;
         } catch (error) {
-            logger.error('Error getting available properties:', error);
+            loggingService.error('Error getting available properties:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1422,7 +1420,7 @@ export class UsageService {
                 { new: true }
             ).lean();
 
-            logger.info('Usage properties updated:', {
+            loggingService.info('Usage properties updated:', {
                 usageId,
                 userId,
                 newProperties: Object.keys(properties),
@@ -1431,7 +1429,7 @@ export class UsageService {
 
             return updatedUsage;
         } catch (error) {
-            logger.error('Error updating usage properties:', error);
+            loggingService.error('Error updating usage properties:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1445,7 +1443,7 @@ export class UsageService {
 
             return usage;
         } catch (error) {
-            logger.error('Error getting usage by ID:', error);
+            loggingService.error('Error getting usage by ID:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1469,7 +1467,7 @@ export class UsageService {
 
             return updatedUsage;
         } catch (error) {
-            logger.error('Error updating usage:', error);
+            loggingService.error('Error updating usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1482,7 +1480,7 @@ export class UsageService {
             await Usage.findByIdAndDelete(usageId);
             return { success: true, message: 'Usage deleted successfully' };
         } catch (error) {
-            logger.error('Error deleting usage:', error);
+            loggingService.error('Error deleting usage:', { error: error instanceof Error ? error.message : String(error) } );
             throw error;
         }
     }
@@ -1505,7 +1503,7 @@ export class UsageService {
             }
             return 100; // $100 budget for basic users
         } catch (error) {
-            logger.error('Error getting user budget:', error);
+            loggingService.error('Error getting user budget:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }
@@ -1524,7 +1522,7 @@ export class UsageService {
 
             return recentUsage;
         } catch (error) {
-            logger.error('Error getting recent usage:', error);
+            loggingService.error('Error getting recent usage:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }

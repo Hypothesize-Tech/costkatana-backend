@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 // Simplified LangSmith service for basic tracing and analytics
 export class LangSmithService {
@@ -19,9 +19,9 @@ export class LangSmithService {
         this.isEnabled = !!(process.env.LANGCHAIN_API_KEY && process.env.LANGCHAIN_PROJECT);
         
         if (this.isEnabled) {
-            logger.info('🔗 LangSmith service initialized (simplified mode)');
+            loggingService.info('🔗 LangSmith service initialized (simplified mode)');
         } else {
-            logger.warn('⚠️ LangSmith not configured - using local tracing only');
+            loggingService.warn('⚠️ LangSmith not configured - using local tracing only');
         }
     }
 
@@ -58,10 +58,10 @@ export class LangSmithService {
                 this.traces = this.traces.slice(-1000);
             }
 
-            logger.info(`📊 LangSmith run created: ${runId}`);
+            loggingService.info(`📊 LangSmith run created: ${runId}`);
             return runId;
         } catch (error) {
-            logger.error('❌ Failed to create LangSmith run:', error);
+            loggingService.error('❌ Failed to create LangSmith run:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -86,9 +86,9 @@ export class LangSmithService {
                 }
             }
 
-            logger.info(`✅ LangSmith run completed: ${runId}`);
+            loggingService.info(`✅ LangSmith run completed: ${runId}`);
         } catch (error) {
-            logger.error('❌ Failed to end LangSmith run:', error);
+            loggingService.error('❌ Failed to end LangSmith run:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -123,7 +123,7 @@ export class LangSmithService {
             this.traces.push(trace);
             return runId;
         } catch (error) {
-            logger.error('❌ Failed to create LangSmith child run:', error);
+            loggingService.error('❌ Failed to create LangSmith child run:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -155,9 +155,9 @@ export class LangSmithService {
                 };
             }
 
-            logger.info(`💰 Cost logged for run ${runId}: $${cost.toFixed(6)}`);
+            loggingService.info(`💰 Cost logged for run ${runId}: $${cost.toFixed(6)}`);
         } catch (error) {
-            logger.error('❌ Failed to log cost event:', error);
+            loggingService.error('❌ Failed to log cost event:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -190,10 +190,10 @@ export class LangSmithService {
                     metadata: trace.metadata
                 }));
 
-            logger.info(`📈 Retrieved ${costData.length} cost records from local traces`);
+            loggingService.info(`📈 Retrieved ${costData.length} cost records from local traces`);
             return costData;
         } catch (error) {
-            logger.error('❌ Failed to retrieve historical cost data:', error);
+            loggingService.error('❌ Failed to retrieve historical cost data:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -304,7 +304,7 @@ export class LangSmithService {
                 lastActivity
             };
         } catch (error) {
-            logger.error('❌ Failed to get project stats:', error);
+            loggingService.error('❌ Failed to get project stats:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 totalRuns: 0,
                 successRate: 0,
@@ -334,7 +334,7 @@ export class LangSmithService {
         const removed = initialLength - this.traces.length;
         
         if (removed > 0) {
-            logger.info(`🧹 Cleared ${removed} old traces (older than ${olderThanHours}h)`);
+            loggingService.info(`🧹 Cleared ${removed} old traces (older than ${olderThanHours}h)`);
         }
     }
 }

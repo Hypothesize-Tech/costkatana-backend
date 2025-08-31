@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export class RealtimeUpdateService {
     private static activeConnections = new Map<string, { userId: string, res: any, lastActivity: Date }>();
@@ -48,10 +48,10 @@ export class RealtimeUpdateService {
         res.on('close', () => {
             this.activeConnections.delete(connectionId);
             clearInterval(heartbeat);
-            logger.info(`SSE connection closed for user: ${userId}`);
+            loggingService.info(`SSE connection closed for user: ${userId}`);
         });
 
-        logger.info(`SSE connection established for user: ${userId}`);
+        loggingService.info(`SSE connection established for user: ${userId}`);
         return connectionId;
     }
 
@@ -100,7 +100,7 @@ export class RealtimeUpdateService {
                 connection.res.write(`data: ${JSON.stringify(message)}\n\n`);
                 connection.lastActivity = new Date();
             } catch (error) {
-                logger.error(`Failed to send SSE message to ${connectionId}:`, error);
+                loggingService.error(`Failed to send SSE message to ${connectionId}:`, { error: error instanceof Error ? error.message : String(error) });
                 this.activeConnections.delete(connectionId);
             }
         });
@@ -118,7 +118,7 @@ export class RealtimeUpdateService {
                 try {
                     connection.res.end();
                 } catch (error) {
-                    logger.error(`Error closing inactive connection ${connectionId}:`, error);
+                    loggingService.error(`Error closing inactive connection ${connectionId}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
                 this.activeConnections.delete(connectionId);
             }

@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 // Schema for simulation tracking
 const SimulationTrackingSchema = new mongoose.Schema({
@@ -187,10 +187,10 @@ export class SimulationTrackingService {
             });
 
             const saved = await tracking.save();
-            logger.info(`Simulation tracked: ${saved._id} for user ${data.userId}`);
+            loggingService.info(`Simulation tracked: ${saved._id} for user ${data.userId}`);
             return saved._id.toString();
         } catch (error) {
-            logger.error('Error tracking simulation:', error);
+            loggingService.error('Error tracking simulation:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -216,9 +216,9 @@ export class SimulationTrackingService {
                 }
             );
             
-            logger.info(`Optimization application tracked: ${trackingId}`);
+            loggingService.info(`Optimization application tracked: ${trackingId}`);
         } catch (error) {
-            logger.error('Error tracking optimization application:', error);
+            loggingService.error('Error tracking optimization application:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -243,7 +243,7 @@ export class SimulationTrackingService {
                 }
             );
         } catch (error) {
-            logger.error('Error updating viewing metrics:', error);
+            loggingService.error('Error updating viewing metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -385,7 +385,7 @@ export class SimulationTrackingService {
                 weeklyTrends: weeklyTrends
             };
         } catch (error) {
-            logger.error('Error getting simulation stats:', error);
+            loggingService.error('Error getting simulation stats:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -440,7 +440,7 @@ export class SimulationTrackingService {
 
             return results;
         } catch (error) {
-            logger.error('Error getting top optimization wins:', error);
+            loggingService.error('Error getting top optimization wins:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -466,7 +466,7 @@ export class SimulationTrackingService {
 
             return simulations;
         } catch (error) {
-            logger.error('Error getting user simulation history:', error);
+            loggingService.error('Error getting user simulation history:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -527,7 +527,7 @@ export class SimulationTrackingService {
 
             return results;
         } catch (error) {
-            logger.error('Error getting applied optimizations:', error);
+            loggingService.error('Error getting applied optimizations:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -583,7 +583,7 @@ export class SimulationTrackingService {
 
             return totalSavings;
         } catch (error) {
-            logger.error('Error calculating total actual savings:', error);
+            loggingService.error('Error calculating total actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }
@@ -622,7 +622,7 @@ export class SimulationTrackingService {
 
             return Math.max(0, estimatedOriginalCost - avgNewModelCost);
         } catch (error) {
-            logger.error('Error calculating model switch actual savings:', error);
+            loggingService.error('Error calculating model switch actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return optimization.estimatedSavings || 0;
         }
     }
@@ -661,7 +661,7 @@ export class SimulationTrackingService {
 
             return Math.max(0, estimatedCostWithoutTrim - avgNewCost);
         } catch (error) {
-            logger.error('Error calculating context trim actual savings:', error);
+            loggingService.error('Error calculating context trim actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return optimization.estimatedSavings || 0;
         }
     }
@@ -700,7 +700,7 @@ export class SimulationTrackingService {
 
             return tokenSavings;
         } catch (error) {
-            logger.error('Error calculating prompt optimize actual savings:', error);
+            loggingService.error('Error calculating prompt optimize actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return optimization.estimatedSavings || 0;
         }
     }

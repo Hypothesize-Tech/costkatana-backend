@@ -1,12 +1,12 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { Usage } from '../models/Usage';
 import { Experiment } from '../models/Experiment';
 import { WhatIfScenario } from '../models/WhatIfScenario';
-import { MODEL_PRICING } from '../utils/pricing';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
+import { MODEL_PRICING } from '../utils/pricing';
 import mongoose from 'mongoose';
-import { BedrockService } from './bedrock.service'; // Add Bedrock integration
-import { EventEmitter } from 'events'; // For SSE support
+import { BedrockService } from './bedrock.service'; 
+import { EventEmitter } from 'events';
 
 export interface ExperimentResult {
     id: string;
@@ -154,7 +154,7 @@ export class ExperimentationService {
                     this.emitProgress(sessionId, 'executing', newProgress, `Completed ${model.model}`);
 
                 } catch (modelError: any) {
-                    logger.error(`Error executing model ${model.model}:`, modelError);
+                    loggingService.error(`Error executing model ${model.model}:`, { error: modelError instanceof Error ? modelError.message : String(modelError) });
                     
                     // Handle specific error types
                     let errorMessage = modelError.message || 'Unknown error';
@@ -186,7 +186,7 @@ export class ExperimentationService {
                     request.evaluationPrompt
                 );
             } catch (evaluationError: any) {
-                logger.warn('AI evaluation skipped due to error:', evaluationError.message);
+                loggingService.warn('AI evaluation skipped due to error:', { error: evaluationError instanceof Error ? evaluationError.message : String(evaluationError) });
                 this.emitProgress(sessionId, 'evaluating', 85, '⚠️ AI evaluation skipped due to rate limiting - using basic scores');
                 // Continue with basic scoring
                 evaluatedResults = results.map(result => ({
@@ -206,7 +206,7 @@ export class ExperimentationService {
             try {
                 await this.generateComparisonAnalysis(evaluatedResults, comparisonMode);
             } catch (analysisError: any) {
-                logger.warn('Comparison analysis skipped due to error:', analysisError.message);
+                loggingService.warn('Comparison analysis skipped due to error:', { error: analysisError instanceof Error ? analysisError.message : String(analysisError) });
                 this.emitProgress(sessionId, 'evaluating', 95, '⚠️ Analysis generation skipped due to rate limiting');
             }
 
@@ -250,7 +250,7 @@ export class ExperimentationService {
             );
 
         } catch (error) {
-            logger.error('Error in real-time model comparison:', error);
+            loggingService.error('Error in real-time model comparison:', { error: error instanceof Error ? error.message : String(error) });
             this.emitProgress(
                 sessionId, 
                 'failed', 
@@ -282,7 +282,7 @@ export class ExperimentationService {
             if (executeOnBedrock) {
                 // Get the appropriate Bedrock model ID
                 const bedrockModelId = this.mapToBedrockModelId(model.model, model.provider);
-                logger.info(`Mapped ${model.provider}:${model.model} -> ${bedrockModelId}`);
+                loggingService.info(`Mapped ${model.provider}:${model.model} -> ${bedrockModelId}`);
                 
                 // Execute on Bedrock
                 bedrockOutput = await BedrockService.invokeModel(prompt, bedrockModelId);
@@ -327,7 +327,7 @@ export class ExperimentationService {
             };
 
         } catch (error) {
-            logger.error(`Error executing model ${model.model}:`, error);
+            loggingService.error(`Error executing model ${model.model}:`, { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -395,11 +395,11 @@ export class ExperimentationService {
                 notes: pricing.notes || 'Available in AWS Bedrock'
             }));
 
-            logger.info(`Found ${accessibleModels.length} AWS Bedrock models from pricing data`);
+            loggingService.info(`Found ${accessibleModels.length} AWS Bedrock models from pricing data`);
             return accessibleModels;
 
         } catch (error: any) {
-            logger.error('Error getting AWS Bedrock models from pricing data:', error);
+            loggingService.error('Error getting AWS Bedrock models from pricing data:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error(`Failed to load AWS Bedrock models: ${error.message}`);
         }
     }
@@ -427,7 +427,7 @@ export class ExperimentationService {
         };
 
         this.progressEmitter.emit('progress', progressData);
-        logger.info('Model comparison progress:', progressData);
+        loggingService.info('Model comparison progress:', { value:  { value: progressData  } });
     }
 
     /**
@@ -473,7 +473,7 @@ export class ExperimentationService {
         if (providerMatch) return providerMatch;
 
         // Fallback to a known working model
-        logger.warn(`Unknown model ${modelName} from ${provider}, falling back to Claude Sonnet 4`);
+        loggingService.warn(`Unknown model ${modelName} from ${provider}, falling back to Claude Sonnet 4`);
         return 'anthropic.claude-sonnet-4-20250514-v1:0'; // Known working fallback
     }
 
@@ -501,13 +501,13 @@ export class ExperimentationService {
             
             // Try with Claude 3.5 Haiku first (lower rate limits) as per user memory
             try {
-                logger.info('Attempting evaluation with Claude 3.5 Haiku...');
+                loggingService.info('Attempting evaluation with Claude 3.5 Haiku...');
                 evaluationResponse = await this.invokeWithExponentialBackoff(
                     evaluationPrompt,
                     'anthropic.claude-3-5-haiku-20241022-v1:0'
                 );
             } catch (haikuError) {
-                logger.warn('Claude 3.5 Haiku failed, trying Sonnet with longer delay...', haikuError);
+                loggingService.warn('Claude 3.5 Haiku failed, trying Sonnet with longer delay...', { error: haikuError instanceof Error ? haikuError.message : String(haikuError) });
                 // Wait even longer before trying Sonnet
                 await new Promise(resolve => setTimeout(resolve, 20000));
                 evaluationResponse = await this.invokeWithExponentialBackoff(
@@ -531,7 +531,7 @@ export class ExperimentationService {
             }));
 
         } catch (error) {
-            logger.error('Error performing AI evaluation:', error);
+            loggingService.error('Error performing AI evaluation:', { error: error instanceof Error ? error.message : String(error) });
             // Return results with fallback AI evaluation based on execution metrics
             return results.map((result) => {
                 const score = this.calculateFallbackScore(result);
@@ -567,7 +567,7 @@ export class ExperimentationService {
                 if (attempt > 0) {
                     // Exponential backoff: 5s, 15s, 45s
                     const delay = Math.pow(3, attempt) * 5000;
-                    logger.info(`Retry attempt ${attempt + 1} after ${delay}ms delay...`);
+                    loggingService.info(`Retry attempt ${attempt + 1} after ${delay}ms delay...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
                 
@@ -577,7 +577,7 @@ export class ExperimentationService {
                 lastError = error;
                 
                 if (error.name === 'ThrottlingException' && attempt < maxRetries - 1) {
-                    logger.warn(`Throttling detected, retrying... (attempt ${attempt + 1}/${maxRetries})`);
+                    loggingService.warn(`Throttling detected, retrying... (attempt ${attempt + 1}/${maxRetries})`);
                     continue;
                 }
                 
@@ -648,13 +648,13 @@ export class ExperimentationService {
             
             // Try with Claude 3.5 Haiku first for analysis
             try {
-                logger.info('Attempting analysis with Claude 3.5 Haiku...');
+                loggingService.info('Attempting analysis with Claude 3.5 Haiku...');
                 analysisResponse = await this.invokeWithExponentialBackoff(
                     analysisPrompt,
                     'anthropic.claude-3-5-haiku-20241022-v1:0'
                 );
             } catch (haikuError) {
-                logger.warn('Claude 3.5 Haiku failed for analysis, trying Sonnet...', haikuError);
+                loggingService.warn('Claude 3.5 Haiku failed for analysis, trying Sonnet...', { error: haikuError instanceof Error ? haikuError.message : String(haikuError) });
                 // Wait even longer before trying Sonnet
                 await new Promise(resolve => setTimeout(resolve, 30000));
                 analysisResponse = await this.invokeWithExponentialBackoff(
@@ -667,12 +667,12 @@ export class ExperimentationService {
             try {
                 return JSON.parse(extractedJson);
             } catch (parseError) {
-                logger.error('Failed to parse comparison analysis JSON:', parseError);
-                logger.error('Extracted JSON:', extractedJson.substring(0, 500) + '...');
+                loggingService.error('Failed to parse comparison analysis JSON:', { error: parseError instanceof Error ? parseError.message : String(parseError) });
+                loggingService.error('Extracted JSON:', { json: extractedJson.substring(0, 500) + '...' });
                 throw new Error('Failed to parse AI analysis response');
             }
         } catch (error) {
-            logger.error('Error generating comparison analysis:', error);
+            loggingService.error('Error generating comparison analysis:', { error: error instanceof Error ? error.message : String(error) });
             
             // Generate fallback analysis based on available data
             const winner = results.reduce((best, current) => {
@@ -729,7 +729,7 @@ export class ExperimentationService {
 
             return 0.01; // Fallback estimate
         } catch (error) {
-            logger.error('Error calculating actual cost:', error);
+            loggingService.error('Error calculating actual cost:', { error: error instanceof Error ? error.message : String(error) });
             return 0.01;
         }
     }
@@ -756,7 +756,7 @@ export class ExperimentationService {
             // Fallback to a generic response
             return `This is a simulated response from ${model.model} for the prompt: "${prompt.substring(0, 100)}..."`;
         } catch (error) {
-            logger.error('Error simulating model response:', error);
+            loggingService.error('Error simulating model response:', { error: error instanceof Error ? error.message : String(error) });
             return `Simulated response from ${model.model}`;
         }
     }
@@ -792,7 +792,7 @@ export class ExperimentationService {
                 errorRate: 0 // Assume no errors for successful execution
             };
         } catch (error) {
-            logger.error('Error calculating model metrics:', error);
+            loggingService.error('Error calculating model metrics:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 cost: actualCost,
                 latency: executionTime,
@@ -860,7 +860,7 @@ export class ExperimentationService {
                 totalCost: 0
             };
         } catch (error) {
-            logger.error('Error calculating cost breakdown:', error);
+            loggingService.error('Error calculating cost breakdown:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 inputTokens: 0,
                 outputTokens: 0,
@@ -918,20 +918,20 @@ export class ExperimentationService {
                 .replace(/\\\\/g, '\\') // Fix double backslashes
                 .trim();
             
-            logger.info('Extracted JSON response:', cleanedResponse.substring(0, 200) + '...');
+            loggingService.info('Extracted JSON response:', { json: cleanedResponse.substring(0, 200) + '...' });
             
             const parsed = JSON.parse(cleanedResponse);
             
             // Validate that the parsed result is an array
             if (!Array.isArray(parsed)) {
-                logger.warn('Parsed response is not an array, wrapping in array');
+                loggingService.warn('Parsed response is not an array, wrapping in array');
                 return [parsed];
             }
             
             return parsed;
         } catch (error) {
-            logger.error('Error parsing evaluation response:', error);
-            logger.error('Original response:', response.substring(0, 500) + '...');
+            loggingService.error('Error parsing evaluation response:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Original response:', { response: response.substring(0, 500) + '...' });
             
             // Try alternative parsing approaches
             try {
@@ -947,11 +947,11 @@ export class ExperimentationService {
                         .replace(/\\\\/g, '\\');
                     
                     const parsed = JSON.parse(alternativeJson);
-                    logger.info('Successfully parsed with alternative method');
+                    loggingService.info('Successfully parsed with alternative method');
                     return Array.isArray(parsed) ? parsed : [parsed];
                 }
             } catch (altError) {
-                logger.error('Alternative parsing also failed:', altError);
+                loggingService.error('Alternative parsing also failed:', { error: altError instanceof Error ? altError.message : String(altError) });
             }
             
             // Return fallback evaluations for each result
@@ -991,7 +991,7 @@ export class ExperimentationService {
         try {
             // Validate ObjectId format before creating
             if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                logger.warn(`Invalid user ID format for experiment history: ${userId}`);
+                loggingService.warn(`Invalid user ID format for experiment history: ${userId}`);
                 return [];
             }
 
@@ -1035,7 +1035,7 @@ export class ExperimentationService {
 
             return experimentResults;
         } catch (error) {
-            logger.error('Error getting experiment history:', error);
+            loggingService.error('Error getting experiment history:', { error: error instanceof Error ? error.message : String(error) });
             return []; // Return empty array instead of throwing to prevent 500 errors
         }
     }
@@ -1089,11 +1089,11 @@ export class ExperimentationService {
             });
 
             await savedExperiment.save();
-            logger.info(`Saved experiment ${experimentId} to database for user ${userId}`);
+            loggingService.info(`Saved experiment ${experimentId} to database for user ${userId}`);
 
             return experiment;
         } catch (error) {
-            logger.error('Error running model comparison:', error);
+            loggingService.error('Error running model comparison:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1105,12 +1105,12 @@ export class ExperimentationService {
         try {
             // Validate ObjectId format before creating
             if (!experimentId || !mongoose.Types.ObjectId.isValid(experimentId)) {
-                logger.warn(`Invalid experiment ID format: ${experimentId}`);
+                loggingService.warn(`Invalid experiment ID format: ${experimentId}`);
                 return null;
             }
 
             if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                logger.warn(`Invalid user ID format: ${userId}`);
+                loggingService.warn(`Invalid user ID format: ${userId}`);
                 return null;
             }
 
@@ -1136,7 +1136,7 @@ export class ExperimentationService {
                 createdAt: experiment.createdAt
             };
         } catch (error) {
-            logger.error('Error getting experiment by ID:', error);
+            loggingService.error('Error getting experiment by ID:', { error: error instanceof Error ? error.message : String(error) });
             return null; // Return null instead of throwing to prevent 500 errors
         }
     }
@@ -1148,12 +1148,12 @@ export class ExperimentationService {
         try {
             // Validate ObjectId format before creating
             if (!experimentId || !mongoose.Types.ObjectId.isValid(experimentId)) {
-                logger.warn(`Invalid experiment ID format for deletion: ${experimentId}`);
+                loggingService.warn(`Invalid experiment ID format for deletion: ${experimentId}`);
                 return;
             }
 
             if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-                logger.warn(`Invalid user ID format for deletion: ${userId}`);
+                loggingService.warn(`Invalid user ID format for deletion: ${userId}`);
                 return;
             }
 
@@ -1163,12 +1163,12 @@ export class ExperimentationService {
             });
 
             if (result.deletedCount > 0) {
-                logger.info(`Deleted experiment ${experimentId} for user ${userId}`);
+                loggingService.info(`Deleted experiment ${experimentId} for user ${userId}`);
             } else {
-                logger.warn(`No experiment found to delete: ${experimentId} for user ${userId}`);
+                loggingService.warn(`No experiment found to delete: ${experimentId} for user ${userId}`);
             }
         } catch (error) {
-            logger.error('Error deleting experiment:', error);
+            loggingService.error('Error deleting experiment:', { error: error instanceof Error ? error.message : String(error) });
             // Don't throw error to prevent 500 responses
         }
     }
@@ -1240,7 +1240,7 @@ export class ExperimentationService {
                 duration
             };
         } catch (error) {
-            logger.error('Error estimating experiment cost:', error);
+            loggingService.error('Error estimating experiment cost:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1318,7 +1318,7 @@ export class ExperimentationService {
             // Sort by potential savings (highest first)
             return recommendations.sort((a, b) => b.potentialSavings - a.potentialSavings);
         } catch (error: any) {
-            logger.error('Error getting experiment recommendations:', error);
+            loggingService.error('Error getting experiment recommendations:', { error: error instanceof Error ? error.message : String(error) });
             
             throw new Error(`Failed to get experiment recommendations: ${error.message}`);
         }
@@ -1442,7 +1442,7 @@ export class ExperimentationService {
                 costSaved: costSaved
             };
         } catch (error) {
-            logger.error('Error analyzing models from usage data:', error);
+            loggingService.error('Error analyzing models from usage data:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1629,7 +1629,7 @@ export class ExperimentationService {
                             });
                         }
                     } catch (error) {
-                        logger.warn('Failed to generate model optimization scenario:', error);
+                        loggingService.warn('Failed to generate model optimization scenario:', { error: error instanceof Error ? error.message : String(error) });
                     }
 
                     try {
@@ -1649,7 +1649,7 @@ export class ExperimentationService {
                             });
                         }
                     } catch (error) {
-                        logger.warn('Failed to generate volume scenario:', error);
+                        loggingService.warn('Failed to generate volume scenario:', { error: error instanceof Error ? error.message : String(error) });
                     }
 
                     try {
@@ -1669,7 +1669,7 @@ export class ExperimentationService {
                             });
                         }
                     } catch (error) {
-                        logger.warn('Failed to generate caching scenario:', error);
+                        loggingService.warn('Failed to generate caching scenario:', { error: error instanceof Error ? error.message : String(error) });
                     }
 
                     try {
@@ -1689,16 +1689,16 @@ export class ExperimentationService {
                             });
                         }
                     } catch (error) {
-                        logger.warn('Failed to generate batching scenario:', error);
+                        loggingService.warn('Failed to generate batching scenario:', { error: error instanceof Error ? error.message : String(error) });
                     }
                 }
             } catch (error) {
-                logger.warn('Failed to analyze user usage patterns:', error);
+                loggingService.warn('Failed to analyze user usage patterns:', { error: error instanceof Error ? error.message : String(error) });
             }
 
             return scenarios;
         } catch (error) {
-            logger.error('Error getting what-if scenarios:', error);
+            loggingService.error('Error getting what-if scenarios:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1719,7 +1719,7 @@ export class ExperimentationService {
                 const timestamp = Date.now();
                 const uniqueName = `${scenarioData.name} (${timestamp})`;
                 
-                logger.info(`Scenario name "${scenarioData.name}" already exists. Using unique name: "${uniqueName}"`);
+                loggingService.info(`Scenario name "${scenarioData.name}" already exists. Using unique name: "${uniqueName}"`);
                 scenarioData.name = uniqueName;
             }
 
@@ -1738,7 +1738,7 @@ export class ExperimentationService {
             const savedScenario = new WhatIfScenario(scenario);
             await savedScenario.save();
 
-            logger.info(`Created and stored what-if scenario: ${scenarioData.name} for user: ${userId}`);
+            loggingService.info(`Created and stored what-if scenario: ${scenarioData.name} for user: ${userId}`);
             
             return {
                 id: (savedScenario._id as any).toString(),
@@ -1756,7 +1756,7 @@ export class ExperimentationService {
         } catch (error: any) {
             // Handle duplicate key error specifically
             if (error.code === 11000 && error.keyPattern && error.keyPattern.name) {
-                logger.warn(`Duplicate scenario name "${scenarioData.name}" detected. Generating unique name.`);
+                loggingService.warn(`Duplicate scenario name "${scenarioData.name}" detected. Generating unique name.`);
                 
                 // Generate a unique name with timestamp
                 const timestamp = Date.now();
@@ -1778,7 +1778,7 @@ export class ExperimentationService {
                     const savedScenario = new WhatIfScenario(scenarioWithUniqueName);
                     await savedScenario.save();
 
-                    logger.info(`Created scenario with unique name: ${uniqueName} for user: ${userId}`);
+                    loggingService.info(`Created scenario with unique name: ${uniqueName} for user: ${userId}`);
                     
                     return {
                         id: (savedScenario._id as any).toString(),
@@ -1793,12 +1793,12 @@ export class ExperimentationService {
                         analysis: savedScenario.analysis
                     };
                 } catch (retryError) {
-                    logger.error('Error creating scenario with unique name:', retryError);
+                    loggingService.error('Error creating scenario with unique name:', { error: retryError instanceof Error ? retryError.message : String(retryError) });
                     throw retryError;
                 }
             }
             
-            logger.error('Error creating what-if scenario:', error);
+            loggingService.error('Error creating what-if scenario:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1874,7 +1874,7 @@ export class ExperimentationService {
 
             return results;
         } catch (error) {
-            logger.error('Error in real-time what-if simulation:', error);
+            loggingService.error('Error in real-time what-if simulation:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1887,7 +1887,7 @@ export class ExperimentationService {
         const { getModelPricing } = await import('../data/modelPricing');
         const modelPricing = getModelPricing(model);
         
-        if (!modelPricing) {
+        if (!modelPricing || modelPricing.length === 0) {
             throw new Error(`Pricing not found for model: ${model}`);
         }
 
@@ -1895,8 +1895,8 @@ export class ExperimentationService {
         const estimatedTokens = Math.ceil(prompt.length / 4); // Rough estimation
         const estimatedCompletionTokens = Math.ceil(estimatedTokens * 0.3); // Assume 30% response
         
-        const inputCost = (estimatedTokens / 1000000) * modelPricing.inputPrice;
-        const outputCost = (estimatedCompletionTokens / 1000000) * modelPricing.outputPrice;
+        const inputCost = (estimatedTokens / 1000000) * modelPricing[0].inputPrice;
+        const outputCost = (estimatedCompletionTokens / 1000000) * modelPricing[0].outputPrice;
         const totalCost = inputCost + outputCost;
 
         return {
@@ -1907,7 +1907,7 @@ export class ExperimentationService {
             inputCost,
             outputCost,
             totalCost,
-            provider: modelPricing.provider
+            provider: modelPricing[0].provider
         };
     }
 
@@ -1972,7 +1972,7 @@ export class ExperimentationService {
         try {
             currentCost = await this.calculatePromptCost(prompt, currentModel);
         } catch (error) {
-            logger.error(`Could not calculate cost for current model ${currentModel}:`, error);
+            loggingService.error(`Could not calculate cost for current model ${currentModel}:`, { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
         
@@ -2003,7 +2003,7 @@ export class ExperimentationService {
                     implementation: 'moderate'
                 });
             } catch (error) {
-                logger.warn(`Could not simulate model ${altModel}:`, error);
+                loggingService.warn(`Could not simulate model ${altModel}:`, { error: error instanceof Error ? error.message : String(error) });
             }
         }
 
@@ -2075,15 +2075,20 @@ export class ExperimentationService {
             }
             
             // Find cheaper alternatives, excluding current model
-            const alternatives = findCheapestModel(1000, 300, undefined, undefined, currentModel);
+            const alternatives = findCheapestModel({
+                type: 'api-calls',
+                volume: 'medium',
+                complexity: 'moderate',
+                priority: 'cost'
+            });
             
             // Return top 4 alternatives that exist in our pricing data
-            return alternatives
-                .slice(0, 4)
-                .map(alt => alt.model)
-                .filter(model => availableModels.includes(model) && model !== currentModel);
+            if (alternatives) {
+                return [alternatives.model].filter((model: string) => availableModels.includes(model) && model !== currentModel);
+            }
+            return [];
         } catch (error: any) {
-            logger.error('Error getting alternative models:', error);
+            loggingService.error('Error getting alternative models:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error(`Failed to get alternative models: ${error.message}`);
         }
     }
@@ -2219,7 +2224,7 @@ Return ONLY: "low", "medium", or "high" based on the risk assessment.`;
             
             return 'medium'; // Default fallback
         } catch (error) {
-            logger.warn('AI risk assessment failed, using fallback logic:', error);
+            loggingService.warn('AI risk assessment failed, using fallback logic:', { error: error instanceof Error ? error.message : String(error) });
             
             // Enhanced fallback logic with more sophisticated risk assessment
             if (optimizationType === 'model_switch') {
@@ -2343,7 +2348,7 @@ Return ONLY: "low", "medium", or "high" based on the risk assessment.`;
             return analysisResult;
 
         } catch (error) {
-            logger.error('Error running what-if analysis:', error);
+            loggingService.error('Error running what-if analysis:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -2422,14 +2427,14 @@ Make the data realistic and consistent with the scenario type.`;
             
             try {
                 const analysis = JSON.parse(jsonResponse);
-                logger.info('Generated AI-based usage analysis for scenario:', scenarioName);
+                loggingService.info('Generated AI-based usage analysis for scenario:', { value:  {  scenarioName  } });
                 return analysis;
             } catch (parseError) {
-                logger.warn('Failed to parse AI analysis, using fallback data');
+                loggingService.warn('Failed to parse AI analysis, using fallback data');
                 return this.getFallbackUsageAnalysis(scenarioName);
             }
         } catch (error) {
-            logger.warn('AI analysis failed, using fallback data:', error);
+            loggingService.warn('AI analysis failed, using fallback data:', { error: error instanceof Error ? error.message : String(error) });
             return this.getFallbackUsageAnalysis(scenarioName);
         }
     }
@@ -2481,14 +2486,14 @@ Base your analysis on real-world AI cost optimization patterns and industry best
             
             try {
                 const analysis = JSON.parse(jsonResponse);
-                logger.info('Generated AI scenario analysis for:', scenarioName);
+                loggingService.info('Generated AI scenario analysis for:', { value:  {  scenarioName  } });
                 return analysis;
             } catch (parseError) {
-                logger.warn('Failed to parse AI scenario analysis, using mathematical projections');
+                loggingService.warn('Failed to parse AI scenario analysis, using mathematical projections');
                 return null;
             }
         } catch (error) {
-            logger.warn('AI scenario analysis failed:', error);
+            loggingService.warn('AI scenario analysis failed:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -2598,9 +2603,9 @@ Base your analysis on real-world AI cost optimization patterns and industry best
                 name: scenarioName
             });
 
-            logger.info(`Deleted what-if scenario: ${scenarioName} for user: ${userId}`);
+            loggingService.info(`Deleted what-if scenario: ${scenarioName} for user: ${userId}`);
         } catch (error) {
-            logger.error('Error deleting what-if scenario:', error);
+            loggingService.error('Error deleting what-if scenario:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -2646,7 +2651,7 @@ Base your analysis on real-world AI cost optimization patterns and industry best
             };
 
         } catch (error) {
-            logger.error('Error getting fine-tuning analysis:', error);
+            loggingService.error('Error getting fine-tuning analysis:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -2962,11 +2967,11 @@ Base your analysis on real-world AI cost optimization patterns and industry best
                 status: 'planning'
             };
 
-            logger.info(`Created fine-tuning project: ${project.name} for user: ${userId}`);
+            loggingService.info(`Created fine-tuning project: ${project.name} for user: ${userId}`);
             return project;
 
         } catch (error) {
-            logger.error('Error creating fine-tuning project:', error);
+            loggingService.error('Error creating fine-tuning project:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -2977,9 +2982,9 @@ Base your analysis on real-world AI cost optimization patterns and industry best
     static async deleteFineTuningProject(userId: string, projectId: string): Promise<void> {
         try {
             // In production, this would delete from database
-            logger.info(`Deleted fine-tuning project: ${projectId} for user: ${userId}`);
+            loggingService.info(`Deleted fine-tuning project: ${projectId} for user: ${userId}`);
         } catch (error) {
-            logger.error('Error deleting fine-tuning project:', error);
+            loggingService.error('Error deleting fine-tuning project:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -3070,7 +3075,7 @@ Base your analysis on real-world AI cost optimization patterns and industry best
         };
         } catch (error: any) {
             // If database connection fails or no usage data, return default analysis
-            logger.warn(`Database connection failed for user ${userId}, using default analysis:`, error.message);
+            loggingService.warn(`Database connection failed for user ${userId}, using default analysis:`, { error: error.message });
             return { hasData: false };
         }
     }
@@ -3264,14 +3269,14 @@ Base your analysis on real-world AI cost optimization patterns and industry best
         
         if (!currentPricing) return modelStats.totalCost * 0.15; // Conservative estimate
         
-        const alternatives = MODEL_PRICING.filter(p => 
+        const alternatives = MODEL_PRICING.filter((p: any) => 
             p.category === currentPricing.category && 
             (p.inputPrice + p.outputPrice) < (currentPricing.inputPrice + currentPricing.outputPrice) &&
             p.isLatest
         );
         
         if (alternatives.length > 0) {
-            const bestAlternative = alternatives.reduce((best, current) => 
+     const bestAlternative = alternatives.reduce((best: any, current: any) => 
                 (current.inputPrice + current.outputPrice) < (best.inputPrice + best.outputPrice) ? current : best
             );
             

@@ -1,5 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import { getModelPricing } from "../data/modelPricing";
+import { loggingService } from '../services/logging.service';
 
 interface ModelOperation {
     operation: 'recommend' | 'compare' | 'test' | 'configure' | 'validate';
@@ -73,7 +74,13 @@ export class ModelSelectorTool extends Tool {
             }
 
         } catch (error) {
-            console.error('Model selection operation failed:', error);
+            loggingService.error('Model selection operation failed', {
+                component: 'modelSelectorTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorType: error instanceof SyntaxError ? 'SyntaxError' : 'Unknown'
+            });
             
             if (error instanceof SyntaxError) {
                 return "Invalid JSON input. Please provide a valid operation object.";
@@ -120,10 +127,10 @@ export class ModelSelectorTool extends Tool {
 
                 return {
                     model,
-                    provider: pricing?.provider || 'Unknown',
-                    inputCost: pricing?.inputPrice || 0,
-                    outputCost: pricing?.outputPrice || 0,
-                    contextWindow: pricing?.contextWindow || 0,
+                    provider: pricing?.[0]?.provider || 'Unknown',
+                    inputCost: pricing?.[0]?.inputPrice || 0,
+                    outputCost: pricing?.[0]?.outputPrice || 0,
+                    contextWindow: pricing?.[0]?.contextWindow || 0,
                     suitabilityScore: suitability?.score || 0,
                     strengths: suitability?.strengths || [],
                     weaknesses: suitability?.weaknesses || [],
@@ -254,7 +261,7 @@ export class ModelSelectorTool extends Tool {
                 },
                 limits: {
                     rateLimit: '1000 requests/minute',
-                    contextWindow: this.getModelInfo(model)?.contextWindow || 4096,
+                    contextWindow: this.getModelInfo(model)?.[0]?.contextWindow || 4096,
                     maxTokens: 4096
                 }
             };
@@ -354,8 +361,8 @@ export class ModelSelectorTool extends Tool {
         recommendations.forEach(rec => {
             const pricing = this.getModelInfo(rec.model);
             if (pricing) {
-                const inputCost = (avgTokens * 0.6 * pricing.inputPrice) / 1000000; // Assuming 60% input tokens
-                const outputCost = (avgTokens * 0.4 * pricing.outputPrice) / 1000000; // 40% output tokens
+                const inputCost = (avgTokens * 0.6 * pricing[0].inputPrice) / 1000000; // Assuming 60% input tokens
+                const outputCost = (avgTokens * 0.4 * pricing[0].outputPrice) / 1000000; // 40% output tokens
                 costs[rec.model] = (inputCost + outputCost) * monthlyRequests;
             }
         });
@@ -439,8 +446,8 @@ export class ModelSelectorTool extends Tool {
         const monthlyRequests = volumeMultiplier[useCase.volume as keyof typeof volumeMultiplier] || 1000;
         const avgTokens = tokenEstimate[useCase.complexity as keyof typeof tokenEstimate] || 1000;
 
-        const inputCost = (avgTokens * 0.6 * pricing.inputPrice) / 1000000;
-        const outputCost = (avgTokens * 0.4 * pricing.outputPrice) / 1000000;
+        const inputCost = (avgTokens * 0.6 * pricing[0].inputPrice) / 1000000;
+        const outputCost = (avgTokens * 0.4 * pricing[0].outputPrice) / 1000000;
         
         return (inputCost + outputCost) * monthlyRequests;
     }

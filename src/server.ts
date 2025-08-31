@@ -22,7 +22,7 @@ import {
     trackUserSession, 
     trackOptimizationEvents 
 } from './middleware/mixpanel.middleware';
-import { logger, stream } from './utils/logger';
+import { stream } from './utils/logger';
 import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
 import { initializeCronJobs } from './utils/cronJobs';
@@ -32,6 +32,7 @@ import { redisService } from './services/redis.service';
 import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
+import { loggingService } from './services/logging.service';
 
 // Create Express app
 const app: Application = express();
@@ -147,12 +148,16 @@ app.use(cacheMiddleware);
 app.get('/', (req, res) => {
     const isHealthCheck = req.get('User-Agent')?.includes('ELB-HealthChecker');
 
-    if (!isHealthCheck) {
-        logger.info('Health check accessed', {
-            ip: req.ip,
-            userAgent: req.get('User-Agent')
-        });
-    }
+            if (!isHealthCheck) {
+            loggingService.info('Health check accessed', {
+                component: 'Server',
+                operation: 'healthCheck',
+                type: 'health_check',
+                step: 'health_check_accessed',
+                ip: req.ip,
+                userAgent: req.get('User-Agent')
+            });
+        }
 
     res.json({
         success: true,
@@ -210,44 +215,135 @@ const PORT = process.env.PORT || 8000;
 
 export const startServer = async () => {
     try {
-        logger.info('Starting server...');
+        loggingService.info('=== SERVER STARTUP INITIATED ===', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'started'
+        });
+
+        loggingService.info('Step 1: Connecting to MongoDB database', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'connect_database'
+        });
+
         await connectDatabase();
-        logger.info('MongoDB connected');
+        loggingService.info('✅ MongoDB connected successfully', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'database_connected'
+        });
 
         // Start background telemetry enrichment
         try {
+            loggingService.info('Step 2: Starting background telemetry enrichment', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'start_telemetry'
+            });
+
             TelemetryService.startBackgroundEnrichment();
-            logger.info('✅ Background telemetry enrichment started');
+            loggingService.info('✅ Background telemetry enrichment started', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'telemetry_started'
+            });
         } catch (error) {
-            logger.warn('⚠️ Background telemetry enrichment failed:', error);
+            loggingService.warn('⚠️ Background telemetry enrichment failed', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'telemetry_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
         }
 
         // Initialize Redis
         try {
+            loggingService.info('Step 3: Connecting to Redis', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'connect_redis'
+            });
+
             await redisService.connect();
-            logger.info('✅ Redis connected successfully');
+            loggingService.info('✅ Redis connected successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'redis_connected'
+            });
         } catch (error) {
-            logger.warn('⚠️ Redis connection failed, using in-memory cache as fallback:', error);
+            loggingService.warn('⚠️ Redis connection failed, using in-memory cache as fallback', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'redis_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
         }
 
         // Initialize default tips
+        loggingService.info('Step 4: Initializing default intelligence tips', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'init_tips'
+        });
+
         await intelligenceService.initializeDefaultTips();
-        // logger.info('Default tips initialized');
         
         // Initialize AIOps Agent
         try {
+            loggingService.info('Step 5: Initializing AIOps Agent', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_agent'
+            });
+
             await agentService.initialize();
-            logger.info('🤖 AIOps Agent initialized successfully');
+            loggingService.info('🤖 AIOps Agent initialized successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'agent_initialized'
+            });
         } catch (error) {
-            logger.warn('⚠️  AIOps Agent initialization failed, will initialize on first request:', error);
+            loggingService.warn('⚠️ AIOps Agent initialization failed, will initialize on first request', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'agent_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
         }
-        
-        // Redis configuration is now handled by config/redis.ts
         
         // Initialize Webhook Delivery Service
         try {
+            loggingService.info('Step 6: Initializing webhook delivery service', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_webhook'
+            });
+
             const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
-            logger.info('🪝 Webhook delivery service initialized successfully');
+            loggingService.info('🪝 Webhook delivery service initialized successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'webhook_initialized'
+            });
             
             // Process pending deliveries with increased delay and retry mechanism
             const retryProcessingWithBackoff = async (attempt = 1, maxAttempts = 3) => {
@@ -256,15 +352,44 @@ export const startServer = async () => {
                     const delayMs = attempt * 5000;
                     await new Promise(resolve => setTimeout(resolve, delayMs));
                     
-                    logger.info(`🪝 Attempting to process pending webhook deliveries (attempt ${attempt}/${maxAttempts})`);
+                    loggingService.info('🪝 Attempting to process pending webhook deliveries', {
+                        component: 'Server',
+                        operation: 'startServer',
+                        type: 'server_startup',
+                        step: 'process_webhooks',
+                        attempt,
+                        maxAttempts
+                    });
+
                     await webhookDeliveryService.processPendingDeliveries();
-                    logger.info('🪝 Successfully processed pending webhook deliveries');
+                    loggingService.info('🪝 Successfully processed pending webhook deliveries', {
+                        component: 'Server',
+                        operation: 'startServer',
+                        type: 'server_startup',
+                        step: 'webhooks_processed'
+                    });
                 } catch (err) {
-                    logger.warn(`⚠️ Error processing pending webhook deliveries (attempt ${attempt}/${maxAttempts}):`, err);
+                    loggingService.warn('⚠️ Error processing pending webhook deliveries', {
+                        component: 'Server',
+                        operation: 'startServer',
+                        type: 'server_startup',
+                        step: 'webhook_error',
+                        attempt,
+                        maxAttempts,
+                        error: err instanceof Error ? err.message : 'Unknown error',
+                        stack: err instanceof Error ? err.stack : undefined
+                    });
                     
                     // Retry with backoff if not reached max attempts
                     if (attempt < maxAttempts) {
-                        logger.info(`🪝 Will retry processing pending webhook deliveries in ${(attempt + 1) * 5} seconds`);
+                        loggingService.info('🪝 Will retry processing pending webhook deliveries', {
+                            component: 'Server',
+                            operation: 'startServer',
+                            type: 'server_startup',
+                            step: 'webhook_retry',
+                            nextAttempt: attempt + 1,
+                            delaySeconds: (attempt + 1) * 5
+                        });
                         retryProcessingWithBackoff(attempt + 1, maxAttempts);
                     }
                 }
@@ -274,15 +399,51 @@ export const startServer = async () => {
             retryProcessingWithBackoff();
             
         } catch (error) {
-            logger.warn('⚠️ Webhook delivery service initialization failed:', error);
+            loggingService.warn('⚠️ Webhook delivery service initialization failed', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'webhook_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
         }
         
+        loggingService.info('Step 7: Initializing cron jobs', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'init_cron'
+        });
+
         initializeCronJobs();
 
+        loggingService.info('Step 8: Starting HTTP server', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'start_http_server'
+        });
+
         const server = app.listen(PORT, () => {
-            logger.info(`🚀 AI Cost Optimizer Backend running on port ${PORT}`);
-            logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
-            logger.info(`🔗 Database: ${process.env.MONGODB_URI ? 'Connected' : 'Not configured'}`);
+            loggingService.info('🚀 AI Cost Optimizer Backend running successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'server_running',
+                port: PORT,
+                environment: process.env.NODE_ENV,
+                databaseStatus: process.env.MONGODB_URI ? 'Connected' : 'Not configured'
+            });
+
+            loggingService.info('=== SERVER STARTUP COMPLETED ===', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'completed',
+                port: PORT,
+                environment: process.env.NODE_ENV
+            });
         });
 
         // Configure server timeouts for MCP compatibility
@@ -296,24 +457,49 @@ export const startServer = async () => {
             
             // Handle connection errors gracefully
             socket.on('error', (err) => {
-                logger.warn('Socket error:', err.message);
+                loggingService.warn('Socket error occurred', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'socket_error',
+                    error: err.message
+                });
             });
             
             // Handle connection close
             socket.on('close', (hadError) => {
                 if (hadError) {
-                    logger.warn('Socket closed with error');
+                    loggingService.warn('Socket closed with error', {
+                        component: 'Server',
+                        operation: 'startServer',
+                        type: 'server_startup',
+                        step: 'socket_closed_error'
+                    });
                 }
             });
         });
         
         // Handle server errors gracefully
         server.on('error', (err) => {
-            logger.error('Server error:', err);
+            loggingService.error('Server error occurred', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'server_error',
+                error: err instanceof Error ? err.message : 'Unknown error',
+                stack: err instanceof Error ? err.stack : undefined
+            });
         });
 
     } catch (error) {
-        logger.error('Failed to start server:', error);
+        loggingService.error('Failed to start server', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined
+        });
         process.exit(1);
     }
 };
@@ -322,7 +508,12 @@ startServer();
 
 // Graceful shutdown handling
 process.on('SIGTERM', async () => {
-    logger.info('🛑 SIGTERM received, shutting down gracefully');
+    loggingService.info('🛑 SIGTERM received, shutting down gracefully', {
+        component: 'Server',
+        operation: 'shutdown',
+        type: 'graceful_shutdown',
+        step: 'sigterm_received'
+    });
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
         const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
@@ -331,32 +522,66 @@ process.on('SIGTERM', async () => {
         await shutdownTelemetry();
         process.exit(0);
     } catch (error) {
-        logger.error('❌ Error during graceful shutdown:', error);
+        loggingService.error('❌ Error during graceful shutdown', {
+            component: 'Server',
+            operation: 'shutdown',
+            type: 'graceful_shutdown',
+            step: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined
+        });
         process.exit(1);
     }
 });
 
 process.on('SIGINT', async () => {
-    logger.info('🛑 SIGINT received, shutting down gracefully');
+    loggingService.info('🛑 SIGINT received, shutting down gracefully', {
+        component: 'Server',
+        operation: 'shutdown',
+        type: 'graceful_shutdown',
+        step: 'sigint_received'
+    });
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
         await multiAgentFlowService.cleanup();
         await shutdownTelemetry();
         process.exit(0);
     } catch (error) {
-        logger.error('❌ Error during graceful shutdown:', error);
+        loggingService.error('❌ Error during graceful shutdown', {
+            component: 'Server',
+            operation: 'shutdown',
+            type: 'graceful_shutdown',
+            step: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined
+        });
         process.exit(1);
     }
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-    logger.error('❌ Uncaught Exception:', error);
+    loggingService.error('❌ Uncaught Exception occurred', {
+        component: 'Server',
+        operation: 'shutdown',
+        type: 'uncaught_exception',
+        step: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined
+    });
     process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    logger.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+    loggingService.error('❌ Unhandled Rejection occurred', {
+        component: 'Server',
+        operation: 'shutdown',
+        type: 'unhandled_rejection',
+        step: 'error',
+        reason: reason instanceof Error ? reason.message : 'Unknown reason',
+        stack: reason instanceof Error ? reason.stack : undefined,
+        promise: promise.toString()
+    });
     process.exit(1);
 });
 

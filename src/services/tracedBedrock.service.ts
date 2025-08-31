@@ -2,7 +2,7 @@ import { BedrockService } from './bedrock.service';
 import { traceService } from './trace.service';
 import { calculateCost } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { Request } from 'express';
 
 /**
@@ -32,7 +32,7 @@ export class TracedBedrockService extends BedrockService {
                     }
                 });
             } catch (error) {
-                logger.error('Error starting LLM trace span:', error);
+                loggingService.error('Error starting LLM trace span:', { error: error instanceof Error ? error.message : String(error) });
             }
         }
         
@@ -94,7 +94,7 @@ export class TracedBedrockService extends BedrockService {
                         });
                     }
                 } catch (error) {
-                    logger.error('Error ending LLM trace span:', error);
+                    loggingService.error('Error ending LLM trace span:', { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             
@@ -117,7 +117,7 @@ export class TracedBedrockService extends BedrockService {
                         }
                     });
                 } catch (endError) {
-                    logger.error('Error ending LLM trace span with error:', endError);
+                    loggingService.error('Error ending LLM trace span with error:', { error: endError instanceof Error ? endError.message : String(endError) });
                 }
             }
             
@@ -147,7 +147,7 @@ export class TracedBedrockService extends BedrockService {
                     }
                 });
             } catch (error) {
-                logger.error('Error starting optimize prompt trace span:', error);
+                loggingService.error('Error starting optimize prompt trace span:', { error: error instanceof Error ? error.message : String(error) });
             }
         }
         
@@ -165,7 +165,7 @@ export class TracedBedrockService extends BedrockService {
                         }
                     });
                 } catch (error) {
-                    logger.error('Error ending optimize prompt trace span:', error);
+                    loggingService.error('Error ending optimize prompt trace span:', { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             
@@ -180,7 +180,7 @@ export class TracedBedrockService extends BedrockService {
                         }
                     });
                 } catch (endError) {
-                    logger.error('Error ending optimize prompt trace span with error:', endError);
+                    loggingService.error('Error ending optimize prompt trace span with error:', { error: endError instanceof Error ? endError.message : String(endError) });
                 }
             }
             throw error;
@@ -208,7 +208,7 @@ export class TracedBedrockService extends BedrockService {
                     }
                 });
             } catch (error) {
-                logger.error('Error starting analyze usage trace span:', error);
+                loggingService.error('Error starting analyze usage trace span:', { error: error instanceof Error ? error.message : String(error) });
             }
         }
         
@@ -226,7 +226,7 @@ export class TracedBedrockService extends BedrockService {
                         }
                     });
                 } catch (error) {
-                    logger.error('Error ending analyze usage trace span:', error);
+                    loggingService.error('Error ending analyze usage trace span:', { error: error instanceof Error ? error.message : String(error) });
                 }
             }
             
@@ -241,7 +241,7 @@ export class TracedBedrockService extends BedrockService {
                         }
                     });
                 } catch (endError) {
-                    logger.error('Error ending analyze usage trace span with error:', endError);
+                    loggingService.error('Error ending analyze usage trace span with error:', { error: endError instanceof Error ? endError.message : String(endError) });
                 }
             }
             throw error;

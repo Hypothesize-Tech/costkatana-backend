@@ -3,13 +3,13 @@ import { ProjectController } from '../controllers/project.controller';
 import { authenticate, optionalAuth, requirePermission } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
 import { body, param, query } from 'express-validator';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 const router = Router();
 
 // Request logging middleware
 router.use((req: any, _res: any, next: any) => {
-    logger.info('=== PROJECT ROUTE REQUEST ===', {
+    loggingService.info('=== PROJECT ROUTE REQUEST ===', {
         method: req.method,
         path: req.path,
         query: req.query,

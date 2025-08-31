@@ -2,7 +2,7 @@ import jwt, { SignOptions, Secret, JwtPayload } from 'jsonwebtoken';
 import { User, IUser } from '../models/User';
 import { config } from '../config';
 import { generateToken } from '../utils/helpers';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 import { MFAService } from './mfa.service';
 
@@ -66,7 +66,7 @@ export class AuthService {
         const maskedKey = `dak_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
 
         // Use the parameters to avoid TypeScript warnings
-        console.log(`Creating API key "${name}" with permissions: ${permissions.join(', ')}${expiresAt ? ` (expires: ${expiresAt})` : ''}`);
+        loggingService.info(`Creating API key "${name}" with permissions: ${permissions.join(', ')}${expiresAt ? ` (expires: ${expiresAt})` : ''}`);
 
         return {
             keyId,
@@ -173,11 +173,11 @@ export class AuthService {
 
             // Send verification email (handled by email service)
 
-            logger.info(`New user registered: ${user.email}`);
+            loggingService.info(`New user registered: ${user.email}`);
 
             return { user, tokens };
         } catch (error: unknown) {
-            logger.error('Error in registration:', error);
+            loggingService.error('Error in registration:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -217,7 +217,7 @@ export class AuthService {
                     // Generate temporary MFA token for verification
                     const mfaToken = this.generateMFAToken(user._id.toString());
                     
-                    logger.info(`MFA required for user: ${user.email}`);
+                    loggingService.info(`MFA required for user: ${user.email}`);
                     
                     return {
                         user,
@@ -230,7 +230,7 @@ export class AuthService {
             // Complete login (no MFA required or trusted device)
             return this.completeLogin(user);
         } catch (error: unknown) {
-            logger.error('Error in login:', error);
+            loggingService.error('Error in login:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -251,11 +251,11 @@ export class AuthService {
             // Generate tokens
             const tokens = this.generateTokens(user);
 
-            logger.info(`User logged in: ${user.email}`);
+            loggingService.info(`User logged in: ${user.email}`);
 
             return { user, tokens };
         } catch (error: unknown) {
-            logger.error('Error completing login:', error);
+            loggingService.error('Error completing login:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -276,7 +276,7 @@ export class AuthService {
 
             return tokens;
         } catch (error: unknown) {
-            logger.error('Error refreshing tokens:', error);
+            loggingService.error('Error refreshing tokens:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -292,9 +292,9 @@ export class AuthService {
             user.verificationToken = undefined;
             await user.save();
 
-            logger.info(`Email verified for user: ${user.email}`);
+            loggingService.info(`Email verified for user: ${user.email}`);
         } catch (error: unknown) {
-            logger.error('Error verifying email:', error);
+            loggingService.error('Error verifying email:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -312,11 +312,11 @@ export class AuthService {
             user.resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
             await user.save();
 
-            logger.info(`Password reset requested for: ${user.email}`);
+            loggingService.info(`Password reset requested for: ${user.email}`);
 
             return resetToken;
         } catch (error: unknown) {
-            logger.error('Error in forgot password:', error);
+            loggingService.error('Error in forgot password:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -337,9 +337,9 @@ export class AuthService {
             user.resetPasswordExpires = undefined;
             await user.save();
 
-            logger.info(`Password reset for user: ${user.email}`);
+            loggingService.info(`Password reset for user: ${user.email}`);
         } catch (error: unknown) {
-            logger.error('Error resetting password:', error);
+            loggingService.error('Error resetting password:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -362,9 +362,9 @@ export class AuthService {
             user.password = newPassword;
             await user.save();
 
-            logger.info(`Password changed for user: ${user.email}`);
+            loggingService.info(`Password changed for user: ${user.email}`);
         } catch (error: unknown) {
-            logger.error('Error changing password:', error);
+            loggingService.error('Error changing password:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

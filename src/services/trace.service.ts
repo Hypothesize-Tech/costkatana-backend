@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Session, ISession } from '../models/Session';
 import { Trace, ITrace } from '../models/Trace';
 import { Message, IMessage } from '../models/Message';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface StartSpanInput {
     sessionId?: string;
@@ -145,7 +145,7 @@ class TraceService {
             
             return trace;
         } catch (error) {
-            logger.error('Error starting span:', error);
+            loggingService.error('Error starting span:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -218,7 +218,7 @@ class TraceService {
             
             return trace;
         } catch (error) {
-            logger.error('Error ending span:', error);
+            loggingService.error('Error ending span:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -245,7 +245,7 @@ class TraceService {
             
             return message;
         } catch (error) {
-            logger.error('Error recording message:', error);
+            loggingService.error('Error recording message:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -280,7 +280,7 @@ class TraceService {
             
             return { nodes, edges };
         } catch (error) {
-            logger.error('Error getting session graph:', error);
+            loggingService.error('Error getting session graph:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -298,7 +298,7 @@ class TraceService {
             
             return { session, messages };
         } catch (error) {
-            logger.error('Error getting session details:', error);
+            loggingService.error('Error getting session details:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -346,7 +346,7 @@ class TraceService {
             
             return { sessions, total, page, totalPages };
         } catch (error) {
-            logger.error('Error listing sessions:', error);
+            loggingService.error('Error listing sessions:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -374,7 +374,7 @@ class TraceService {
                 { new: true }
             );
         } catch (error) {
-            logger.error('Error ending session:', error);
+            loggingService.error('Error ending session:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

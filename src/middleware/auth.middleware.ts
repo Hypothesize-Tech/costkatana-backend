@@ -1,6 +1,6 @@
 import { Response, NextFunction } from 'express';
 import { AuthService } from '../services/auth.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 import { User } from '../models/User';
 import { decrypt } from '../utils/helpers';
 
@@ -10,15 +10,24 @@ export const authenticate = async (
     next: NextFunction
 ) => {
     const startTime = Date.now();
-    logger.info('=== AUTHENTICATION MIDDLEWARE STARTED ===');
-    logger.info('Request path:', req.path);
-    logger.info('Request method:', req.method);
+    loggingService.info('=== AUTHENTICATION MIDDLEWARE STARTED ===', {
+        component: 'AuthMiddleware',
+        operation: 'authenticate',
+        type: 'authentication',
+        path: req.path,
+        method: req.method
+    });
 
     try {
         let token: string | undefined;
         let apiKey: string | undefined;
 
-        logger.info('Step 1: Extracting authentication from request');
+        loggingService.info('Step 1: Extracting authentication from request', {
+            component: 'AuthMiddleware',
+            operation: 'authenticate',
+            type: 'authentication',
+            step: 'extract_auth'
+        });
 
         // Check for CostKatana-Auth header first (gateway requests)
         const costkatanaAuth = req.headers['costkatana-auth'] as string;
@@ -28,10 +37,22 @@ export const authenticate = async (
             // Check if it's an API key (starts with 'dak_') or JWT token
             if (authValue.startsWith('dak_')) {
                 apiKey = authValue;
-                logger.info('Dashboard API key found in CostKatana-Auth header');
+                loggingService.info('Dashboard API key found in CostKatana-Auth header', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    authMethod: 'costkatana_header',
+                    authType: 'api_key'
+                });
             } else {
                 token = authValue;
-                logger.info('JWT token found in CostKatana-Auth header');
+                loggingService.info('JWT token found in CostKatana-Auth header', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    authMethod: 'costkatana_header',
+                    authType: 'jwt_token'
+                });
             }
         }
         // Check for standard Authorization header
@@ -41,21 +62,52 @@ export const authenticate = async (
             // Check if it's an API key (starts with 'dak_') or JWT token
             if (authValue.startsWith('dak_')) {
                 apiKey = authValue;
-                logger.info('Dashboard API key found in Authorization header');
+                loggingService.info('Dashboard API key found in Authorization header', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    authMethod: 'authorization_header',
+                    authType: 'api_key'
+                });
             } else {
                 token = authValue;
-                logger.info('JWT token found in Authorization header');
+                loggingService.info('JWT token found in Authorization header', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    authMethod: 'authorization_header',
+                    authType: 'jwt_token'
+                });
             }
         } else if (req.query.token) {
             token = req.query.token as string;
-            logger.info('Token found in query parameters');
+            loggingService.info('Token found in query parameters', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                authMethod: 'query_param',
+                authType: 'jwt_token'
+            });
         } else if (req.query.apiKey) {
             apiKey = req.query.apiKey as string;
-            logger.info('API key found in query parameters');
+            loggingService.info('API key found in query parameters', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                authMethod: 'query_param',
+                authType: 'api_key'
+            });
         }
 
         if (!token && !apiKey) {
-            logger.warn('No authentication provided in request');
+            loggingService.warn('No authentication provided in request', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                step: 'no_auth_provided',
+                path: req.path,
+                method: req.method
+            });
             return res.status(401).json({
                 success: false,
                 message: 'No authentication provided',
@@ -66,12 +118,23 @@ export const authenticate = async (
         let userId: string;
 
         if (apiKey) {
-            logger.info('Step 2: Processing API key authentication');
+            loggingService.info('Step 2: Processing API key authentication', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                step: 'process_api_key'
+            });
 
             // Parse API key
             const parsedKey = AuthService.parseApiKey(apiKey);
             if (!parsedKey) {
-                logger.warn('Invalid API key format');
+                loggingService.warn('Invalid API key format', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'parse_api_key',
+                    error: 'invalid_format'
+                });
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid API key format',
@@ -81,7 +144,14 @@ export const authenticate = async (
             // Find user and validate API key
             user = await User.findById(parsedKey.userId);
             if (!user) {
-                logger.warn('User not found for API key:', parsedKey.userId);
+                loggingService.warn('User not found for API key', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'find_user',
+                    userId: parsedKey.userId,
+                    error: 'user_not_found'
+                });
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid API key: User not found',
@@ -91,7 +161,15 @@ export const authenticate = async (
             // Find matching API key in user's dashboard keys
             const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
             if (!userApiKey) {
-                logger.warn('API key not found in user account');
+                loggingService.warn('API key not found in user account', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'validate_api_key',
+                    userId: parsedKey.userId,
+                    keyId: parsedKey.keyId,
+                    error: 'key_not_found'
+                });
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid API key',
@@ -104,14 +182,29 @@ export const authenticate = async (
                 const decryptedKey = decrypt(encrypted, iv, authTag);
 
                 if (decryptedKey !== apiKey) {
-                    logger.warn('API key validation failed');
+                    loggingService.warn('API key validation failed', {
+                        component: 'AuthMiddleware',
+                        operation: 'authenticate',
+                        type: 'authentication',
+                        step: 'validate_api_key',
+                        userId: parsedKey.userId,
+                        keyId: parsedKey.keyId,
+                        error: 'validation_failed'
+                    });
                     return res.status(401).json({
                         success: false,
                         message: 'Invalid API key',
                     });
                 }
             } catch (error) {
-                logger.error('Error decrypting API key:', error);
+                loggingService.logError(error as Error, {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'decrypt_api_key',
+                    userId: parsedKey.userId,
+                    keyId: parsedKey.keyId
+                });
                 return res.status(401).json({
                     success: false,
                     message: 'Invalid API key',
@@ -120,7 +213,15 @@ export const authenticate = async (
 
             // Check if API key is expired
             if (userApiKey.expiresAt && new Date() > userApiKey.expiresAt) {
-                logger.warn('API key has expired');
+                loggingService.warn('API key has expired', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'check_expiry',
+                    userId: parsedKey.userId,
+                    keyId: parsedKey.keyId,
+                    expiresAt: userApiKey.expiresAt
+                });
                 return res.status(401).json({
                     success: false,
                     message: 'API key has expired',
@@ -132,8 +233,12 @@ export const authenticate = async (
             await user.save();
 
             userId = user._id.toString();
-            logger.info('API key validated successfully:', {
-                userId: userId,
+            loggingService.info('API key validated successfully', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                step: 'api_key_validated',
+                userId: parsedKey.userId,
                 keyId: parsedKey.keyId,
                 permissions: userApiKey.permissions
             });
@@ -148,28 +253,53 @@ export const authenticate = async (
             req.userId = userId;
 
         } else if (token) {
-            logger.info('Step 2: Processing JWT token authentication');
+            loggingService.info('Step 2: Processing JWT token authentication', {
+                component: 'AuthMiddleware',
+                operation: 'authenticate',
+                type: 'authentication',
+                step: 'process_jwt'
+            });
 
             try {
                 const payload = AuthService.verifyAccessToken(token);
-                logger.info('Token verified successfully:', {
+                loggingService.info('Token verified successfully', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'verify_jwt',
                     userId: payload.id,
                     email: payload.email,
                     hasJti: !!payload.jti
                 });
 
-                logger.info('Step 3: Finding user in database');
+                loggingService.info('Step 3: Finding user in database', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'find_user'
+                });
                 user = await User.findById(payload.id);
 
                 if (!user) {
-                    logger.warn('User not found for token payload:', payload.id);
+                    loggingService.warn('User not found for token payload', {
+                        component: 'AuthMiddleware',
+                        operation: 'authenticate',
+                        type: 'authentication',
+                        step: 'find_user',
+                        userId: payload.id,
+                        error: 'user_not_found'
+                    });
                     return res.status(401).json({
                         success: false,
                         message: 'Invalid token: User not found',
                     });
                 }
 
-                logger.info('User found:', {
+                loggingService.info('User found', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'user_found',
                     userId: user._id,
                     email: user.email,
                     role: user.role
@@ -177,11 +307,23 @@ export const authenticate = async (
 
                 // If jti claim exists, it's an API key auth via JWT, validate it
                 if (payload.jti) {
-                    logger.info('Step 4: Validating API key via JWT');
+                    loggingService.info('Step 4: Validating API key via JWT', {
+                        component: 'AuthMiddleware',
+                        operation: 'authenticate',
+                        type: 'authentication',
+                        step: 'validate_api_key_jwt'
+                    });
                     const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === payload.jti);
 
                     if (!userApiKey) {
-                        logger.warn('Invalid API key ID in JWT');
+                        loggingService.warn('Invalid API key ID in JWT', {
+                            component: 'AuthMiddleware',
+                            operation: 'authenticate',
+                            type: 'authentication',
+                            step: 'validate_api_key_jwt',
+                            userId: payload.id,
+                            error: 'invalid_api_key_id'
+                        });
                         return res.status(401).json({
                             success: false,
                             message: 'Invalid API Key',
@@ -190,7 +332,15 @@ export const authenticate = async (
 
                     // Check expiration
                     if (userApiKey.expiresAt && new Date() > userApiKey.expiresAt) {
-                        logger.warn('API key has expired');
+                        loggingService.warn('API key has expired', {
+                            component: 'AuthMiddleware',
+                            operation: 'authenticate',
+                            type: 'authentication',
+                            step: 'check_expiry',
+                            userId: payload.id,
+                            apiKeyId: payload.jti,
+                            expiresAt: userApiKey.expiresAt
+                        });
                         return res.status(401).json({
                             success: false,
                             message: 'API key has expired',
@@ -201,10 +351,22 @@ export const authenticate = async (
                     userApiKey.lastUsed = new Date();
                     await user.save();
 
-                    logger.info('API key validated successfully via JWT');
+                    loggingService.info('API key validated successfully via JWT', {
+                        component: 'AuthMiddleware',
+                        operation: 'authenticate',
+                        type: 'authentication',
+                        step: 'api_key_validated_jwt',
+                        userId: payload.id,
+                        apiKeyId: payload.jti
+                    });
                 }
 
-                logger.info('Step 5: Setting user context');
+                loggingService.info('Step 5: Setting user context', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'set_user_context'
+                });
                 req.user = {
                     id: payload.id,
                     email: payload.email,
@@ -215,7 +377,11 @@ export const authenticate = async (
                 req.userId = payload.id;
 
             } catch (error: any) {
-                logger.warn('Token verification failed:', {
+                loggingService.warn('Token verification failed', {
+                    component: 'AuthMiddleware',
+                    operation: 'authenticate',
+                    type: 'authentication',
+                    step: 'verify_jwt',
                     error: error.message,
                     timeTaken: Date.now() - startTime + 'ms'
                 });
@@ -226,18 +392,30 @@ export const authenticate = async (
             }
         }
 
-        logger.info('Authentication successful:', {
+        loggingService.info('Authentication successful', {
+            component: 'AuthMiddleware',
+            operation: 'authenticate',
+            type: 'authentication',
+            step: 'success',
             userId: req.user.id,
             authMethod: req.user.apiKeyAuth ? 'API Key' : 'JWT',
             permissions: req.user.permissions,
             timeTaken: Date.now() - startTime + 'ms'
         });
-        logger.info('=== AUTHENTICATION MIDDLEWARE COMPLETED ===');
+        loggingService.info('=== AUTHENTICATION MIDDLEWARE COMPLETED ===', {
+            component: 'AuthMiddleware',
+            operation: 'authenticate',
+            type: 'authentication',
+            step: 'completed'
+        });
         next();
 
     } catch (error) {
-        logger.error('Authentication middleware error:', {
-            error,
+        loggingService.logError(error as Error, {
+            component: 'AuthMiddleware',
+            operation: 'authenticate',
+            type: 'authentication',
+            step: 'error',
             timeTaken: Date.now() - startTime + 'ms'
         });
         res.status(500).json({
@@ -350,7 +528,12 @@ export const optionalAuth = async (
                                 }
                             } catch (error) {
                                 // Invalid key, continue without user
-                                logger.debug('Optional auth: Invalid API key provided');
+                                loggingService.debug('Optional auth: Invalid API key provided', {
+                                    component: 'AuthMiddleware',
+                                    operation: 'optionalAuth',
+                                    type: 'authentication',
+                                    step: 'invalid_api_key'
+                                });
                             }
                         }
                     }
@@ -372,12 +555,22 @@ export const optionalAuth = async (
             }
         } catch (error) {
             // Invalid token/key, but continue without user
-            logger.debug('Optional auth: Invalid authentication provided');
+            loggingService.debug('Optional auth: Invalid authentication provided', {
+                component: 'AuthMiddleware',
+                operation: 'optionalAuth',
+                type: 'authentication',
+                step: 'invalid_auth'
+            });
         }
 
         next();
     } catch (error) {
-        logger.error('Optional authentication error:', error);
+        loggingService.logError(error as Error, {
+            component: 'AuthMiddleware',
+            operation: 'optionalAuth',
+            type: 'authentication',
+            step: 'error'
+        });
         next();
     }
 };

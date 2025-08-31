@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { TelemetryService } from './telemetry.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 
@@ -102,7 +102,7 @@ export class AIInsightsService {
         priority_actions: priorityActions
       };
     } catch (error) {
-      logger.error('Failed to generate AI insights:', error);
+      loggingService.error('Failed to generate AI insights:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
   }
@@ -136,7 +136,7 @@ export class AIInsightsService {
 
       return anomalies;
     } catch (error) {
-      logger.error('Failed to detect anomalies:', error);
+      loggingService.error('Failed to detect anomalies:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -167,7 +167,7 @@ export class AIInsightsService {
 
       return optimizations;
     } catch (error) {
-      logger.error('Failed to generate optimizations:', error);
+      loggingService.error('Failed to generate optimizations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -194,7 +194,7 @@ export class AIInsightsService {
 
       return forecasts;
     } catch (error) {
-      logger.error('Failed to generate forecasts:', error);
+      loggingService.error('Failed to generate forecasts:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
   }
@@ -757,7 +757,7 @@ Provide concise, actionable insights.`;
         latencyTimeSeries: sortedDays.map(([, stats]) => stats.count > 0 ? stats.totalDuration / stats.count : 0)
       };
     } catch (error) {
-      logger.error('Failed to get historical data:', error);
+      loggingService.error('Failed to get historical data:', { error: error instanceof Error ? error.message : String(error) });
       return {
         costTimeSeries: [],
         usageTimeSeries: [],

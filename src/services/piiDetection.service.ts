@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 
@@ -72,18 +72,18 @@ export class PIIDetectionService {
                 try {
                     aiResults = await this.detectPIIWithAI(text);
                 } catch (error) {
-                    logger.warn('AI PII detection failed, using regex only:', error);
+                    loggingService.warn('AI PII detection failed, using regex only:', { error: error instanceof Error ? error.message : String(error) });
                 }
             }
 
             // Merge results (AI takes precedence where available)
             const finalResult = this.mergeDetectionResults(regexResults, aiResults);
 
-            logger.info(`PII detection completed for text (${text.length} chars): ${finalResult.piiTypes.length} types found`);
+            loggingService.info(`PII detection completed for text (${text.length} chars): ${finalResult.piiTypes.length} types found`);
             return finalResult;
 
         } catch (error) {
-            logger.error('Error in PII detection:', error);
+            loggingService.error('Error in PII detection:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -195,7 +195,7 @@ Respond with JSON: {"hasPII": boolean, "confidence": 0-1, "piiTypes": ["email", 
             };
 
         } catch (error) {
-            logger.error('AI PII detection failed:', error);
+            loggingService.error('AI PII detection failed:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -339,7 +339,7 @@ Respond with JSON: {"hasPII": boolean, "confidence": 0-1, "piiTypes": ["email", 
             };
 
         } catch (error) {
-            logger.error('Error in batch PII detection:', error);
+            loggingService.error('Error in batch PII detection:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

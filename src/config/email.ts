@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { loggingService } from '../services/logging.service';
 
 /**
  * Creates and returns a Nodemailer transporter using SMTP.
@@ -23,9 +24,22 @@ const createTransporter = async () => {
     // Verify connection configuration
     try {
         await transporter.verify();
-        console.log('SMTP server connection verified successfully');
+        loggingService.info('SMTP server connection verified successfully', {
+            component: 'EmailConfig',
+            operation: 'createTransporter',
+            type: 'email',
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.SMTP_PORT || '587')
+        });
     } catch (error) {
-        console.error('SMTP server connection failed:', error);
+        loggingService.error('SMTP server connection failed', {
+            component: 'EmailConfig',
+            operation: 'createTransporter',
+            type: 'email',
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            error: error instanceof Error ? error.message : String(error)
+        });
         throw new Error('Failed to connect to SMTP server. Please check your configuration.');
     }
 

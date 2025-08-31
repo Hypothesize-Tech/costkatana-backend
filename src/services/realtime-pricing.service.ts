@@ -1,6 +1,6 @@
 import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { WebScraperService } from './web-scraper.service';
 
@@ -44,7 +44,7 @@ export class RealtimePricingService {
     private static isUpdating = false;
 
     static async initialize() {
-        logger.info('Initializing RealtimePricingService');
+        loggingService.info('Initializing RealtimePricingService');
 
         // Start periodic updates
         setInterval(() => {
@@ -54,10 +54,10 @@ export class RealtimePricingService {
         // Start initial update in background (don't await to avoid blocking)
         this.updateAllPricing().catch(error => {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`Initial pricing update failed: ${errorMessage}`);
+            loggingService.error(`Initial pricing update failed: ${errorMessage}`);
         });
 
-        logger.info('RealtimePricingService initialized with background updates');
+        loggingService.info('RealtimePricingService initialized with background updates');
     }
 
     private static createModelPayload(prompt: string, modelId: string) {
@@ -137,11 +137,11 @@ export class RealtimePricingService {
                 throw new Error(`Failed to scrape pricing data for ${provider}: ${scrapedData.error}`);
             }
 
-            logger.info(`Successfully scraped ${scrapedData.content.length} characters for ${provider}`);
+            loggingService.info(`Successfully scraped ${scrapedData.content.length} characters for ${provider}`);
             return scrapedData.content;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`Error scraping pricing data for ${provider}: ${errorMessage}`);
+            loggingService.error(`Error scraping pricing data for ${provider}: ${errorMessage}`);
             throw error;
         }
     }
@@ -225,14 +225,14 @@ export class RealtimePricingService {
             };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`Error extracting pricing data for ${provider}: ${errorMessage}`);
+            loggingService.error(`Error extracting pricing data for ${provider}: ${errorMessage}`);
             throw error;
         }
     }
 
     private static async updateProviderPricing(provider: string): Promise<ProviderPricing> {
         try {
-            logger.info(`Updating pricing for ${provider}`);
+            loggingService.info(`Updating pricing for ${provider}`);
 
             const scrapedContent = await this.getScrapedPricingData(provider);
             const pricingData = await this.extractPricingData(provider, scrapedContent);
@@ -240,18 +240,18 @@ export class RealtimePricingService {
             this.pricingCache.set(provider, pricingData);
             this.lastUpdateTime.set(provider, new Date());
 
-            logger.info(`Successfully updated pricing for ${provider}`);
+            loggingService.info(`Successfully updated pricing for ${provider}`);
             return pricingData;
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            logger.error(`Failed to update pricing for ${provider}: ${errorMessage}`);
+            loggingService.error(`Failed to update pricing for ${provider}: ${errorMessage}`);
             throw error;
         }
     }
 
     static async updateAllPricing(): Promise<void> {
         if (this.isUpdating) {
-            logger.info('Pricing update already in progress, skipping');
+            loggingService.info('Pricing update already in progress, skipping');
             return;
         }
 
@@ -259,19 +259,19 @@ export class RealtimePricingService {
         const providers = ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral'];
 
         try {
-            logger.info('Starting pricing update for all providers');
+            loggingService.info('Starting pricing update for all providers');
 
             const updatePromises = providers.map(provider =>
                 this.updateProviderPricing(provider).catch(error => {
                     const errorMessage = error instanceof Error ? error.message : String(error);
-                    logger.error(`Failed to update ${provider}: ${errorMessage}`);
+                    loggingService.error(`Failed to update ${provider}: ${errorMessage}`);
                     return null;
                 })
             );
 
             await Promise.all(updatePromises);
 
-            logger.info('Completed pricing update for all providers');
+            loggingService.info('Completed pricing update for all providers');
         } finally {
             this.isUpdating = false;
         }
@@ -287,7 +287,7 @@ export class RealtimePricingService {
                 return await this.updateProviderPricing(provider);
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Failed to get updated pricing for ${provider}, returning cached: ${errorMessage}`);
+                loggingService.error(`Failed to get updated pricing for ${provider}, returning cached: ${errorMessage}`);
                 return cached || null;
             }
         }
@@ -322,44 +322,44 @@ export class RealtimePricingService {
 
         // Trigger background updates for uncached/stale providers (don't await)
         if (uncachedProviders.length > 0) {
-            logger.info(`Triggering background updates for ${uncachedProviders.length} providers: ${uncachedProviders.join(', ')}`);
+            loggingService.info(`Triggering background updates for ${uncachedProviders.length} providers: ${uncachedProviders.join(', ')}`);
 
             // Start background updates without blocking the response
             this.updateProvidersInBackground(uncachedProviders).catch(error => {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Background update failed: ${errorMessage}`);
+                loggingService.error(`Background update failed: ${errorMessage}`);
             });
         }
 
         // If we have no cached data at all, return fallback data to avoid empty response
         if (results.length === 0) {
-            logger.warn('No cached pricing data available, generating fallback data');
+            loggingService.warn('No cached pricing data available, generating fallback data');
             return await this.generateFallbackPricingData();
         }
 
-        logger.info(`Returning ${results.length} cached pricing providers`);
+        loggingService.info(`Returning ${results.length} cached pricing providers`);
         return results;
     }
 
     private static async updateProvidersInBackground(providers: string[]): Promise<void> {
-        logger.info(`Starting background update for providers: ${providers.join(', ')}`);
+        loggingService.info(`Starting background update for providers: ${providers.join(', ')}`);
 
         // Update providers in parallel for faster completion
         const updatePromises = providers.map(async (provider) => {
             try {
-                logger.info(`Background update starting for ${provider}`);
+                loggingService.info(`Background update starting for ${provider}`);
                 const pricingData = await this.updateProviderPricing(provider);
-                logger.info(`Background update completed for ${provider}`);
+                loggingService.info(`Background update completed for ${provider}`);
                 return pricingData;
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Background update failed for ${provider}: ${errorMessage}`);
+                loggingService.error(`Background update failed for ${provider}: ${errorMessage}`);
                 return null;
             }
         });
 
         await Promise.all(updatePromises);
-        logger.info(`Background update completed for all providers`);
+        loggingService.info(`Background update completed for all providers`);
     }
 
     private static async generateFallbackPricingData(): Promise<ProviderPricing[]> {
@@ -384,7 +384,7 @@ export class RealtimePricingService {
                 }
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                logger.error(`Failed to generate fallback data for ${provider}: ${errorMessage}`);
+                loggingService.error(`Failed to generate fallback data for ${provider}: ${errorMessage}`);
             }
         }
 

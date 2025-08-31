@@ -1,9 +1,9 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ckqlService } from './ckql.service';
 import { TelemetryService } from './telemetry.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { Notebook, INotebook } from '../models/Notebook';
-import { NotebookExecution, INotebookExecution } from '../models/NotebookExecution';
+import { Notebook } from '../models/Notebook';
+import { NotebookExecution } from '../models/NotebookExecution';
 
 export interface NotebookCell {
   id: string;
@@ -352,7 +352,7 @@ Discover patterns in your API usage, peak times, and user behavior.
         parsed_query: parsedQuery.explanation
       };
     } catch (error) {
-      logger.error('Query cell execution failed:', error);
+      loggingService.error('Query cell execution failed:', { error: error instanceof Error ? error.message : String(error) });
       return {
         type: 'error',
         message: error instanceof Error ? error.message : 'Query execution failed'
@@ -432,12 +432,12 @@ Discover patterns in your API usage, peak times, and user behavior.
       try {
         return await this.bedrockClient.send(command);
       } catch (error: any) {
-        logger.error(`Bedrock request failed (attempt ${attempt}/${maxRetries}):`, error.name);
+        loggingService.error(`Bedrock request failed (attempt ${attempt}/${maxRetries}):`, error.name);
         
         // Check if it's a throttling error
         if (error.name === 'ThrottlingException' && attempt < maxRetries) {
           const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff: 2s, 4s, 8s
-          logger.info(`Throttling detected, waiting ${delay}ms before retry ${attempt + 1}/${maxRetries}`);
+          loggingService.info(`Throttling detected, waiting ${delay}ms before retry ${attempt + 1}/${maxRetries}`);
           await new Promise(resolve => setTimeout(resolve, delay));
           continue;
         }
@@ -505,7 +505,7 @@ Discover patterns in your API usage, peak times, and user behavior.
       
       return this.parseInsightResponse(responseText, insightType);
     } catch (error) {
-      logger.error('Failed to generate insights:', error);
+      loggingService.error('Failed to generate insights:', { error: error instanceof Error ? error.message : String(error) });
       return {
         insights: ['Unable to generate insights at this time'],
         recommendations: ['Check system status and try again']
@@ -668,7 +668,7 @@ Provide timing and scaling insights.`;
         }]
       };
     } catch (error) {
-      logger.error('Failed to get cost timeline data:', error);
+      loggingService.error('Failed to get cost timeline data:', { error: error instanceof Error ? error.message : String(error) });
       return {
         labels: [],
         datasets: [{
@@ -741,7 +741,7 @@ Provide timing and scaling insights.`;
         }]
       };
     } catch (error) {
-      logger.error('Failed to get model comparison data:', error);
+      loggingService.error('Failed to get model comparison data:', { error: error instanceof Error ? error.message : String(error) });
       return {
         datasets: [{
           label: 'Models',
@@ -867,7 +867,7 @@ Provide timing and scaling insights.`;
         }
       };
     } catch (error) {
-      logger.error('Failed to get usage heatmap data:', error);
+      loggingService.error('Failed to get usage heatmap data:', { error: error instanceof Error ? error.message : String(error) });
       // Return dynamic data as fallback
       return await this.generateDynamicHeatmapData();
     }
@@ -999,7 +999,7 @@ Provide timing and scaling insights.`;
           sort_order: 'desc'
         });
       } catch (telemetryError) {
-        logger.warn('Limited telemetry data available for dynamic heatmap:', telemetryError);
+        loggingService.warn('Limited telemetry data available for dynamic heatmap:', { error: telemetryError instanceof Error ? telemetryError.message : String(telemetryError) });
       }
 
       // Initialize data structures with dynamic dimensions
@@ -1097,7 +1097,7 @@ Provide timing and scaling insights.`;
         dataQuality: totalDataPoints > 0 ? (totalDataPoints > 100 ? 'high' : 'limited') : 'generated'
       };
     } catch (error) {
-      logger.error('Failed to generate dynamic heatmap data:', error);
+      loggingService.error('Failed to generate dynamic heatmap data:', { error: error instanceof Error ? error.message : String(error) });
       // Ultimate fallback - return minimal but functional data
       return this.getMinimalFallbackData();
     }
@@ -1322,7 +1322,7 @@ Provide timing and scaling insights.`;
         }]
       };
     } catch (error) {
-      logger.error('Failed to get operation distribution data:', error);
+      loggingService.error('Failed to get operation distribution data:', { error: error instanceof Error ? error.message : String(error) });
       return {
         labels: [],
         datasets: [{
@@ -1394,7 +1394,7 @@ Provide timing and scaling insights.`;
         }]
       };
     } catch (error) {
-      logger.error('Failed to get cost per token data:', error);
+      loggingService.error('Failed to get cost per token data:', { error: error instanceof Error ? error.message : String(error) });
       return {
         labels: [],
         datasets: [{

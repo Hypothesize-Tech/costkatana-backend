@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { SimulationTrackingService } from './simulationTracking.service';
 import { Usage } from '../models/Usage';
 import { Project } from '../models/Project';
@@ -201,7 +201,7 @@ export class ROIMetricsService {
                 }
             };
         } catch (error) {
-            logger.error('Error calculating project ROI:', error);
+            loggingService.error('Error calculating project ROI:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -268,7 +268,7 @@ export class ROIMetricsService {
                 recommendations
             };
         } catch (error) {
-            logger.error('Error generating user ROI summary:', error);
+            loggingService.error('Error generating user ROI summary:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -285,7 +285,7 @@ export class ROIMetricsService {
             const summary = await this.generateUserROISummary(userId, startDate, endDate);
 
             if (summary.totalSavings === 0 && summary.totalOptimizations === 0) {
-                logger.info(`No activity for user ${userId}, skipping weekly summary`);
+                loggingService.info(`No activity for user ${userId}, skipping weekly summary`);
                 return;
             }
 
@@ -298,9 +298,9 @@ export class ROIMetricsService {
                 html: emailContent.html
             });
 
-            logger.info(`Sent weekly ROI summary to user: ${userId}`);
+            loggingService.info(`Sent weekly ROI summary to user: ${userId}`);
         } catch (error) {
-            logger.error('Error sending weekly ROI summary:', error);
+            loggingService.error('Error sending weekly ROI summary:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -319,7 +319,7 @@ export class ROIMetricsService {
                 createdAt: { $gte: startDate, $lte: endDate }
             });
 
-            logger.info(`Sending weekly ROI summaries to ${activeUsers.length} active users`);
+            loggingService.info(`Sending weekly ROI summaries to ${activeUsers.length} active users`);
 
             for (const userId of activeUsers) {
                 try {
@@ -327,13 +327,13 @@ export class ROIMetricsService {
                     // Add small delay to avoid overwhelming email service
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } catch (error) {
-                    logger.error(`Error sending summary to user ${userId}:`, error);
+                    loggingService.error(`Error sending summary to user ${userId}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
 
-            logger.info('Completed sending weekly ROI summaries');
+            loggingService.info('Completed sending weekly ROI summaries');
         } catch (error) {
-            logger.error('Error sending weekly ROI summaries to all users:', error);
+            loggingService.error('Error sending weekly ROI summaries to all users:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -447,7 +447,7 @@ export class ROIMetricsService {
             return totalSavings;
             */
         } catch (error) {
-            logger.error('Error calculating actual savings:', error);
+            loggingService.error('Error calculating actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }

@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 // Stub interfaces for missing services
 export interface DemandPrediction {
@@ -90,10 +90,10 @@ export class RecommendationEngineService {
     ): Promise<ScalingRecommendation[]> {
         try {
             // Return empty array since DemandPredictorService is not available
-            logger.info(`Recommendation generation requested for user ${userId}, but DemandPredictorService is not available`);
+            loggingService.info(`Recommendation generation requested for user ${userId}, but DemandPredictorService is not available`);
             return [];
         } catch (error) {
-            logger.error('Error generating recommendations:', error);
+            loggingService.error('Error generating recommendations:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to generate scaling recommendations');
         }
     }
@@ -107,10 +107,10 @@ export class RecommendationEngineService {
     ): Promise<ScalingRecommendation[]> {
         try {
             // Return empty array since CostPerformanceProfilerService is not available
-            logger.info(`Model recommendation generation requested for model ${prediction.modelId}, but CostPerformanceProfilerService is not available`);
+            loggingService.info(`Model recommendation generation requested for model ${prediction.modelId}, but CostPerformanceProfilerService is not available`);
             return [];
         } catch (error) {
-            logger.error('Error generating model recommendations:', error);
+            loggingService.error('Error generating model recommendations:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to generate model recommendations');
         }
     }
@@ -215,7 +215,7 @@ export class RecommendationEngineService {
                 changes: null
             };
         } catch (error) {
-            logger.error('Error executing recommendation:', error);
+            loggingService.error('Error executing recommendation:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 success: false,
                 message: 'Failed to execute recommendation',

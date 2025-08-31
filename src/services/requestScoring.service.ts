@@ -1,6 +1,6 @@
 import { RequestScore, IRequestScore } from '../models/RequestScore';
 import { Usage } from '../models/Usage';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
 
 export interface ScoreRequestData {
@@ -90,11 +90,11 @@ export class RequestScoringService {
                 requestScore = await requestScore.save();
             }
 
-            logger.info(`Request scored: ${scoreData.requestId} - Score: ${scoreData.score}`);
+            loggingService.info(`Request scored: ${scoreData.requestId} - Score: ${scoreData.score}`);
             return requestScore;
 
         } catch (error) {
-            logger.error('Error scoring request:', error);
+            loggingService.error('Error scoring request:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -109,7 +109,7 @@ export class RequestScoringService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
         } catch (error) {
-            logger.error('Error getting request score:', error);
+            loggingService.error('Error getting request score:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -158,7 +158,7 @@ export class RequestScoringService {
 
             return await queryBuilder.exec();
         } catch (error) {
-            logger.error('Error getting user scores:', error);
+            loggingService.error('Error getting user scores:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -233,7 +233,7 @@ export class RequestScoringService {
 
             return candidates;
         } catch (error) {
-            logger.error('Error getting training candidates:', error);
+            loggingService.error('Error getting training candidates:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -322,7 +322,7 @@ export class RequestScoringService {
                         });
                     }
                 } catch (error) {
-                    logger.error(`Error enriching request ${score.requestId}:`, error);
+                    loggingService.error(`Error enriching request ${score.requestId}:`, { error: error instanceof Error ? error.message : String(error) });
                     // Fallback with minimal info
                     topScoredRequests.push({
                         requestId: score.requestId,
@@ -346,7 +346,7 @@ export class RequestScoringService {
                 topScoredRequests
             };
         } catch (error) {
-            logger.error('Error getting scoring analytics:', error);
+            loggingService.error('Error getting scoring analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -366,10 +366,10 @@ export class RequestScoringService {
                 results.push(result);
             }
 
-            logger.info(`Bulk scored ${scores.length} requests for user ${userId}`);
+            loggingService.info(`Bulk scored ${scores.length} requests for user ${userId}`);
             return results;
         } catch (error) {
-            logger.error('Error bulk scoring requests:', error);
+            loggingService.error('Error bulk scoring requests:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -386,7 +386,7 @@ export class RequestScoringService {
 
             return result.deletedCount > 0;
         } catch (error) {
-            logger.error('Error deleting request score:', error);
+            loggingService.error('Error deleting request score:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

@@ -2,7 +2,7 @@ import { IWebhook, Webhook } from '../models/Webhook';
 import { IWebhookDelivery, WebhookDelivery } from '../models/WebhookDelivery';
 import { User } from '../models/User';
 import { Project } from '../models/Project';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { encryptData, decryptData } from '../utils/encryption';
 import { 
     WebhookEventData, 
@@ -85,11 +85,11 @@ export class WebhookService {
             });
 
             await webhook.save();
-            logger.info('Webhook created', { webhookId: webhook._id, userId });
+            loggingService.info('Webhook created', { value:  {  webhookId: webhook._id, userId  } });
 
             return webhook;
         } catch (error) {
-            logger.error('Error creating webhook', { error, userId });
+            loggingService.error('Error creating webhook', { error, userId });
             throw error;
         }
     }
@@ -131,10 +131,10 @@ export class WebhookService {
             Object.assign(webhook, updates);
             await webhook.save();
 
-            logger.info('Webhook updated', { webhookId, userId });
+            loggingService.info('Webhook updated', { value:  {  webhookId, userId  } });
             return webhook;
         } catch (error) {
-            logger.error('Error updating webhook', { error, webhookId, userId });
+            loggingService.error('Error updating webhook', { error, webhookId, userId });
             throw error;
         }
     }
@@ -163,7 +163,7 @@ export class WebhookService {
 
             return webhooks;
         } catch (error) {
-            logger.error('Error fetching webhooks', { error, userId });
+            loggingService.error('Error fetching webhooks', { error, userId });
             throw error;
         }
     }
@@ -177,7 +177,7 @@ export class WebhookService {
                 .select('-auth.credentials');
             return webhook;
         } catch (error) {
-            logger.error('Error fetching webhook', { error, webhookId, userId });
+            loggingService.error('Error fetching webhook', { error, webhookId, userId });
             throw error;
         }
     }
@@ -192,13 +192,13 @@ export class WebhookService {
             if (result.deletedCount > 0) {
                 // Also delete associated deliveries
                 await WebhookDelivery.deleteMany({ webhookId });
-                logger.info('Webhook deleted', { webhookId, userId });
+                loggingService.info('Webhook deleted', { value:  {  webhookId, userId  } });
                 return true;
             }
             
             return false;
         } catch (error) {
-            logger.error('Error deleting webhook', { error, webhookId, userId });
+            loggingService.error('Error deleting webhook', { error, webhookId, userId });
             throw error;
         }
     }
@@ -208,16 +208,16 @@ export class WebhookService {
      */
     async processEvent(eventData: WebhookEventData): Promise<void> {
         try {
-            logger.info('Processing webhook event', { 
+            loggingService.info('Processing webhook event', { value:  {  
                 eventType: eventData.eventType, 
                 eventId: eventData.eventId 
-            });
+             } });
 
             // Find matching webhooks
             const webhooks = await this.findMatchingWebhooks(eventData);
 
             if (webhooks.length === 0) {
-                logger.debug('No matching webhooks found', { eventType: eventData.eventType });
+                loggingService.debug('No matching webhooks found', { value:  { eventType: eventData.eventType  } });
                 return;
             }
 
@@ -228,12 +228,12 @@ export class WebhookService {
 
             await Promise.all(deliveryPromises);
 
-            logger.info('Event processed for webhooks', { 
+            loggingService.info('Event processed for webhooks', { value:  {  
                 eventId: eventData.eventId,
                 webhookCount: webhooks.length 
-            });
+             } });
         } catch (error) {
-            logger.error('Error processing webhook event', { error, eventData });
+            loggingService.error('Error processing webhook event', { error, eventData });
             // Don't throw - webhook failures shouldn't break the main flow
         }
     }
@@ -289,7 +289,7 @@ export class WebhookService {
                 // Simple matching of custom query against event data
                 return this.matchCustomQuery(webhook.filters.customQuery, eventData);
             } catch (error) {
-                logger.error('Error matching custom query', { error, webhookId: webhook._id });
+                loggingService.error('Error matching custom query', { error, webhookId: webhook._id });
                 return false;
             }
         });
@@ -375,14 +375,13 @@ export class WebhookService {
 
             await delivery.save();
 
-            logger.debug('Webhook delivery created', { 
-                deliveryId: delivery._id, 
+            loggingService.debug('Webhook delivery created', { value:  { deliveryId: delivery._id, 
                 webhookId: webhook._id 
-            });
+             } });
 
             return delivery;
         } catch (error) {
-            logger.error('Error creating webhook delivery', { error, webhookId: webhook._id });
+            loggingService.error('Error creating webhook delivery', { error, webhookId: webhook._id });
             throw error;
         }
     }
@@ -426,7 +425,7 @@ export class WebhookService {
 
             return compiledTemplate(context);
         } catch (error) {
-            logger.error('Error building webhook payload', { error, webhookId: webhook._id });
+            loggingService.error('Error building webhook payload', { error, webhookId: webhook._id });
             // Return a minimal payload on error
             return JSON.stringify({
                 event_id: eventData.eventId,
@@ -485,7 +484,7 @@ export class WebhookService {
                 case 'oauth2':
                     // OAuth2 would require fetching a token first
                     // This is a placeholder - implement OAuth2 flow as needed
-                    logger.warn('OAuth2 authentication not yet implemented for webhooks');
+                    loggingService.warn('OAuth2 authentication not yet implemented for webhooks');
                     break;
             }
         }
@@ -552,14 +551,14 @@ export class WebhookService {
             // Create and return delivery
             const delivery = await this.createDelivery(webhook, eventData);
             
-            logger.info('Test webhook delivery created', { 
+            loggingService.info('Test webhook delivery created', { value:  {  
                 webhookId, 
                 deliveryId: delivery._id 
-            });
+             } });
 
             return delivery;
         } catch (error) {
-            logger.error('Error testing webhook', { error, webhookId, userId });
+            loggingService.error('Error testing webhook', { error, webhookId, userId });
             throw error;
         }
     }
@@ -602,7 +601,7 @@ export class WebhookService {
 
             return { deliveries, total };
         } catch (error) {
-            logger.error('Error fetching webhook deliveries', { error, webhookId, userId });
+            loggingService.error('Error fetching webhook deliveries', { error, webhookId, userId });
             throw error;
         }
     }
@@ -618,7 +617,7 @@ export class WebhookService {
             });
             return delivery;
         } catch (error) {
-            logger.error('Error fetching delivery', { error, deliveryId, userId });
+            loggingService.error('Error fetching delivery', { error, deliveryId, userId });
             throw error;
         }
     }
@@ -667,14 +666,14 @@ export class WebhookService {
 
             await newDelivery.save();
 
-            logger.info('Webhook delivery replayed', { 
+            loggingService.info('Webhook delivery replayed', { value:  {  
                 originalDeliveryId: deliveryId,
                 newDeliveryId: newDelivery._id 
-            });
+             } });
 
             return newDelivery;
         } catch (error) {
-            logger.error('Error replaying delivery', { error, deliveryId, userId });
+            loggingService.error('Error replaying delivery', { error, deliveryId, userId });
             throw error;
         }
     }
@@ -724,7 +723,7 @@ export class WebhookService {
                 recentDeliveries
             };
         } catch (error) {
-            logger.error('Error getting webhook stats', { error, webhookId, userId });
+            loggingService.error('Error getting webhook stats', { error, webhookId, userId });
             throw error;
         }
     }
@@ -804,7 +803,7 @@ export class WebhookService {
 
             await Webhook.findByIdAndUpdate(webhookId, update);
         } catch (error) {
-            logger.error('Error updating webhook stats', { error, webhookId });
+            loggingService.error('Error updating webhook stats', { error, webhookId });
         }
     }
 }

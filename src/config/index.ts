@@ -16,6 +16,7 @@ const requiredEnvVars = [
 
 for (const envVar of requiredEnvVars) {
     if (!process.env[envVar]) {
+        console.error(`Missing required environment variable: ${envVar}`);
         throw new Error(`Missing required environment variable: ${envVar}`);
     }
 }
@@ -67,4 +68,6 @@ export const config = {
 
 export * from './database';
 export * from './aws';
-export * from './email'; 
+export * from './email';
+export * from './redis';
+export * from './telemetry'; 

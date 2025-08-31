@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { FineTuneJobService, CreateFineTuneJobData } from '../services/fineTuneJob.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 export class FineTuneJobController {
     /**
@@ -8,17 +8,42 @@ export class FineTuneJobController {
      * POST /api/fine-tune/jobs
      */
     static async createFineTuneJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const jobData: CreateFineTuneJobData = req.body;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Fine-tune job creation initiated', {
+                userId,
+                hasUserId: !!userId,
+                hasJobData: !!jobData,
+                jobName: jobData.name,
+                datasetId: jobData.datasetId,
+                baseModel: jobData.baseModel,
+                provider: jobData.provider,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Fine-tune job creation failed - authentication required', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const jobData: CreateFineTuneJobData = req.body;
-
             // Validate required fields
             if (!jobData.name || !jobData.datasetId || !jobData.baseModel || !jobData.provider) {
+                loggingService.warn('Fine-tune job creation failed - missing required fields', {
+                    userId,
+                    hasName: !!jobData.name,
+                    hasDatasetId: !!jobData.datasetId,
+                    hasBaseModel: !!jobData.baseModel,
+                    hasProvider: !!jobData.provider,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({ 
                     success: false, 
                     message: 'Name, dataset ID, base model, and provider are required' 
@@ -26,15 +51,67 @@ export class FineTuneJobController {
                 return;
             }
 
+            loggingService.info('Fine-tune job creation processing started', {
+                userId,
+                jobName: jobData.name,
+                datasetId: jobData.datasetId,
+                baseModel: jobData.baseModel,
+                provider: jobData.provider,
+                hasHyperparameters: !!jobData.hyperparameters,
+                hasProviderConfig: !!jobData.providerConfig,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const fineTuneJob = await FineTuneJobService.createFineTuneJob(userId, jobData);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune job created successfully', {
+                userId,
+                jobId: fineTuneJob.id || fineTuneJob._id,
+                jobName: fineTuneJob.name,
+                duration,
+                hasJob: !!fineTuneJob,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_job_created',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId: fineTuneJob.id || fineTuneJob._id,
+                    jobName: fineTuneJob.name,
+                    datasetId: fineTuneJob.datasetId,
+                    baseModel: fineTuneJob.baseModel,
+                    provider: fineTuneJob.provider,
+                    hasHyperparameters: !!fineTuneJob.hyperparameters
+                }
+            });
 
             res.status(201).json({
                 success: true,
                 data: fineTuneJob,
                 message: 'Fine-tune job created successfully'
             });
-        } catch (error) {
-            logger.error('Create fine-tune job error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune job creation failed', {
+                userId,
+                hasJobData: !!jobData,
+                jobName: jobData.name,
+                datasetId: jobData.datasetId,
+                baseModel: jobData.baseModel,
+                provider: jobData.provider,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -44,21 +121,69 @@ export class FineTuneJobController {
      * GET /api/fine-tune/jobs
      */
     static async getUserFineTuneJobs(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('User fine-tune jobs retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('User fine-tune jobs retrieval failed - authentication required', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
+            loggingService.info('User fine-tune jobs retrieval processing started', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const jobs = await FineTuneJobService.getUserFineTuneJobs(userId);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User fine-tune jobs retrieved successfully', {
+                userId,
+                duration,
+                jobsCount: jobs.length,
+                hasJobs: !!jobs && jobs.length > 0,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_fine_tune_jobs_retrieved',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobsCount: jobs.length,
+                    hasJobs: !!jobs && jobs.length > 0
+                }
+            });
 
             res.json({
                 success: true,
                 data: jobs
             });
-        } catch (error) {
-            logger.error('Get user fine-tune jobs error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('User fine-tune jobs retrieval failed', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -68,17 +193,44 @@ export class FineTuneJobController {
      * GET /api/fine-tune/jobs/:jobId
      */
     static async getFineTuneJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const { jobId } = req.params;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Specific fine-tune job retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                jobId,
+                hasJobId: !!jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Specific fine-tune job retrieval failed - authentication required', {
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const { jobId } = req.params;
+            loggingService.info('Specific fine-tune job retrieval processing started', {
+                userId,
+                jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const job = await FineTuneJobService.getFineTuneJob(userId, jobId);
 
             if (!job) {
+                loggingService.warn('Specific fine-tune job not found', {
+                    userId,
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({ 
                     success: false, 
                     message: 'Fine-tune job not found' 
@@ -86,12 +238,48 @@ export class FineTuneJobController {
                 return;
             }
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Specific fine-tune job retrieved successfully', {
+                userId,
+                jobId,
+                duration,
+                jobName: job.name,
+                jobStatus: job.status,
+                hasJob: !!job,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'specific_fine_tune_job_retrieved',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId,
+                    jobName: job.name,
+                    jobStatus: job.status,
+                    hasJob: !!job
+                }
+            });
+
             res.json({
                 success: true,
                 data: job
             });
-        } catch (error) {
-            logger.error('Get fine-tune job error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Specific fine-tune job retrieval failed', {
+                userId,
+                jobId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -101,23 +289,78 @@ export class FineTuneJobController {
      * POST /api/fine-tune/jobs/:jobId/cancel
      */
     static async cancelFineTuneJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const { jobId } = req.params;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Fine-tune job cancellation initiated', {
+                userId,
+                hasUserId: !!userId,
+                jobId,
+                hasJobId: !!jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Fine-tune job cancellation failed - authentication required', {
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const { jobId } = req.params;
+            loggingService.info('Fine-tune job cancellation processing started', {
+                userId,
+                jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const job = await FineTuneJobService.cancelFineTuneJob(userId, jobId);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune job cancelled successfully', {
+                userId,
+                jobId,
+                duration,
+                jobStatus: job.status,
+                hasJob: !!job,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_job_cancelled',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId,
+                    jobStatus: job.status,
+                    hasJob: !!job
+                }
+            });
 
             res.json({
                 success: true,
                 data: job,
                 message: 'Fine-tune job cancelled successfully'
             });
-        } catch (error) {
-            logger.error('Cancel fine-tune job error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune job cancellation failed', {
+                userId,
+                jobId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -127,17 +370,44 @@ export class FineTuneJobController {
      * GET /api/fine-tune/jobs/:jobId/status
      */
     static async getJobStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const { jobId } = req.params;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Fine-tune job status retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                jobId,
+                hasJobId: !!jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Fine-tune job status retrieval failed - authentication required', {
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const { jobId } = req.params;
+            loggingService.info('Fine-tune job status retrieval processing started', {
+                userId,
+                jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const job = await FineTuneJobService.getFineTuneJob(userId, jobId);
 
             if (!job) {
+                loggingService.warn('Fine-tune job not found for status retrieval', {
+                    userId,
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({ 
                     success: false, 
                     message: 'Fine-tune job not found' 
@@ -155,12 +425,50 @@ export class FineTuneJobController {
                 providerJobId: job.providerJobId
             };
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune job status retrieved successfully', {
+                userId,
+                jobId,
+                duration,
+                jobStatus: job.status,
+                hasProgress: !!job.progress,
+                hasCost: !!job.cost,
+                hasResults: !!job.results,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_job_status_retrieved',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId,
+                    jobStatus: job.status,
+                    hasProgress: !!job.progress,
+                    hasCost: !!job.cost,
+                    hasResults: !!job.results
+                }
+            });
+
             res.json({
                 success: true,
                 data: statusData
             });
-        } catch (error) {
-            logger.error('Get job status error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune job status retrieval failed', {
+                userId,
+                jobId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -170,23 +478,80 @@ export class FineTuneJobController {
      * GET /api/fine-tune/jobs/:jobId/metrics
      */
     static async getJobMetrics(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const { jobId } = req.params;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Fine-tune job metrics retrieval initiated', {
+                userId,
+                hasUserId: !!userId,
+                jobId,
+                hasJobId: !!jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Fine-tune job metrics retrieval failed - authentication required', {
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const { jobId } = req.params;
+            loggingService.info('Fine-tune job metrics retrieval processing started', {
+                userId,
+                jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const job = await FineTuneJobService.getFineTuneJob(userId, jobId);
 
             if (!job) {
+                loggingService.warn('Fine-tune job not found for metrics retrieval', {
+                    userId,
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({ 
                     success: false, 
                     message: 'Fine-tune job not found' 
                 });
                 return;
             }
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune job metrics retrieved successfully', {
+                userId,
+                jobId,
+                duration,
+                hasMetrics: !!job.metrics,
+                hasProgress: !!job.progress,
+                hasHyperparameters: !!job.hyperparameters,
+                hasTiming: !!job.timing,
+                hasCost: !!job.cost,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_job_metrics_retrieved',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId,
+                    hasMetrics: !!job.metrics,
+                    hasProgress: !!job.progress,
+                    hasHyperparameters: !!job.hyperparameters,
+                    hasTiming: !!job.timing,
+                    hasCost: !!job.cost
+                }
+            });
 
             res.json({
                 success: true,
@@ -198,8 +563,18 @@ export class FineTuneJobController {
                     cost: job.cost
                 }
             });
-        } catch (error) {
-            logger.error('Get job metrics error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune job metrics retrieval failed', {
+                userId,
+                jobId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -209,17 +584,44 @@ export class FineTuneJobController {
      * DELETE /api/fine-tune/jobs/:jobId
      */
     static async deleteFineTuneJob(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+        const { jobId } = req.params;
+
         try {
-            const userId = (req as any).user?.id;
+            loggingService.info('Fine-tune job deletion initiated', {
+                userId,
+                hasUserId: !!userId,
+                jobId,
+                hasJobId: !!jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             if (!userId) {
+                loggingService.warn('Fine-tune job deletion failed - authentication required', {
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const { jobId } = req.params;
+            loggingService.info('Fine-tune job deletion processing started', {
+                userId,
+                jobId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             const deleted = await FineTuneJobService.deleteFineTuneJob(userId, jobId);
 
             if (!deleted) {
+                loggingService.warn('Fine-tune job not found for deletion', {
+                    userId,
+                    jobId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({ 
                     success: false, 
                     message: 'Fine-tune job not found' 
@@ -227,12 +629,44 @@ export class FineTuneJobController {
                 return;
             }
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune job deleted successfully', {
+                userId,
+                jobId,
+                duration,
+                wasDeleted: !!deleted,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_job_deleted',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    jobId,
+                    wasDeleted: !!deleted
+                }
+            });
+
             res.json({
                 success: true,
                 message: 'Fine-tune job deleted successfully'
             });
-        } catch (error) {
-            logger.error('Delete fine-tune job error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune job deletion failed', {
+                userId,
+                jobId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -242,7 +676,13 @@ export class FineTuneJobController {
      * GET /api/fine-tune/providers
      */
     static async getSupportedProviders(_req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('Supported providers retrieval initiated', {
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             const providers = {
                 'openai': {
                     name: 'OpenAI',
@@ -278,12 +718,40 @@ export class FineTuneJobController {
                 }
             };
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Supported providers retrieved successfully', {
+                duration,
+                providersCount: Object.keys(providers).length,
+                providers: Object.keys(providers),
+                requestId: _req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_supported_providers_retrieved',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    providersCount: Object.keys(providers).length,
+                    providers: Object.keys(providers)
+                }
+            });
+
             res.json({
                 success: true,
                 data: providers
             });
-        } catch (error) {
-            logger.error('Get supported providers error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Supported providers retrieval failed', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }
@@ -293,10 +761,32 @@ export class FineTuneJobController {
      * POST /api/fine-tune/estimate-cost
      */
     static async estimateCost(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        const { provider, baseModel, datasetId } = req.body;
+        const userId = (req as any).user?.id;
+
         try {
-            const { provider, baseModel, datasetId } = req.body;
+            loggingService.info('Fine-tune cost estimation initiated', {
+                userId,
+                hasUserId: !!userId,
+                provider,
+                baseModel,
+                datasetId,
+                hasProvider: !!provider,
+                hasBaseModel: !!baseModel,
+                hasDatasetId: !!datasetId,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!provider || !baseModel || !datasetId) {
+                loggingService.warn('Fine-tune cost estimation failed - missing required fields', {
+                    userId,
+                    hasProvider: !!provider,
+                    hasBaseModel: !!baseModel,
+                    hasDatasetId: !!datasetId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     message: 'Provider, base model, and dataset ID are required'
@@ -304,8 +794,15 @@ export class FineTuneJobController {
                 return;
             }
 
+            loggingService.info('Fine-tune cost estimation processing started', {
+                userId,
+                provider,
+                baseModel,
+                datasetId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             // Get dataset to calculate tokens
-            const userId = (req as any).user?.id;
             const { TrainingDataset } = await import('../models/TrainingDataset');
             const dataset = await TrainingDataset.findOne({
                 _id: datasetId,
@@ -313,6 +810,12 @@ export class FineTuneJobController {
             });
             
             if (!dataset) {
+                loggingService.warn('Fine-tune cost estimation failed - dataset not found', {
+                    userId,
+                    datasetId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(404).json({
                     success: false,
                     message: 'Dataset not found'
@@ -348,6 +851,38 @@ export class FineTuneJobController {
                     estimatedDuration = Math.max(30, itemCount * 0.1);
             }
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Fine-tune cost estimation completed successfully', {
+                userId,
+                provider,
+                baseModel,
+                datasetId,
+                duration,
+                itemCount,
+                totalTokens,
+                estimatedCost,
+                estimatedDuration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'fine_tune_cost_estimated',
+                category: 'fine_tune_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    provider,
+                    baseModel,
+                    datasetId,
+                    itemCount,
+                    totalTokens,
+                    estimatedCost,
+                    estimatedDuration
+                }
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -370,8 +905,20 @@ export class FineTuneJobController {
                     ].filter(Boolean)
                 }
             });
-        } catch (error) {
-            logger.error('Estimate cost error:', error);
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Fine-tune cost estimation failed', {
+                userId,
+                provider,
+                baseModel,
+                datasetId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             next(error);
         }
     }

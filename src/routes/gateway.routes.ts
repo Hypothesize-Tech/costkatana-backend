@@ -7,7 +7,7 @@ import {
     addGatewayResponseHeaders 
 } from '../middleware/gateway.middleware';
 import { authenticate } from '../middleware/auth.middleware';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 const router = Router();
 
@@ -68,7 +68,7 @@ router.use('/', [
 
 // Log gateway route setup
 router.use('/', (req, _res, next) => {
-    logger.debug('Gateway route matched', {
+    loggingService.debug('Gateway route matched', {
         method: req.method,
         path: req.path,
         targetUrl: req.gatewayContext?.targetUrl,

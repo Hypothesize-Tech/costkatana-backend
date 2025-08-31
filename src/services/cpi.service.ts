@@ -3,13 +3,13 @@
  * Core engine for cross-provider cost normalization and intelligent routing
  */
 
-import { logger } from '../utils/logger';
 import { getModelPricing } from '../utils/pricing';
 import { 
     CPIMetrics, 
     ProviderPerformance, 
     CPICalculationInput
 } from '../types/cpi.types';
+import { loggingService } from './logging.service';
 
 export class CPIService {
     private static performanceCache = new Map<string, ProviderPerformance>();
@@ -75,17 +75,16 @@ export class CPIService {
             // Cache the result
             this.cpiCache.set(cacheKey, metrics);
 
-            logger.debug('CPI metrics calculated', {
-                provider,
+            loggingService.debug('CPI metrics calculated', { value:  { provider,
                 modelId,
                 cpiScore,
                 normalizedCost,
                 performanceScore
-            });
+             } });
 
             return metrics;
         } catch (error) {
-            logger.error('Error calculating CPI metrics:', error);
+            loggingService.error('Error calculating CPI metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -117,7 +116,7 @@ export class CPIService {
             
             return normalizedCost * normalizationFactor;
         } catch (error) {
-            logger.error('Error calculating normalized cost:', error);
+            loggingService.error('Error calculating normalized cost:', { error: error instanceof Error ? error.message : String(error) });
             return 0;
         }
     }
@@ -367,7 +366,7 @@ export class CPIService {
             this.performanceCache.set(cacheKey, estimatedPerformance);
             return estimatedPerformance;
         } catch (error) {
-            logger.warn(`Failed to fetch performance data for ${provider}:${modelId}:`, error);
+            loggingService.warn(`Failed to fetch performance data for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
             const estimatedPerformance = await this.generateEstimatedPerformance(provider, modelId);
             this.performanceCache.set(cacheKey, estimatedPerformance);
             return estimatedPerformance;
@@ -451,7 +450,7 @@ export class CPIService {
 
             return performance;
         } catch (error) {
-            logger.error('Error fetching real performance data:', error);
+            loggingService.error('Error fetching real performance data:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -526,7 +525,7 @@ export class CPIService {
                 };
             }
         } catch (error) {
-            logger.warn(`Failed to get real performance data for ${provider}:${modelId}:`, error);
+            loggingService.warn(`Failed to get real performance data for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
         }
 
         // Fallback: Use industry benchmarks and model specifications
@@ -600,7 +599,7 @@ export class CPIService {
                 };
             }
         } catch (error) {
-            logger.warn(`Failed to get model specifications for ${provider}:${modelId}:`, error);
+            loggingService.warn(`Failed to get model specifications for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
         }
         
         // Final fallback values
@@ -693,7 +692,7 @@ export class CPIService {
                 reliabilityTrend: reliabilityChange < -1 ? 'improving' : reliabilityChange > 1 ? 'degrading' : 'stable'
             };
         } catch (error) {
-            logger.warn('Error calculating performance trends:', error);
+            loggingService.warn('Error calculating performance trends:', { error: error instanceof Error ? error.message : String(error) });
             return { latencyTrend: 'stable', costTrend: 'stable', reliabilityTrend: 'stable' };
         }
     }
@@ -731,7 +730,7 @@ export class CPIService {
                 };
             }
         } catch (error) {
-            logger.warn('Error getting model capabilities:', error);
+            loggingService.warn('Error getting model capabilities:', { error: error instanceof Error ? error.message : String(error) });
         }
 
         return this.getDefaultCapabilities(provider, _modelId);

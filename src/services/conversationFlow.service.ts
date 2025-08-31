@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { agentService } from './agent.service';
 
 // Define the structure for conversation states
@@ -390,7 +390,7 @@ export class ConversationalFlowService {
             return await this.processConversationStep(conversationId, userId, message, state, context);
 
         } catch (error) {
-            logger.error('Error processing conversation message:', error);
+            loggingService.error('Error processing conversation message:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 response: 'I apologize, but I encountered an error processing your message. Could you please try again?',
                 isComplete: false,
@@ -801,6 +801,11 @@ export class ConversationalFlowService {
         mcpData?: any;
         thinking?: any;
     }> {
+        // Check if this is a knowledge base query first
+        if (this.isKnowledgeBaseQuery(message)) {
+            return await this.handleKnowledgeBaseQuery(userId, message, context);
+        }
+
         // For truly general queries, still provide a conversational approach
         // but execute immediately since they don't need structured data collection
         try {
@@ -811,7 +816,7 @@ export class ConversationalFlowService {
             });
 
             // Debug logging to understand the response structure
-            logger.info('ConversationFlow - Agent response structure:', {
+            loggingService.info('ConversationFlow - Agent response structure:', {
                 success: agentResponse.success,
                 hasResponse: !!agentResponse.response,
                 responseLength: agentResponse.response?.length || 0,
@@ -829,10 +834,9 @@ export class ConversationalFlowService {
                 };
             } else if (agentResponse.success && !agentResponse.response) {
                 // Agent succeeded but returned empty response - this shouldn't happen but handle gracefully
-                logger.warn('ConversationFlow - Agent succeeded but no response:', {
-                    success: agentResponse.success,
+                loggingService.warn('ConversationFlow - Agent succeeded but no response:', { value:  { success: agentResponse.success,
                     metadata: agentResponse.metadata
-                });
+                 } });
                 
                 return {
                     response: 'I processed your request successfully, but the response was empty. Please try asking your question again.',
@@ -842,11 +846,10 @@ export class ConversationalFlowService {
                 };
             } else {
                 // Log the failure case
-                logger.warn('ConversationFlow - Agent failed:', {
-                    success: agentResponse.success,
+                loggingService.warn('ConversationFlow - Agent failed:', { value:  { success: agentResponse.success,
                     error: agentResponse.error,
                     metadata: agentResponse.metadata
-                });
+                 } });
                 
                 return {
                     response: agentResponse.error || 'I apologize, but I encountered an error processing your request. Please try rephrasing your question or being more specific about what you\'d like to know.',
@@ -856,9 +859,164 @@ export class ConversationalFlowService {
                 };
             }
         } catch (error) {
-            logger.error('Error handling general query:', error);
+            loggingService.error('Error handling general query:', { error: error instanceof Error ? error.message : String(error) });
             return {
                 response: 'I apologize, but I encountered an error. Could you please rephrase your question or be more specific about what you\'d like me to help you with?',
+                isComplete: true,
+                requiresMcpCall: false
+            };
+        }
+    }
+
+    /**
+     * Check if a message is a knowledge base query
+     */
+    private isKnowledgeBaseQuery(message: string): boolean {
+        const knowledgeBaseMentions = [
+            '@knowledge-base/',
+            '@knowledge-base',
+            'knowledge base',
+            'knowledge-base',
+            'cost katana',
+            'costkatana',
+            'what is cost katana',
+            'what is costkatana',
+            'cost optimization platform',
+            'ai cost optimizer',
+            'ai cost optimization',
+            'cost optimizer platform',
+            'cost optimization system',
+            'costkatana platform',
+            'cost katana platform',
+            'what does costkatana do',
+            'what does costkatana do'
+        ];
+        
+        const messageLower = message.toLowerCase();
+        
+        // Special handling for Cost Katana variations to prevent confusion with sword katana
+        const costKatanaPatterns = [
+            /cost\s*katana/i,
+            /costkatana/i,
+            /what\s+is\s+cost\s*katana/i,
+            /what\s+is\s+costkatana/i,
+            /tell\s+me\s+about\s+cost\s*katana/i,
+            /explain\s+cost\s*katana/i,
+            /ai\s+cost\s+optimizer/i,
+            /cost\s+optimization\s+platform/i,
+            /what\s+does\s+cost\s*katana\s+do/i,
+            /what\s+does\s+costkatana\s+do/i
+        ];
+        
+        // Check for Cost Katana specific patterns first
+        if (costKatanaPatterns.some(pattern => pattern.test(message))) {
+            return true;
+        }
+        
+        // Check for general knowledge base mentions
+        return knowledgeBaseMentions.some(mention => messageLower.includes(mention.toLowerCase()));
+    }
+
+    /**
+     * Handle knowledge base queries directly
+     */
+    private async handleKnowledgeBaseQuery(
+        userId: string,
+        message: string,
+        context?: any
+    ): Promise<{
+        response: string;
+        isComplete: boolean;
+        requiresMcpCall: boolean;
+        mcpAction?: string;
+        mcpData?: any;
+        thinking?: any;
+    }> {
+        try {
+            // Import the KnowledgeBaseTool here to avoid circular dependencies
+            const { KnowledgeBaseTool } = await import('../tools/knowledgeBase.tool');
+            const knowledgeBaseTool = new KnowledgeBaseTool();
+            
+            // Clean the message to extract the actual query
+            let cleanQuery = message
+                .replace(/@knowledge-base\/?/gi, '')
+                .replace(/knowledge[\s-]?base/gi, '')
+                .trim();
+            
+            // If the query is empty after cleaning, use the original message
+            if (!cleanQuery) {
+                cleanQuery = message;
+            }
+
+            // Enhance the query with context information
+            let contextualQuery = cleanQuery;
+            if (context) {
+                // Add conversation context for better search results
+                if (context.previousMessages && context.previousMessages.length > 0) {
+                    const recentContext = context.previousMessages
+                        .slice(-3) // Last 3 messages for context
+                        .map((msg: any) => `${msg.role}: ${msg.content}`)
+                        .join('\n');
+                    
+                    contextualQuery = `Context from conversation:\n${recentContext}\n\nCurrent query: ${cleanQuery}`;
+                }
+
+                // Add model context if available
+                if (context.selectedModel) {
+                    contextualQuery += `\n\nUser is currently using model: ${context.selectedModel}`;
+                }
+
+                // Add any additional context information
+                if (context.conversationId) {
+                    contextualQuery += `\n\nConversation ID: ${context.conversationId}`;
+                }
+            }
+            
+            loggingService.info('Processing knowledge base query with context:', {
+                originalMessage: message,
+                cleanQuery: cleanQuery,
+                contextualQuery: contextualQuery,
+                userId: userId,
+                hasContext: !!context,
+                contextKeys: context ? Object.keys(context) : []
+            });
+            
+            const knowledgeResponse = await knowledgeBaseTool._call(contextualQuery);
+            
+            return {
+                response: knowledgeResponse,
+                isComplete: true,
+                requiresMcpCall: false,
+                thinking: {
+                    title: 'Knowledge Base Search with Context',
+                    steps: [
+                        {
+                            step: 1,
+                            description: 'Detected knowledge base query',
+                            reasoning: 'Message contains knowledge base mention or Cost Katana reference',
+                            outcome: 'Routing to knowledge base tool'
+                        },
+                        {
+                            step: 2,
+                            description: 'Enhanced query with conversation context',
+                            reasoning: context ? 'Added previous messages and model context for better search results' : 'No additional context available',
+                            outcome: `Enhanced query: "${contextualQuery.substring(0, 100)}${contextualQuery.length > 100 ? '...' : ''}"`
+                        },
+                        {
+                            step: 3,
+                            description: 'Searching knowledge base',
+                            reasoning: `Searching with contextual query for more relevant results`,
+                            outcome: 'Knowledge base results retrieved with context consideration'
+                        }
+                    ],
+                    summary: 'Successfully retrieved contextual information from the AI Cost Optimizer knowledge base'
+                }
+            };
+            
+        } catch (error) {
+            loggingService.error('Error handling knowledge base query:', { error: error instanceof Error ? error.message : String(error) });
+            return {
+                response: 'I apologize, but I encountered an error accessing the knowledge base. Please try rephrasing your question about Cost Katana or the AI Cost Optimizer platform.',
                 isComplete: true,
                 requiresMcpCall: false
             };

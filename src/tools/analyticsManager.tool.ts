@@ -1,6 +1,7 @@
 import { Tool } from "@langchain/core/tools";
 import { Usage } from "../models/Usage";
 import { Optimization } from "../models/Optimization";
+import { loggingService } from '../services/logging.service';
 
 interface AnalyticsOperation {
     operation: 'dashboard' | 'cost_trends' | 'usage_patterns' | 'model_performance' | 'project_analytics' | 'user_stats' | 'comparative_analysis' | 'forecasting' | 'anomaly_detection' | 'token_usage';
@@ -92,7 +93,13 @@ export class AnalyticsManagerTool extends Tool {
             }
 
         } catch (error) {
-            console.error('Analytics operation failed:', error);
+            loggingService.error('Analytics operation failed', {
+                component: 'analyticsManagerTool',
+                operation: '_call',
+                step: 'error',
+                error: error instanceof Error ? error.message : String(error),
+                errorType: error instanceof SyntaxError ? 'SyntaxError' : 'Unknown'
+            });
             
             if (error instanceof SyntaxError) {
                 return "Invalid JSON input. Please provide a valid operation object.";
@@ -634,7 +641,10 @@ export class AnalyticsManagerTool extends Tool {
             const userId = operation.userId;
 
             // Debug logging
-            console.log('🔍 Token Usage Query Debug:', {
+            loggingService.info('Token Usage Query Debug', {
+                component: 'analyticsManagerTool',
+                operation: 'getTokenUsage',
+                step: 'debug',
                 userId,
                 originalTimeRange: timeRange,
                 userIdType: typeof userId,
@@ -646,7 +656,13 @@ export class AnalyticsManagerTool extends Tool {
                 userId: new (require('mongoose')).Types.ObjectId(userId)
             });
 
-            console.log(`📊 Total usage records for user ${userId}: ${totalUserUsage}`);
+            loggingService.info('Total usage records for user', {
+                component: 'analyticsManagerTool',
+                operation: 'getTokenUsage',
+                step: 'usageCount',
+                userId,
+                totalUserUsage
+            });
 
             if (totalUserUsage === 0) {
                 return JSON.stringify({
@@ -691,13 +707,26 @@ export class AnalyticsManagerTool extends Tool {
             ]);
 
             const userDataRange = dataRangeQuery[0];
-            console.log('📅 User data range:', userDataRange);
+            loggingService.info('User data range', {
+                component: 'analyticsManagerTool',
+                operation: 'getTokenUsage',
+                step: 'dataRange',
+                userId,
+                userDataRange
+            });
 
             // Check if requested time range overlaps with user's data
             const hasOverlap = timeRange.end >= userDataRange.earliest && timeRange.start <= userDataRange.latest;
             
             if (!hasOverlap) {
-                console.log('⚠️ No overlap between requested range and user data. Adjusting...');
+                loggingService.warn('No overlap between requested range and user data, adjusting', {
+                    component: 'analyticsManagerTool',
+                    operation: 'getTokenUsage',
+                    step: 'timeRangeAdjustment',
+                    userId,
+                    requestedRange: operation.timeRange,
+                    userDataRange
+                });
                 
                 // If no overlap, use the user's actual data range or recent data
                 const now = new Date();
@@ -709,7 +738,13 @@ export class AnalyticsManagerTool extends Tool {
                     end: userDataRange.latest
                 };
                 
-                console.log('🔄 Adjusted time range:', timeRange);
+                loggingService.info('Adjusted time range', {
+                    component: 'analyticsManagerTool',
+                    operation: 'getTokenUsage',
+                    step: 'timeRangeAdjusted',
+                    userId,
+                    adjustedTimeRange: timeRange
+                });
             }
 
             // Get sample usage records to understand the data structure
@@ -717,14 +752,21 @@ export class AnalyticsManagerTool extends Tool {
                 userId: new (require('mongoose')).Types.ObjectId(userId)
             }).limit(3).sort({ createdAt: -1 }).lean();
 
-            console.log('📋 Sample usage records:', sampleUsage.map(u => ({
-                id: u._id,
-                model: u.model,
-                service: u.service,
-                cost: u.cost,
-                totalTokens: u.totalTokens,
-                createdAt: u.createdAt
-            })));
+            loggingService.info('Sample usage records', {
+                component: 'analyticsManagerTool',
+                operation: 'getTokenUsage',
+                step: 'sampleData',
+                userId,
+                sampleCount: sampleUsage.length,
+                sampleData: sampleUsage.map(u => ({
+                    id: u._id,
+                    model: u.model,
+                    service: u.service,
+                    cost: u.cost,
+                    totalTokens: u.totalTokens,
+                    createdAt: u.createdAt
+                }))
+            });
 
             const tokenAnalysis = await Usage.aggregate([
                 {
@@ -769,7 +811,11 @@ export class AnalyticsManagerTool extends Tool {
 
             const tokenData = tokenAnalysis[0];
 
-            console.log('🔍 Token Analysis Result:', {
+            loggingService.info('Token Analysis Result', {
+                component: 'analyticsManagerTool',
+                operation: 'getTokenUsage',
+                step: 'analysisResult',
+                userId,
                 tokenAnalysisLength: tokenAnalysis.length,
                 tokenData,
                 totalUserUsage,
@@ -778,7 +824,16 @@ export class AnalyticsManagerTool extends Tool {
             });
 
             if (!tokenData || tokenData.totalTokens === 0) {
-                console.log('⚠️ No data found in adjusted time range. This should not happen after range adjustment.');
+                loggingService.warn('No data found in adjusted time range after adjustment', {
+                    component: 'analyticsManagerTool',
+                    operation: 'getTokenUsage',
+                    step: 'noDataWarning',
+                    userId,
+                    totalRecords: totalUserUsage,
+                    requestedRange: operation.timeRange,
+                    adjustedRange: timeRange,
+                    userDataRange: userDataRange
+                });
                 
                 // This should rarely happen now due to our time range adjustment above
                 // But if it does, provide a helpful fallback

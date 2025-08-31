@@ -4,8 +4,7 @@
  * Provides centralized Redis URL resolution and connection options
  */
 
-// Import console for logging since we can't use logger (circular dependency)
-// logger would require config which requires redis which would require logger
+import { loggingService } from '../services/logging.service';
 
 /**
  * Resolves the Redis URL based on environment configuration
@@ -20,13 +19,24 @@ export function resolveRedisUrl(): string {
 
   // Highest priority: explicit REDIS_URL
   if (process.env.REDIS_URL) {
-    console.log(`🔧 Redis: Using explicit REDIS_URL configuration`);
+    loggingService.info('🔧 Redis: Using explicit REDIS_URL configuration', {
+      component: 'RedisConfig',
+      operation: 'resolveRedisUrl',
+      type: 'redis',
+      configuration: 'explicit_url'
+    });
     return process.env.REDIS_URL;
   }
 
   // If running in AWS, prefer ElastiCache URL (must be reachable inside VPC)
   if (inAws && process.env.ELASTICACHE_URL) {
-    console.log(`🔧 Redis: AWS environment detected, using ELASTICACHE_URL`);
+    loggingService.info('🔧 Redis: AWS environment detected, using ELASTICACHE_URL', {
+      component: 'RedisConfig',
+      operation: 'resolveRedisUrl',
+      type: 'redis',
+      configuration: 'elasticache_url',
+      environment: 'aws'
+    });
     return process.env.ELASTICACHE_URL;
   }
 
@@ -35,12 +45,24 @@ export function resolveRedisUrl(): string {
     const redisHost = process.env.REDIS_HOST;
     const redisPort = process.env.REDIS_PORT || '6379';
     const url = `redis://${redisHost}:${redisPort}`;
-    console.log(`🔧 Redis: Using host configuration: ${redisHost}:${redisPort}`);
+    loggingService.info(`🔧 Redis: Using host configuration: ${redisHost}:${redisPort}`, {
+      component: 'RedisConfig',
+      operation: 'resolveRedisUrl',
+      type: 'redis',
+      configuration: 'host_port',
+      host: redisHost,
+      port: redisPort
+    });
     return url;
   }
 
   // Local dev default
-  console.log(`🔧 Redis: Using local development configuration`);
+  loggingService.info('🔧 Redis: Using local development configuration', {
+    component: 'RedisConfig',
+    operation: 'resolveRedisUrl',
+    type: 'redis',
+    configuration: 'local_default'
+  });
   return process.env.REDIS_LOCAL_URL || 'redis://127.0.0.1:6379';
 }
 
@@ -55,7 +77,15 @@ export function getRedisOptions(isBullMQ: boolean = false): any {
   // Log connection details (masking sensitive parts)
   const redisUrl = resolveRedisUrl();
   const maskedUrl = redisUrl.replace(/\/\/([^@]*@)?/, '//');
-  console.log(`🔧 Redis: Connecting to ${maskedUrl} ${useTLS ? 'with TLS' : 'without TLS'}${password ? ' using AUTH' : ''}`);
+  loggingService.info(`🔧 Redis: Connecting to ${maskedUrl} ${useTLS ? 'with TLS' : 'without TLS'}${password ? ' using AUTH' : ''}`, {
+    component: 'RedisConfig',
+    operation: 'getRedisOptions',
+    type: 'redis',
+    maskedUrl,
+    useTLS,
+    hasPassword: !!password,
+    hasUsername: !!username
+  });
 
   // Common options for all Redis clients
   const commonOptions = {

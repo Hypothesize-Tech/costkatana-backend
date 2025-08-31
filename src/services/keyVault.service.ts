@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import mongoose, { Types } from 'mongoose';
 import { ProviderKey, IProviderKey, ProxyKey, IProxyKey } from '../models';
 import { encrypt, decrypt } from '../utils/helpers';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 export interface CreateProviderKeyRequest {
     name: string;
@@ -74,16 +74,16 @@ export class KeyVaultService {
 
             await providerKey.save();
 
-            logger.info('Provider key created successfully', {
+            loggingService.info('Provider key created successfully', { value:  { 
                 userId,
                 provider: request.provider,
                 name: request.name,
                 keyId: providerKey._id
-            });
+             } });
 
             return providerKey;
         } catch (error) {
-            logger.error('Failed to create provider key', error as Error, {
+            loggingService.error('Failed to create provider key', {
                 userId,
                 provider: request.provider,
                 name: request.name
@@ -207,16 +207,17 @@ export class KeyVaultService {
 
             await proxyKey.save();
 
-            logger.info('Proxy key created successfully', {
+            loggingService.info('Proxy key created successfully', { value:  { 
                 userId,
                 proxyKeyId: keyId,
                 name: request.name,
                 providerKeyId: request.providerKeyId
-            });
+             } });
 
             return proxyKey;
         } catch (error) {
-            logger.error('Failed to create proxy key', error as Error, {
+            loggingService.error('Failed to create proxy key', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 name: request.name,
                 providerKeyId: request.providerKeyId
@@ -246,20 +247,20 @@ export class KeyVaultService {
 
             // Check if proxy key is expired
             if (proxyKey.isExpired()) {
-                logger.warn('Proxy key is expired', { proxyKeyId });
+                loggingService.warn('Proxy key is expired', { value:  { proxyKeyId  } });
                 return null;
             }
 
             // Check if proxy key is over budget
             if (proxyKey.isOverBudget()) {
-                logger.warn('Proxy key is over budget', { proxyKeyId });
+                loggingService.warn('Proxy key is over budget', { value:  { proxyKeyId  } });
                 return null;
             }
 
             const providerKey = proxyKey.providerKeyId as any as IProviderKey;
             
             if (!providerKey || !providerKey.isActive) {
-                logger.warn('Provider key not found or inactive', { proxyKeyId });
+                loggingService.warn('Provider key not found or inactive', { value:  { proxyKeyId  } });
                 return null;
             }
 
@@ -282,7 +283,10 @@ export class KeyVaultService {
                 decryptedApiKey
             };
         } catch (error) {
-            logger.error('Failed to resolve proxy key', error as Error, { proxyKeyId });
+            loggingService.error('Failed to resolve proxy key', {
+                error: error instanceof Error ? error.message : String(error),
+                proxyKeyId
+            });
             return null;
         }
     }
@@ -337,7 +341,12 @@ export class KeyVaultService {
                 );
             }
         } catch (error) {
-            logger.error('Failed to update proxy key usage', error as Error, { proxyKeyId, cost, requests });
+            loggingService.error('Failed to update proxy key usage', {
+                error: error instanceof Error ? error.message : String(error),
+                proxyKeyId,
+                cost,
+                requests
+            });
         }
     }
 
@@ -391,13 +400,14 @@ export class KeyVaultService {
                 _id: new Types.ObjectId(providerKeyId)
             });
 
-            logger.info('Provider key deleted successfully', {
+            loggingService.info('Provider key deleted successfully', { value:  { 
                 userId,
                 providerKeyId,
                 provider: providerKey.provider
-            });
+             } });
         } catch (error) {
-            logger.error('Failed to delete provider key', error as Error, {
+            loggingService.error('Failed to delete provider key', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 providerKeyId
             });
@@ -419,12 +429,13 @@ export class KeyVaultService {
                 throw new Error('Proxy key not found');
             }
 
-            logger.info('Proxy key deleted successfully', {
+            loggingService.info('Proxy key deleted successfully', { value:  { 
                 userId,
                 proxyKeyId
-            });
+             } });
         } catch (error) {
-            logger.error('Failed to delete proxy key', error as Error, {
+            loggingService.error('Failed to delete proxy key', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 proxyKeyId
             });
@@ -449,11 +460,11 @@ export class KeyVaultService {
             throw new Error('Proxy key not found');
         }
 
-        logger.info('Proxy key status updated', {
+        loggingService.info('Proxy key status updated', { value:  { 
             userId,
             proxyKeyId,
             isActive
-        });
+         } });
 
         return proxyKey;
     }
@@ -547,7 +558,7 @@ export class KeyVaultService {
                 { teamId: { $in: teamIds } }
             ];
         } catch (error) {
-            logger.error('Error getting user team key queries:', error);
+            loggingService.error('Error getting user team key queries:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -577,7 +588,10 @@ export class KeyVaultService {
 
             return proxyKeys;
         } catch (error) {
-            logger.error('Error getting accessible proxy keys', error as Error, { userId });
+            loggingService.error('Error getting accessible proxy keys', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
             throw new Error('Failed to get accessible proxy keys');
         }
     }
@@ -618,15 +632,16 @@ export class KeyVaultService {
             proxyKey.scope = 'team'; // Update scope when sharing
             await proxyKey.save();
 
-            logger.info('Proxy key shared successfully', {
+            loggingService.info('Proxy key shared successfully', { value:  { 
                 userId,
                 proxyKeyId,
                 sharedWith: shareWith
-            });
+             } });
 
             return proxyKey;
         } catch (error) {
-            logger.error('Error sharing proxy key', error as Error, {
+            loggingService.error('Error sharing proxy key', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 proxyKeyId,
                 shareWith
@@ -675,15 +690,16 @@ export class KeyVaultService {
             proxyKey.scope = 'project'; // Update scope when assigning to projects
             await proxyKey.save();
 
-            logger.info('Proxy key assigned to projects successfully', {
+            loggingService.info('Proxy key assigned to projects successfully', { value:  { 
                 userId,
                 proxyKeyId,
                 projectIds
-            });
+             } });
 
             return proxyKey;
         } catch (error) {
-            logger.error('Error assigning proxy key to projects', error as Error, {
+            loggingService.error('Error assigning proxy key to projects', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 proxyKeyId,
                 projectIds
@@ -724,7 +740,8 @@ export class KeyVaultService {
 
             return proxyKeys;
         } catch (error) {
-            logger.error('Error getting team proxy keys', error as Error, {
+            loggingService.error('Error getting team proxy keys', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 teamId
             });
@@ -766,7 +783,8 @@ export class KeyVaultService {
 
             return proxyKeys;
         } catch (error) {
-            logger.error('Error getting project proxy keys', error as Error, {
+            loggingService.error('Error getting project proxy keys', {
+                error: error instanceof Error ? error.message : String(error),
                 userId,
                 projectId
             });
@@ -791,7 +809,8 @@ export class KeyVaultService {
             // Use the model method to check access
             return proxyKey.canBeUsedBy(new Types.ObjectId(userId) as any);
         } catch (error) {
-            logger.error('Error validating proxy key access', error as Error, {
+            loggingService.error('Error validating proxy key access', {
+                error: error instanceof Error ? error.message : String(error),
                 proxyKeyId,
                 userId
             });

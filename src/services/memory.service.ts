@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory';
@@ -65,7 +65,7 @@ export class MemoryService {
      */
     async storeConversationMemory(context: MemoryContext): Promise<void> {
         try {
-            logger.info(`🧠 Storing conversation memory for user: ${context.userId}`);
+            loggingService.info(`🧠 Storing conversation memory for user: ${context.userId}`);
             
             // Store in MongoDB
             const conversationMemory = new ConversationMemory({
@@ -102,9 +102,9 @@ export class MemoryService {
             // Analyze and store user preferences
             await this.analyzeAndStorePreferences(context);
             
-            logger.info(`✅ Conversation memory stored successfully`);
+            loggingService.info(`✅ Conversation memory stored successfully`);
         } catch (error) {
-            logger.error('❌ Failed to store conversation memory:', error);
+            loggingService.error('❌ Failed to store conversation memory:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -114,14 +114,14 @@ export class MemoryService {
      */
     async getSimilarConversations(userId: string, query: string, limit: number = 5): Promise<SimilarConversation[]> {
         try {
-            logger.info(`🔍 Finding similar conversations for user: ${userId}`);
+            loggingService.info(`🔍 Finding similar conversations for user: ${userId}`);
             
             // Check conversation cache first
             const cacheKey = `${userId}:${query}`;
             if (this.conversationCache.has(cacheKey)) {
                 const cached = this.conversationCache.get(cacheKey);
                 if (cached && cached.timestamp && Date.now() - cached.timestamp < this.CONVERSATION_CACHE_TTL) {
-                    logger.info(`⚡ Retrieved similar conversations from cache`);
+                    loggingService.info(`⚡ Retrieved similar conversations from cache`);
                     return cached.data;
                 }
             }
@@ -145,10 +145,10 @@ export class MemoryService {
                 timestamp: Date.now()
             });
             
-            logger.info(`✅ Found ${similarConversations.length} similar conversations`);
+            loggingService.info(`✅ Found ${similarConversations.length} similar conversations`);
             return similarConversations;
         } catch (error) {
-            logger.error('❌ Failed to get similar conversations:', error);
+            loggingService.error('❌ Failed to get similar conversations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -158,7 +158,7 @@ export class MemoryService {
      */
     async getUserMemoryInsights(userId: string): Promise<MemoryInsight[]> {
         try {
-            logger.info(`🧠 Getting memory insights for user: ${userId}`);
+            loggingService.info(`🧠 Getting memory insights for user: ${userId}`);
             
             const insights: MemoryInsight[] = [];
             
@@ -197,10 +197,10 @@ export class MemoryService {
                 insights.push(securityInsight);
             }
             
-            logger.info(`✅ Generated ${insights.length} memory insights`);
+            loggingService.info(`✅ Generated ${insights.length} memory insights`);
             return insights;
         } catch (error) {
-            logger.error('❌ Failed to get memory insights:', error);
+            loggingService.error('❌ Failed to get memory insights:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -249,13 +249,13 @@ export class MemoryService {
             }`;
             
             const response = await this.memoryAgent.invoke([new HumanMessage(analysisPrompt)]);
-            const analysis = JSON.parse(response.content.toString());
+            const analysis = this.parseAIResponse(response.content.toString());
             
             // Cache the result
             this.securityPatternCache.set(cacheKey, Date.now());
             
             if (analysis.suspicious && analysis.confidence > 0.7) {
-                logger.warn(`🚨 Suspicious pattern detected for user ${userId}: ${analysis.pattern}`);
+                loggingService.warn(`🚨 Suspicious pattern detected for user ${userId}: ${analysis.pattern}`);
                 return {
                     type: 'security',
                     content: `Potential security concern: ${analysis.pattern}`,
@@ -267,7 +267,7 @@ export class MemoryService {
             
             return null;
         } catch (error) {
-            logger.error('❌ Failed to check security patterns:', error);
+            loggingService.error('❌ Failed to check security patterns:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -277,7 +277,7 @@ export class MemoryService {
      */
     async getPersonalizedRecommendations(userId: string, currentQuery: string): Promise<string[]> {
         try {
-            logger.info(`🎯 Getting personalized recommendations for user: ${userId}`);
+            loggingService.info(`🎯 Getting personalized recommendations for user: ${userId}`);
             
             const [preferences, similarConversations] = await Promise.all([
                 this.userPreferenceService.getUserPreferences(userId),
@@ -309,10 +309,10 @@ export class MemoryService {
                 }
             }
             
-            logger.info(`✅ Generated ${recommendations.length} personalized recommendations`);
+            loggingService.info(`✅ Generated ${recommendations.length} personalized recommendations`);
             return recommendations;
         } catch (error) {
-            logger.error('❌ Failed to get personalized recommendations:', error);
+            loggingService.error('❌ Failed to get personalized recommendations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
     }
@@ -350,7 +350,7 @@ export class MemoryService {
             const response = await this.memoryAgent.invoke([new HumanMessage(analysisPrompt)]);
             return response.content.toString();
         } catch (error) {
-            logger.error('❌ Failed to analyze conversation patterns:', error);
+            loggingService.error('❌ Failed to analyze conversation patterns:', { error: error instanceof Error ? error.message : String(error) });
             return 'Unable to analyze conversation patterns';
         }
     }
@@ -381,7 +381,7 @@ export class MemoryService {
             }`;
             
             const response = await this.memoryAgent.invoke([new HumanMessage(preferencePrompt)]);
-            const preferences = JSON.parse(response.content.toString());
+            const preferences = this.parseAIResponse(response.content.toString());
             
             // Update user preferences
             await this.userPreferenceService.updatePreferences(context.userId, {
@@ -391,7 +391,7 @@ export class MemoryService {
                 costPreference: preferences.cost_preference
             });
         } catch (error) {
-            logger.error('❌ Failed to analyze and store preferences:', error);
+            loggingService.error('❌ Failed to analyze and store preferences:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -422,7 +422,7 @@ export class MemoryService {
             }
         }
         
-        logger.info(`🧹 Cleaned up memory caches`);
+        loggingService.info(`🧹 Cleaned up memory caches`);
     }
 
     /**
@@ -441,7 +441,7 @@ export class MemoryService {
      */
     async clearUserMemory(userId: string): Promise<void> {
         try {
-            logger.info(`🗑️ Clearing all memory for user: ${userId}`);
+            loggingService.info(`🗑️ Clearing all memory for user: ${userId}`);
             
             // Clear from database
             await Promise.all([
@@ -466,9 +466,34 @@ export class MemoryService {
                 }
             }
             
-            logger.info(`✅ Successfully cleared all memory for user: ${userId}`);
+            loggingService.info(`✅ Successfully cleared all memory for user: ${userId}`);
         } catch (error) {
-            logger.error('❌ Failed to clear user memory:', error);
+            loggingService.error('❌ Failed to clear user memory:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+    }
+
+    /**
+     * Parse AI response that might be wrapped in markdown code blocks
+     */
+    private parseAIResponse(content: string): any {
+        try {
+            // First try to parse as-is
+            return JSON.parse(content);
+        } catch (error) {
+            // If that fails, try to extract JSON from markdown code blocks
+            const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[1]);
+            }
+            
+            // Try to find JSON object without code blocks
+            const objectMatch = content.match(/\{[\s\S]*\}/);
+            if (objectMatch) {
+                return JSON.parse(objectMatch[0]);
+            }
+            
+            // If all else fails, throw the original error
             throw error;
         }
     }

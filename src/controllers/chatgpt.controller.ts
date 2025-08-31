@@ -3,7 +3,7 @@ import { ProjectService } from '../services/project.service';
 import { UsageService } from '../services/usage.service';
 import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 import { BedrockService } from '../services/bedrock.service';
-import { logger } from '../utils/logger';
+import { loggingService } from '../services/logging.service';
 
 interface ChatGPTRequest extends Request {
     body: {
@@ -58,98 +58,98 @@ export class ChatGPTController {
      * Check user connection status automatically
      */
     private static async checkConnectionStatus(req: ChatGPTRequest): Promise<ConnectionStatus> {
+        const startTime = Date.now();
         const { user_id, api_key } = req.body;
 
-        // If no authentication provided at all
-        if (!user_id && !api_key) {
-            return {
-                connected: false,
-                message: 'Welcome to Cost Katana! I need to connect you to start tracking your AI costs.',
-                needsOnboarding: true,
-                magicLinkRequired: true
-            };
-        }
+        try {
+            loggingService.info('Connection status check initiated', {
+                hasUserId: !!user_id,
+                hasApiKey: !!api_key,
+                userIdType: user_id?.includes('@') ? 'email' : user_id ? 'objectId' : 'none',
+                requestId: req.headers['x-request-id'] as string
+            });
 
-        let userId: string | undefined;
-        let user: any;
+            // If no authentication provided at all
+            if (!user_id && !api_key) {
+                loggingService.warn('Connection check failed - no authentication provided', {
+                    requestId: req.headers['x-request-id'] as string
+                });
 
-        // Check user_id authentication
-        if (user_id) {
-            if (user_id.includes('@')) {
-                // It's an email, look up the actual user ObjectId
-                const { User } = await import('../models/User');
-                user = await User.findOne({ email: user_id });
-                if (!user) {
-                    return {
-                        connected: false,
-                        message: `I don't see an account for ${user_id}. Let me create one for you with a magic link!`,
-                        needsOnboarding: true,
-                        magicLinkRequired: true
-                    };
-                }
-                userId = user._id.toString();
-            } else {
-                // It's an ObjectId
-                const { User } = await import('../models/User');
-                user = await User.findById(user_id);
-                if (!user) {
-                    return {
-                        connected: false,
-                        message: 'I found your user ID, but the account seems to be missing. Let me help you reconnect!',
-                        needsOnboarding: true,
-                        magicLinkRequired: true
-                    };
-                }
-                userId = user_id;
+                return {
+                    connected: false,
+                    message: 'Welcome to Cost Katana! I need to connect you to start tracking your AI costs.',
+                    needsOnboarding: true,
+                    magicLinkRequired: true
+                };
             }
-        }
-        // Check API key authentication
-        else if (api_key) {
-            let validation: any = null;
-            
-            // Try ChatGPT integration API keys (ck_user_ format)
-            if (api_key.startsWith('ck_user_')) {
-                const { ApiKeyController } = await import('./apiKey.controller');
-                validation = await ApiKeyController.validateApiKey(api_key);
-            }
-            
-            // Try dashboard API keys (dak_ format or full key)
-            if (!validation) {
-                try {
+
+            let userId: string | undefined;
+            let user: any;
+
+            // Check user_id authentication
+            if (user_id) {
+                if (user_id.includes('@')) {
+                    // It's an email, look up the actual user ObjectId
                     const { User } = await import('../models/User');
-                    const { AuthService } = await import('../services/auth.service');
-                    const { decrypt } = await import('../utils/helpers');
-                    
-                    if (api_key.startsWith('dak_')) {
-                        const parsedKey = AuthService.parseApiKey(api_key);
-                        if (parsedKey) {
-                            user = await User.findById(parsedKey.userId);
-                            if (user) {
-                                const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
-                                if (userApiKey && (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt)) {
-                                    try {
-                                        const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
-                                        const decryptedKey = decrypt(encrypted, iv, authTag);
-                                        if (decryptedKey === api_key) {
-                                            userApiKey.lastUsed = new Date();
-                                            await user.save();
-                                            validation = { userId: user._id.toString(), user };
-                                        }
-                                    } catch (error) {
-                                        logger.warn('Failed to decrypt dashboard API key:', error);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Handle full dashboard API keys
-                        const userIdMatch = api_key.match(/^[a-f0-9]{24}_/);
-                        if (userIdMatch) {
-                            const potentialUserId = userIdMatch[0].slice(0, -1);
-                            user = await User.findById(potentialUserId);
-                            if (user && user.dashboardApiKeys) {
-                                for (const userApiKey of user.dashboardApiKeys) {
-                                    if (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt) {
+                    user = await User.findOne({ email: user_id });
+                    if (!user) {
+                        loggingService.warn('Connection check failed - email not found', {
+                            email: user_id,
+                            requestId: req.headers['x-request-id'] as string
+                        });
+
+                        return {
+                            connected: false,
+                            message: `I don't see an account for ${user_id}. Let me create one for you with a magic link!`,
+                            needsOnboarding: true,
+                            magicLinkRequired: true
+                        };
+                    }
+                    userId = user._id.toString();
+                } else {
+                    // It's an ObjectId
+                    const { User } = await import('../models/User');
+                    user = await User.findById(user_id);
+                    if (!user) {
+                        loggingService.warn('Connection check failed - user ID not found', {
+                            userId: user_id,
+                            requestId: req.headers['x-request-id'] as string
+                        });
+
+                        return {
+                            connected: false,
+                            message: 'I found your user ID, but the account seems to be missing. Let me help you reconnect!',
+                            needsOnboarding: true,
+                            magicLinkRequired: true
+                        };
+                    }
+                    userId = user_id;
+                }
+            }
+            // Check API key authentication
+            else if (api_key) {
+                let validation: any = null;
+                
+                // Try ChatGPT integration API keys (ck_user_ format)
+                if (api_key.startsWith('ck_user_')) {
+                    const { ApiKeyController } = await import('./apiKey.controller');
+                    validation = await ApiKeyController.validateApiKey(api_key);
+                }
+                
+                // Try dashboard API keys (dak_ format or full key)
+                if (!validation) {
+                    try {
+                        const { User } = await import('../models/User');
+                        const { AuthService } = await import('../services/auth.service');
+                        const { decrypt } = await import('../utils/helpers');
+                        
+                        if (api_key.startsWith('dak_')) {
+                            const parsedKey = AuthService.parseApiKey(api_key);
+                            if (parsedKey) {
+                                user = await User.findById(parsedKey.userId);
+                                if (user) {
+                                    const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === parsedKey.keyId);
+                                    if (userApiKey && (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt)) {
                                         try {
                                             const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
                                             const decryptedKey = decrypt(encrypted, iv, authTag);
@@ -157,65 +157,144 @@ export class ChatGPTController {
                                                 userApiKey.lastUsed = new Date();
                                                 await user.save();
                                                 validation = { userId: user._id.toString(), user };
-                                                break;
                                             }
                                         } catch (error) {
-                                            continue;
+                                            loggingService.warn('Failed to decrypt dashboard API key', {
+                                                error: error instanceof Error ? error.message : 'Unknown error',
+                                                requestId: req.headers['x-request-id'] as string
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Handle full dashboard API keys
+                            const userIdMatch = api_key.match(/^[a-f0-9]{24}_/);
+                            if (userIdMatch) {
+                                const potentialUserId = userIdMatch[0].slice(0, -1);
+                                user = await User.findById(potentialUserId);
+                                if (user && user.dashboardApiKeys) {
+                                    for (const userApiKey of user.dashboardApiKeys) {
+                                        if (!userApiKey.expiresAt || new Date() <= userApiKey.expiresAt) {
+                                            try {
+                                                const [iv, authTag, encrypted] = userApiKey.encryptedKey.split(':');
+                                                const decryptedKey = decrypt(encrypted, iv, authTag);
+                                                if (decryptedKey === api_key) {
+                                                    userApiKey.lastUsed = new Date();
+                                                    await user.save();
+                                                    validation = { userId: user._id.toString(), user };
+                                                    break;
+                                                }
+                                            } catch (error) {
+                                                continue;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
+                    } catch (error) {
+                        loggingService.error('Error validating dashboard API key', {
+                            error: error instanceof Error ? error.message : 'Unknown error',
+                            stack: error instanceof Error ? error.stack : undefined,
+                            requestId: req.headers['x-request-id'] as string
+                        });
                     }
-                } catch (error) {
-                    logger.error('Error validating dashboard API key:', error);
                 }
+                
+                if (!validation) {
+                    loggingService.warn('Connection check failed - invalid or expired API key', {
+                        apiKeyPrefix: api_key.substring(0, 8) + '...',
+                        requestId: req.headers['x-request-id'] as string
+                    });
+
+                    return {
+                        connected: false,
+                        message: 'I found your API key, but it seems to be invalid or expired. Let me help you get a new one!',
+                        needsOnboarding: true,
+                        magicLinkRequired: true
+                    };
+                }
+                userId = validation.userId;
+                user = validation.user;
             }
-            
-            if (!validation) {
+
+            // User is connected
+            if (userId && user) {
+                const duration = Date.now() - startTime;
+
+                loggingService.info('Connection status check successful', {
+                    userId,
+                    userEmail: user.email,
+                    duration,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                // Log business event
+                loggingService.logBusiness({
+                    event: 'chatgpt_connection_verified',
+                    category: 'chatgpt_integration',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        userEmail: user.email,
+                        authMethod: user_id ? 'user_id' : 'api_key'
+                    }
+                });
+
                 return {
-                    connected: false,
-                    message: 'I found your API key, but it seems to be invalid or expired. Let me help you get a new one!',
-                    needsOnboarding: true,
-                    magicLinkRequired: true
+                    connected: true,
+                    userId,
+                    user,
+                    message: `Great! You're connected as ${user.email}. I'm ready to help you track and optimize your AI costs!`
                 };
             }
-            userId = validation.userId;
-            user = validation.user;
-        }
 
-        // User is connected
-        if (userId && user) {
+            // Fallback case - should not reach here
+            loggingService.warn('Connection check reached fallback case', {
+                requestId: req.headers['x-request-id'] as string
+            });
+
             return {
-                connected: true,
-                userId,
-                user,
-                message: `Great! You're connected as ${user.email}. I'm ready to help you track and optimize your AI costs!`
+                connected: false,
+                message: 'I encountered an issue with your connection. Let me help you reconnect!',
+                needsOnboarding: true,
+                magicLinkRequired: true
+            };
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Connection status check failed', {
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            return {
+                connected: false,
+                message: 'I encountered an issue with your connection. Let me help you reconnect!',
+                needsOnboarding: true,
+                magicLinkRequired: true
             };
         }
-
-        // Fallback case - should not reach here
-        return {
-            connected: false,
-            message: 'I encountered an issue with your connection. Let me help you reconnect!',
-            needsOnboarding: true,
-            magicLinkRequired: true
-        };
     }
 
     /**
      * Main endpoint for ChatGPT Custom GPT actions with automatic connection checking
      */
     static async handleAction(req: ChatGPTRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { action } = req.body;
+
         try {
-            logger.info('ChatGPT action received:', {
-                action: req.body.action,
+            loggingService.info('ChatGPT action received', {
+                action,
                 hasUserId: !!req.body.user_id,
                 hasApiKey: !!req.body.api_key,
-                hasEmail: !!req.body.email
+                hasEmail: !!req.body.email,
+                requestId: req.headers['x-request-id'] as string
             });
-
-            const { action } = req.body;
 
             // Handle magic link generation first (no auth required)
             if (action === 'generate_magic_link') {
@@ -238,6 +317,12 @@ export class ChatGPTController {
 
             // If not connected, guide user through onboarding
             if (!connectionStatus.connected) {
+                loggingService.warn('ChatGPT action failed - authentication required', {
+                    action,
+                    connectionStatus: connectionStatus.message,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(200).json({
                     success: false,
                     error: 'authentication_required',
@@ -272,13 +357,28 @@ export class ChatGPTController {
                     await ChatGPTController.getAnalytics(req, res, userId);
                     break;
                 default:
+                    loggingService.warn('ChatGPT action failed - invalid action', {
+                        action,
+                        userId,
+                        requestId: req.headers['x-request-id'] as string
+                    });
+
                     res.status(400).json({
                         success: false,
                         error: 'Invalid action. Supported actions: track_usage, create_project, get_projects, get_analytics, generate_magic_link, check_connection'
                     });
             }
         } catch (error: any) {
-            logger.error('ChatGPT controller error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('ChatGPT controller error', {
+                action,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Internal server error',
@@ -291,13 +391,25 @@ export class ChatGPTController {
      * Generate magic link for seamless onboarding
      */
     private static async generateMagicLink(req: ChatGPTRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const email = req.body.email || req.body.onboarding?.email;
+        const name = req.body.name || req.body.onboarding?.name;
+        const source = req.body.source || req.body.onboarding?.source || 'chatgpt';
+
         try {
-            // Extract email from either direct body or onboarding object
-            const email = req.body.email || req.body.onboarding?.email;
-            const name = req.body.name || req.body.onboarding?.name;
-            const source = req.body.source || req.body.onboarding?.source || 'chatgpt';
+            loggingService.info('Magic link generation initiated', {
+                email,
+                name,
+                source,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!email) {
+                loggingService.warn('Magic link generation failed - email required', {
+                    receivedBody: req.body,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Email is required for magic link generation',
@@ -333,6 +445,27 @@ export class ChatGPTController {
             await OnboardingController.generateMagicLink(mockReq, mockRes);
 
             if (magicLinkResponse?.success) {
+                const duration = Date.now() - startTime;
+
+                loggingService.info('Magic link generated successfully', {
+                    email,
+                    source,
+                    duration,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                // Log business event
+                loggingService.logBusiness({
+                    event: 'chatgpt_magic_link_generated',
+                    category: 'chatgpt_integration',
+                    value: duration,
+                    metadata: {
+                        email,
+                        source,
+                        hasName: !!name
+                    }
+                });
+
                 res.json({
                     success: true,
                     message: 'Magic link created successfully!',
@@ -349,6 +482,13 @@ export class ChatGPTController {
                     }
                 });
             } else {
+                loggingService.error('Magic link generation failed', {
+                    email,
+                    source,
+                    error: magicLinkResponse?.error || 'Unknown error',
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(500).json({
                     success: false,
                     error: 'Failed to generate magic link',
@@ -357,7 +497,17 @@ export class ChatGPTController {
             }
 
         } catch (error: any) {
-            logger.error('Generate magic link error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Generate magic link error', {
+                email,
+                source,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to generate magic link',
@@ -370,10 +520,25 @@ export class ChatGPTController {
      * Track ChatGPT conversation usage with AI-powered insights
      */
     private static async trackUsage(req: ChatGPTRequest, res: Response, userId: string): Promise<void> {
+        const startTime = Date.now();
+        const { conversation_data } = req.body;
+
         try {
-            const { conversation_data } = req.body;
+            loggingService.info('ChatGPT usage tracking initiated', {
+                userId,
+                model: conversation_data?.model,
+                hasPrompt: !!conversation_data?.prompt,
+                hasResponse: !!conversation_data?.response,
+                conversationId: conversation_data?.conversation_id,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!conversation_data) {
+                loggingService.warn('Usage tracking failed - conversation data required', {
+                    userId,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'conversation_data is required for track_usage action'
@@ -431,7 +596,11 @@ export class ChatGPTController {
 
             // Trigger intelligent monitoring in background (non-blocking)
             IntelligentMonitoringService.monitorUserUsage(userId).catch(error => 
-                logger.error('Background monitoring failed:', error)
+                loggingService.error('Background monitoring failed', {
+                    userId,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    requestId: req.headers['x-request-id'] as string
+                })
             );
 
             // Generate AI-powered smart tip
@@ -443,6 +612,33 @@ export class ChatGPTController {
                 conversation_data.prompt,
                 conversation_data.response
             );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('ChatGPT usage tracked successfully', {
+                userId,
+                model: conversation_data.model || 'gpt-3.5-turbo',
+                totalTokens,
+                cost,
+                duration,
+                conversationId: conversation_data.conversation_id,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'chatgpt_usage_tracked',
+                category: 'chatgpt_integration',
+                value: duration,
+                metadata: {
+                    userId,
+                    model: conversation_data.model || 'gpt-3.5-turbo',
+                    totalTokens,
+                    cost,
+                    conversationId: conversation_data.conversation_id,
+                    hasSmartTip: !!smartTip
+                }
+            });
 
             res.json({
                 success: true,
@@ -457,7 +653,17 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            logger.error('Track usage error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Track usage error', {
+                userId,
+                model: conversation_data?.model,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to track usage',
@@ -511,7 +717,12 @@ export class ChatGPTController {
                     return `🤖 AI Tip: Your prompt can be optimized to save ${aiOptimization.estimatedTokenReduction}% tokens. Try: "${aiOptimization.optimizedPrompt.substring(0, 80)}..." - Technique: ${aiOptimization.techniques[0]}`;
                 }
             } catch (aiError) {
-                logger.warn('AI optimization tip failed, using fallback:', aiError);
+                loggingService.warn('AI optimization tip failed, using fallback', {
+                    userId,
+                    model,
+                    error: aiError instanceof Error ? aiError.message : 'Unknown error',
+                    requestId: 'background'
+                });
             }
 
             // Fallback to pattern-based tips
@@ -549,7 +760,12 @@ export class ChatGPTController {
             return "📊 Visit your Cost Katana dashboard for AI-powered analytics and personalized optimization recommendations.";
 
         } catch (error) {
-            logger.error('Error generating AI smart tip:', error);
+            loggingService.error('Error generating AI smart tip', {
+                userId,
+                model,
+                error: error instanceof Error ? error.message : 'Unknown error',
+                requestId: 'background'
+            });
             return "🤖 Tip: Check your Cost Katana dashboard for AI-powered optimization insights!";
         }
     }
@@ -558,10 +774,27 @@ export class ChatGPTController {
      * Create a new project from ChatGPT
      */
     private static async createProject(req: ChatGPTRequest, res: Response, userId: string): Promise<void> {
+        const startTime = Date.now();
+        const { project } = req.body;
+
         try {
-            const { project } = req.body;
+            loggingService.info('ChatGPT project creation initiated', {
+                userId,
+                projectName: project?.name,
+                hasDescription: !!project?.description,
+                budgetAmount: project?.budget_amount,
+                budgetPeriod: project?.budget_period,
+                requestId: req.headers['x-request-id'] as string
+            });
 
             if (!project || !project.name) {
+                loggingService.warn('Project creation failed - project data with name required', {
+                    userId,
+                    hasProject: !!project,
+                    hasName: !!project?.name,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
                 res.status(400).json({
                     success: false,
                     error: 'Project data with name is required for create_project action'
@@ -586,6 +819,31 @@ export class ChatGPTController {
 
             const newProject = await ProjectService.createProject(userId, projectData);
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('ChatGPT project created successfully', {
+                userId,
+                projectId: newProject._id,
+                projectName: newProject.name,
+                budget: `${newProject.budget.amount} ${newProject.budget.period}`,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'chatgpt_project_created',
+                category: 'chatgpt_integration',
+                value: duration,
+                metadata: {
+                    userId,
+                    projectId: newProject._id,
+                    projectName: newProject.name,
+                    budget: `${newProject.budget.amount} ${newProject.budget.period}`,
+                    source: 'chatgpt'
+                }
+            });
+
             res.json({
                 success: true,
                 message: 'Project created successfully',
@@ -597,7 +855,17 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            logger.error('Create project error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Create project error', {
+                userId,
+                projectName: project?.name,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to create project',
@@ -610,7 +878,14 @@ export class ChatGPTController {
      * Get user's projects
      */
     private static async getProjects(_req: ChatGPTRequest, res: Response, userId: string): Promise<void> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('ChatGPT projects retrieval initiated', {
+                userId,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             const projects = await ProjectService.getUserProjects(userId);
 
             const projectSummary = projects.map(project => ({
@@ -623,6 +898,27 @@ export class ChatGPTController {
                 status: project.isActive ? 'Active' : 'Inactive'
             }));
 
+            const duration = Date.now() - startTime;
+
+            loggingService.info('ChatGPT projects retrieved successfully', {
+                userId,
+                projectsCount: projects.length,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'chatgpt_projects_retrieved',
+                category: 'chatgpt_integration',
+                value: duration,
+                metadata: {
+                    userId,
+                    projectsCount: projects.length,
+                    activeProjects: projects.filter(p => p.isActive).length
+                }
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -634,7 +930,16 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            logger.error('Get projects error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Get projects error', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get projects',
@@ -647,13 +952,45 @@ export class ChatGPTController {
      * Get analytics summary
      */
     private static async getAnalytics(_req: ChatGPTRequest, res: Response, userId: string): Promise<void> {
+        const startTime = Date.now();
+
         try {
+            loggingService.info('ChatGPT analytics retrieval initiated', {
+                userId,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             // Get user's recent usage stats
             const stats = await UsageService.getUsageStats(userId, 'monthly');
             const projects = await ProjectService.getUserProjects(userId);
 
             const totalSpending = projects.reduce((sum, project) => sum + project.spending.current, 0);
             const totalBudget = projects.reduce((sum, project) => sum + project.budget.amount, 0);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('ChatGPT analytics retrieved successfully', {
+                userId,
+                totalSpending,
+                totalBudget,
+                projectsCount: projects.length,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'chatgpt_analytics_retrieved',
+                category: 'chatgpt_integration',
+                value: duration,
+                metadata: {
+                    userId,
+                    totalSpending,
+                    totalBudget,
+                    projectsCount: projects.length,
+                    activeProjects: projects.filter(p => p.isActive).length
+                }
+            });
 
             res.json({
                 success: true,
@@ -674,7 +1011,16 @@ export class ChatGPTController {
                 }
             });
         } catch (error: any) {
-            logger.error('Get analytics error:', error);
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Get analytics error', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: _req.headers['x-request-id'] as string
+            });
+
             res.status(500).json({
                 success: false,
                 error: 'Failed to get analytics',

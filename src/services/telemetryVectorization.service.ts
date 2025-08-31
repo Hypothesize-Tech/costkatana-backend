@@ -1,4 +1,4 @@
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 import { embeddingsService } from './embeddings.service';
 import { Telemetry } from '../models/Telemetry';
 import { redisService } from './redis.service';
@@ -79,7 +79,7 @@ export class TelemetryVectorizationService {
 
     // Start processing asynchronously
     this.processVectorization(query).catch(error => {
-      logger.error('Vectorization job failed:', error);
+      loggingService.error('Vectorization job failed:', { error: error instanceof Error ? error.message : String(error) });
       if (this.currentJob) {
         this.currentJob.status = 'failed';
         this.currentJob.error = error.message;
@@ -104,7 +104,7 @@ export class TelemetryVectorizationService {
       const cached = await redisService.client.get(this.JOB_STATUS_KEY);
       return cached ? JSON.parse(cached) : null;
     } catch (error) {
-      logger.warn('Failed to get job status from Redis:', error);
+      loggingService.warn('Failed to get job status from Redis:', { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }
@@ -153,9 +153,9 @@ export class TelemetryVectorizationService {
         await this.saveJobStatus();
       }
 
-      logger.info(`Vectorization completed: ${this.currentJob.processedRecords}/${this.currentJob.totalRecords} records`);
+      loggingService.info(`Vectorization completed: ${this.currentJob.processedRecords}/${this.currentJob.totalRecords} records`);
     } catch (error) {
-      logger.error('Vectorization processing failed:', error);
+      loggingService.error('Vectorization processing failed:', { error: error instanceof Error ? error.message : String(error) });
       if (this.currentJob) {
         this.currentJob.status = 'failed';
         this.currentJob.error = error instanceof Error ? error.message : 'Unknown error';
@@ -191,7 +191,7 @@ export class TelemetryVectorizationService {
 
         return { success: true, id: record._id };
       } catch (error) {
-        logger.error(`Failed to vectorize record ${record._id}:`, error);
+        loggingService.error(`Failed to vectorize record ${record._id}:`, { error: error instanceof Error ? error.message : String(error) });
         return { success: false, id: record._id, error };
       }
     });
@@ -201,7 +201,7 @@ export class TelemetryVectorizationService {
     const failed = results.length - successful;
 
     if (failed > 0) {
-      logger.warn(`Batch processing: ${successful} successful, ${failed} failed`);
+      loggingService.warn(`Batch processing: ${successful} successful, ${failed} failed`);
     }
   }
 
@@ -233,7 +233,7 @@ export class TelemetryVectorizationService {
 
       return true;
     } catch (error) {
-      logger.error(`Failed to vectorize single record ${recordId}:`, error);
+      loggingService.error(`Failed to vectorize single record ${recordId}:`, { error: error instanceof Error ? error.message : String(error) });
       return false;
     }
   }
@@ -315,7 +315,7 @@ export class TelemetryVectorizationService {
         JSON.stringify(this.currentJob)
       );
     } catch (error) {
-      logger.warn('Failed to save job status to Redis:', error);
+      loggingService.warn('Failed to save job status to Redis:', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 

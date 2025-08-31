@@ -1,5 +1,6 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { fromEnv } from '@aws-sdk/credential-providers';
+import { loggingService } from './logging.service';
 
 const bedrockClient = new BedrockRuntimeClient({
   region: process.env.AWS_REGION || 'us-east-1',
@@ -21,7 +22,7 @@ export const getEmbedding = async (text: string): Promise<number[]> => {
     const parsedBody = JSON.parse(decodedBody);
     return parsedBody.embedding;
   } catch (error) {
-    console.error('Error generating embedding:', error);
+    loggingService.error('Error generating embedding:', { error: error instanceof Error ? error.message : String(error) });
     throw new Error('Failed to generate embedding.');
   }
 };

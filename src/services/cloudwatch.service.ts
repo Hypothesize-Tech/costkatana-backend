@@ -1,6 +1,6 @@
 import { PutMetricDataCommand, GetMetricStatisticsCommand } from '@aws-sdk/client-cloudwatch';
 import { cloudWatchClient, AWS_CONFIG } from '../config/aws';
-import { logger } from '../utils/logger';
+import { loggingService } from './logging.service';
 
 interface MetricData {
     metricName: string;
@@ -47,12 +47,11 @@ export class CloudWatchService {
 
             await cloudWatchClient.send(command);
 
-            logger.debug('CloudWatch metrics sent', {
-                namespace: data.namespace,
+            loggingService.debug('CloudWatch metrics sent', { value:  { namespace: data.namespace,
                 metricsCount: data.metricData.length,
-            });
+             } });
         } catch (error) {
-            logger.error('Error sending CloudWatch metrics:', error);
+            loggingService.error('Error sending CloudWatch metrics:', { error: error instanceof Error ? error.message : String(error) });
             // Don't throw - metrics are not critical
         }
     }
@@ -85,7 +84,7 @@ export class CloudWatchService {
                 ),
             };
         } catch (error) {
-            logger.error('Error getting CloudWatch metrics:', error);
+            loggingService.error('Error getting CloudWatch metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -149,6 +148,6 @@ export class CloudWatchService {
     static async createDashboard(userId: string): Promise<void> {
         // Implementation for creating custom CloudWatch dashboards
         // This would use PutDashboardCommand from AWS SDK
-        logger.info('Dashboard creation not implemented yet', { userId });
+        loggingService.info('Dashboard creation not implemented yet', { value:  {  userId  } });
     }
 }

@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
-import { logger } from '../utils/logger';
 import { ExperimentationService } from './experimentation.service';
 import { SimulationTrackingService } from './simulationTracking.service';
 import { Usage } from '../models/Usage';
+import { loggingService } from './logging.service';
 
 // Schema for auto-simulation settings
 const AutoSimulationSettingsSchema = new mongoose.Schema({
@@ -173,7 +173,7 @@ export class AutoSimulationService {
 
             return false;
         } catch (error) {
-            logger.error('Error checking auto-simulation trigger:', error);
+            loggingService.error('Error checking auto-simulation trigger:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -193,14 +193,14 @@ export class AutoSimulationService {
             });
 
             const saved = await queueItem.save();
-            logger.info(`Queued usage ${usageId} for auto-simulation: ${saved._id}`);
+            loggingService.info(`Queued usage ${usageId} for auto-simulation: ${saved._id}`);
             
             // Process immediately if not too busy
             setImmediate(() => this.processQueue());
             
             return saved._id.toString();
         } catch (error) {
-            logger.error('Error queuing for auto-simulation:', error);
+            loggingService.error('Error queuing for auto-simulation:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -221,7 +221,7 @@ export class AutoSimulationService {
                 await this.processQueueItem(item);
             }
         } catch (error) {
-            logger.error('Error processing auto-simulation queue:', error);
+            loggingService.error('Error processing auto-simulation queue:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -289,9 +289,9 @@ export class AutoSimulationService {
                 await this.considerAutoOptimization(queueItem._id.toString(), result, settings);
             }
 
-            logger.info(`Completed auto-simulation for queue item: ${queueItem._id}`);
+            loggingService.info(`Completed auto-simulation for queue item: ${queueItem._id}`);
         } catch (error) {
-            logger.error(`Error processing queue item ${queueItem._id}:`, error);
+            loggingService.error(`Error processing queue item ${queueItem._id}:`, { error: error instanceof Error ? error.message : String(error) });
             
             // Update with error and retry logic
             await AutoSimulationQueue.findByIdAndUpdate(queueItem._id, {
@@ -338,10 +338,10 @@ export class AutoSimulationService {
                     updatedAt: new Date()
                 });
 
-                logger.info(`Auto-applied ${appliedOptimizations.length} optimizations for queue item: ${queueItemId}`);
+                loggingService.info(`Auto-applied ${appliedOptimizations.length} optimizations for queue item: ${queueItemId}`);
             }
         } catch (error) {
-            logger.error('Error considering auto-optimization:', error);
+            loggingService.error('Error considering auto-optimization:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -409,7 +409,7 @@ export class AutoSimulationService {
                 }
             };
         } catch (error) {
-            logger.error('Error getting user settings:', error);
+            loggingService.error('Error getting user settings:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -432,9 +432,9 @@ export class AutoSimulationService {
                 { upsert: true, new: true }
             );
             
-            logger.info(`Updated auto-simulation settings for user: ${userId}`);
+            loggingService.info(`Updated auto-simulation settings for user: ${userId}`);
         } catch (error) {
-            logger.error('Error updating user settings:', error);
+            loggingService.error('Error updating user settings:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -474,7 +474,7 @@ export class AutoSimulationService {
                 updatedAt: item.updatedAt
             }));
         } catch (error) {
-            logger.error('Error getting user queue:', error);
+            loggingService.error('Error getting user queue:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -509,9 +509,9 @@ export class AutoSimulationService {
 
             await AutoSimulationQueue.findByIdAndUpdate(queueItemId, updateData);
             
-            logger.info(`${approved ? 'Approved' : 'Rejected'} optimization for queue item: ${queueItemId}`);
+            loggingService.info(`${approved ? 'Approved' : 'Rejected'} optimization for queue item: ${queueItemId}`);
         } catch (error) {
-            logger.error('Error handling optimization approval:', error);
+            loggingService.error('Error handling optimization approval:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

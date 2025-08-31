@@ -1,6 +1,7 @@
 import { HNSWLib } from '@langchain/community/vectorstores/hnswlib';
 import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
 import { redisService } from './redis.service';
+import { loggingService } from './logging.service';
 
 const SIMILARITY_THRESHOLD = 0.9;
 
@@ -63,13 +64,13 @@ export class VectorStoreService {
                 // Additional configuration to ensure proper API calls
                 maxRetries: 3,
             });
-            console.log('✅ BedrockEmbeddings initialized with amazon.titan-embed-text-v2:0');
+            loggingService.info('✅ BedrockEmbeddings initialized with amazon.titan-embed-text-v2:0');
         } catch (error) {
-            console.error('❌ Failed to initialize BedrockEmbeddings v2:', error);
+            loggingService.error('❌ Failed to initialize BedrockEmbeddings v2:', { error: error instanceof Error ? error.message : String(error) });
             
             // Fallback to v1 if v2 fails
             try {
-                console.log('🔄 Trying fallback to titan-embed-text-v1:0...');
+                loggingService.info('🔄 Trying fallback to titan-embed-text-v1:0...');
                 this.embeddings = new BedrockEmbeddings({
                     region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
                     model: 'amazon.titan-embed-text-v1:0',
@@ -79,12 +80,12 @@ export class VectorStoreService {
                     },
                     maxRetries: 3,
                 });
-                console.log('✅ BedrockEmbeddings fallback successful with v1:0');
+                loggingService.info('✅ BedrockEmbeddings fallback successful with v1:0');
             } catch (fallbackError) {
-                console.error('❌ All BedrockEmbeddings models failed:', fallbackError);
+                loggingService.error('❌ All BedrockEmbeddings models failed:', { error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) });
                 
                 // Final fallback - disable embeddings functionality
-                console.warn('⚠️ Running in degraded mode without embeddings');
+                loggingService.warn('⚠️ Running in degraded mode without embeddings');
                 throw new Error('BedrockEmbeddings initialization completely failed - check AWS credentials and region');
             }
         }
@@ -97,33 +98,33 @@ export class VectorStoreService {
         if (this.initialized) return;
 
         try {
-            console.log('🧠 Initializing Agent Knowledge Base...');
+            loggingService.info('🧠 Initializing Agent Knowledge Base...');
 
             // Load and process documentation
             const documents = await this.loadDocumentation();
             
             // Test embeddings before creating vector store
             try {
-                console.log('🧪 Testing BedrockEmbeddings with sample text...');
+                loggingService.info('🧪 Testing BedrockEmbeddings with sample text...');
                 await this.embeddings.embedQuery("test");
-                console.log('✅ BedrockEmbeddings test successful');
+                loggingService.info('✅ BedrockEmbeddings test successful');
             } catch (embeddingError) {
-                console.error('❌ BedrockEmbeddings test failed:', embeddingError);
+                loggingService.error('❌ BedrockEmbeddings test failed:', { error: embeddingError instanceof Error ? embeddingError.message : String(embeddingError) });
                 throw new Error(`BedrockEmbeddings test failed: ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
             }
             
             // Create vector store from documents
-            console.log('📚 Creating vector store from documents...');
+            loggingService.info('📚 Creating vector store from documents...');
             this.vectorStore = await HNSWLib.fromDocuments(
                 documents,
                 this.embeddings
             );
 
             this.initialized = true;
-            console.log(`✅ Agent Knowledge Base initialized with ${documents.length} documents`);
+            loggingService.info(`✅ Agent Knowledge Base initialized with ${documents.length} documents`);
         } catch (error) {
-            console.error('❌ Failed to initialize vector store:', error);
-            console.error('Error details:', error);
+            loggingService.error('❌ Failed to initialize vector store:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error details:', { error: error instanceof Error ? error.message : String(error) });
             
             // Set a flag to indicate partial initialization
             this.initialized = false;
@@ -132,21 +133,33 @@ export class VectorStoreService {
     }
 
     /**
-     * Load and chunk documentation files
+     * Load and chunk documentation files including knowledge base
      */
     private async loadDocumentation(): Promise<Document[]> {
         const documents: Document[] = [];
         
         // Define paths to documentation
         const docPaths = [
-            '../docs/API.md',
-            '../docs/EXAMPLES.md', 
-            '../docs/PROMPT_OPTIMIZATION.md',
-            '../../ai-cost-optimizer-backend/API_DOCUMENTATION.md',
-            '../../ai-cost-optimizer-backend/docs/INTEGRATION_GUIDE.md',
-            '../../ai-cost-optimizer-backend/docs/FINANCIAL_GOVERNANCE.md',
-            '../../ai-cost-optimizer-backend/docs/PROACTIVE_INTELLIGENCE.md',
-            '../../ai-cost-optimizer-backend/docs/EMAIL_CONFIGURATION.md'
+            // Backend documentation
+            '../../API_DOCUMENTATION.md',
+            '../../README.md',
+            '../../OBSERVABILITY.md',
+            '../../WEBHOOK_DOCUMENTATION.md',
+            '../../docs/INTEGRATION_GUIDE.md',
+            '../../docs/FINANCIAL_GOVERNANCE.md',
+            '../../docs/PROACTIVE_INTELLIGENCE.md',
+            '../../docs/EMAIL_CONFIGURATION.md',
+            
+            // Knowledge Base files - all folders included
+            '../../knowledge-base/README.md',
+            '../../knowledge-base/cost-optimization/README.md',
+            '../../knowledge-base/ai-insights/README.md',
+            '../../knowledge-base/api-integration/README.md',
+            '../../knowledge-base/multi-agent-workflows/README.md',
+            '../../knowledge-base/user-coaching/README.md',
+            '../../knowledge-base/predictive-analytics/README.md',
+            '../../knowledge-base/security-monitoring/README.md',
+            '../../knowledge-base/data-analytics/README.md'
         ];
 
         // Text splitter for chunking documents
@@ -159,14 +172,20 @@ export class VectorStoreService {
         for (const docPath of docPaths) {
             try {
                 const fullPath = path.resolve(__dirname, docPath);
+                loggingService.info(`🔍 Attempting to load: ${docPath}`);
+                loggingService.info(`📍 Full resolved path: ${fullPath}`);
+                
                 if (fs.existsSync(fullPath)) {
                     const content = fs.readFileSync(fullPath, 'utf-8');
                     const chunks = await textSplitter.createDocuments([content], [{ source: docPath }]);
                     documents.push(...chunks);
-                    console.log(`📄 Loaded: ${docPath} (${chunks.length} chunks)`);
+                    loggingService.info(`✅ Successfully loaded: ${docPath} (${chunks.length} chunks, ${content.length} characters)`);
+                } else {
+                    loggingService.warn(`⚠️  File not found: ${fullPath}`);
                 }
             } catch (error) {
-                console.warn(`⚠️  Failed to load ${docPath}:`, error);
+                loggingService.error(`❌ Failed to load ${docPath}:`, { error: error instanceof Error ? error.message : String(error) });
+                loggingService.error(`   Full path attempted: ${path.resolve(__dirname, docPath)}`);
             }
         }
 
@@ -202,6 +221,20 @@ export class VectorStoreService {
         );
         
         documents.push(...builtInDocs);
+        
+        // Log summary of loaded documents
+        loggingService.info(`\n📚 Knowledge Base Loading Summary:`);
+        loggingService.info(`   Total documents loaded: ${documents.length}`);
+        loggingService.info(`   Built-in knowledge chunks: ${builtInDocs.length}`);
+        loggingService.info(`   External documentation chunks: ${documents.length - builtInDocs.length}`);
+        
+        // Categorize loaded documents for summary
+        const categories = this.categorizeLoadedDocuments(documents);
+        loggingService.info(`   Document categories:`);
+        Object.entries(categories).forEach(([category, count]) => {
+            loggingService.info(`     - ${category}: ${count} chunks`);
+        });
+        
         return documents;
     }
 
@@ -210,7 +243,7 @@ export class VectorStoreService {
      */
     async search(query: string, k: number = 5): Promise<Document[]> {
         if (!this.initialized || !this.vectorStore) {
-            console.warn('Vector store not initialized. Returning empty results.');
+            loggingService.warn('Vector store not initialized. Returning empty results.');
             return [];
         }
 
@@ -218,7 +251,7 @@ export class VectorStoreService {
             const results = await this.vectorStore.similaritySearch(query, k);
             return results;
         } catch (error) {
-            console.error('Vector search failed:', error);
+            loggingService.error('Vector search failed:', { error: error instanceof Error ? error.message : String(error) });
             // Return empty results gracefully instead of throwing
             return [];
         }
@@ -232,7 +265,7 @@ export class VectorStoreService {
             await this.embeddings.embedQuery("test");
             return true;
         } catch (error) {
-            console.error('Embeddings test failed:', error);
+            loggingService.error('Embeddings test failed:', { error: error instanceof Error ? error.message : String(error) });
             return false;
         }
     }
@@ -256,10 +289,25 @@ export class VectorStoreService {
             });
 
             await this.vectorStore.addDocuments([document]);
-            console.log('🧠 Added new knowledge to vector store');
+            loggingService.info('🧠 Added new knowledge to vector store');
         } catch (error) {
-            console.error('Failed to add knowledge:', error);
+            loggingService.error('Failed to add knowledge:', { error: error instanceof Error ? error.message : String(error) });
         }
+    }
+
+    /**
+     * Categorize loaded documents based on their metadata sources
+     */
+    private categorizeLoadedDocuments(documents: Document[]): Record<string, number> {
+        const categories: Record<string, number> = {};
+        documents.forEach(doc => {
+            const source = doc.metadata.source || 'unknown';
+            if (!categories[source]) {
+                categories[source] = 0;
+            }
+            categories[source]++;
+        });
+        return categories;
     }
 
     /**
@@ -270,9 +318,9 @@ export class VectorStoreService {
 
         try {
             await this.vectorStore.save(directory);
-            console.log(`💾 Vector store saved to ${directory}`);
+            loggingService.info(`💾 Vector store saved to ${directory}`);
         } catch (error) {
-            console.error('Failed to save vector store:', error);
+            loggingService.error('Failed to save vector store:', { error: error instanceof Error ? error.message : String(error) });
         }
     }
 
@@ -283,9 +331,9 @@ export class VectorStoreService {
         try {
             this.vectorStore = await HNSWLib.load(directory, this.embeddings);
             this.initialized = true;
-            console.log(`📂 Vector store loaded from ${directory}`);
+            loggingService.info(`📂 Vector store loaded from ${directory}`);
         } catch (error) {
-            console.warn('Could not load existing vector store, will create new one');
+            loggingService.warn('Could not load existing vector store, will create new one');
             await this.initialize();
         }
     }
@@ -299,6 +347,7 @@ export class VectorStoreService {
             documentsCount: this.initialized ? 1 : 0 // Simplified for now
         };
     }
+
 }
 
 // Singleton instance

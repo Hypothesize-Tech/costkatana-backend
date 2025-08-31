@@ -1,4 +1,4 @@
-import { logger } from './logger';
+import { loggingService } from '../services/logging.service';
 
 export interface RetryOptions {
     maxRetries?: number;
@@ -73,7 +73,9 @@ export class RetryWithBackoff {
 
                 // Check if error is retryable
                 if (!this.isRetryableError(lastError, config.retryableErrors)) {
-                    logger.warn(`Non-retryable error encountered: ${lastError.message}`);
+                    loggingService.warn(`Non-retryable error encountered: ${lastError.message}`);
+
+                    
                     break;
                 }
 
@@ -81,7 +83,7 @@ export class RetryWithBackoff {
                 const delay = this.calculateDelay(attempt, config);
                 totalDelay += delay;
 
-                logger.warn(
+                loggingService.warn(
                     `Attempt ${attempt + 1}/${config.maxRetries + 1} failed: ${lastError.message}. ` +
                     `Retrying in ${delay}ms...`
                 );
@@ -161,7 +163,7 @@ export class RetryWithBackoff {
                 'ValidationException'
             ],
             onRetry: (error: Error, attempt: number) => {
-                logger.info(`🔄 Bedrock retry attempt ${attempt}: ${error.message}`);
+                loggingService.info(`🔄 Bedrock retry attempt ${attempt}: ${error.message}`);
             },
             ...customOptions
         };
@@ -186,7 +188,7 @@ export class RetryWithBackoff {
             // Check if we should reset the circuit breaker
             if (state === 'OPEN' && now - lastFailureTime > resetTimeout) {
                 state = 'HALF_OPEN';
-                logger.info('🔄 Circuit breaker moving to HALF_OPEN state');
+                loggingService.info('🔄 Circuit breaker moving to HALF_OPEN state');
             }
 
             // If circuit is open, reject immediately
@@ -200,7 +202,7 @@ export class RetryWithBackoff {
                 // Success - reset failure count and close circuit
                 if (state === 'HALF_OPEN') {
                     state = 'CLOSED';
-                    logger.info('✅ Circuit breaker reset to CLOSED state');
+                    loggingService.info('✅ Circuit breaker reset to CLOSED state');
                 }
                 failures = 0;
                 
@@ -212,7 +214,7 @@ export class RetryWithBackoff {
                 // Open circuit if threshold exceeded
                 if (failures >= failureThreshold) {
                     state = 'OPEN';
-                    logger.warn(`⚠️ Circuit breaker OPENED after ${failures} failures`);
+                    loggingService.warn(`⚠️ Circuit breaker OPENED after ${failures} failures`);
                 }
 
                 throw error;
