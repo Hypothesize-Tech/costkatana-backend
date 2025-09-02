@@ -2,12 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { loggingService } from './logging.service';
 
-// Add DOM types for browser context
-declare global {
-    interface Window {
-        document: Document;
-    }
-}
+// DOM types not needed for Node.js backend scraping
 
 export interface ScrapedPricingData {
     provider: string;

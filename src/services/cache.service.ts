@@ -545,7 +545,8 @@ export class CacheService {
     public getStats(): { [key: string]: { hits: number; misses: number; sets: number } } {
         const stats: { [key: string]: { hits: number; misses: number; sets: number } } = {};
         
-        for (const [key, value] of this.cacheStats.entries()) {
+        for (const entry of Array.from(this.cacheStats.entries())) {
+            const [key, value] = entry;
             stats[key] = { ...value };
         }
         
@@ -633,7 +634,8 @@ export class CacheService {
             const now = Date.now();
             let cleanedCount = 0;
             
-            for (const [key, entry] of this.inMemoryCache.entries()) {
+            for (const cacheEntry of Array.from(this.inMemoryCache.entries())) {
+                const [key, entry] = cacheEntry;
                 if (entry.expiry <= now) {
                     this.inMemoryCache.delete(key);
                     cleanedCount++;

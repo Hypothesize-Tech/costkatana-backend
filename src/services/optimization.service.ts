@@ -10,6 +10,7 @@ import { estimateTokens } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions } from '../utils/optimizationUtils';
 import mongoose from 'mongoose';
 import { ActivityService } from './activity.service';
+import { cortexService } from './cortexService';
 
 /**
  * Convert AIProvider enum to string for pricing functions
@@ -66,6 +67,7 @@ interface OptimizationRequest {
     service: string;
     model: string;
     context?: string;
+    useCortex?: boolean;  // Enable Cortex meta-language optimization
     conversationHistory?: Array<{
         role: 'user' | 'assistant' | 'system';
         content: string;
@@ -175,19 +177,86 @@ export class OptimizationService {
                 request.model
             );
 
-            // Run the enhanced optimization using internal utilities
+            // Use Cortex optimization if enabled
             let optimizationResult: OptimizationResult;
-            try {
-                optimizationResult = generateOptimizationSuggestions(
-                    request.prompt,
-                    provider,
-                    request.model,
-                    request.conversationHistory
-                );
-            } catch (error) {
-                loggingService.error('Failed to generate optimization suggestions:', { error: error instanceof Error ? error.message : String(error) });
-                // Create a fallback optimization result
-                optimizationResult = {
+            
+            // Check if Cortex is enabled for optimization
+            const useCortex = process.env.CORTEX_ENABLED === 'true' && 
+                            (process.env.CORTEX_MODE === 'mandatory' || 
+                             request.useCortex === true);
+            
+            if (useCortex) {
+                try {
+                    // Process with Cortex for maximum optimization
+                    const cortexResult = await cortexService.process(request.prompt);
+                    
+                    // Create optimization result from Cortex metrics
+                    optimizationResult = {
+                        id: 'cortex-optimization',
+                        suggestions: [{
+                            id: 'cortex-semantic-compression',
+                            type: 'compression' as const,
+                            originalPrompt: request.prompt,
+                            optimizedPrompt: cortexResult.response,
+                            estimatedSavings: cortexResult.metrics.costSavings * 100,
+                            confidence: 0.95,
+                            explanation: `Cortex Meta-Language optimization achieved ${(cortexResult.metrics.tokenReduction * 100).toFixed(1)}% token reduction and ${(cortexResult.metrics.costSavings * 100).toFixed(1)}% cost savings using ${cortexResult.metrics.modelUsed}`,
+                            implementation: 'Applied Cortex semantic compression, neural optimization, and intelligent model routing',
+                            compressionDetails: {
+                                technique: 'pattern_replacement' as const,
+                                originalSize: originalTokens,
+                                compressedSize: cortexResult.metrics.optimizedTokens,
+                                compressionRatio: cortexResult.metrics.tokenReduction,
+                                reversible: false
+                            }
+                        }],
+                        totalSavings: cortexResult.metrics.costSavings * 100,
+                        appliedOptimizations: ['cortex-semantic-compression'],
+                        metadata: {
+                            processingTime: cortexResult.metrics.processingTime,
+                            originalTokens,
+                            optimizedTokens: cortexResult.metrics.optimizedTokens,
+                            techniques: ['Cortex Semantic Compression', 'Cortex Neural Optimization', 'Cortex Model Routing'],
+                            cortexOptimized: true,
+                            cortexMetrics: {
+                                encodingReduction: cortexResult.metrics.tokenReduction * 100,
+                                semanticCompression: cortexResult.metrics.tokenReduction * 100,
+                                processingTime: cortexResult.metrics.processingTime,
+                                cacheUtilization: cortexResult.metrics.cacheHit ? 100 : 0,
+                                tokenReduction: cortexResult.metrics.tokenReduction * 100,
+                                costReduction: cortexResult.metrics.costSavings * 100
+                            }
+                        }
+                    };
+                    
+                    loggingService.info('Optimization completed with Cortex', {
+                        tokenReduction: `${(cortexResult.metrics.tokenReduction * 100).toFixed(1)}%`,
+                        costSavings: `${(cortexResult.metrics.costSavings * 100).toFixed(1)}%`,
+                        modelUsed: cortexResult.metrics.modelUsed
+                    });
+                } catch (cortexError) {
+                    loggingService.warn('Cortex optimization failed, falling back to standard', { error: cortexError });
+                    // Fall back to standard optimization
+                    optimizationResult = generateOptimizationSuggestions(
+                        request.prompt,
+                        provider,
+                        request.model,
+                        request.conversationHistory
+                    );
+                }
+            } else {
+                // Use standard optimization when Cortex is not enabled
+                try {
+                    optimizationResult = generateOptimizationSuggestions(
+                        request.prompt,
+                        provider,
+                        request.model,
+                        request.conversationHistory
+                    );
+                } catch (error) {
+                    loggingService.error('Failed to generate optimization suggestions:', { error: error instanceof Error ? error.message : String(error) });
+                    // Create a fallback optimization result
+                    optimizationResult = {
                     id: 'fallback-optimization',
                     totalSavings: 10,
                     suggestions: [{
@@ -213,6 +282,7 @@ export class OptimizationService {
                         techniques: ['compression']
                     }
                 };
+                }
             }
 
             // Apply the optimizations to get the actual optimized prompt

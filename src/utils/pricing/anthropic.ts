@@ -15,6 +15,20 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         notes: 'Most capable and intelligent Claude model yet - superior reasoning and advanced coding'
     },
     {
+
+        modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
+        modelName: 'Claude Opus 4.1 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 15.00,
+        outputPrice: 75.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Opus 4.1 via AWS Bedrock - requires Provisioned Throughput'
+    },
+    {
         modelId: 'claude-opus-4-20250514',
         modelName: 'Claude Opus 4',
         provider: 'Anthropic',
@@ -91,5 +105,31 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         category: 'text',
         isLatest: false,
         notes: 'Fast and compact model (Aug 2023 cutoff, 4k output)'
+    },
+    {
+        modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
+        modelName: 'Claude Haiku 3 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.25,
+        outputPrice: 1.25,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multilingual'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude 3 Haiku via AWS Bedrock'
+    },
+    {
+        modelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelName: 'Claude Haiku 3.5 (Bedrock Inference Profile)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.80,
+        outputPrice: 4.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude 3.5 Haiku via AWS Bedrock inference profile'
     }
 ]; 

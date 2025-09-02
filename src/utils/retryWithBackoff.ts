@@ -111,6 +111,25 @@ export class RetryWithBackoff {
         const errorMessage = error.message.toLowerCase();
         const errorName = error.name.toLowerCase();
         
+        // Non-retryable errors that should fail immediately
+        const nonRetryableErrors = [
+            'malformed input request',
+            'invalid request format',
+            'bad request',
+            'unauthorized',
+            'forbidden',
+            'not found'
+        ];
+        
+        // Check if error is explicitly non-retryable
+        const isNonRetryable = nonRetryableErrors.some(nonRetryable => 
+            errorMessage.includes(nonRetryable) || errorName.includes(nonRetryable)
+        );
+        
+        if (isNonRetryable) {
+            return false;
+        }
+        
         return retryableErrors.some(retryableError => 
             errorMessage.includes(retryableError.toLowerCase()) ||
             errorName.includes(retryableError.toLowerCase())

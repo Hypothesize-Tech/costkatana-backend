@@ -232,7 +232,7 @@ export function getModelNameVariations(model: string): string[] {
     if (normalized.includes('llama-4-behemoth')) {
         variations.push('llama-4-behemoth', 'llama-4-behemoth-preview');
     }
-    return [...new Set(variations)];
+    return Array.from(new Set(variations));
 }
 
 export function calculateCost(
@@ -269,6 +269,7 @@ export function calculateCost(
             return providerMatch && modelMatch;
         });
     }
+    
     if (!pricing && provider.toLowerCase().includes('bedrock')) {
         const normalizedModel = normalizeModelName(model);
         pricing = MODEL_PRICING.find(p => {

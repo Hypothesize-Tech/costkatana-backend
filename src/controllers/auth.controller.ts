@@ -65,8 +65,12 @@ export class AuthController {
             // Validate input
             const validatedData = registerSchema.parse(req.body);
 
-            // Register user
-            const { user, tokens } = await AuthService.register(validatedData);
+            // Register user (extract required fields)
+            const { user, tokens } = await AuthService.register({
+                email: validatedData.email,
+                password: validatedData.password,
+                name: validatedData.name
+            });
 
             const duration = Date.now() - startTime;
 

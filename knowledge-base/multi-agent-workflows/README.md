@@ -3,6 +3,16 @@
 ## Overview
 Multi-Agent Workflows enable intelligent coordination between specialized AI agents to handle complex cost optimization tasks, provide comprehensive analysis, and deliver superior results through collaborative intelligence.
 
+## 🚀 Featured: Cortex Meta-Language
+The Cortex meta-language is a revolutionary semantic optimization layer that dramatically reduces LLM costs and improves efficiency:
+
+- **[Cortex Meta-Language Overview](./CORTEX_META_LANGUAGE.md)** - Comprehensive guide to the Cortex semantic optimization system
+
+Cortex is being integrated as:
+- **Core feature** in the optimization service (mandatory)
+- **Optional toggle** in the gateway (via headers/configuration)
+- **Extensible plugin** architecture for custom optimizations
+
 ## Core Concepts
 
 ### 1. Agent Specialization

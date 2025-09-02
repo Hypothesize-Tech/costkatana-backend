@@ -81,6 +81,15 @@ export interface OptimizationResult {
         optimizationType?: string;
         contextTrimDetails?: ContextTrimDetails;
         fusionStrategy?: string;
+        cortexOptimized?: boolean;
+        cortexMetrics?: {
+            encodingReduction: number;
+            semanticCompression: number;
+            processingTime: number;
+            cacheUtilization: number;
+            tokenReduction: number;
+            costReduction: number;
+        };
     };
 }
 

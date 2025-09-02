@@ -5,6 +5,7 @@ import { optimizationRequestSchema, paginationSchema } from '../utils/validators
 import { loggingService } from '../services/logging.service';
 import { Optimization } from '../models';
 
+
 export class OptimizationController {
     static async createOptimization(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
@@ -31,8 +32,12 @@ export class OptimizationController {
 
             const optimization = await OptimizationService.createOptimization({
                 userId,
-                ...validatedData,
+                prompt: validatedData.prompt,
+                service: validatedData.service,
+                model: validatedData.model,
+                context: validatedData.context,
                 conversationHistory: req.body.conversationHistory,
+                useCortex: req.body.useCortex || false,  // Enable Cortex if requested
                 options: {
                     ...validatedData.options,
                     enableCompression: req.body.enableCompression !== false,
