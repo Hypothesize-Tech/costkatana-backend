@@ -324,7 +324,7 @@ Please analyze and provide a detailed user profile in JSON format:
 
 Make this highly specific to the user's actual usage patterns, not generic advice.`;
 
-            const response = await BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-haiku-20240307-v1:0');
+            const response = await BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0');
             const cleanedResponse = BedrockService.extractJson(response);
             const profileData = JSON.parse(cleanedResponse);
 
@@ -519,7 +519,7 @@ JSON Format:
 
 Make recommendations highly specific to their usage patterns, not generic advice.`;
 
-            const response = await BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0');
+            const response = await BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0');
             const cleanedResponse = BedrockService.extractJson(response);
             const aiRecommendations = JSON.parse(cleanedResponse);
 
@@ -596,7 +596,7 @@ JSON Format:
     ]
 }`;
 
-            const response = await BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-haiku-20240307-v1:0');
+            const response = await BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0');
             const cleanedResponse = BedrockService.extractJson(response);
             const onboardingData = JSON.parse(cleanedResponse);
 

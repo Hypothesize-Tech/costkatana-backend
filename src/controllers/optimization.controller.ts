@@ -3,6 +3,38 @@ import mongoose from 'mongoose';
 import { OptimizationService } from '../services/optimization.service';
 import { optimizationRequestSchema, paginationSchema } from '../utils/validators';
 import { loggingService } from '../services/logging.service';
+
+/**
+ * Model mapping from short names to full AWS Bedrock model IDs
+ */
+const mapToFullModelId = (shortName?: string): string | undefined => {
+    if (!shortName) return undefined;
+    
+    const modelMap: Record<string, string> = {
+        // Claude 3.5 models (upgraded)
+        'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        
+        // Claude 4 models
+        'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
+        'claude-opus-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
+        
+        // Nova models
+        'nova-pro': 'amazon.nova-pro-v1:0',
+        'nova-lite': 'amazon.nova-lite-v1:0',
+        'nova-micro': 'amazon.nova-micro-v1:0',
+        
+        // Full model IDs (pass through)
+        'anthropic.claude-3-5-haiku-20241022-v1:0': 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        'anthropic.claude-3-5-sonnet-20241022-v2:0': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        'anthropic.claude-opus-4-1-20250805-v1:0': 'anthropic.claude-opus-4-1-20250805-v1:0',
+        'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0'
+    };
+    
+    return modelMap[shortName] || shortName;
+};
 import { Optimization } from '../models';
 
 export class OptimizationController {
@@ -26,7 +58,22 @@ export class OptimizationController {
                 enableCompression: req.body.enableCompression !== false,
                 enableContextTrimming: req.body.enableContextTrimming !== false,
                 enableRequestFusion: req.body.enableRequestFusion !== false,
+                enableCortex: req.body.enableCortex === true,
+                cortexOperation: req.body.cortexOperation || 'optimize',
+                cortexStyle: req.body.cortexStyle || 'conversational',
                 requestId: req.headers['x-request-id'] as string
+            });
+
+            // 🔍 CONTROLLER DEBUG: Check if enableCortex is being received
+            console.log('🔍 CONTROLLER DEBUG - enableCortex check:', {
+                'req.body.enableCortex': req.body.enableCortex,
+                'validatedData.enableCortex': validatedData.enableCortex,
+                'typeof enableCortex': typeof req.body.enableCortex,
+                'typeof validated enableCortex': typeof validatedData.enableCortex,
+                'strict equality': req.body.enableCortex === true,
+                'validated strict equality': validatedData.enableCortex === true,
+                'loose equality': req.body.enableCortex == true,
+                'truthy check': !!req.body.enableCortex
             });
 
             const optimization = await OptimizationService.createOptimization({
@@ -38,6 +85,21 @@ export class OptimizationController {
                     enableCompression: req.body.enableCompression !== false,
                     enableContextTrimming: req.body.enableContextTrimming !== false,
                     enableRequestFusion: req.body.enableRequestFusion !== false,
+                    
+                    // 🚀 CORTEX OPTIONS
+                    enableCortex: req.body.enableCortex === true,
+                    cortexConfig: req.body.enableCortex === true ? {
+                        encodingModel: mapToFullModelId(req.body.cortexEncodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default
+                        coreProcessingModel: mapToFullModelId(req.body.cortexCoreModel) || 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 default
+                        decodingModel: mapToFullModelId(req.body.cortexDecodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default
+                        processingOperation: req.body.cortexOperation || 'optimize',
+                        outputStyle: req.body.cortexStyle || 'conversational',
+                        outputFormat: req.body.cortexFormat || 'plain',
+                        enableSemanticCache: req.body.cortexSemanticCache !== false,
+                        enableStructuredContext: req.body.cortexStructuredContext === true,
+                        preserveSemantics: req.body.cortexPreserveSemantics !== false,
+                        enableIntelligentRouting: req.body.cortexIntelligentRouting === true
+                    } : undefined
                 }
             });
 
@@ -87,6 +149,12 @@ export class OptimizationController {
                     tokensSaved: optimization.tokensSaved,
                     suggestions: optimization.suggestions,
                     metadata: optimization.metadata,
+                    
+                    // 🚀 CORTEX METADATA in response
+                    cortexEnabled: optimization.metadata?.cortexEnabled || false,
+                    cortexProcessingTime: optimization.metadata?.cortexProcessingTime,
+                    cortexSemanticIntegrity: optimization.metadata?.cortexSemanticIntegrity,
+                    cortexTokenReduction: optimization.metadata?.cortexTokenReduction
                 },
             });
         } catch (error: any) {
@@ -1184,5 +1252,312 @@ export class OptimizationController {
         }
     }
 
+    /**
+     * Get Cortex cache statistics
+     */
+    static async getCortexCacheStats(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexCacheService } = await import('../services/cortexCache.service');
+            const stats = CortexCacheService.getCacheStats();
+            
+            res.status(200).json({
+                success: true,
+                data: {
+                    cache: stats,
+                    performance: {
+                        hitRatePercentage: stats.hitRate ? (stats.hitRate * 100).toFixed(1) : '0.0',
+                        utilizationPercentage: ((stats.size / stats.maxEntries) * 100).toFixed(1),
+                        estimatedMemorySavedMB: stats.size > 0 ? ((stats.size * 2.5) / 1000).toFixed(2) : '0.00' // Rough estimate
+                    }
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get cache stats', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
 
+    /**
+     * Clear Cortex cache (admin endpoint)
+     */
+    static async clearCortexCache(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexCacheService } = await import('../services/cortexCache.service');
+            CortexCacheService.clearCache();
+            
+            res.status(200).json({
+                success: true,
+                message: 'Cortex cache cleared successfully'
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to clear cache', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    // ========================================================================
+    // 🧬 SAST (SEMANTIC ABSTRACT SYNTAX TREE) ENDPOINTS
+    // ========================================================================
+
+    /**
+     * Get SAST vocabulary statistics
+     */
+    static async getSastVocabulary(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { SemanticPrimitivesService } = await import('../services/semanticPrimitives.service');
+            const service = SemanticPrimitivesService.getInstance();
+            const stats = service.getVocabularyStats();
+            
+            res.status(200).json({
+                success: true,
+                data: stats,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get SAST vocabulary', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Search semantic primitives
+     */
+    static async searchSemanticPrimitives(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { SemanticPrimitivesService } = await import('../services/semanticPrimitives.service');
+            const service = SemanticPrimitivesService.getInstance();
+            
+            const { term, category, language, limit } = req.body;
+            const results = await service.searchPrimitives({
+                term,
+                category,
+                language,
+                limit: limit || 10
+            });
+            
+            res.status(200).json({
+                success: true,
+                data: {
+                    results,
+                    totalFound: results.length,
+                    query: { term, category, language, limit }
+                },
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to search semantic primitives', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Compare SAST evolution (traditional vs SAST)
+     */
+    static async compareSastEvolution(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexSastIntegrationService } = await import('../services/cortexSastIntegration.service');
+            const service = CortexSastIntegrationService.getInstance();
+            
+            const { text, language = 'en' } = req.body;
+            
+            if (!text || typeof text !== 'string') {
+                res.status(400).json({
+                    success: false,
+                    message: 'Text parameter is required and must be a string'
+                });
+                return;
+            }
+            
+            const comparison = await service.compareEvolution(text, language);
+            
+            res.status(200).json({
+                success: true,
+                data: comparison,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to compare SAST evolution', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get SAST showcase (demonstrates multiple examples)
+     */
+    static async getSastShowcase(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexSastIntegrationService } = await import('../services/cortexSastIntegration.service');
+            const service = CortexSastIntegrationService.getInstance();
+            
+            const showcase = await service.demonstrateEvolutionShowcase();
+            
+            res.status(200).json({
+                success: true,
+                data: showcase,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to generate SAST showcase', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Test universal semantic representation
+     */
+    static async testUniversalSemantics(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexSastIntegrationService } = await import('../services/cortexSastIntegration.service');
+            const service = CortexSastIntegrationService.getInstance();
+            
+            const { concept, languages = ['en', 'es', 'fr'] } = req.body;
+            
+            if (!concept || typeof concept !== 'string') {
+                res.status(400).json({
+                    success: false,
+                    message: 'Concept parameter is required and must be a string'
+                });
+                return;
+            }
+            
+            const test = await service.testUniversalSemantics(concept, languages);
+            
+            res.status(200).json({
+                success: true,
+                data: test,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to test universal semantics', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Demonstrate telescope ambiguity resolution
+     */
+    static async getTelescopeDemo(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { SemanticPrimitivesService } = await import('../services/semanticPrimitives.service');
+            const { CortexSastEncoderService } = await import('../services/cortexSastEncoder.service');
+            
+            const primitives = SemanticPrimitivesService.getInstance();
+            const encoder = CortexSastEncoderService.getInstance();
+            
+            // Get the classic telescope ambiguity demo
+            const telescopeDemo = await encoder.demonstrateTelescopeExample();
+            const sastStats = encoder.getStats();
+            
+            res.status(200).json({
+                success: true,
+                data: {
+                    telescopeDemo,
+                    sastStats,
+                    explanation: {
+                        sentence: telescopeDemo.originalSentence,
+                        ambiguityType: 'prepositional_phrase_attachment',
+                        interpretations: [
+                            'I used a telescope to see a man on the hill',
+                            'I saw a man who had a telescope and was on the hill'
+                        ],
+                        resolution: 'SAST resolves this using semantic primitives and syntactic analysis'
+                    }
+                },
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to demonstrate telescope ambiguity', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Map natural language to semantic primitives
+     */
+    static async mapSemanticPrimitives(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { SemanticPrimitivesService } = await import('../services/semanticPrimitives.service');
+            const service = SemanticPrimitivesService.getInstance();
+            
+            const { text, language = 'en' } = req.body;
+            
+            if (!text || typeof text !== 'string') {
+                res.status(400).json({
+                    success: false,
+                    message: 'Text parameter is required and must be a string'
+                });
+                return;
+            }
+            
+            const mapping = await service.mapLanguageToPrimitives(text, language);
+            
+            res.status(200).json({
+                success: true,
+                data: mapping,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to map semantic primitives', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get SAST service statistics
+     */
+    static async getSastStats(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { CortexSastEncoderService } = await import('../services/cortexSastEncoder.service');
+            const { CortexSastIntegrationService } = await import('../services/cortexSastIntegration.service');
+            
+            const encoder = CortexSastEncoderService.getInstance();
+            const integration = CortexSastIntegrationService.getInstance();
+            
+            const encoderStats = encoder.getStats();
+            const comparisonStats = integration.getComparisonStats();
+            
+            res.status(200).json({
+                success: true,
+                data: {
+                    encoding: encoderStats,
+                    comparison: comparisonStats,
+                    lastUpdated: new Date().toISOString()
+                },
+                timestamp: new Date().toISOString()
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get SAST statistics', {
+                error: error.message || 'Unknown error',
+                stack: error.stack
+            });
+            next(error);
+        }
+    }
 }

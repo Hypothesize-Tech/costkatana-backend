@@ -42,6 +42,29 @@ declare global {
                 availableProviders?: string[];
                 selectedModel?: string;
                 routingDecision?: any;
+
+                // 🚀 CORTEX PROCESSING PROPERTIES
+                cortexEnabled?: boolean;
+                cortexCoreModel?: string;
+                cortexEncodingModel?: string;
+                cortexDecodingModel?: string;
+                cortexOperation?: 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast';
+                cortexOutputStyle?: 'formal' | 'casual' | 'technical' | 'conversational';
+                cortexOutputFormat?: 'plain' | 'markdown' | 'structured';
+                cortexPreserveSemantics?: boolean;
+                cortexSemanticCache?: boolean;
+                cortexPriority?: 'cost' | 'speed' | 'quality' | 'balanced';
+                cortexBinaryEnabled?: boolean;
+                cortexBinaryCompression?: 'basic' | 'standard' | 'aggressive';
+                cortexSchemaValidation?: boolean;
+                cortexStrictValidation?: boolean;
+                cortexControlFlowEnabled?: boolean;
+                cortexHybridExecution?: boolean;
+                cortexFragmentCache?: boolean;
+                cortexContextManagement?: boolean;
+                cortexSessionId?: string;
+                cortexContextCompression?: boolean;
+                cortexMetadata?: any;
             };
         }
     }

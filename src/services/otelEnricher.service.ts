@@ -401,9 +401,17 @@ Respond in JSON format:
   private async calculateModelCost(model: string, promptTokens: number, completionTokens: number): Promise<number> {
     // Simplified cost calculation - in production, use actual pricing data
     const modelPricing: Record<string, { input: number; output: number }> = {
-      'anthropic.claude-3-haiku-20240307-v1:0': { input: 0.00025, output: 0.00125 },
-      'anthropic.claude-3-sonnet-20240229-v1:0': { input: 0.003, output: 0.015 },
-      'anthropic.claude-3-opus-20240229-v1:0': { input: 0.015, output: 0.075 },
+      // Legacy Claude 3 models removed - use Claude 3.5+ only
+      
+      // Updated Claude 3.5 models
+      'anthropic.claude-3-5-haiku-20241022-v1:0': { input: 0.00025, output: 0.00125 },
+      'anthropic.claude-3-5-sonnet-20241022-v2:0': { input: 0.003, output: 0.015 },
+      
+      // Claude 4 models
+      'anthropic.claude-opus-4-1-20250805-v1:0': { input: 0.015, output: 0.075 }, // Premium pricing
+      
+      // AWS Native models
+      'amazon.nova-pro-v1:0': { input: 0.0008, output: 0.0032 }, // Cost-effective AWS pricing
       'amazon.titan-text-express-v1': { input: 0.0008, output: 0.0016 }
     };
 

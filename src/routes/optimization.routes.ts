@@ -61,4 +61,18 @@ router.post('/:id/feedback', asyncHandler(OptimizationController.provideFeedback
 // Legacy bulk optimize endpoint
 router.post('/bulk-legacy', asyncHandler(OptimizationController.bulkOptimize));
 
+// 🎯 Cortex cache management endpoints
+router.get('/cortex/cache/stats', asyncHandler(OptimizationController.getCortexCacheStats));
+router.delete('/cortex/cache', asyncHandler(OptimizationController.clearCortexCache));
+
+// 🧬 SAST (Semantic Abstract Syntax Tree) endpoints
+router.get('/sast/vocabulary', asyncHandler(OptimizationController.getSastVocabulary));
+router.post('/sast/search', asyncHandler(OptimizationController.searchSemanticPrimitives));
+router.post('/sast/compare', asyncHandler(OptimizationController.compareSastEvolution));
+router.get('/sast/showcase', asyncHandler(OptimizationController.getSastShowcase));
+router.post('/sast/universal-test', asyncHandler(OptimizationController.testUniversalSemantics));
+router.get('/sast/telescope-demo', asyncHandler(OptimizationController.getTelescopeDemo));
+router.post('/sast/map-primitives', asyncHandler(OptimizationController.mapSemanticPrimitives));
+router.get('/sast/stats', asyncHandler(OptimizationController.getSastStats));
+
 export default router;

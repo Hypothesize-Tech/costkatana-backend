@@ -82,7 +82,7 @@ export class AICostTrackerService {
             enableRequestFusion: true,
             bedrockConfig: {
                 region: process.env.AWS_REGION || 'us-east-1',
-                modelId: 'anthropic.claude-3-haiku-20240307-v1:0'
+                modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0'
             },
             compressionSettings: {
                 minCompressionRatio: 0.7,
@@ -91,7 +91,7 @@ export class AICostTrackerService {
             contextTrimmingSettings: {
                 maxContextLength: 4000,
                 preserveRecentMessages: 3,
-                summarizationModel: 'anthropic.claude-3-haiku-20240307-v1:0'
+                summarizationModel: 'anthropic.claude-3-5-haiku-20241022-v1:0'
             },
             requestFusionSettings: {
                 maxFusionBatch: 5,

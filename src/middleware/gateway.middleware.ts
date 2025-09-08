@@ -59,6 +59,26 @@ declare global {
                 inputTokens?: number;
                 outputTokens?: number;
                 cost?: number;
+
+                // 🚀 CORTEX PROCESSING PROPERTIES
+                cortexEnabled?: boolean;
+                cortexCoreModel?: string;
+                cortexEncodingModel?: string;
+                cortexDecodingModel?: string;
+                cortexOperation?: 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast';
+                cortexOutputStyle?: 'formal' | 'casual' | 'technical' | 'conversational';
+                cortexOutputFormat?: 'plain' | 'markdown' | 'structured';
+                cortexPreserveSemantics?: boolean;
+                cortexSemanticCache?: boolean;
+                cortexPriority?: 'cost' | 'speed' | 'quality' | 'balanced';
+                cortexBinaryEnabled?: boolean;
+                cortexBinaryCompression?: 'basic' | 'standard' | 'aggressive';
+                cortexSchemaValidation?: boolean;
+                cortexStrictValidation?: boolean;
+                cortexControlFlowEnabled?: boolean;
+                cortexHybridExecution?: boolean;
+                cortexFragmentCache?: boolean;
+                cortexMetadata?: any;
             };
         }
     }
@@ -926,6 +946,35 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     context.securityEnabled = req.headers['costkatana-llm-security-enabled'] === 'true';
     context.omitRequest = req.headers['costkatana-omit-request'] === 'true';
     context.omitResponse = req.headers['costkatana-omit-response'] === 'true';
+
+    // 🚀 CORTEX PROCESSING HEADERS
+    context.cortexEnabled = req.headers['costkatana-enable-cortex'] === 'true';
+    context.cortexCoreModel = req.headers['costkatana-cortex-core-model'] as string || 'anthropic.claude-opus-4-1-20250805-v1:0'; // Claude 4+ for core
+    context.cortexEncodingModel = req.headers['costkatana-cortex-encoding-model'] as string || 'amazon.nova-pro-v1:0'; // Nova Pro for encoding
+    context.cortexDecodingModel = req.headers['costkatana-cortex-decoding-model'] as string || 'amazon.nova-pro-v1:0'; // Nova Pro for decoding
+    (context as any).cortexOperation = (req.headers['costkatana-cortex-operation'] as 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast') || 'optimize';
+    context.cortexOutputStyle = (req.headers['costkatana-cortex-output-style'] as 'formal' | 'casual' | 'technical' | 'conversational') || 'conversational';
+    context.cortexOutputFormat = (req.headers['costkatana-cortex-output-format'] as 'plain' | 'markdown' | 'structured') || 'plain';
+    context.cortexPreserveSemantics = req.headers['costkatana-cortex-preserve-semantics'] !== 'false';
+    context.cortexSemanticCache = req.headers['costkatana-cortex-semantic-cache'] !== 'false';
+    context.cortexPriority = (req.headers['costkatana-cortex-priority'] as 'cost' | 'speed' | 'quality' | 'balanced') || 'balanced';
+    
+    // 🗜️ BINARY SERIALIZATION HEADERS
+    context.cortexBinaryEnabled = req.headers['costkatana-cortex-binary-enabled'] === 'true';
+    context.cortexBinaryCompression = (req.headers['costkatana-cortex-binary-compression'] as 'basic' | 'standard' | 'aggressive') || 'standard';
+    
+    // 🔍 SCHEMA VALIDATION HEADERS
+    context.cortexSchemaValidation = req.headers['costkatana-cortex-schema-validation'] !== 'false';
+    context.cortexStrictValidation = req.headers['costkatana-cortex-strict-validation'] === 'true';
+    
+    // 🔄 CONTROL FLOW HEADERS
+    context.cortexControlFlowEnabled = req.headers['costkatana-cortex-control-flow'] !== 'false';
+    
+    // ⚡ HYBRID EXECUTION HEADERS
+    context.cortexHybridExecution = req.headers['costkatana-cortex-hybrid-execution'] !== 'false';
+    
+    // 🧩 FRAGMENT CACHE HEADERS
+    context.cortexFragmentCache = req.headers['costkatana-cortex-fragment-cache'] !== 'false';
     
     // Process cache-specific headers
     context.semanticCacheEnabled = req.headers['costkatana-semantic-cache-enabled'] !== 'false';
@@ -1039,6 +1088,26 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     const userIdHeader = req.headers['costkatana-user-id'] as string;
     if (userIdHeader) {
         context.properties!['user-id'] = userIdHeader;
+    }
+
+    // Process Cortex Context Management headers
+    const cortexContextManagement = req.headers['x-costkatana-cortex-context-management'] as string;
+    if (cortexContextManagement === 'true' || cortexContextManagement === 'enabled') {
+        (context as any).cortexContextManagement = true;
+    } else if (cortexContextManagement === 'false' || cortexContextManagement === 'disabled') {
+        (context as any).cortexContextManagement = false;
+    }
+
+    const cortexSessionId = req.headers['x-costkatana-cortex-session-id'] as string;
+    if (cortexSessionId) {
+        (context as any).cortexSessionId = cortexSessionId;
+    }
+
+    const cortexContextCompression = req.headers['x-costkatana-cortex-context-compression'] as string;
+    if (cortexContextCompression === 'true' || cortexContextCompression === 'enabled') {
+        (context as any).cortexContextCompression = true;
+    } else if (cortexContextCompression === 'false' || cortexContextCompression === 'disabled') {
+        (context as any).cortexContextCompression = false;
     }
 
     loggingService.info('Gateway headers processed', {

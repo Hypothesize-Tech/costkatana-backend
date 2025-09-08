@@ -437,11 +437,12 @@ export class ExperimentationService {
         // Map frontend model names to WORKING Bedrock model IDs (compatible with on-demand throughput)
         const modelMap: Record<string, string> = {
             // Claude models (use older stable versions that support on-demand)
-            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v1:0',
-            'claude-3-5-haiku': 'anthropic.claude-3-haiku-20240307-v1:0',
-            'claude-3-opus': 'anthropic.claude-3-opus-20240229-v1:0',
-            'claude-3-sonnet': 'anthropic.claude-3-sonnet-20240229-v1:0',
-            'claude-3-haiku': 'anthropic.claude-3-haiku-20240307-v1:0',
+            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
+            'claude-3-opus': 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Upgraded to 3.5 Sonnet
+            'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Upgraded to 3.5  
+            'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
+            'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 support
             
             // Amazon models (most reliable access)
             'amazon.nova-micro-v1': 'amazon.nova-micro-v1:0',
@@ -2205,7 +2206,7 @@ Consider factors like:
 
 Return ONLY: "low", "medium", or "high" based on the risk assessment.`;
 
-            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-haiku-20240307-v1:0');
+            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
             const riskLevel = response.trim().toLowerCase();
             
             if (riskLevel === 'low' || riskLevel === 'medium' || riskLevel === 'high') {

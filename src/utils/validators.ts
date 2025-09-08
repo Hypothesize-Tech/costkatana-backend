@@ -122,6 +122,29 @@ export const optimizationRequestSchema = z.object({
         preserveIntent: z.boolean().optional(),
         suggestAlternatives: z.boolean().optional(),
     }).optional(),
+    
+    // 🚀 CORTEX VALIDATION PARAMETERS
+    enableCortex: z.boolean().optional(),
+    cortexOperation: z.enum(['optimize', 'compress', 'analyze', 'transform', 'sast']).optional(),
+    cortexEncodingModel: z.string().optional(),
+    cortexCoreModel: z.string().optional(),
+    cortexDecodingModel: z.string().optional(),
+    cortexStyle: z.enum(['formal', 'casual', 'technical', 'conversational']).optional(),
+    cortexFormat: z.enum(['plain', 'markdown', 'structured', 'json']).optional(),
+    cortexSemanticCache: z.boolean().optional(),
+    cortexStructuredContext: z.boolean().optional(),
+    cortexPreserveSemantics: z.boolean().optional(),
+    cortexIntelligentRouting: z.boolean().optional(),
+    
+    // Additional optional fields that might be sent from frontend
+    conversationHistory: z.array(z.object({
+        role: z.enum(['user', 'assistant', 'system']),
+        content: z.string(),
+        timestamp: z.date().optional()
+    })).optional(),
+    enableCompression: z.boolean().optional(),
+    enableContextTrimming: z.boolean().optional(),
+    enableRequestFusion: z.boolean().optional(),
 });
 
 // Alert validation schemas

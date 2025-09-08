@@ -26,5 +26,5 @@
       "downlevelIteration": true
     },
     "include": ["src/**/*"],
-    "exclude": ["node_modules", "dist", "tests", "src/observability/selfHealingSpanProcessor.ts"]
+    "exclude": ["node_modules", "dist", "tests", "src/observability/selfHealingSpanProcessor.ts", "src/tests/**/*", "**/*.test.ts", "**/*.spec.ts"]
   }

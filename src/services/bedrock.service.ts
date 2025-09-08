@@ -60,10 +60,13 @@ export class BedrockService {
             'anthropic.claude-3-5-haiku-20241022-v1:0': `${regionPrefix}.anthropic.claude-3-5-haiku-20241022-v1:0`,
             'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
             
-            // Some regions may require inference profiles for other Claude models
-            'anthropic.claude-3-opus-20240229-v1:0': `${regionPrefix}.anthropic.claude-3-opus-20240229-v1:0`,
-            'anthropic.claude-3-sonnet-20240229-v1:0': `${regionPrefix}.anthropic.claude-3-sonnet-20240229-v1:0`,
-            'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
+            // Legacy Claude 3 models removed - use Claude 3.5+ only
+            
+            // Add Claude 4 and upgraded Claude 3.5 models
+            'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
+            
+            // Add Nova Pro
+            'amazon.nova-pro-v1:0': `amazon.nova-pro-v1:0`, // Nova models don't need inference profiles
         };
 
         return modelMappings[modelId] || modelId;
@@ -218,7 +221,7 @@ export class BedrockService {
         let result: string = '';
 
         // Check model type and create appropriate payload
-        if (model.includes('claude-3') || model.includes('claude-v3')) {
+        if (model.includes('claude-3-5') || model.includes('claude-4') || model.includes('claude-opus-4')) {
             // Modern Claude models (3.x) use messages format
             payload = this.createMessagesPayload(prompt);
             responsePath = 'content';

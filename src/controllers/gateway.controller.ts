@@ -7,6 +7,7 @@ import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
 import { IntelligentRoutingService } from '../services/intelligentRouting.service';
 import { CPIOptimizationStrategy } from '../types/cpi.types';
+import { GatewayCortexService } from '../services/gatewayCortex.service';
 import https from 'https';
 
 // Create a connection pool for better performance
@@ -273,6 +274,37 @@ export class GatewayController {
                 // Handle single provider request (existing logic)
                 const proxyRequest = await GatewayController.prepareProxyRequest(req);
                 
+                // 🚀 CORTEX PROCESSING - Process request through Cortex if enabled
+                if (context.cortexEnabled && GatewayCortexService.isEligibleForCortex(req.body, context)) {
+                    loggingService.info('🔄 Processing request through Gateway Cortex', {
+                        requestId: context.requestId,
+                        coreModel: context.cortexCoreModel,
+                        operation: context.cortexOperation
+                    });
+
+                    try {
+                        const cortexResult = await GatewayCortexService.processGatewayRequest(req, req.body);
+                        
+                        if (!cortexResult.shouldBypass) {
+                            // Update the proxy request with Cortex-optimized body
+                            proxyRequest.data = cortexResult.processedBody;
+                            
+                            loggingService.info('✅ Gateway Cortex processing completed', {
+                                requestId: context.requestId,
+                                tokensSaved: cortexResult.cortexMetadata.tokensSaved,
+                                reductionPercentage: cortexResult.cortexMetadata.reductionPercentage?.toFixed(1),
+                                processingTime: cortexResult.cortexMetadata.processingTime
+                            });
+                        }
+                    } catch (cortexError) {
+                        loggingService.warn('⚠️ Gateway Cortex processing failed, continuing with original request', {
+                            requestId: context.requestId,
+                            error: cortexError instanceof Error ? cortexError.message : String(cortexError)
+                        });
+                        // Continue with original request on Cortex failure
+                    }
+                }
+                
                 // Check circuit breaker
                 const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
                 if (!GatewayController.checkCircuitBreaker(provider)) {
@@ -352,6 +384,11 @@ export class GatewayController {
             // Add CostKatana-Request-Id header for feedback tracking
             if (context.requestId) {
                 res.setHeader('CostKatana-Request-Id', context.requestId);
+            }
+
+            // 🚀 Add Cortex response headers if Cortex was used
+            if (context.cortexEnabled && context.cortexMetadata) {
+                GatewayCortexService.addCortexResponseHeaders(res, context);
             }
             
             // Add CostKatana-Failover-Index header for failover requests

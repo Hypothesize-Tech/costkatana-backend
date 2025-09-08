@@ -8,7 +8,7 @@ import { Request } from 'express';
 /**
  * Wrapped Bedrock service that adds tracing to all LLM calls
  */
-export class TracedBedrockService extends BedrockService {
+export class TracedBedrockService {
     /**
      * Wrapped invokeModel that adds tracing
      */
@@ -41,8 +41,8 @@ export class TracedBedrockService extends BedrockService {
         let error: any;
         
         try {
-            // Call the parent class method
-            response = await super.invokeModel(prompt, model);
+            // Call the parent class static method
+            response = await BedrockService.invokeModel(prompt, model);
             
             // Estimate tokens (simplified - in production you'd use proper tokenization)
             const inputTokens = estimateTokens(prompt);
@@ -152,7 +152,7 @@ export class TracedBedrockService extends BedrockService {
         }
         
         try {
-            const result = await super.optimizePrompt(request);
+            const result = await BedrockService.optimizePrompt(request);
             
             if (trace) {
                 try {
@@ -213,7 +213,7 @@ export class TracedBedrockService extends BedrockService {
         }
         
         try {
-            const result = await super.analyzeUsagePatterns(request);
+            const result = await BedrockService.analyzeUsagePatterns(request);
             
             if (trace) {
                 try {

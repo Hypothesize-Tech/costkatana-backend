@@ -443,14 +443,14 @@ export function generateOptimizationSuggestions(
                 model,
                 error: error instanceof Error ? error.message : String(error),
                 fallbackPricing: 'GPT-4o-mini rates',
-                optimizationType: 'prompt-compression'
+                optimizationType: 'prompt_compression'
             });
             compressedCost = (compressedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
         }
         const savings = originalCost - compressedCost;
 
         suggestions.push({
-            id: 'prompt-compression',
+            id: 'prompt_compression',
             type: 'compression',
             originalPrompt: prompt,
             optimizedPrompt: compressionResult.compressedPrompt,
