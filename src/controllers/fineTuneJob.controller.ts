@@ -698,7 +698,7 @@ export class FineTuneJobController {
                 'aws-bedrock': {
                     name: 'AWS Bedrock',
                     models: [
-                        { id: 'anthropic.claude-3-haiku-20240307-v1:0', name: 'Claude 3 Haiku', baseModel: true },
+                        { id: 'anthropic.claude-3-5-haiku-20241022-v1:0', name: 'Claude 3.5 Haiku', baseModel: true },
                         { id: 'anthropic.claude-3-sonnet-20240229-v1:0', name: 'Claude 3 Sonnet', baseModel: true },
                         { id: 'amazon.titan-text-express-v1', name: 'Titan Text Express', baseModel: true }
                     ],

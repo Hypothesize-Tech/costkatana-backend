@@ -288,14 +288,14 @@ export class ModelSelectorTool extends Tool {
         // Define model recommendations based on use case
         const modelMap = {
             'api-calls': [
-                { model: 'claude-3-haiku-20240307-v1:0', score: 90, reason: 'Excellent for high-volume, cost-effective API calls' },
+                { model: 'anthropic.claude-3-5-haiku-20241022-v1:0', score: 90, reason: 'Excellent for high-volume, cost-effective API calls' },
                 { model: 'gpt-3.5-turbo', score: 85, reason: 'Fast and reliable for general API usage' },
                 { model: 'claude-3-sonnet-20240229-v1:0', score: 75, reason: 'Better quality but higher cost' }
             ],
             'chatbot': [
                 { model: 'claude-3-sonnet-20240229-v1:0', score: 95, reason: 'Superior conversational abilities' },
                 { model: 'gpt-4', score: 90, reason: 'Excellent understanding and context retention' },
-                { model: 'claude-3-haiku-20240307-v1:0', score: 80, reason: 'Cost-effective for simple conversations' }
+                { model: 'anthropic.claude-3-5-haiku-20241022-v1:0', score: 80, reason: 'Cost-effective for simple conversations' }
             ],
             'content-generation': [
                 { model: 'claude-3-opus-20240229-v1:0', score: 95, reason: 'Best for creative and long-form content' },
@@ -305,7 +305,7 @@ export class ModelSelectorTool extends Tool {
             'data-analysis': [
                 { model: 'claude-3-sonnet-20240229-v1:0', score: 90, reason: 'Strong analytical and reasoning capabilities' },
                 { model: 'gpt-4', score: 88, reason: 'Excellent for complex data interpretation' },
-                { model: 'claude-3-haiku-20240307-v1:0', score: 75, reason: 'Good for simple analysis tasks' }
+                { model: 'anthropic.claude-3-5-haiku-20241022-v1:0', score: 75, reason: 'Good for simple analysis tasks' }
             ],
             'code-generation': [
                 { model: 'claude-3-sonnet-20240229-v1:0', score: 95, reason: 'Excellent code generation and debugging' },
@@ -313,7 +313,7 @@ export class ModelSelectorTool extends Tool {
                 { model: 'codex-davinci-002', score: 85, reason: 'Specialized for code generation' }
             ],
             'summarization': [
-                { model: 'claude-3-haiku-20240307-v1:0', score: 95, reason: 'Perfect for high-volume summarization' },
+                { model: 'anthropic.claude-3-5-haiku-20241022-v1:0', score: 95, reason: 'Perfect for high-volume summarization' },
                 { model: 'gpt-3.5-turbo', score: 88, reason: 'Fast and accurate summaries' },
                 { model: 'claude-3-sonnet-20240229-v1:0', score: 80, reason: 'Better for complex documents' }
             ]
@@ -377,7 +377,7 @@ export class ModelSelectorTool extends Tool {
     private assessSuitability(model: string, useCase: any) {
         // Simplified suitability assessment
         const scores = {
-            'claude-3-haiku-20240307-v1:0': { cost: 95, speed: 95, quality: 75 },
+            'anthropic.claude-3-5-haiku-20241022-v1:0': { cost: 95, speed: 95, quality: 75 },
             'claude-3-sonnet-20240229-v1:0': { cost: 75, speed: 85, quality: 90 },
             'claude-3-opus-20240229-v1:0': { cost: 40, speed: 70, quality: 98 },
             'gpt-3.5-turbo': { cost: 90, speed: 95, quality: 80 },
@@ -416,7 +416,7 @@ export class ModelSelectorTool extends Tool {
 
     private getModelStrengths(model: string): string[] {
         const strengths = {
-            'claude-3-haiku-20240307-v1:0': ['Very fast responses', 'Lowest cost', 'High throughput'],
+            'anthropic.claude-3-5-haiku-20241022-v1:0': ['Very fast responses', 'Lowest cost', 'High throughput'],
             'claude-3-sonnet-20240229-v1:0': ['Balanced performance', 'Good reasoning', 'Reliable'],
             'claude-3-opus-20240229-v1:0': ['Highest quality', 'Complex reasoning', 'Creative tasks'],
             'gpt-3.5-turbo': ['Fast and affordable', 'Wide compatibility', 'Good general performance'],
@@ -427,7 +427,7 @@ export class ModelSelectorTool extends Tool {
 
     private getModelWeaknesses(model: string): string[] {
         const weaknesses = {
-            'claude-3-haiku-20240307-v1:0': ['Lower quality for complex tasks', 'Limited reasoning'],
+            'anthropic.claude-3-5-haiku-20241022-v1:0': ['Lower quality for complex tasks', 'Limited reasoning'],
             'claude-3-sonnet-20240229-v1:0': ['Higher cost than Haiku', 'Slower than Haiku'],
             'claude-3-opus-20240229-v1:0': ['Highest cost', 'Slowest responses', 'Rate limits'],
             'gpt-3.5-turbo': ['Limited context window', 'Less sophisticated reasoning'],
@@ -532,7 +532,7 @@ const client = new Anthropic({
 });
 
 const response = await client.messages.create({
-  model: 'claude-3-haiku-20240307',
+  model: 'claude-3-5-haiku-20241022',
   max_tokens: 1000,
   temperature: 0.1,
   messages: [{ role: 'user', content: 'Your prompt here' }],

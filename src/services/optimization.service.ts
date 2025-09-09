@@ -268,7 +268,7 @@ export class OptimizationService {
                 options: {
                     preserveSemantics: cortexConfig.preserveSemantics !== false,
                     targetReduction: 20, // Reduced from 30% to 20% to preserve more information
-                    maxProcessingTime: 15000 // 15 second timeout
+                    maxProcessingTime: 45000 // Increased to 45 seconds to prevent timeouts
                 },
                 metadata: {
                     userId,
@@ -276,7 +276,7 @@ export class OptimizationService {
                 }
             };
 
-            const processingResult = await this.cortexCoreService.process(processingRequest);
+            const processingResult = await this.processWithRetry(processingRequest, userId);
             
             // 🔍 Enhanced Integrity Check After Core Processing
             const semanticIntegrity = processingResult.metadata?.semanticIntegrity || 0;
@@ -600,7 +600,9 @@ Reply ONLY: {"valid": true/false, "issues": ["specific issue 1", "specific issue
             }
 
             try {
-                const parsed = JSON.parse(validationResult.trim());
+                // Extract JSON robustly from potentially mixed response
+                const cleanedResult = this.extractJsonFromValidationResponse(validationResult);
+                const parsed = JSON.parse(cleanedResult);
                 const isValid = parsed.valid === true;
                 const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
                 
@@ -617,10 +619,13 @@ Reply ONLY: {"valid": true/false, "issues": ["specific issue 1", "specific issue
                 
                 return { isValid, issues };
             } catch (parseError) {
-                loggingService.error('Failed to parse validation result', { parseError, validationResult });
+                loggingService.warn('Failed to parse validation result, being lenient for small changes', { 
+                    parseError: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+                
                 // For minimal changes, default to valid if parsing fails
                 const lengthDiff = Math.abs(original.length - optimized.length);
-                if (lengthDiff < 20) {
+                if (lengthDiff < 50) { // More lenient threshold
                     return { isValid: true, issues: ['Validation parsing failed but minimal changes detected'] };
                 }
                 return { isValid: false, issues: ['Validation result parsing failed'] };
@@ -630,6 +635,112 @@ Reply ONLY: {"valid": true/false, "issues": ["specific issue 1", "specific issue
             loggingService.error('Validation service error', { error });
             return { isValid: false, issues: ['Validation service error'] };
         }
+    }
+
+    /**
+     * Extract JSON from LLM validation response that might contain additional text
+     */
+    private static extractJsonFromValidationResponse(response: string): string {
+        let cleanedResult = response.trim();
+        
+        // Remove markdown code blocks
+        cleanedResult = cleanedResult.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+        
+        // Try to find JSON object - look for first { to matching }
+        const firstBrace = cleanedResult.indexOf('{');
+        if (firstBrace !== -1) {
+            let braceCount = 0;
+            let endIndex = -1;
+            
+            for (let i = firstBrace; i < cleanedResult.length; i++) {
+                if (cleanedResult[i] === '{') braceCount++;
+                else if (cleanedResult[i] === '}') {
+                    braceCount--;
+                    if (braceCount === 0) {
+                        endIndex = i;
+                        break;
+                    }
+                }
+            }
+            
+            if (endIndex !== -1) {
+                return cleanedResult.substring(firstBrace, endIndex + 1);
+            }
+        }
+        
+        // Fallback: try regex match for simple JSON
+        const jsonMatch = cleanedResult.match(/\{[^}]*\}/);
+        if (jsonMatch) {
+            return jsonMatch[0];
+        }
+        
+        // Last resort: return cleaned result
+        return cleanedResult;
+    }
+
+    /**
+     * Process with retry logic for handling timeouts and failures
+     */
+    private static async processWithRetry(
+        processingRequest: CortexProcessingRequest, 
+        userId: string,
+        maxRetries: number = 2
+    ): Promise<any> {
+        let lastError: any;
+        
+        for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+            try {
+                loggingService.info(`🔄 Processing attempt ${attempt}/${maxRetries + 1}`, { userId });
+                
+                // Add timeout wrapper for individual processing attempts
+                const processingPromise = this.cortexCoreService.process(processingRequest);
+                const timeoutPromise = new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('Processing timeout after 45 seconds')), 45000);
+                });
+                
+                const result = await Promise.race([processingPromise, timeoutPromise]);
+                
+                loggingService.info(`✅ Processing succeeded on attempt ${attempt}`, { userId });
+                return result;
+                
+            } catch (error) {
+                lastError = error;
+                const isTimeout = error instanceof Error && error.message.includes('timeout');
+                const isRetryableError = isTimeout || (error instanceof Error && error.message.includes('ThrottlingException'));
+                
+                loggingService.warn(`⚠️ Processing failed on attempt ${attempt}`, {
+                    userId,
+                    error: error instanceof Error ? error.message : String(error),
+                    isTimeout,
+                    isRetryableError,
+                    remainingAttempts: maxRetries + 1 - attempt
+                });
+                
+                // Don't retry on final attempt
+                if (attempt === maxRetries + 1) {
+                    break;
+                }
+                
+                // Only retry on timeout or throttling errors
+                if (isRetryableError) {
+                    // Exponential backoff: 2s, 4s
+                    const delay = Math.pow(2, attempt) * 1000;
+                    loggingService.info(`⏱️ Waiting ${delay}ms before retry ${attempt + 1}`, { userId });
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                } else {
+                    // Don't retry non-retryable errors
+                    break;
+                }
+            }
+        }
+        
+        loggingService.error('❌ All processing attempts failed', {
+            userId,
+            error: lastError instanceof Error ? lastError.message : String(lastError),
+            maxRetries
+        });
+        
+        throw lastError;
     }
     
     /**

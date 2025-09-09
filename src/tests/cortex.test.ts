@@ -181,7 +181,7 @@ describe('Cortex Core Infrastructure', () => {
         });
 
         it('should validate default Cortex configuration', () => {
-            expect(DEFAULT_CORTEX_CONFIG.encoding.model).toBe('anthropic.claude-3-haiku-20240307-v1:0');
+            expect(DEFAULT_CORTEX_CONFIG.encoding.model).toBe('anthropic.claude-3-5-haiku-20241022-v1:0');
             expect(DEFAULT_CORTEX_CONFIG.coreProcessing.optimizationLevel).toBe('balanced');
             expect(DEFAULT_CORTEX_CONFIG.decoding.qualityThreshold).toBe(0.85);
             expect(DEFAULT_CORTEX_CONFIG.caching.enabled).toBe(true);

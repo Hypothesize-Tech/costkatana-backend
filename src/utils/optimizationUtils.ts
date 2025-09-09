@@ -592,8 +592,8 @@ function suggestAlternativeModel(
     // Model alternatives by provider
     const alternatives: Record<AIProvider, string[]> = {
         [AIProvider.OpenAI]: ['gpt-3.5-turbo', 'gpt-4-turbo', 'gpt-4'],
-        [AIProvider.AWSBedrock]: ['anthropic.claude-3-haiku-20240307-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0'],
-        [AIProvider.Anthropic]: ['claude-3-haiku-20240307', 'claude-3-sonnet-20240229'],
+        [AIProvider.AWSBedrock]: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0'],
+        [AIProvider.Anthropic]: ['claude-3-5-haiku-20241022', 'claude-3-sonnet-20240229'],
         [AIProvider.Google]: ['gemini-1.5-flash', 'gemini-pro'],
         [AIProvider.Cohere]: ['command-light', 'command'],
         [AIProvider.Gemini]: ['gemini-1.5-flash', 'gemini-pro'],

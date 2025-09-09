@@ -562,14 +562,6 @@ export class ChatService {
                     pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' }
                 },
                 {
-                    id: 'anthropic.claude-3-haiku-20240307-v1:0',
-                    name: 'Claude 3 Haiku',
-                    provider: 'Anthropic',
-                    description: 'Fast responses with good reasoning',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.25, output: 1.25, unit: 'Per 1M tokens' }
-                },
-                {
                     id: 'anthropic.claude-3-sonnet-20240229-v1:0',
                     name: 'Claude 3 Sonnet',
                     provider: 'Anthropic',

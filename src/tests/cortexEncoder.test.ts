@@ -255,7 +255,7 @@ describe('Cortex Encoder Service', () => {
         it('should respect custom configuration', async () => {
             const customConfig: Partial<CortexConfig> = {
                 encoding: {
-                    model: 'anthropic.claude-3-haiku-20240307-v1:0',
+                    model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
                     temperature: 0.2,
                     maxTokens: 1500,
                     enableCaching: true

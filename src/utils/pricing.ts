@@ -104,7 +104,7 @@ export function getModelNameVariations(model: string): string[] {
         variations.push('claude-3-sonnet', 'claude-3-sonnet-20240229-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0');
     }
     if (normalized.includes('claude-3-haiku')) {
-        variations.push('claude-3-haiku', 'claude-3-haiku-20240307-v1:0', 'anthropic.claude-3-haiku-20240307-v1:0');
+        variations.push('claude-3-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0');
     }
     if (normalized.includes('command-a')) {
         variations.push('command-a', 'command-a-03-2025');

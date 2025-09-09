@@ -287,7 +287,7 @@ export class WebScraperService {
                 Claude 3.5 Sonnet (claude-3-5-sonnet-20241022): $3.00 per 1M input tokens, $15.00 per 1M output tokens
                 Claude 3 Opus (claude-3-opus-20240229): $15.00 per 1M input tokens, $75.00 per 1M output tokens
                 Claude 3 Sonnet (claude-3-sonnet-20240229): $3.00 per 1M input tokens, $15.00 per 1M output tokens
-                Claude 3 Haiku (claude-3-haiku-20240307): $0.25 per 1M input tokens, $1.25 per 1M output tokens
+                Claude 3.5 Haiku (claude-3-5-haiku-20241022): $0.80 per 1M input tokens, $4.00 per 1M output tokens
                 Claude 2.1: $8.00 per 1M input tokens, $24.00 per 1M output tokens
                 Claude 2.0: $8.00 per 1M input tokens, $24.00 per 1M output tokens
                 Claude Instant 1.2: $0.80 per 1M input tokens, $2.40 per 1M output tokens

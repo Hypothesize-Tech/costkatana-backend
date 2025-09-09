@@ -367,7 +367,7 @@ export class ProjectManagerTool extends Tool {
                 settings: {
                     budgetLimit: 100.00,
                     alertThreshold: 80,
-                    preferredModels: ['claude-3-haiku-20240307-v1:0', 'gpt-3.5-turbo'],
+                    preferredModels: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'gpt-3.5-turbo'],
                     optimizationGoals: ['cost', 'reliability']
                 },
                 tags: ['api', 'integration', 'production'],
