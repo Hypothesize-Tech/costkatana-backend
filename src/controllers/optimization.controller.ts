@@ -59,7 +59,7 @@ export class OptimizationController {
                 enableContextTrimming: req.body.enableContextTrimming !== false,
                 enableRequestFusion: req.body.enableRequestFusion !== false,
                 enableCortex: req.body.enableCortex === true,
-                cortexOperation: req.body.cortexOperation || 'optimize',
+                cortexOperation: 'answer', // NEW ARCHITECTURE: Always answer generation,
                 cortexStyle: req.body.cortexStyle || 'conversational',
                 requestId: req.headers['x-request-id'] as string
             });
@@ -92,12 +92,12 @@ export class OptimizationController {
                         encodingModel: mapToFullModelId(req.body.cortexEncodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default
                         coreProcessingModel: mapToFullModelId(req.body.cortexCoreModel) || 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 default
                         decodingModel: mapToFullModelId(req.body.cortexDecodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default
-                        processingOperation: req.body.cortexOperation || 'optimize',
+                        processingOperation: 'answer', // NEW ARCHITECTURE: Always answer generation,
                         outputStyle: req.body.cortexStyle || 'conversational',
                         outputFormat: req.body.cortexFormat || 'plain',
                         enableSemanticCache: req.body.cortexSemanticCache !== false,
                         enableStructuredContext: req.body.cortexStructuredContext === true,
-                        preserveSemantics: req.body.cortexPreserveSemantics !== false,
+                        preserveSemantics: true, // Always preserve semantics in answer generation,
                         enableIntelligentRouting: req.body.cortexIntelligentRouting === true
                     } : undefined
                 }
@@ -109,8 +109,8 @@ export class OptimizationController {
                 userId,
                 duration,
                 optimizationId: optimization._id,
-                hasOriginalPrompt: !!optimization.originalPrompt,
-                hasOptimizedPrompt: !!optimization.optimizedPrompt,
+                hasUserQuery: !!optimization.userQuery,
+                hasGeneratedAnswer: !!optimization.generatedAnswer,
                 improvementPercentage: optimization.improvementPercentage,
                 costSaved: optimization.costSaved,
                 tokensSaved: optimization.tokensSaved,
@@ -127,8 +127,8 @@ export class OptimizationController {
                 metadata: {
                     userId,
                     optimizationId: optimization._id,
-                    hasOriginalPrompt: !!optimization.originalPrompt,
-                    hasOptimizedPrompt: !!optimization.optimizedPrompt,
+                    hasUserQuery: !!optimization.userQuery,
+                    hasGeneratedAnswer: !!optimization.generatedAnswer,
                     improvementPercentage: optimization.improvementPercentage,
                     costSaved: optimization.costSaved,
                     tokensSaved: optimization.tokensSaved,
@@ -142,8 +142,8 @@ export class OptimizationController {
                 message: 'Optimization created successfully',
                 data: {
                     id: optimization._id,
-                    originalPrompt: optimization.originalPrompt,
-                    optimizedPrompt: optimization.optimizedPrompt,
+                    userQuery: optimization.userQuery,
+                    generatedAnswer: optimization.generatedAnswer,
                     improvementPercentage: optimization.improvementPercentage,
                     costSaved: optimization.costSaved,
                     tokensSaved: optimization.tokensSaved,
@@ -188,7 +188,7 @@ export class OptimizationController {
 
             const filters = {
                 userId,
-                applied: req.query.applied !== undefined ? req.query.applied === 'true' : undefined,
+                // Removed applied filter - no longer needed
                 category: req.query.category as string,
                 minSavings: req.query.minSavings ? parseFloat(req.query.minSavings as string) : undefined,
                 startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
@@ -201,8 +201,7 @@ export class OptimizationController {
                 limit,
                 sort,
                 order,
-                hasAppliedFilter: req.query.applied !== undefined,
-                appliedFilter: req.query.applied,
+                // Removed applied filter logging
                 category: req.query.category,
                 hasMinSavings: !!req.query.minSavings,
                 minSavings: req.query.minSavings,
@@ -334,8 +333,8 @@ export class OptimizationController {
                 optimizationId: id,
                 duration,
                 hasOptimization: !!optimization,
-                hasOriginalPrompt: !!optimization.originalPrompt,
-                hasOptimizedPrompt: !!optimization.optimizedPrompt,
+                hasUserQuery: !!optimization.userQuery,
+                hasGeneratedAnswer: !!optimization.generatedAnswer,
                 improvementPercentage: optimization.improvementPercentage,
                 costSaved: optimization.costSaved,
                 tokensSaved: optimization.tokensSaved,
@@ -351,8 +350,8 @@ export class OptimizationController {
                     userId,
                     optimizationId: id,
                     hasOptimization: !!optimization,
-                    hasOriginalPrompt: !!optimization.originalPrompt,
-                    hasOptimizedPrompt: !!optimization.optimizedPrompt,
+                    hasUserQuery: !!optimization.userQuery,
+                    hasGeneratedAnswer: !!optimization.generatedAnswer,
                     improvementPercentage: optimization.improvementPercentage,
                     costSaved: optimization.costSaved,
                     tokensSaved: optimization.tokensSaved
@@ -741,7 +740,7 @@ export class OptimizationController {
     static async bulkOptimize(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         const userId = req.user!.id;
-        const { promptIds } = req.body;
+        const { promptIds, cortexEnabled, cortexConfig } = req.body;
 
         try {
             loggingService.info('Bulk optimization initiated', {
@@ -787,7 +786,10 @@ export class OptimizationController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const result = await OptimizationService.generateBulkOptimizations(userId, promptIds);
+            const result = await OptimizationService.generateBulkOptimizations(userId, promptIds, {
+                cortexEnabled,
+                cortexConfig
+            });
 
             const duration = Date.now() - startTime;
 
@@ -931,10 +933,7 @@ export class OptimizationController {
                 totalSaved: summaryStats.totalSaved,
                 totalTokensSaved: summaryStats.totalTokensSaved,
                 avgImprovement: summaryStats.avgImprovement || 0,
-                applied: summaryStats.applied,
-                applicationRate: summaryStats.total > 0
-                    ? (summaryStats.applied / summaryStats.total) * 100
-                    : 0,
+                // No longer tracking application rate
                 byCategory: categoryStats.reduce((acc: any, cat: any) => {
                     acc[cat._id] = {
                         count: cat.count,

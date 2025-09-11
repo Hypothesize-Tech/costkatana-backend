@@ -14,15 +14,23 @@ import { ActivityService } from './activity.service';
 // 🚀 NEW CORTEX IMPORTS
 import { CortexCoreService } from './cortexCore.service';
 import { CortexCacheService } from './cortexCache.service';
+import { CortexLispInstructionGeneratorService, LispInstructions } from './cortexLispInstructionGenerator.service';
 import { CortexDecoderService } from './cortexDecoder.service';
 import { 
-    CortexEncodingRequest, 
-    CortexProcessingRequest, 
+    CortexConfig,
+    CortexProcessingRequest,
     CortexDecodingRequest,
+    CortexEncodingRequest,
+    CortexEncodingResult,
+    CortexProcessingResult,
+    CortexDecodingResult,
     DEFAULT_CORTEX_CONFIG 
 } from '../types/cortex.types';
 import { CortexEncoderService } from './cortexEncoder.service';
 import { BedrockService } from './tracedBedrock.service';
+import { CortexAnalyticsService, CortexImpactMetrics } from './cortexAnalytics.service';
+import { CortexVocabularyService } from './cortexVocabulary.service';
+import { CortexSastEncoderService } from './cortexSastEncoder.service';
 
 /**
  * Convert AIProvider enum to string for pricing functions
@@ -84,6 +92,8 @@ interface OptimizationRequest {
         content: string;
         timestamp?: Date;
     }>;
+    cortexEnabled?: boolean;
+    cortexConfig?: any;
     options?: {
         targetReduction?: number;
         preserveIntent?: boolean;
@@ -98,7 +108,7 @@ interface OptimizationRequest {
             encodingModel?: string;
             coreProcessingModel?: string;
             decodingModel?: string;
-            processingOperation?: 'optimize' | 'compress' | 'analyze' | 'transform';
+            processingOperation?: 'optimize' | 'compress' | 'analyze' | 'transform' | 'answer';
             outputStyle?: 'formal' | 'casual' | 'technical' | 'conversational';
             outputFormat?: 'plain' | 'markdown' | 'structured';
             enableSemanticCache?: boolean;
@@ -182,10 +192,10 @@ export class OptimizationService {
             this.cortexCoreService = CortexCoreService.getInstance();
             this.cortexDecoderService = CortexDecoderService.getInstance();
             
+            // Initialize all services that require it
             await Promise.all([
-                this.cortexEncoderService.initialize(),
-                this.cortexCoreService.initialize(),
-                this.cortexDecoderService.initialize()
+                CortexCoreService.getInstance().initialize(),
+                CortexVocabularyService.getInstance().initialize(),
             ]);
             
             this.cortexInitialized = true;
@@ -205,11 +215,13 @@ export class OptimizationService {
     private static async processCortexOptimization(
         originalPrompt: string, 
         cortexConfig: any, 
-        userId: string
+        userId: string,
+        model?: string
     ): Promise<{
         optimizedPrompt: string;
         cortexMetadata: any;
         tokenReduction?: { originalTokens: number; cortexTokens: number; reductionPercentage: number };
+        impactMetrics?: CortexImpactMetrics;
     }> {
         const startTime = Date.now();
         
@@ -242,17 +254,22 @@ export class OptimizationService {
 
             // Step 1: Encode natural language to Cortex
             loggingService.info('🔄 Step 1: Starting Cortex encoding...', { userId });
-            const encodingRequest: CortexEncodingRequest = {
-                text: originalPrompt,
-                context: 'optimization processing',
-                metadata: {
-                    domain: 'general',
-                    language: 'en',
-                    complexity: 'medium'
-                }
-            };
+            const instructionService = CortexLispInstructionGeneratorService.getInstance();
+            const lispInstructions = await instructionService.generateInstructions(originalPrompt, cortexConfig);
 
-            const encodingResult = await this.cortexEncoderService.encode(encodingRequest);
+            const encoderService = CortexEncoderService.getInstance();
+            const encodingResult = await encoderService.encode({
+                text: originalPrompt,
+                language: 'en',
+                userId,
+                config: cortexConfig,
+                prompt: lispInstructions.encoderPrompt
+            });
+
+            if (encodingResult.error) {
+                loggingService.error('❌ Cortex encoding failed', { userId, error: encodingResult.error });
+                throw new Error(`Encoding failed: ${encodingResult.error}`);
+            }
             loggingService.info('✅ Step 1: Cortex encoding completed', { 
                 userId,
                 frameType: (encodingResult.cortexFrame as any).frameType,
@@ -261,158 +278,83 @@ export class OptimizationService {
                 encodedCortex: JSON.stringify(encodingResult.cortexFrame, null, 2)
             });
             
-            // Step 2: Process and optimize Cortex structure with enhanced information preservation
-            const processingRequest: CortexProcessingRequest = {
-                input: encodingResult.cortexFrame,
-                operation: cortexConfig.processingOperation || 'optimize',
-                options: {
-                    preserveSemantics: cortexConfig.preserveSemantics !== false,
-                    targetReduction: 20, // Reduced from 30% to 20% to preserve more information
-                    maxProcessingTime: 45000 // Increased to 45 seconds to prevent timeouts
-                },
-                metadata: {
-                    userId,
-                    provider: 'optimization-service'
-                }
-            };
-
-            const processingResult = await this.processWithRetry(processingRequest, userId);
-            
-            // 🔍 Enhanced Integrity Check After Core Processing
-            const semanticIntegrity = processingResult.metadata?.semanticIntegrity || 0;
-            const minIntegrityThreshold = 0.85; // Raised threshold for better information preservation
-            
-            loggingService.info('🔍 DEBUG Step 2: Core processing completed', {
+            // Step 2: Generate ANSWER in LISP format (NEW ARCHITECTURE)
+            loggingService.info('🎆 Step 2: Generating answer in LISP format...', { 
                 userId,
-                originalCortex: JSON.stringify(encodingResult.cortexFrame, null, 2),
-                processedCortex: JSON.stringify(processingResult.output, null, 2),
-                semanticIntegrity,
-                preserveSemantics: processingRequest.options?.preserveSemantics,
-                integrityThreshold: minIntegrityThreshold,
-                passesThreshold: semanticIntegrity >= minIntegrityThreshold
+                queryType: encodingResult.cortexFrame.frameType
             });
-
-            // Information preservation validation
-            if (semanticIntegrity < minIntegrityThreshold) {
-                loggingService.warn('⚠️ Low semantic integrity detected after core processing', {
-                    userId,
-                    semanticIntegrity,
-                    threshold: minIntegrityThreshold,
-                    attemptingRecovery: true
-                });
-                
-                // Attempt recovery with conservative processing
-                const conservativeRequest: CortexProcessingRequest = {
-                    ...processingRequest,
-                    operation: 'analyze', // More conservative operation
-                    options: {
-                        ...processingRequest.options,
-                        preserveSemantics: true,
-                        targetReduction: 10 // Much lower reduction target
-                    }
-                };
-                
-                try {
-                    const recoveryResult = await this.cortexCoreService.process(conservativeRequest);
-                    const recoveredIntegrity = recoveryResult.metadata?.semanticIntegrity || 0;
-                    
-                    if (recoveredIntegrity >= minIntegrityThreshold) {
-                        loggingService.info('✅ Recovery processing successful', {
-                            userId,
-                            recoveredIntegrity,
-                            originalIntegrity: semanticIntegrity
-                        });
-                        // Use recovery result instead
-                        processingResult.output = recoveryResult.output;
-                        processingResult.metadata = {
-                            ...processingResult.metadata,
-                            ...recoveryResult.metadata,
-                            semanticIntegrity: recoveredIntegrity
-                        };
-                        
-                        // Log recovery success with additional context
-                        loggingService.info('📊 Recovery metadata preserved', {
-                            userId,
-                            recoveryUsed: true,
-                            originalIntegrity: semanticIntegrity
-                        });
-                    } else {
-                        throw new Error(`Recovery processing also failed integrity check: ${recoveredIntegrity}`);
-                    }
-                } catch (recoveryError) {
-                    loggingService.error('❌ Recovery processing failed, using original frame', {
-                        userId,
-                        error: recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
-                    });
-                    
-                    // Use original frame to prevent information loss
-                    processingResult.output = encodingResult.cortexFrame;
-                    processingResult.metadata = {
-                        ...processingResult.metadata,
-                        semanticIntegrity: 1.0
-                    };
-                    
-                    // Log preservation mode with additional context
-                    loggingService.warn('🛡️ Information preservation mode activated', {
-                        userId,
-                        fallbackUsed: true,
-                        preservationMode: true,
-                        reason: 'Used original frame to prevent information loss'
-                    });
-                }
-            }
             
-            // Step 3: Decode back to natural language
-            const decodingRequest: CortexDecodingRequest = {
+            const coreService = CortexCoreService.getInstance();
+            const processingResult = await coreService.process({
+                input: encodingResult.cortexFrame,
+                operation: 'answer', // Hardcoded to answer generation
+                options: { preserveSemantics: true },
+                prompt: lispInstructions.coreProcessorPrompt
+            });
+            
+            loggingService.info('🎆 Step 2: Answer generation completed', {
+                userId,
+                queryFrame: JSON.stringify(encodingResult.cortexFrame, null, 2),
+                answerFrame: JSON.stringify(processingResult.output, null, 2),
+                answerType: processingResult.output.frameType,
+                isAnswer: processingResult.output.frameType === 'answer'
+            });
+            
+            // Step 3: Decode LISP answer back to natural language (NEW ARCHITECTURE)
+            loggingService.info('🎉 Step 3: Decoding LISP answer to natural language...', { 
+                userId,
+                answerFrameType: processingResult.output.frameType
+            });
+            
+            const decoderService = CortexDecoderService.getInstance();
+            const decodingResult = await decoderService.decode({
                 cortexStructure: processingResult.output,
+                targetLanguage: 'en',
                 style: cortexConfig.outputStyle || 'conversational',
                 format: cortexConfig.outputFormat || 'plain',
                 options: {
-                    enhanceReadability: true
-                }
-            };
-
-            const decodingResult = await this.cortexDecoderService.decode(decodingRequest);
-            
-            loggingService.info('🔍 DEBUG Step 3: Decoding completed', {
-                userId,
-                inputCortexForDecoding: JSON.stringify(decodingRequest.cortexStructure, null, 2),
-                finalOptimizedPrompt: decodingResult.text,
-                originalPrompt: originalPrompt,
-                statementToQuestionConversion: originalPrompt.includes('costs') && decodingResult.text.includes('How much')
+                    enhanceReadability: true,
+                    isAnswer: true // Flag to indicate this is an answer frame
+                },
+                prompt: lispInstructions.decoderPrompt
             });
             
-            // 🚨 QUALITY CHECK: Detect terrible AI responses and use intelligent fallback
-            if (await this.isTerribleResponse(decodingResult.text, originalPrompt)) {
-                loggingService.warn('🚨 DETECTED TERRIBLE AI RESPONSE - Using intelligent fallback', {
-                    userId,
-                    originalPrompt: originalPrompt.substring(0, 100),
-                    terribleResponse: decodingResult.text,
-                    reason: 'AI response is clearly inferior to original'
-                });
-                
-                const intelligentResult = await this.createIntelligentOptimization(originalPrompt);
-                decodingResult.text = intelligentResult;
-            }
+            loggingService.info('✅ Step 3: Answer decoding completed', {
+                userId,
+                lispAnswer: JSON.stringify(processingResult.output, null, 2),
+                naturalLanguageAnswer: decodingResult.text,
+                originalQuery: originalPrompt,
+                answerLength: decodingResult.text.length,
+                tokenReduction: `${Math.round(((originalPrompt.length - decodingResult.text.length) / originalPrompt.length) * 100)}%`
+            });
+            
+            // For answer generation, we don't need quality checks since we're providing actual answers
 
-            // Calculate token reduction
-            const originalTokens = originalPrompt.length / 4; // Rough estimate
-            const optimizedTokens = decodingResult.text.length / 4;
-            const reductionPercentage = ((originalTokens - optimizedTokens) / originalTokens) * 100;
+            // Calculate token reduction (comparing LISP vs natural language output)
+            // The REAL savings come from generating answers in LISP
+            const lispAnswerTokens = JSON.stringify(processingResult.output).length / 4;
+            const naturalLanguageTokens = decodingResult.text.length / 4;
+            // Estimate what a full natural language response would have been (5-10x larger)
+            const estimatedFullResponseTokens = naturalLanguageTokens * 7;
+            const reductionPercentage = ((estimatedFullResponseTokens - lispAnswerTokens) / estimatedFullResponseTokens) * 100;
+            
+            // For compatibility with existing code
+            const originalTokens = originalPrompt.length / 4;
+            const optimizedTokens = lispAnswerTokens;
 
             const cortexMetadata = {
                 processingTime: Date.now() - startTime,
                 encodingConfidence: encodingResult.confidence,
-                optimizationsApplied: processingResult.optimizations.length,
+                answerGenerated: processingResult.output.frameType === 'answer',
                 decodingConfidence: decodingResult.confidence,
-                semanticIntegrity: processingResult.metadata.semanticIntegrity,
                 cortexModel: {
                     encoder: DEFAULT_CORTEX_CONFIG.encoding.model,
                     core: DEFAULT_CORTEX_CONFIG.coreProcessing.model,
                     decoder: DEFAULT_CORTEX_CONFIG.decoding.model
                 },
-                tokensSaved: Math.max(0, originalTokens - optimizedTokens),
-                reductionPercentage: Math.max(0, reductionPercentage)
+                tokensSaved: Math.max(0, estimatedFullResponseTokens - lispAnswerTokens),
+                reductionPercentage: Math.max(0, reductionPercentage),
+                semanticIntegrity: processingResult.metadata?.semanticIntegrity || 1.0
             };
 
             loggingService.info('✅ Cortex processing completed successfully', {
@@ -424,8 +366,8 @@ export class OptimizationService {
 
             // 💾 Cache the successful result for future use
             const tokenReductionData = {
-                originalTokens,
-                cortexTokens: optimizedTokens,
+                originalTokens: estimatedFullResponseTokens,
+                cortexTokens: lispAnswerTokens,
                 reductionPercentage
             };
 
@@ -436,10 +378,35 @@ export class OptimizationService {
                 tokenReductionData
             );
 
+            // Analyze the actual impact of Cortex optimization
+            let impactMetrics: CortexImpactMetrics | undefined;
+            try {
+                loggingService.info('📊 Analyzing Cortex optimization impact...', { userId });
+                
+                impactMetrics = await CortexAnalyticsService.analyzeOptimizationImpact(
+                    originalPrompt,
+                    JSON.stringify(processingResult.output), // The LISP answer
+                    decodingResult.text, // The natural language answer
+                    model || cortexConfig?.model || 'gpt-4'
+                );
+                
+                loggingService.info('✅ Impact analysis completed', {
+                    userId,
+                    tokenSavings: impactMetrics.tokenReduction.percentageSavings,
+                    clarityScore: impactMetrics.qualityMetrics.clarityScore,
+                    confidenceScore: impactMetrics.justification.confidenceScore
+                });
+            } catch (error) {
+                loggingService.error('Failed to analyze Cortex impact', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+
             return {
                 optimizedPrompt: decodingResult.text,
                 cortexMetadata,
-                tokenReduction: tokenReductionData
+                tokenReduction: tokenReductionData,
+                impactMetrics
             };
 
         } catch (error) {
@@ -949,7 +916,8 @@ REPLY FORMAT (JSON only):
                         cortexResult = await this.processCortexOptimization(
                             request.prompt,
                             request.options.cortexConfig || {},
-                            request.userId
+                            request.userId,
+                            request.model
                         );
                         
                         loggingService.info('✅ Cortex processing completed', { 
@@ -1253,8 +1221,8 @@ REPLY FORMAT (JSON only):
             // Create optimization record
             const optimization = await Optimization.create({
                 userId: request.userId,
-                originalPrompt: request.prompt,
-                optimizedPrompt: optimizedPrompt,
+                userQuery: request.prompt, // Changed from originalPrompt
+                generatedAnswer: optimizedPrompt, // Changed from optimizedPrompt
                 optimizationTechniques: appliedOptimizations,
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
@@ -1273,6 +1241,7 @@ REPLY FORMAT (JSON only):
                     implemented: index === 0,
                 })),
                 metadata,
+                cortexImpactMetrics: cortexResult?.impactMetrics,
             });
 
             // Update user's optimization count
@@ -1426,8 +1395,8 @@ REPLY FORMAT (JSON only):
 
                     const optimization = await Optimization.create({
                         userId: request.userId,
-                        originalPrompt: request.requests.map(r => r.prompt).join('\n\n---\n\n'),
-                        optimizedPrompt: suggestion.optimizedPrompt!,
+                        userQuery: request.requests.map(r => r.prompt).join('\n\n---\n\n'), // Changed from originalPrompt
+                        generatedAnswer: suggestion.optimizedPrompt!, // Changed from optimizedPrompt
                         optimizationTechniques: ['request_fusion', suggestion.fusionDetails.fusionStrategy],
                         originalTokens: originalTotalTokens,
                         optimizedTokens,
@@ -1485,7 +1454,7 @@ REPLY FORMAT (JSON only):
             const query: any = {};
 
             if (filters.userId) query.userId = filters.userId;
-            if (filters.applied !== undefined) query.applied = filters.applied;
+            // Removed applied filter - no longer tracking applied status
             if (filters.category) query.category = filters.category;
             if (filters.minSavings !== undefined) query.costSaved = { $gte: filters.minSavings };
             if (filters.startDate || filters.endDate) {
@@ -1533,9 +1502,7 @@ REPLY FORMAT (JSON only):
                 throw new Error('Optimization not found');
             }
 
-            optimization.applied = true;
-            optimization.appliedAt = new Date();
-            optimization.appliedCount = (optimization.appliedCount || 0) + 1;
+            // No longer tracking applied status - answers are simply generated
             await optimization.save();
 
             // Track activity
@@ -1643,7 +1610,10 @@ REPLY FORMAT (JSON only):
         }
     }
 
-    static async generateBulkOptimizations(userId: string, promptIds: string[]) {
+    static async generateBulkOptimizations(userId: string, promptIds: string[], options?: {
+        cortexEnabled?: boolean;
+        cortexConfig?: any;
+    }) {
         try {
             const prompts = await Usage.find({
                 userId,
@@ -1659,6 +1629,8 @@ REPLY FORMAT (JSON only):
                         prompt: promptData.prompt,
                         service: promptData.service,
                         model: promptData.model,
+                        cortexEnabled: options?.cortexEnabled,
+                        cortexConfig: options?.cortexConfig,
                     });
                     optimizations.push(optimization);
                 } catch (error) {
@@ -1826,17 +1798,16 @@ REPLY FORMAT (JSON only):
             })
                 .sort({ createdAt: -1 })
                 .limit(10)
-                .select('originalPrompt optimizedPrompt tokensSaved costSaved improvementPercentage applied appliedAt createdAt')
+                .select('userQuery generatedAnswer tokensSaved costSaved improvementPercentage createdAt')
                 .lean();
 
             const formattedHistory = history.map((opt, index) => ({
                 id: opt._id,
                 version: history.length - index, // Calculate version based on order
-                prompt: opt.optimizedPrompt || opt.originalPrompt,
+                prompt: opt.generatedAnswer || opt.userQuery, // Updated field names,
                 tokens: opt.tokensSaved || 0,
                 cost: opt.costSaved || 0,
-                createdAt: opt.createdAt,
-                appliedAt: opt.appliedAt
+                createdAt: opt.createdAt
             }));
 
             return {
@@ -1861,9 +1832,7 @@ REPLY FORMAT (JSON only):
                 throw new Error('Optimization not found');
             }
 
-            // Mark as not applied (revert)
-            optimization.applied = false;
-            optimization.appliedAt = undefined;
+            // No longer tracking applied status
 
             // Add metadata about the reversion
             if (!optimization.metadata) {

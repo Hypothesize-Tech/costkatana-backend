@@ -226,7 +226,7 @@ export class AnalyticsManagerTool extends Tool {
                 recentOptimizations: recentOptimizations.map(opt => ({
                     type: opt.category,
                     estimatedSavings: opt.costSaved,
-                    status: opt.applied ? 'applied' : 'pending',
+                    status: 'completed', // All answers are completed
                     date: opt.createdAt
                 })),
                 timeRange: {

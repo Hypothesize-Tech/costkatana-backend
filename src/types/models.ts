@@ -20,8 +20,8 @@ export interface IUsageData {
 
 export interface IOptimization {
     userId: string;
-    originalPrompt: string;
-    optimizedPrompt: string;
+    userQuery: string; // Changed from originalPrompt
+    generatedAnswer: string; // Changed from optimizedPrompt
     originalTokens: number;
     optimizedTokens: number;
     tokensSaved: number;

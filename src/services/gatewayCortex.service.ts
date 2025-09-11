@@ -15,9 +15,15 @@ import { SemanticPrimitivesService } from './semanticPrimitives.service';
 import { CortexSastEncoderService } from './cortexSastEncoder.service';
 import { CortexSastIntegrationService } from './cortexSastIntegration.service';
 import { 
-    CortexEncodingRequest, 
-    CortexProcessingRequest, 
-    CortexDecodingRequest 
+    CortexFrame,
+    CortexConfig,
+    CortexError,
+    CortexErrorCode,
+    CortexProcessingRequest,
+    CortexEncodingResult,
+    DEFAULT_CORTEX_CONFIG,
+    CortexEncodingRequest,
+    CortexDecodingRequest
 } from '../types/cortex.types';
 
 /**
@@ -223,11 +229,7 @@ export class GatewayCortexService {
             loggingService.debug('🔄 Gateway Cortex encoding...', { requestId: context.requestId });
             const encodingRequest: CortexEncodingRequest = {
                 text: optimizedPrompt, // Use context-optimized prompt
-                metadata: {
-                    domain: 'general',
-                    language: 'en',
-                    complexity: complexityAnalysis.overallComplexity === 'expert' ? 'complex' : complexityAnalysis.overallComplexity
-                }
+                language: 'en'
             };
 
             // 🧬 DYNAMIC SAST vs TRADITIONAL CORTEX SELECTION
@@ -256,7 +258,7 @@ export class GatewayCortexService {
                 // Perform SAST encoding
                 const sastResult = await sastEncoder.encodeSast({
                     text: optimizedPrompt,
-                    language: encodingRequest.metadata?.language || 'en',
+                    language: encodingRequest.language || 'en',
                     disambiguationStrategy: 'hybrid',
                     preserveAmbiguity: false,
                     outputFormat: 'frame'
@@ -267,7 +269,7 @@ export class GatewayCortexService {
                 if ((context.cortexOperation as any) === 'analyze') {
                     evolutionComparison = await sastIntegration.compareEvolution(
                         optimizedPrompt,
-                        encodingRequest.metadata?.language || 'en'
+                        encodingRequest.language || 'en'
                     );
                 }
 
@@ -761,7 +763,7 @@ export class GatewayCortexService {
             });
             const processingRequest: CortexProcessingRequest = {
                 input: encodingResult.cortexFrame,
-                operation: context.cortexOperation || 'optimize',
+                operation: 'answer', // NEW ARCHITECTURE: Always answer generation,
                 options: {
                     preserveSemantics: context.cortexPreserveSemantics !== false,
                     targetReduction: this.getTargetReduction(complexityAnalysis.overallComplexity),

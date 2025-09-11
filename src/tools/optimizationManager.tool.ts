@@ -396,9 +396,9 @@ export class OptimizationManagerTool extends Tool {
                 optimization: {
                     id: optimization._id,
                     type: optimization.category,
-                    description: optimization.optimizedPrompt,
+                    description: optimization.generatedAnswer,
                     estimatedSavings: optimization.costSaved,
-                    status: optimization.applied ? 'applied' : 'pending',
+                    status: 'completed', // All answers are completed
                     createdAt: optimization.createdAt,
                     confidence: dynamicData.confidence,
                     dataQuality: dynamicData.dataQuality,
@@ -766,16 +766,15 @@ export class OptimizationManagerTool extends Tool {
                 optimizations: optimizations.map(opt => ({
                     id: opt._id,
                     type: opt.category,
-                    description: opt.optimizedPrompt,
+                    description: opt.generatedAnswer,
                     estimatedSavings: opt.costSaved,
-                    status: opt.applied ? 'applied' : 'pending',
+                    status: 'completed', // All answers are completed
                     createdAt: opt.createdAt,
                     hasImplementationDetails: !!opt.metadata?.implementationDetails && Object.keys(opt.metadata.implementationDetails).length > 0
                 })),
                 summary: {
                     totalEstimatedSavings: Number(optimizations.reduce((sum, opt) => sum + (opt.costSaved || 0), 0).toFixed(4)),
-                    pendingOptimizations: optimizations.filter(opt => !opt.applied).length,
-                    appliedOptimizations: optimizations.filter(opt => opt.applied).length,
+                    totalOptimizations: optimizations.length, // All are completed answers
                     typeBreakdown: this.getOptimizationTypeBreakdown(optimizations)
                 }
             };

@@ -125,7 +125,7 @@ export const optimizationRequestSchema = z.object({
     
     // 🚀 CORTEX VALIDATION PARAMETERS
     enableCortex: z.boolean().optional(),
-    cortexOperation: z.enum(['optimize', 'compress', 'analyze', 'transform', 'sast']).optional(),
+    cortexOperation: z.enum(['optimize', 'compress', 'analyze', 'transform', 'sast', 'answer']).optional(),
     cortexEncodingModel: z.string().optional(),
     cortexCoreModel: z.string().optional(),
     cortexDecodingModel: z.string().optional(),

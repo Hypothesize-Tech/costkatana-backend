@@ -48,6 +48,26 @@ interface UsageAnalysisResponse {
 export class BedrockService {
     
     /**
+     * Get appropriate max tokens based on model capability
+     */
+    private static getMaxTokensForModel(modelId: string): number {
+        // Higher token limits for more capable models to ensure complete code generation
+        if (modelId.includes('claude-opus-4')) {
+            return 16384; // Claude Opus 4.1 - maximum capability for large code responses
+        } else if (modelId.includes('claude-3-5-sonnet')) {
+            return 12288; // Claude 3.5 Sonnet - enhanced for large outputs
+        } else if (modelId.includes('claude-3-5-haiku')) {
+            return 8192; // Claude 3.5 Haiku - increased for better performance
+        } else if (modelId.includes('nova-pro')) {
+            return 8000; // Nova Pro can handle larger outputs
+        } else if (modelId.includes('nova')) {
+            return 6000; // Other Nova models - increased limit
+        } else {
+            return AWS_CONFIG.bedrock.maxTokens; // Default fallback
+        }
+    }
+
+    /**
      * Convert model ID to inference profile ARN if needed
      */
     private static convertToInferenceProfile(modelId: string): string {
@@ -58,9 +78,11 @@ export class BedrockService {
         const modelMappings: Record<string, string> = {
             // Anthropic Claude 3.5 models require inference profiles
             'anthropic.claude-3-5-haiku-20241022-v1:0': `${regionPrefix}.anthropic.claude-3-5-haiku-20241022-v1:0`,
+            'anthropic.claude-3-5-sonnet-20240620-v1:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0`,
             'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
             
             // Legacy Claude 3 models removed - use Claude 3.5+ only
+            'anthropic.claude-3-haiku-20240307-v1:0': `${regionPrefix}.anthropic.claude-3-haiku-20240307-v1:0`,
             
             // Add Claude 4 and upgraded Claude 3.5 models
             'anthropic.claude-opus-4-1-20250805-v1:0': `${regionPrefix}.anthropic.claude-opus-4-1-20250805-v1:0`,
@@ -133,20 +155,26 @@ export class BedrockService {
         return withoutSuffix;
     }
 
-    private static createMessagesPayload(prompt: string) {
+    private static createMessagesPayload(prompt: string, model?: string) {
+        // Dynamic token limits based on model capability
+        const maxTokens = this.getMaxTokensForModel(model || '');
+        
         return {
             anthropic_version: "bedrock-2023-05-31",
-            max_tokens: AWS_CONFIG.bedrock.maxTokens,
+            max_tokens: maxTokens,
             temperature: AWS_CONFIG.bedrock.temperature,
             messages: [{ role: "user", content: prompt }],
         };
     }
 
-    private static createNovaPayload(prompt: string) {
+    private static createNovaPayload(prompt: string, model?: string) {
+        // Dynamic token limits based on model capability
+        const maxTokens = this.getMaxTokensForModel(model || '');
+        
         return {
             messages: [{ role: "user", content: [{ text: prompt }] }],
             inferenceConfig: {
-                max_new_tokens: AWS_CONFIG.bedrock.maxTokens,
+                max_new_tokens: maxTokens,
                 temperature: AWS_CONFIG.bedrock.temperature,
                 top_p: 0.9,
             }
@@ -221,13 +249,13 @@ export class BedrockService {
         let result: string = '';
 
         // Check model type and create appropriate payload
-        if (model.includes('claude-3-5') || model.includes('claude-4') || model.includes('claude-opus-4')) {
+        if (model.includes('claude-3') || model.includes('claude-4') || model.includes('claude-opus-4')) {
             // Modern Claude models (3.x) use messages format
-            payload = this.createMessagesPayload(prompt);
+            payload = this.createMessagesPayload(prompt, model);
             responsePath = 'content';
         } else if (model.includes('nova')) {
             // Amazon Nova models
-            payload = this.createNovaPayload(prompt);
+            payload = this.createNovaPayload(prompt, model);
             responsePath = 'nova';
         } else if (model.includes('amazon.titan')) {
             // Amazon Titan models
@@ -239,7 +267,7 @@ export class BedrockService {
             responsePath = 'llama';
         } else if (model.includes('mistral')) {
             // Mistral models use messages format
-            payload = this.createMessagesPayload(prompt);
+            payload = this.createMessagesPayload(prompt, model);
             responsePath = 'content';
         } else if (model.includes('cohere.command')) {
             // Cohere Command models
@@ -255,7 +283,7 @@ export class BedrockService {
             responsePath = 'completion';
         } else {
             // Default to messages format for unknown models
-            payload = this.createMessagesPayload(prompt);
+            payload = this.createMessagesPayload(prompt, model);
             responsePath = 'content';
         }
 

@@ -6,8 +6,10 @@
  * intermediate representation that reduces token costs and improves processing efficiency.
  */
 
+import { SemanticCortexFrame } from './semanticPrimitives.types';
+
 // ============================================================================
-// CORE CORTEX PRIMITIVES
+// CORTEX CORE TYPES
 // ============================================================================
 
 /**
@@ -244,37 +246,27 @@ export type CortexFrame =
  */
 export interface CortexEncodingRequest {
     text: string;
-    context?: string;
-    conversationHistory?: Array<{
-        role: 'user' | 'assistant' | 'system';
-        content: string;
-        timestamp?: Date;
-    }>;
-    metadata?: {
-        domain?: string;
-        language?: string;
-        complexity?: 'simple' | 'medium' | 'complex';
-    };
+    language: string;
+    userId?: string;
+    config?: Partial<CortexConfig>;
+    prompt?: string;
 }
 
 /**
  * Result of Cortex encoding
  */
 export interface CortexEncodingResult {
-    cortexStructure: CortexFrame;
+    cortexFrame: CortexFrame;
     confidence: number;
     processingTime: number;
-    tokenReduction?: {
-        originalTokens: number;
-        cortexTokens: number;
-        reductionPercentage: number;
+    modelUsed: string;
+    originalText: string;
+    analysis: {
+        language: string;
+        sentiment: string;
+        complexity: string;
     };
-    metadata: {
-        encodingModel: string;
-        detectedIntent: CortexFrameType;
-        identifiedRoles: CortexRole[];
-        primitiveMapping: Record<string, CortexPrimitive>;
-    };
+    error?: string; // Added optional error property
 }
 
 /**
@@ -282,14 +274,16 @@ export interface CortexEncodingResult {
  */
 export interface CortexProcessingRequest {
     input: CortexFrame;
-    operation: 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast';
+    operation: 'optimize' | 'compress' | 'analyze' | 'transform' | 'sast' | 'answer';
     options?: {
         targetReduction?: number;
         preserveSemantics?: boolean;
         enableInference?: boolean;
         maxComplexity?: number;
         maxProcessingTime?: number;
+        generateAnswer?: boolean; // New flag for answer generation
     };
+    prompt?: string;
     metadata?: {
         userId?: string;
         provider?: string;
@@ -337,6 +331,8 @@ export interface CortexDecodingRequest {
         domain?: string;
         audienceLevel?: 'beginner' | 'intermediate' | 'expert';
     };
+    prompt?: string;
+    config?: Partial<CortexConfig>;
 }
 
 /**
@@ -359,6 +355,27 @@ export interface CortexDecodingResult {
     };
 }
 
+export interface CortexSastEncodingRequest {
+    text: string;
+    language: string;
+    disambiguationStrategy: 'most_likely' | 'hybrid' | 'none';
+    preserveAmbiguity: boolean;
+}
+
+export interface CortexSastEncodingResult {
+    semanticFrame: SemanticCortexFrame;
+    confidence: number;
+    processingTime: number;
+    modelUsed: string;
+    originalText: string;
+    analysis: {
+        language: string;
+        sentiment: string;
+        complexity: string;
+    };
+    error?: string;
+}
+
 // ============================================================================
 // CORTEX CONFIGURATION AND METADATA
 // ============================================================================
@@ -369,32 +386,26 @@ export interface CortexDecodingResult {
 export interface CortexConfig {
     encoding: {
         model: string;
-        temperature?: number;
-        maxTokens?: number;
-        enableCaching?: boolean;
+        strategy: 'balanced' | 'performance' | 'quality';
     };
     coreProcessing: {
         model: string;
-        optimizationLevel: 'conservative' | 'balanced' | 'aggressive';
-        enableSemanticValidation?: boolean;
-        maxProcessingTime?: number;
+        optimizationLevel: 'balanced' | 'aggressive' | 'conservative';
     };
     decoding: {
         model: string;
-        qualityThreshold?: number;
-        enablePostProcessing?: boolean;
-        fidelityCheck?: boolean;
+        style: 'formal' | 'conversational' | 'technical';
     };
-    caching: {
+    instructionGenerator: {
+        model: string;
+    };
+    cache: {
         enabled: boolean;
-        ttl?: number;
-        enableFragmentCaching?: boolean;
-        cacheStrategy?: 'lru' | 'lfu' | 'ttl';
+        ttl: number; // in seconds
     };
-    monitoring: {
-        enableMetrics?: boolean;
-        enableTracing?: boolean;
-        logLevel?: 'error' | 'warn' | 'info' | 'debug';
+    security: {
+        contentFilter: 'strict' | 'moderate' | 'none';
+        PIIDetection: boolean;
     };
 }
 
@@ -688,32 +699,26 @@ export const isErrorFrame = (frame: CortexFrame): frame is CortexErrorFrame => f
  */
 export const DEFAULT_CORTEX_CONFIG: CortexConfig = {
     encoding: {
-        model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        temperature: 0.1,
-        maxTokens: 2000,
-        enableCaching: true
+        model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        strategy: 'balanced'
     },
     coreProcessing: {
-        model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-        optimizationLevel: 'balanced',
-        enableSemanticValidation: true,
-        maxProcessingTime: 1200000 // Increased to 60 seconds
+        model: 'anthropic.claude-opus-4-1-20250805-v1:0',
+        optimizationLevel: 'balanced'
     },
     decoding: {
-        model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        qualityThreshold: 0.85,
-        enablePostProcessing: true,
-        fidelityCheck: true
+        model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        style: 'conversational'
     },
-    caching: {
+    instructionGenerator: {
+        model: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+    },
+    cache: {
         enabled: true,
-        ttl: 3600000, // 1 hour
-        enableFragmentCaching: true,
-        cacheStrategy: 'lru'
+        ttl: 3600
     },
-    monitoring: {
-        enableMetrics: true,
-        enableTracing: true,
-        logLevel: 'info'
+    security: {
+        contentFilter: 'moderate',
+        PIIDetection: true
     }
 };

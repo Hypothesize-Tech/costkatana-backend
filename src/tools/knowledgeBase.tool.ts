@@ -7,7 +7,9 @@ export class KnowledgeBaseTool extends Tool {
     description = `Search the comprehensive AI Cost Optimizer knowledge base for detailed information about:
     
     CORE CAPABILITIES:
-    - Cost optimization strategies and techniques (prompt compression, context trimming, model switching)
+    - AI usage optimization strategies (not just prompts - complete usage patterns)
+    - Cortex meta-language system for advanced optimization
+    - Cost optimization techniques (context trimming, model switching, usage efficiency)
     - AI insights and analytics (usage patterns, cost trends, predictive analytics)
     - Multi-agent workflows and coordination patterns
     - API integration guides and system architecture
@@ -18,6 +20,8 @@ export class KnowledgeBaseTool extends Tool {
     
     SYSTEM INFORMATION:
     - Current system components (controllers, services, infrastructure)
+    - Cortex architecture (Encoder, Core Processor, Decoder)
+    - Cortex impact analytics and justification system
     - Authentication patterns and API endpoints
     - Real-time monitoring and observability features
     - Webhook management and delivery systems

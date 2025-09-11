@@ -1483,22 +1483,127 @@ export class PredictiveCostIntelligenceService {
         reasonCode: string;
         potentialSavings: number;
     }>> {
-        // Use parameters to prevent linting warnings
-        loggingService.debug(`Generating model recommendations for user: ${userId}, scope: ${scopeId}, tokens: ${projectedTokens}`);
-        
-        // Calculate realistic savings based on actual usage data
-        const currentModelCost = predictedCost || this.estimateCostFromTokens(projectedTokens);
-        const optimizedModelCost = currentModelCost * 0.1; // GPT-3.5-turbo is ~90% cheaper
-        const savings = currentModelCost - optimizedModelCost;
-        
-        return [
-            {
-                current: 'gpt-4',
-                recommended: 'gpt-3.5-turbo',
-                reasonCode: 'COST_OPTIMIZATION',
-                potentialSavings: Math.max(savings, 0.01) // Ensure positive savings
+        try {
+            // Get user's actual usage patterns
+            const usageData = await Usage.aggregate([
+                { 
+                    $match: { 
+                        userId,
+                        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } // Last 30 days
+                    } 
+                },
+                {
+                    $group: {
+                        _id: '$model',
+                        totalCost: { $sum: '$cost' },
+                        totalTokens: { $sum: '$totalTokens' },
+                        count: { $sum: 1 },
+                        avgPromptLength: { $avg: { $strLenCP: '$prompt' } }
+                    }
+                },
+                { $sort: { totalCost: -1 } }
+            ]);
+
+            const recommendations: Array<{
+                current: string;
+                recommended: string;
+                reasonCode: string;
+                potentialSavings: number;
+            }> = [];
+
+            // Analyze each model used
+            for (const usage of usageData) {
+                const currentModel = usage._id;
+                let recommendedModel = '';
+                let reasonCode = '';
+                let savingsPercentage = 0;
+
+                // Dynamic recommendations based on model and usage patterns
+                if (currentModel.includes('gpt-4') && usage.avgPromptLength < 500) {
+                    // Short prompts don't need GPT-4
+                    recommendedModel = 'gpt-3.5-turbo';
+                    reasonCode = 'SHORT_PROMPTS';
+                    savingsPercentage = 0.9; // 90% cheaper
+                } else if (currentModel.includes('claude-3-opus') && usage.count > 100) {
+                    // High volume usage could use cheaper Claude model
+                    recommendedModel = 'claude-3-haiku';
+                    reasonCode = 'HIGH_VOLUME';
+                    savingsPercentage = 0.8; // 80% cheaper
+                } else if (currentModel.includes('gpt-4') && usage.totalCost > 10) {
+                    // High cost usage - suggest trying Claude
+                    recommendedModel = 'claude-3-sonnet';
+                    reasonCode = 'COST_ALTERNATIVE';
+                    savingsPercentage = 0.5; // 50% cheaper
+                } else if (currentModel === 'gpt-3.5-turbo' && usage.avgPromptLength > 2000) {
+                    // Long prompts might benefit from GPT-3.5-turbo-16k
+                    recommendedModel = 'gpt-3.5-turbo-16k';
+                    reasonCode = 'LONG_CONTEXT';
+                    savingsPercentage = 0.1; // 10% optimization
+                } else if (currentModel.includes('o1-preview') || currentModel.includes('o1-mini')) {
+                    // Expensive reasoning models - suggest alternatives
+                    recommendedModel = 'gpt-4-turbo';
+                    reasonCode = 'REASONING_ALTERNATIVE';
+                    savingsPercentage = 0.7; // 70% cheaper
+                }
+
+                if (recommendedModel && savingsPercentage > 0) {
+                    const potentialSavings = usage.totalCost * savingsPercentage;
+                    if (potentialSavings > 0.05) { // Only recommend if savings > $0.05
+                        recommendations.push({
+                            current: currentModel,
+                            recommended: recommendedModel,
+                            reasonCode,
+                            potentialSavings: Math.round(potentialSavings * 100) / 100
+                        });
+                    }
+                }
             }
-        ];
+
+            // If no specific recommendations, provide general guidance based on cost
+            if (recommendations.length === 0 && predictedCost > 1) {
+                const currentModelCost = predictedCost || this.estimateCostFromTokens(projectedTokens);
+                
+                // Suggest most appropriate model based on projected usage
+                if (projectedTokens < 10000) {
+                    recommendations.push({
+                        current: 'gpt-4',
+                        recommended: 'gpt-3.5-turbo',
+                        reasonCode: 'LOW_TOKEN_USAGE',
+                        potentialSavings: currentModelCost * 0.9
+                    });
+                } else if (projectedTokens > 100000) {
+                    recommendations.push({
+                        current: 'gpt-4',
+                        recommended: 'claude-3-haiku',
+                        reasonCode: 'HIGH_TOKEN_VOLUME',
+                        potentialSavings: currentModelCost * 0.85
+                    });
+                }
+            }
+
+            // Sort by potential savings
+            return recommendations.sort((a, b) => b.potentialSavings - a.potentialSavings).slice(0, 3);
+
+        } catch (error) {
+            loggingService.error('Error generating dynamic model recommendations:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                scopeId
+            });
+            
+            // Fallback to simple recommendation
+            const currentModelCost = predictedCost || this.estimateCostFromTokens(projectedTokens);
+            const savings = currentModelCost * 0.5;
+            
+            return [
+                {
+                    current: 'gpt-4',
+                    recommended: 'gpt-4-turbo',
+                    reasonCode: 'GENERAL_OPTIMIZATION',
+                    potentialSavings: Math.max(savings, 0.01)
+                }
+            ];
+        }
     }
 
     private static async assessRiskFactors(

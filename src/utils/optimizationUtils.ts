@@ -589,46 +589,62 @@ function suggestAlternativeModel(
         currentCost = (tokenCount / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60;
     }
 
-    // Model alternatives by provider
+    // Dynamic model alternatives by provider - prioritize newer, more efficient models
     const alternatives: Record<AIProvider, string[]> = {
-        [AIProvider.OpenAI]: ['gpt-3.5-turbo', 'gpt-4-turbo', 'gpt-4'],
-        [AIProvider.AWSBedrock]: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0'],
-        [AIProvider.Anthropic]: ['claude-3-5-haiku-20241022', 'claude-3-sonnet-20240229'],
-        [AIProvider.Google]: ['gemini-1.5-flash', 'gemini-pro'],
-        [AIProvider.Cohere]: ['command-light', 'command'],
-        [AIProvider.Gemini]: ['gemini-1.5-flash', 'gemini-pro'],
-        [AIProvider.DeepSeek]: [],
-        [AIProvider.Groq]: [],
+        [AIProvider.OpenAI]: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
+        [AIProvider.AWSBedrock]: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-sonnet-20241022-v2:0', 'anthropic.claude-opus-4-1-20250805-v1:0', 'amazon.nova-lite-v1:0'],
+        [AIProvider.Anthropic]: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'],
+        [AIProvider.Google]: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+        [AIProvider.Cohere]: ['command-r', 'command-r-plus'],
+        [AIProvider.Gemini]: ['gemini-1.5-flash', 'gemini-1.5-pro'],
+        [AIProvider.DeepSeek]: ['deepseek-chat', 'deepseek-coder'],
+        [AIProvider.Groq]: ['llama-3.1-8b-instant', 'llama-3.1-70b-versatile'],
         [AIProvider.HuggingFace]: [],
         [AIProvider.Ollama]: [],
         [AIProvider.Replicate]: [],
-        [AIProvider.Azure]: ['gpt-3.5-turbo', 'gpt-4-turbo']
+        [AIProvider.Azure]: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo']
     };
 
     const modelAlternatives = alternatives[provider] || [];
     let bestAlternative: { model: string; cost: number; savings: number } | null = null;
 
-    for (const altModel of modelAlternatives) {
-        if (altModel !== currentModel) {
-            let altCost = 0;
-            try {
-                altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
-            } catch (error) {
-                loggingService.warn('Failed to calculate alternative cost for model, skipping', {
-                    component: 'optimizationUtils',
-                    operation: 'suggestAlternativeModel',
-                    provider,
-                    currentModel,
-                    alternativeModel: altModel,
-                    error: error instanceof Error ? error.message : String(error)
-                });
-                continue;
-            }
-            const savings = currentCost - altCost;
+    // Filter alternatives based on current model tier and task complexity
+    const filteredAlternatives = modelAlternatives.filter(altModel => {
+        if (altModel === currentModel) return false;
+        
+        // Don't suggest downgrades for complex tasks (high token count)
+        if (tokenCount > 2000) {
+            // For complex tasks, only suggest equivalent or better models
+            const isDowngrade = (
+                (currentModel.includes('gpt-4') && altModel.includes('gpt-3.5')) ||
+                (currentModel.includes('claude-3-5-sonnet') && altModel.includes('haiku')) ||
+                (currentModel.includes('gemini-1.5-pro') && altModel.includes('flash'))
+            );
+            return !isDowngrade;
+        }
+        
+        return true;
+    });
 
-            if (savings > 0 && (!bestAlternative || savings > bestAlternative.savings)) {
-                bestAlternative = { model: altModel, cost: altCost, savings };
-            }
+    for (const altModel of filteredAlternatives) {
+        let altCost = 0;
+        try {
+            altCost = calculateCost(tokenCount, 150, providerEnumToString(provider), altModel);
+        } catch (error) {
+            loggingService.warn('Failed to calculate alternative cost for model, skipping', {
+                component: 'optimizationUtils',
+                operation: 'suggestAlternativeModel',
+                provider,
+                currentModel,
+                alternativeModel: altModel,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            continue;
+        }
+        const savings = currentCost - altCost;
+
+        if (savings > 0 && (!bestAlternative || savings > bestAlternative.savings)) {
+            bestAlternative = { model: altModel, cost: altCost, savings };
         }
     }
 

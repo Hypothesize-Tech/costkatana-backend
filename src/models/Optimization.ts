@@ -3,8 +3,8 @@ import mongoose, { Schema } from 'mongoose';
 export interface IOptimization {
     _id?: any;
     userId: mongoose.Types.ObjectId;
-    originalPrompt: string;
-    optimizedPrompt: string;
+    userQuery: string; // Changed from originalPrompt
+    generatedAnswer: string; // Changed from optimizedPrompt
     optimizationTechniques: string[];
     originalTokens: number;
     optimizedTokens: number;
@@ -32,9 +32,37 @@ export interface IOptimization {
         }>;
         [key: string]: any;
     };
-    applied: boolean;
-    appliedAt?: Date;
-    appliedCount: number;
+    cortexImpactMetrics?: {
+        tokenReduction: {
+            withoutCortex: number;
+            withCortex: number;
+            absoluteSavings: number;
+            percentageSavings: number;
+        };
+        qualityMetrics: {
+            clarityScore: number;
+            completenessScore: number;
+            relevanceScore: number;
+            ambiguityReduction: number;
+            redundancyRemoval: number;
+        };
+        performanceMetrics: {
+            processingTime: number;
+            responseLatency: number;
+            compressionRatio: number;
+        };
+        costImpact: {
+            estimatedCostWithoutCortex: number;
+            actualCostWithCortex: number;
+            costSavings: number;
+            savingsPercentage: number;
+        };
+        justification: {
+            optimizationTechniques: string[];
+            keyImprovements: string[];
+            confidenceScore: number;
+        };
+    };
     feedback?: {
         helpful: boolean;
         rating?: number;
@@ -52,13 +80,13 @@ const optimizationSchema = new Schema<IOptimization>({
         ref: 'User',
         required: true,
     },
-    originalPrompt: {
+    userQuery: {
         type: String,
-        required: true,
+        required: true
     },
-    optimizedPrompt: {
+    generatedAnswer: {
         type: String,
-        required: true,
+        required: true
     },
     optimizationTechniques: [{
         type: String,
@@ -135,14 +163,39 @@ const optimizationSchema = new Schema<IOptimization>({
         type: Schema.Types.Mixed,
         default: {},
     },
-    applied: {
-        type: Boolean,
-        default: false,
-    },
-    appliedAt: Date,
-    appliedCount: {
-        type: Number,
-        default: 0,
+    cortexImpactMetrics: {
+        type: {
+            tokenReduction: {
+                withoutCortex: Number,
+                withCortex: Number,
+                absoluteSavings: Number,
+                percentageSavings: Number
+            },
+            qualityMetrics: {
+                clarityScore: Number,
+                completenessScore: Number,
+                relevanceScore: Number,
+                ambiguityReduction: Number,
+                redundancyRemoval: Number
+            },
+            performanceMetrics: {
+                processingTime: Number,
+                responseLatency: Number,
+                compressionRatio: Number
+            },
+            costImpact: {
+                estimatedCostWithoutCortex: Number,
+                actualCostWithCortex: Number,
+                costSavings: Number,
+                savingsPercentage: Number
+            },
+            justification: {
+                optimizationTechniques: [String],
+                keyImprovements: [String],
+                confidenceScore: Number
+            }
+        },
+        required: false
     },
     feedback: {
         helpful: Boolean,

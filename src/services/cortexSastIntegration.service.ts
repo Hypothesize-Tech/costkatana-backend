@@ -10,11 +10,18 @@ import { SemanticPrimitivesService } from './semanticPrimitives.service';
 import { CortexSastEncoderService, SastEncodingResult } from './cortexSastEncoder.service';
 import { CortexEncoderService } from './cortexEncoder.service';
 import { 
-    CortexEncodingRequest, 
+    CortexFrame,
+    CortexConfig,
+    CortexError,
+    CortexErrorCode,
+    CortexProcessingRequest,
     CortexEncodingResult,
-    CortexFrame 
+    DEFAULT_CORTEX_CONFIG,
+    CortexEncodingRequest,
+    CortexSastEncodingRequest
 } from '../types/cortex.types';
 import { SemanticCortexFrame } from '../types/semanticPrimitives.types';
+import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 
 // ============================================================================
@@ -117,12 +124,8 @@ export class CortexSastIntegrationService {
         try {
             // Process with traditional Cortex encoder
             const traditionalRequest: CortexEncodingRequest = {
-                text,
-                metadata: {
-                    domain: 'general',
-                    language,
-                    complexity: 'medium'
-                }
+                text: text,
+                language: language
             };
             const traditionalResult = await this.traditionalEncoder.encode(traditionalRequest);
 

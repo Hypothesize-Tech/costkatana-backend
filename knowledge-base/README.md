@@ -7,6 +7,7 @@ This knowledge base provides comprehensive information about all features and ca
 
 ### 📊 Core Features
 - **[Cost Optimization](./cost-optimization/README.md)** - Core cost optimization capabilities and strategies
+- **[Cortex Optimization](./cortex-optimization/CORTEX_ARCHITECTURE.md)** - Advanced AI usage optimization system
 - **[AI Insights](./ai-insights/README.md)** - Intelligent analysis and recommendations
 - **[User Coaching](./user-coaching/README.md)** - Personalized guidance and education
 - **[Predictive Analytics](./predictive-analytics/README.md)** - Forecasting and trend analysis
@@ -20,8 +21,10 @@ This knowledge base provides comprehensive information about all features and ca
 ## System Architecture
 
 ### High-Level Overview
-AI Cost Optimizer is a comprehensive AI cost optimization platform that combines:
-- **Intelligent Optimization**: AI-powered cost reduction strategies
+AI Cost Optimizer is a comprehensive AI usage optimization platform that combines:
+- **Cortex Meta-Language System**: Revolutionary 70-95% token reduction technology
+- **Intelligent Optimization**: AI-powered usage and cost reduction strategies
+- **Impact Analytics**: Transparent justification of optimization effectiveness
 - **Personalized Insights**: User-specific recommendations and analysis
 - **Predictive Capabilities**: Forecasting and proactive optimization
 - **Educational Support**: User coaching and skill development

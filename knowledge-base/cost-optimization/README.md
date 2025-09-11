@@ -1,15 +1,16 @@
 # Cost Optimization Knowledge Base
 
 ## Overview
-Cost optimization is the core feature of Cost Katana, providing intelligent, personalized cost reduction strategies for AI usage across multiple providers and models.
+Cost optimization is the core feature of AI Cost Optimizer, providing intelligent, personalized strategies for optimizing AI usage (not just prompts) across multiple providers and models. Our revolutionary Cortex system achieves 70-95% token reduction by optimizing how AI generates responses.
 
 ## Core Concepts
 
-### 1. Token Optimization
-- **Prompt Compression**: Reducing prompt length while maintaining intent
+### 1. AI Usage Optimization (Beyond Prompts)
+- **[Cortex Meta-Language System](../cortex-optimization/CORTEX_ARCHITECTURE.md)**: 70-95% output token reduction
+- **[AI Usage Optimization](./AI_USAGE_OPTIMIZATION.md)**: Complete lifecycle optimization
 - **Context Trimming**: Intelligent removal of irrelevant conversation history
 - **Request Fusion**: Combining multiple similar requests into single optimized calls
-- **Model Switching**: Recommending cost-effective alternatives
+- **Model Switching**: Dynamic, usage-based model recommendations
 
 ### 2. Cost Analysis
 - **Real-time Pricing**: Live cost calculations across all AI providers

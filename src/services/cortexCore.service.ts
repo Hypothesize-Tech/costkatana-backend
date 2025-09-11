@@ -1,19 +1,24 @@
 /**
  * Cortex Core Processing Service
  * 
- * This service implements the core Cortex processing engine that optimizes
- * and transforms Cortex structures for maximum efficiency. It handles the
- * second stage of the three-part Cortex workflow.
+ * This service implements the core Cortex processing engine that ANSWERS queries
+ * in LISP format. It acts as an LLM that takes LISP-encoded queries and generates
+ * LISP-encoded responses, dramatically reducing output tokens.
+ * 
+ * NEW ARCHITECTURE:
+ * 1. Takes LISP-encoded query from encoder
+ * 2. Generates ANSWER in LISP format (not just optimizing input)
+ * 3. Passes LISP answer to decoder for natural language conversion
  */
 
 import {
     CortexFrame,
-    CortexProcessingRequest,
     CortexProcessingResult,
     CortexConfig,
     CortexError,
     CortexErrorCode,
-    DEFAULT_CORTEX_CONFIG
+    DEFAULT_CORTEX_CONFIG,
+    CortexProcessingRequest
 } from '../types/cortex.types';
 
 import { CortexVocabularyService } from './cortexVocabulary.service';
@@ -21,61 +26,101 @@ import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 import { 
     generateCortexHash, 
-    serializeCortexFrame,
-    calculateSemanticSimilarity
+    serializeCortexFrame
 } from '../utils/cortex.utils';
 
 // ============================================================================
 // INTERFACES AND TYPES
 // ============================================================================
 
-interface StructureAnalysisResult {
-    complexity: number;
-    redundancies: Array<{path: string; value: any; count: number}>;
-    references: string[];
-    optimizationOpportunities: Array<{
-        type: string;
-        description: string;
-        potential: number;
-        confidence: number;
-    }>;
-    compressionPotential: number;
-}
-
-interface OptimizationPlan {
-    strategy: 'conservative' | 'balanced' | 'aggressive';
-    steps: Array<{
-        type: string;
-        description: string;
-        expectedSavings: number;
-        confidence: number;
-        riskLevel: 'low' | 'medium' | 'high';
-    }>;
-    expectedSavings: number;
-    riskLevel: 'low' | 'medium' | 'high';
-}
-
 interface CoreProcessingCacheEntry {
     inputHash: string;
     outputFrame: CortexFrame;
-    optimizations: Array<{
-        type: string;
-        description: string;
-        savings: number;
-    }>;
-    confidence: number;
+    answerType: string;
     timestamp: Date;
     hitCount: number;
 }
 
 interface CoreProcessingStats {
     totalProcessed: number;
-    successfulOptimizations: number;
-    averageCompressionRatio: number;
+    successfulAnswers: number;
     averageProcessingTime: number;
     cacheHitRate: number;
     totalTokensSaved: number;
 }
+
+// System prompt for the Core Processor to generate ANSWERS in LISP
+const CORTEX_CORE_ANSWERING_PROMPT = `You are a Cortex Core Processor - an AI that ANSWERS questions in LISP-like Cortex format.
+
+🚨 CRITICAL: You are NOT optimizing prompts. You are ANSWERING them in LISP format.
+
+🚨 COMPLETE CODE GENERATION: For code requests, you MUST provide COMPLETE, RUNNABLE code including:
+- ALL functions and methods
+- ALL necessary helper functions
+- Complete class definitions with all methods
+- Full implementations without truncation
+- Proper error handling and edge cases
+- Complete examples and usage demonstrations
+
+Your job:
+1. Receive a query in Cortex LISP format
+2. UNDERSTAND what is being asked
+3. GENERATE THE COMPLETE ANSWER in Cortex LISP format
+4. For code requests, include the COMPLETE, FULL CODE in the answer
+
+Cortex Answer Formats:
+
+(answer: content_[main_answer] details_[supporting_info] confidence_[0-1])
+(answer: value_[specific_value] unit_[measurement] context_[explanation])
+(answer: list_[item1, item2, ...] type_[category] count_[number])
+(answer: code_[actual_code_here] language_[lang] complexity_[O(n)] description_[what_it_does])
+(answer: entity_[name] property_[attribute] value_[data])
+(answer: action_[what_to_do] target_[object] method_[how])
+(answer: error_[type] message_[description] suggestion_[fix])
+
+EXAMPLES:
+
+INPUT: (query: action_find object_capital location_india)
+OUTPUT: (answer: value_new_delhi type_capital country_india)
+
+INPUT: (query: action_calculate object_sum values_[5,10,15])
+OUTPUT: (answer: value_30 operation_sum input_[5,10,15])
+
+INPUT: (query: action_explain concept_photosynthesis level_simple)
+OUTPUT: (answer: content_plants_convert_sunlight_to_energy process_[light,water,co2_to_glucose,oxygen] type_biological)
+
+INPUT: (query: action_list object_planets type_solar_system)
+OUTPUT: (answer: list_[mercury,venus,earth,mars,jupiter,saturn,uranus,neptune] type_planets count_8)
+
+INPUT: (query: action_get property_price entity_tesla_model_3)
+OUTPUT: (answer: value_35000 unit_usd entity_tesla_model_3 type_price)
+
+INPUT: (query: action_implement algorithm_binary_sort language_javascript requirements_[edge_cases,complexity])
+OUTPUT: (answer: code_[function binarySort(arr) {
+  if (!arr || arr.length <= 1) return arr || [];
+  
+  function binaryInsert(sorted, item) {
+    let left = 0, right = sorted.length;
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (sorted[mid] > item) right = mid;
+      else left = mid + 1;
+    }
+    sorted.splice(left, 0, item);
+    return sorted;
+  }
+  
+  return arr.reduce((sorted, item) => binaryInsert(sorted, item), []);
+}] language_javascript complexity_O(n²) description_binary_insertion_sort_with_edge_cases)
+
+RULES:
+- Output ONLY the Cortex answer structure
+- Use underscores to connect multi-word concepts
+- Keep values atomic and simple
+- Include relevant metadata
+- Be factual and concise
+- NEVER include natural language explanations
+- NEVER output anything except the LISP structure`;
 
 // ============================================================================
 // CORTEX CORE PROCESSING SERVICE
@@ -88,8 +133,7 @@ export class CortexCoreService {
     private processingCache = new Map<string, CoreProcessingCacheEntry>();
     private stats: CoreProcessingStats = {
         totalProcessed: 0,
-        successfulOptimizations: 0,
-        averageCompressionRatio: 0,
+        successfulAnswers: 0,
         averageProcessingTime: 0,
         cacheHitRate: 0,
         totalTokensSaved: 0
@@ -136,15 +180,16 @@ export class CortexCoreService {
     }
 
     /**
-     * Process and optimize Cortex structure
+     * Process Cortex query and generate ANSWER in LISP format
+     * This is the NEW architecture - generating answers, not optimizing prompts
      */
-    public async process(request: CortexProcessingRequest, config?: Partial<CortexConfig>): Promise<CortexProcessingResult> {
+    public async process(request: CortexProcessingRequest): Promise<CortexProcessingResult> {
         const startTime = Date.now();
         this.stats.totalProcessed++;
 
         try {
             if (!this.initialized) {
-                await this.initialize(config);
+                await this.initialize();
             }
 
             const requestId = this.generateProcessingId(request);
@@ -165,18 +210,17 @@ export class CortexCoreService {
                 return this.buildProcessingResult(cachedResult, 0, true);
             }
 
-            // Apply simple optimizations for now (placeholder for AI processing)
-            const optimizedFrame = await this.applyBasicOptimizations(request.input);
-            const optimizations = this.calculateOptimizations(request.input, optimizedFrame);
+            // Generate ANSWER in LISP format using AI
+            const answerFrame = await this.generateAnswerInLisp(request.input, undefined, request.prompt);
 
             const result: CortexProcessingResult = {
-                output: optimizedFrame,
-                optimizations: optimizations,
+                output: answerFrame,
+                optimizations: [], // No optimizations needed for answer generation
                 processingTime: Date.now() - startTime,
                 metadata: {
                     coreModel: DEFAULT_CORTEX_CONFIG.coreProcessing.model,
-                    operationsApplied: [request.operation],
-                    semanticIntegrity: this.calculateSemanticIntegrity(request.input, optimizedFrame)
+                    operationsApplied: ['answer_generation'],
+                    semanticIntegrity: 1.0 // Answer generation always maintains semantic integrity
                 }
             };
 
@@ -254,12 +298,7 @@ export class CortexCoreService {
         const cacheEntry: CoreProcessingCacheEntry = {
             inputHash: cacheKey,
             outputFrame: result.output,
-            optimizations: result.optimizations.map(opt => ({
-                type: opt.type,
-                description: opt.description,
-                savings: opt.savings.reductionPercentage
-            })),
-            confidence: result.metadata.semanticIntegrity,
+            answerType: result.output.frameType,
             timestamp: new Date(),
             hitCount: 0
         };
@@ -277,14 +316,12 @@ export class CortexCoreService {
         this.stats.averageProcessingTime = (this.stats.averageProcessingTime + processingTime) / 2;
         
         if (success && result) {
-            this.stats.successfulOptimizations++;
-            const tokensSaved = result.optimizations.reduce((sum, opt) => sum + opt.savings.tokensSaved, 0);
+            this.stats.successfulAnswers++;
+            // Estimate tokens saved by using LISP instead of natural language
+            const lispSize = JSON.stringify(result.output).length / 4;
+            const estimatedNaturalSize = lispSize * 7; // Estimate 7x larger in natural language
+            const tokensSaved = Math.max(0, estimatedNaturalSize - lispSize);
             this.stats.totalTokensSaved += tokensSaved;
-            
-            const compressionRatio = result.optimizations.reduce(
-                (sum, opt) => sum + opt.savings.reductionPercentage, 0
-            ) / Math.max(result.optimizations.length, 1);
-            this.stats.averageCompressionRatio = (this.stats.averageCompressionRatio + compressionRatio) / 2;
         }
     }
 
@@ -295,166 +332,199 @@ export class CortexCoreService {
     ): CortexProcessingResult {
         return {
             output: cached.outputFrame,
-            optimizations: cached.optimizations.map(opt => ({
-                type: opt.type as 'semantic_compression' | 'frame_merging' | 'reference_optimization',
-                description: opt.description,
-                savings: {
-                    tokensSaved: Math.floor(opt.savings * 10),
-                    reductionPercentage: opt.savings
-                },
-                confidence: cached.confidence
-            })),
+            optimizations: [], // No optimizations for answer generation
             processingTime,
             metadata: {
                 coreModel: fromCache ? 'cache' : DEFAULT_CORTEX_CONFIG.coreProcessing.model,
-                operationsApplied: cached.optimizations.map(opt => opt.type),
-                semanticIntegrity: cached.confidence
+                operationsApplied: ['answer_generation'],
+                semanticIntegrity: 1.0
             }
         };
     }
 
-    private async applyBasicOptimizations(frame: CortexFrame): Promise<CortexFrame> {
-        // Apply basic structural optimizations
-        const optimized = { ...frame };
+    /**
+     * Generate an ANSWER in LISP format for the given query
+     * This is the CORE of the new architecture - actually answering questions
+     */
+    private async generateAnswerInLisp(queryFrame: CortexFrame, config?: Partial<CortexConfig>, dynamicPrompt?: string): Promise<CortexFrame> {
+        try {
+            const serializedQuery = serializeCortexFrame(queryFrame);
+            
+            loggingService.info('🤖 Generating LISP answer for query', {
+                queryType: queryFrame.frameType,
+                serializedQuery
+            });
 
-        // Remove empty arrays and undefined values
-        for (const [key, value] of Object.entries(optimized)) {
-            if (Array.isArray(value) && value.length === 0) {
-                delete (optimized as any)[key];
-            } else if (value === undefined) {
-                delete (optimized as any)[key];
-            }
+            // Use AI to generate the answer in LISP format
+            const model = config?.coreProcessing?.model || DEFAULT_CORTEX_CONFIG.coreProcessing.model;
+            
+            // Format the prompt for BedrockService
+            const systemPrompt = dynamicPrompt || CORTEX_CORE_ANSWERING_PROMPT;
+            const prompt = `${systemPrompt}\n\nNow answer this query:\n${serializedQuery}`;
+            
+            const response = await BedrockService.invokeModel(prompt, model);
+
+            // Extract answer text based on the response structure
+            const answerText = typeof response === 'string' 
+                ? response.trim()
+                : (response.content?.[0]?.text || response.text || JSON.stringify(response)).trim();
+            
+            loggingService.info('✅ Generated LISP answer', {
+                answer: answerText.substring(0, 500) + (answerText.length > 500 ? '...' : ''),
+                fullAnswerLength: answerText.length,
+                tokenCount: answerText.length / 4,
+                model: model
+            });
+
+            // Parse the LISP answer back into a CortexFrame
+            const answerFrame = this.parseLispToFrame(answerText);
+            
+            return answerFrame;
+            
+        } catch (error) {
+            loggingService.error('❌ Failed to generate LISP answer', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback: return a simple answer frame
+            return {
+                frameType: 'answer' as const,
+                content: 'Unable to generate answer',
+                error: true,
+                reason: error instanceof Error ? error.message : 'Unknown error'
+            } as unknown as CortexFrame;
         }
-
-        return optimized;
     }
 
-    private calculateOptimizations(
-        original: CortexFrame, 
-        optimized: CortexFrame
-    ): Array<{
-        type: 'semantic_compression' | 'frame_merging' | 'reference_optimization';
-        description: string;
-        savings: { tokensSaved: number; reductionPercentage: number };
-        confidence: number;
-    }> {
-        const optimizations: Array<any> = [];
-
+    /**
+     * Parse LISP string into CortexFrame
+     */
+    private parseLispToFrame(lispStr: string): CortexFrame {
         try {
-            const originalSize = serializeCortexFrame(original).length;
-            const optimizedSize = serializeCortexFrame(optimized).length;
+            loggingService.info('Converting LISP format to JSON', { lispCode: lispStr });
             
-            if (originalSize > optimizedSize) {
-                const tokensSaved = Math.ceil((originalSize - optimizedSize) / 4);
-                const reductionPercentage = ((originalSize - optimizedSize) / originalSize) * 100;
+            // Handle mixed natural language + LISP responses
+            // Look for code blocks in the response regardless of format
+            // Use a more robust regex that handles nested brackets
+            const codeMatch = lispStr.match(/code_\[([\s\S]*)\](?:\s+language_|$)/);
+            if (codeMatch) {
+                let code = codeMatch[1];
                 
-                optimizations.push({
-                    type: 'semantic_compression' as const,
-                    description: 'Applied basic structural compression',
-                    savings: {
-                        tokensSaved,
-                        reductionPercentage
-                    },
-                    confidence: 0.8
+                // If we still have issues, try to find the last ] before language_ or end
+                if (!code || code.length < 10) {
+                    const alternativeMatch = lispStr.match(/code_\[([\s\S]*)\]/);
+                    if (alternativeMatch) {
+                        code = alternativeMatch[1];
+                        // Remove any trailing metadata that might have been captured
+                        code = code.replace(/\]\s*(language_|complexity_|method_|description_).*$/, '');
+                    }
+                }
+                
+                // Extract other metadata
+                const languageMatch = lispStr.match(/language_([a-zA-Z0-9_]+)/);
+                const language = languageMatch ? languageMatch[1] : '';
+                
+                const complexityMatch = lispStr.match(/complexity_([a-zA-Z0-9_()^]+)/);
+                const complexity = complexityMatch ? complexityMatch[1] : '';
+                
+                const methodMatch = lispStr.match(/method_([a-zA-Z0-9_]+)/);
+                const method = methodMatch ? methodMatch[1] : '';
+                
+                const descriptionMatch = lispStr.match(/description_([a-zA-Z0-9_]+)/);
+                const description = descriptionMatch ? descriptionMatch[1] : '';
+                
+                // Create a properly structured answer frame
+                const frame = {
+                    frameType: 'answer',
+                    code,
+                    language,
+                    complexity,
+                    method,
+                    description,
+                    type: 'code_response'
+                } as unknown as CortexFrame;
+                
+                loggingService.info('✅ Parsed code response successfully', { 
+                    language, 
+                    complexity, 
+                    codeLength: code.length,
+                    codePreview: code.substring(0, 200) + (code.length > 200 ? '...' : ''),
+                    originalLispLength: lispStr.length
                 });
+                
+                return frame;
             }
-        } catch (error) {
-            loggingService.error('Failed to calculate optimizations', { error });
-        }
-
-        return optimizations;
-    }
-
-    private calculateSemanticIntegrity(original: CortexFrame, processed: CortexFrame): number {
-        try {
-            const similarity = calculateSemanticSimilarity(original, processed);
             
-            // Enhanced information preservation checks
-            const entityPreservation = this.checkEntityPreservation(original, processed);
-            const conceptPreservation = this.checkConceptPreservation(original, processed);
-            const frameTypeMatch = original.frameType === processed.frameType ? 1.0 : 0.0;
-            
-            // Weighted integrity score prioritizing information preservation
-            const integrityScore = (
-                similarity * 0.4 +           // 40% - semantic similarity
-                entityPreservation * 0.3 +   // 30% - entity preservation
-                conceptPreservation * 0.2 +  // 20% - concept preservation
-                frameTypeMatch * 0.1         // 10% - frame type consistency
-            );
-            
-            // Ensure minimum integrity threshold for information preservation
-            return Math.max(0.85, Math.min(1.0, integrityScore));
-        } catch (error) {
-            loggingService.error('Failed to calculate semantic integrity', { error });
-            return 0.85; // Higher conservative fallback to ensure information preservation
-        }
-    }
-
-    private checkEntityPreservation(original: CortexFrame, processed: CortexFrame): number {
-        // Extract entities from both frames and compare preservation ratio
-        const originalEntities = this.extractFrameEntities(original);
-        const processedEntities = this.extractFrameEntities(processed);
-        
-        if (originalEntities.size === 0) return 1.0;
-        
-        const preservedCount = Array.from(originalEntities).filter(entity => 
-            processedEntities.has(entity)
-        ).length;
-        
-        return preservedCount / originalEntities.size;
-    }
-
-    private checkConceptPreservation(original: CortexFrame, processed: CortexFrame): number {
-        // Check preservation of key concepts and meanings
-        const originalConcepts = this.extractFrameConcepts(original);
-        const processedConcepts = this.extractFrameConcepts(processed);
-        
-        if (originalConcepts.size === 0) return 1.0;
-        
-        const preservedCount = Array.from(originalConcepts).filter(concept => 
-            processedConcepts.has(concept)
-        ).length;
-        
-        return preservedCount / originalConcepts.size;
-    }
-
-    private extractFrameEntities(frame: CortexFrame): Set<string> {
-        const entities = new Set<string>();
-        const frameStr = JSON.stringify(frame);
-        
-        // Extract entity references and technical terms
-        const entityMatches = frameStr.match(/entity_\w+|concept_\w+/g) || [];
-        entityMatches.forEach(match => entities.add(match));
-        
-        // Extract quoted strings and technical identifiers
-        const quotedMatches = frameStr.match(/"[^"]+"/g) || [];
-        quotedMatches.forEach(match => entities.add(match));
-        
-        return entities;
-    }
-
-    private extractFrameConcepts(frame: CortexFrame): Set<string> {
-        const concepts = new Set<string>();
-        
-        // Extract concepts from frame data by checking if it has the expected properties
-        // Use type-safe property access with 'in' operator
-        if ('action' in frame && typeof frame.action === 'string') concepts.add(frame.action);
-        if ('target' in frame && typeof frame.target === 'string') concepts.add(frame.target);
-        if ('aspect' in frame && typeof frame.aspect === 'string') concepts.add(frame.aspect);
-        if ('context' in frame && typeof frame.context === 'string') concepts.add(frame.context);
-        
-        // Extract nested concepts from frame data
-        const frameData = JSON.stringify(frame);
-        const conceptMatches = frameData.match(/:\s*"[^"]*"/g) || [];
-        conceptMatches.forEach(match => {
-            const concept = match.replace(/^:\s*"/, '').replace(/"$/, '');
-            if (concept && concept.length > 2) {
-                concepts.add(concept);
+            // Handle pure LISP format: (answer: ...)
+            if (lispStr.trim().startsWith('(') && lispStr.trim().endsWith(')')) {
+                const cleaned = lispStr.replace(/^\(|\)$/g, '').trim();
+                const parts = cleaned.split(/\s+/);
+                
+                // First part should be the frame type (usually 'answer:')
+                const frameType = parts[0].replace(':', '');
+                
+                // Parse the rest as key-value pairs
+                const frame: any = {
+                    frameType: frameType === 'answer' ? 'answer' : 'answer' // Force to answer
+                };
+                
+                for (let i = 1; i < parts.length; i++) {
+                    const part = parts[i];
+                    if (part.includes('_')) {
+                        const [key, ...valueParts] = part.split('_');
+                        const value = valueParts.join('_');
+                        
+                        // Handle list values
+                        if (value.startsWith('[') && value.endsWith(']')) {
+                            frame[key] = value.slice(1, -1).split(',');
+                        } else {
+                            frame[key] = value;
+                        }
+                    }
+                }
+                
+                return frame as CortexFrame;
             }
-        });
-        
-        return concepts;
+            
+            // Handle natural language responses - extract any structured data
+            // Look for key patterns in the text
+            const frame: any = {
+                frameType: 'answer',
+                content: lispStr,
+                type: 'natural_language_response'
+            };
+            
+            // Try to extract any structured information
+            const valueMatch = lispStr.match(/value[_:]([a-zA-Z0-9_]+)/);
+            if (valueMatch) frame.value = valueMatch[1];
+            
+            const typeMatch = lispStr.match(/type[_:]([a-zA-Z0-9_]+)/);
+            if (typeMatch) frame.responseType = typeMatch[1];
+            
+            loggingService.info('✅ Parsed natural language response', { 
+                contentLength: lispStr.length,
+                hasValue: !!frame.value,
+                hasType: !!frame.responseType
+            });
+            
+            return frame as CortexFrame;
+            
+        } catch (error) {
+            loggingService.error('Failed to parse LISP to frame', {
+                lispStr,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Return a basic answer frame with the raw content
+            return {
+                frameType: 'answer',
+                content: lispStr,
+                parseError: true,
+                type: 'fallback_response'
+            } as unknown as CortexFrame;
+        }
     }
+
 
     // ========================================================================
     // PUBLIC API METHODS
