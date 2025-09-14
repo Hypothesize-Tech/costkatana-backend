@@ -25,6 +25,7 @@ import { BedrockService } from './tracedBedrock.service';
 import { CortexTrainingDataCollectorService } from './cortexTrainingDataCollector.service';
 import { CortexAnalyticsService, CortexImpactMetrics } from './cortexAnalytics.service';
 import { CortexVocabularyService } from './cortexVocabulary.service';
+import { calculateUnifiedSavings, convertToCortexMetrics } from '../utils/calculationUtils';
 
 /**
  * Convert AIProvider enum to string for pricing functions
@@ -1176,28 +1177,30 @@ REPLY FORMAT (JSON only):
                 request.model
             );
 
-            // Calculate baseline savings using traditional method
-            const totalOriginalTokens = (originalEstimate.breakdown?.promptTokens || originalTokens) + (originalEstimate.breakdown?.completionTokens || 150);
-            const totalOptimizedTokens = (optimizedEstimate.breakdown?.promptTokens || optimizedTokens) + (optimizedEstimate.breakdown?.completionTokens || 150);
+            // Use unified calculation for consistency
+            const unifiedCalc = calculateUnifiedSavings(
+                request.prompt,
+                optimizedPrompt,
+                provider,
+                request.model,
+                150 // Expected completion tokens
+            );
             
-            // DEBUG: Log the actual token calculations to identify the issue
-            console.log('🔍 TOKEN CALCULATION DEBUG:', {
-                originalPromptTokens: originalTokens,
-                optimizedPromptTokens: optimizedTokens,
-                originalBreakdownPromptTokens: originalEstimate.breakdown?.promptTokens,
-                optimizedBreakdownPromptTokens: optimizedEstimate.breakdown?.promptTokens,
-                originalBreakdownCompletionTokens: originalEstimate.breakdown?.completionTokens,
-                optimizedBreakdownCompletionTokens: optimizedEstimate.breakdown?.completionTokens,
-                totalOriginalTokens,
-                totalOptimizedTokens,
-                originalPromptLength: request.prompt.length,
-                optimizedPromptLength: optimizedPrompt.length
+            // Use the unified calculation results
+            const totalOriginalTokens = unifiedCalc.originalTokens;
+            const totalOptimizedTokens = unifiedCalc.optimizedTokens;
+            const tokensSaved = unifiedCalc.tokensSaved;
+            const costSaved = unifiedCalc.costSaved;
+            const improvementPercentage = unifiedCalc.tokensSavedPercentage;
+            
+            loggingService.info('🔍 Unified calculation results:', {
+                originalTokens: totalOriginalTokens,
+                optimizedTokens: totalOptimizedTokens,
+                tokensSaved,
+                costSaved,
+                improvementPercentage: improvementPercentage.toFixed(1),
+                isIncrease: unifiedCalc.isIncrease
             });
-            
-            // Calculate savings
-            const tokensSaved = Math.max(0, totalOriginalTokens - totalOptimizedTokens);
-            const costSaved = Math.max(0, originalEstimate.totalCost - optimizedEstimate.totalCost);
-            const improvementPercentage = totalOriginalTokens > 0 ? (tokensSaved / totalOriginalTokens) * 100 : 0;
 
             // Determine category based on optimization type
             const optimizationType = optimizationResult.suggestions.length > 0 ? optimizationResult.suggestions[0].type : 'compression';
@@ -1254,8 +1257,8 @@ REPLY FORMAT (JSON only):
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
                 tokensSaved,
-                originalCost: originalEstimate.totalCost,
-                optimizedCost: optimizedEstimate.totalCost,
+                originalCost: unifiedCalc.originalCost,
+                optimizedCost: unifiedCalc.optimizedCost,
                 costSaved,
                 improvementPercentage,
                 service: request.service,
@@ -1268,7 +1271,13 @@ REPLY FORMAT (JSON only):
                     implemented: index === 0,
                 })),
                 metadata,
-                cortexImpactMetrics: cortexResult?.impactMetrics,
+                // Use unified calculations to generate consistent cortex metrics
+                cortexImpactMetrics: cortexResult ? convertToCortexMetrics(
+                    unifiedCalc,
+                    cortexResult.impactMetrics?.qualityMetrics,
+                    cortexResult.impactMetrics?.performanceMetrics,
+                    cortexResult.impactMetrics?.justification
+                ) : undefined,
             });
 
             // Update user's optimization count
@@ -1287,7 +1296,7 @@ REPLY FORMAT (JSON only):
                     optimizationId: optimization._id,
                     service: request.service,
                     model: request.model,
-                    cost: originalEstimate.totalCost,
+                    cost: unifiedCalc.originalCost,
                     saved: costSaved,
                     techniques: optimizationResult.appliedOptimizations
                 }
