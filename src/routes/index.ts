@@ -47,6 +47,7 @@ import { securityRoutes } from './security.routes';
 import cpiRoutes from './cpi.routes';
 import costDebuggerRoutes from './costDebugger.routes';
 import unexplainedCostRoutes from './unexplainedCost.routes';
+import cortexTrainingDataRoutes from './cortexTrainingData.routes';
 
 const router = Router();
 
@@ -109,5 +110,6 @@ router.use('/security', securityRoutes);
 router.use('/cpi', cpiRoutes);
 router.use('/cost-debugger', costDebuggerRoutes);
 router.use('/unexplained-costs', unexplainedCostRoutes);
+router.use('/cortex-training-data', cortexTrainingDataRoutes);
 
 export const apiRouter = router;

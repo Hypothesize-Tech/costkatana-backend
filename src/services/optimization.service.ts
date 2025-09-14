@@ -14,23 +14,17 @@ import { ActivityService } from './activity.service';
 // 🚀 NEW CORTEX IMPORTS
 import { CortexCoreService } from './cortexCore.service';
 import { CortexCacheService } from './cortexCache.service';
-import { CortexLispInstructionGeneratorService, LispInstructions } from './cortexLispInstructionGenerator.service';
+import { CortexLispInstructionGeneratorService } from './cortexLispInstructionGenerator.service';
 import { CortexDecoderService } from './cortexDecoder.service';
 import { 
-    CortexConfig,
     CortexProcessingRequest,
-    CortexDecodingRequest,
-    CortexEncodingRequest,
-    CortexEncodingResult,
-    CortexProcessingResult,
-    CortexDecodingResult,
     DEFAULT_CORTEX_CONFIG 
 } from '../types/cortex.types';
 import { CortexEncoderService } from './cortexEncoder.service';
 import { BedrockService } from './tracedBedrock.service';
+import { CortexTrainingDataCollectorService } from './cortexTrainingDataCollector.service';
 import { CortexAnalyticsService, CortexImpactMetrics } from './cortexAnalytics.service';
 import { CortexVocabularyService } from './cortexVocabulary.service';
-import { CortexSastEncoderService } from './cortexSastEncoder.service';
 
 /**
  * Convert AIProvider enum to string for pricing functions
@@ -225,6 +219,17 @@ export class OptimizationService {
     }> {
         const startTime = Date.now();
         
+        // 🎯 Initialize training data collection (fire-and-forget)
+        const sessionId = `cortex_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const trainingCollector = CortexTrainingDataCollectorService.getInstance();
+        
+        trainingCollector.startSession(sessionId, userId, originalPrompt, {
+            service: 'optimization',
+            category: 'prompt_optimization',
+            complexity: originalPrompt.length > 500 ? 'complex' : originalPrompt.length > 100 ? 'medium' : 'simple',
+            language: 'en'
+        });
+        
         try {
             // 🎯 Step 0: Check semantic cache first
             loggingService.info('🔍 Checking Cortex semantic cache...', { userId });
@@ -256,6 +261,14 @@ export class OptimizationService {
             loggingService.info('🔄 Step 1: Starting Cortex encoding...', { userId });
             const instructionService = CortexLispInstructionGeneratorService.getInstance();
             const lispInstructions = await instructionService.generateInstructions(originalPrompt, cortexConfig);
+            
+            // 🎯 Collect LISP instructions (fire-and-forget)
+            trainingCollector.collectLispInstructions(sessionId, {
+                encoderPrompt: lispInstructions.encoderPrompt,
+                coreProcessorPrompt: lispInstructions.coreProcessorPrompt,
+                decoderPrompt: lispInstructions.decoderPrompt,
+                model: cortexConfig.instructionGeneration?.model || 'claude-3-5-sonnet'
+            });
 
             const encoderService = CortexEncoderService.getInstance();
             const encodingResult = await encoderService.encode({
@@ -278,6 +291,15 @@ export class OptimizationService {
                 encodedCortex: JSON.stringify(encodingResult.cortexFrame, null, 2)
             });
             
+            // 🎯 Collect encoder data (fire-and-forget)
+            trainingCollector.collectEncoderData(sessionId, {
+                inputText: originalPrompt,
+                outputLisp: encodingResult.cortexFrame,
+                confidence: encodingResult.confidence,
+                processingTime: encodingResult.processingTime || 0,
+                model: cortexConfig.encoding?.model || 'claude-3-5-sonnet'
+            });
+            
             // Step 2: Generate ANSWER in LISP format (NEW ARCHITECTURE)
             loggingService.info('🎆 Step 2: Generating answer in LISP format...', { 
                 userId,
@@ -298,6 +320,15 @@ export class OptimizationService {
                 answerFrame: JSON.stringify(processingResult.output, null, 2),
                 answerType: processingResult.output.frameType,
                 isAnswer: processingResult.output.frameType === 'answer'
+            });
+            
+            // 🎯 Collect core processor data (fire-and-forget)
+            trainingCollector.collectCoreProcessorData(sessionId, {
+                inputLisp: encodingResult.cortexFrame,
+                outputLisp: processingResult.output,
+                answerType: processingResult.output.frameType || 'answer',
+                processingTime: processingResult.processingTime || 0,
+                model: cortexConfig.coreProcessing?.model || 'claude-opus-4-1'
             });
             
             // Step 3: Decode LISP answer back to natural language (NEW ARCHITECTURE)
@@ -328,19 +359,31 @@ export class OptimizationService {
                 tokenReduction: `${Math.round(((originalPrompt.length - decodingResult.text.length) / originalPrompt.length) * 100)}%`
             });
             
-            // For answer generation, we don't need quality checks since we're providing actual answers
+            // 🎯 Collect decoder data (fire-and-forget)
+            trainingCollector.collectDecoderData(sessionId, {
+                inputLisp: processingResult.output,
+                outputText: decodingResult.text,
+                style: cortexConfig.outputStyle || 'conversational',
+                processingTime: decodingResult.processingTime || 0,
+                model: cortexConfig.decoding?.model || 'claude-3-5-sonnet'
+            });
+            
 
             // Calculate token reduction (comparing LISP vs natural language output)
             // The REAL savings come from generating answers in LISP
             const lispAnswerTokens = JSON.stringify(processingResult.output).length / 4;
             const naturalLanguageTokens = decodingResult.text.length / 4;
             // Estimate what a full natural language response would have been (5-10x larger)
-            const estimatedFullResponseTokens = naturalLanguageTokens * 7;
-            const reductionPercentage = ((estimatedFullResponseTokens - lispAnswerTokens) / estimatedFullResponseTokens) * 100;
+            // 🚨 FIX: Don't use artificial multipliers - use actual token counts
+            // The real comparison should be: original prompt vs final response
+            const originalPromptTokens = estimateTokens(originalPrompt, AIProvider.OpenAI);
+            const finalResponseTokens = naturalLanguageTokens;
             
-            // For compatibility with existing code
-            const originalTokens = originalPrompt.length / 4;
-            const optimizedTokens = lispAnswerTokens;
+            // Calculate ACTUAL token difference (can be negative if response is longer)
+            const actualTokenDifference = originalPromptTokens - finalResponseTokens;
+            const actualReductionPercentage = originalPromptTokens > 0 
+                ? (actualTokenDifference / originalPromptTokens) * 100 
+                : 0;
 
             const cortexMetadata = {
                 processingTime: Date.now() - startTime,
@@ -352,9 +395,17 @@ export class OptimizationService {
                     core: DEFAULT_CORTEX_CONFIG.coreProcessing.model,
                     decoder: DEFAULT_CORTEX_CONFIG.decoding.model
                 },
-                tokensSaved: Math.max(0, estimatedFullResponseTokens - lispAnswerTokens),
-                reductionPercentage: Math.max(0, reductionPercentage),
-                semanticIntegrity: processingResult.metadata?.semanticIntegrity || 1.0
+                // Use ACTUAL token difference (can be negative)
+                tokensSaved: actualTokenDifference,
+                reductionPercentage: actualReductionPercentage,
+                semanticIntegrity: processingResult.metadata?.semanticIntegrity || 1.0,
+                // Add debug info to understand what happened
+                debug: {
+                    originalPromptTokens,
+                    finalResponseTokens,
+                    lispAnswerTokens,
+                    actualDifference: actualTokenDifference
+                }
             };
 
             loggingService.info('✅ Cortex processing completed successfully', {
@@ -366,9 +417,9 @@ export class OptimizationService {
 
             // 💾 Cache the successful result for future use
             const tokenReductionData = {
-                originalTokens: estimatedFullResponseTokens,
-                cortexTokens: lispAnswerTokens,
-                reductionPercentage
+                originalTokens: originalPromptTokens,
+                cortexTokens: finalResponseTokens,
+                reductionPercentage: actualReductionPercentage
             };
 
             await CortexCacheService.setCachedResult(
@@ -401,6 +452,16 @@ export class OptimizationService {
                     error: error instanceof Error ? error.message : String(error)
                 });
             }
+
+            // 🎯 Finalize training data collection (fire-and-forget)
+            const totalProcessingTime = Date.now() - startTime;
+            trainingCollector.finalizeSession(sessionId, {
+                totalProcessingTime,
+                totalTokenReduction: tokenReductionData?.reductionPercentage || 0,
+                tokenReductionPercentage: tokenReductionData?.reductionPercentage || 0,
+                costSavings: impactMetrics?.costImpact?.costSavings || 0,
+                qualityScore: impactMetrics?.qualityMetrics?.clarityScore || 0
+            });
 
             return {
                 optimizedPrompt: decodingResult.text,
@@ -1133,44 +1194,10 @@ REPLY FORMAT (JSON only):
                 optimizedPromptLength: optimizedPrompt.length
             });
             
-            let rawTokensSaved = totalOriginalTokens - totalOptimizedTokens;
-            let rawCostSaved = originalEstimate.totalCost - optimizedEstimate.totalCost;
-            let rawImprovementPercentage = totalOriginalTokens > 0 ? (rawTokensSaved / totalOriginalTokens) * 100 : 0;
-
-            // 🚀 OVERRIDE with Cortex results if available and successful
-            if (cortexResult && !cortexResult.cortexMetadata.error) {
-                loggingService.info('🔄 Using Cortex token calculations instead of traditional estimates', {
-                    userId: request.userId,
-                    traditionalTokensSaved: rawTokensSaved,
-                    cortexTokensSaved: cortexResult.cortexMetadata.tokensSaved,
-                    cortexReductionPercentage: cortexResult.cortexMetadata.reductionPercentage
-                });
-
-                // Use Cortex token savings
-                rawTokensSaved = cortexResult.cortexMetadata.tokensSaved;
-                rawImprovementPercentage = cortexResult.cortexMetadata.reductionPercentage;
-                
-                // Recalculate cost savings based on Cortex token savings
-                const originalTokenCost = totalOriginalTokens * (originalEstimate.totalCost / totalOriginalTokens);
-                const optimizedTokenCost = (totalOriginalTokens - rawTokensSaved) * (originalEstimate.totalCost / totalOriginalTokens);
-                rawCostSaved = originalTokenCost - optimizedTokenCost;
-            }
-            
-            // Ensure non-negative values for database validation
-            const tokensSaved = Math.max(0, rawTokensSaved);
-            const costSaved = Math.max(0, rawCostSaved);
-            const improvementPercentage = Math.max(0, rawImprovementPercentage);
-
-            // Log if optimization increased token count
-            if (rawTokensSaved < 0) {
-                loggingService.warn('⚠️ Optimization increased token count', {
-                    userId: request.userId,
-                    originalTokens: totalOriginalTokens,
-                    optimizedTokens: totalOptimizedTokens,
-                    increase: Math.abs(rawTokensSaved),
-                    source: cortexResult && !cortexResult.cortexMetadata.error ? 'cortex' : 'traditional'
-                });
-            }
+            // Calculate savings
+            const tokensSaved = Math.max(0, totalOriginalTokens - totalOptimizedTokens);
+            const costSaved = Math.max(0, originalEstimate.totalCost - optimizedEstimate.totalCost);
+            const improvementPercentage = totalOriginalTokens > 0 ? (tokensSaved / totalOriginalTokens) * 100 : 0;
 
             // Determine category based on optimization type
             const optimizationType = optimizationResult.suggestions.length > 0 ? optimizationResult.suggestions[0].type : 'compression';
