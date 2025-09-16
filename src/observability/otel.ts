@@ -110,7 +110,7 @@ export async function startTelemetry(): Promise<void> {
         });
 
         // Configure trace exporter with self-healing processor
-        let traceExporter;
+        let traceExporter: any;
         const tracesUrl = process.env.OTLP_HTTP_TRACES_URL;
         
         if (tracesUrl && tracesUrl.trim() !== '') {
@@ -148,7 +148,7 @@ export async function startTelemetry(): Promise<void> {
         });
 
         // Configure metrics exporter
-        let metricsExporter;
+        let metricsExporter: any;
         const metricsUrl = process.env.OTLP_HTTP_METRICS_URL;
         
         if (metricsUrl && metricsUrl.trim() !== '') {
@@ -309,7 +309,7 @@ export async function startTelemetry(): Promise<void> {
         // Create and configure SDK
         sdk = new NodeSDK({
             resource,
-            traceExporter,
+            traceExporter: traceExporter as any,
             instrumentations,
         });
 
