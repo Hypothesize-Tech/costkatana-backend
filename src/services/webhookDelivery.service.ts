@@ -2,7 +2,7 @@ import axios, { AxiosError } from 'axios';
 import { IWebhook, Webhook } from '../models/Webhook';
 import { IWebhookDelivery, WebhookDelivery } from '../models/WebhookDelivery';
 import { webhookService } from './webhook.service';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from './logging.service';
 import { Queue, Worker } from 'bullmq';
 import IORedis, { Redis, RedisOptions } from 'ioredis';
 import { config } from '../config';

@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { Usage } from '../models/Usage';
-import { loggingService } from '../services/logging.service';
+import { loggingService } from './logging.service';
 
 export interface WorkflowSummary {
     workflowId: string;
