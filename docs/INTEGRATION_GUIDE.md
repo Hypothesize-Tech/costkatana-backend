@@ -9,10 +9,10 @@ This guide explains how API keys and project IDs work in the AI Cost Tracker sys
 ### Backend Implementation
 
 **Storage & Security:**
-- API keys are stored in the User model (`ai-cost-optimizer-backend/src/models/User.ts`)
+- API keys are stored in the User model (`costkatana-backend/src/models/User.ts`)
 - Keys are encrypted using AES-256-GCM encryption before storage
 - Only masked versions are returned to the frontend
-- Encryption/decryption handled in `ai-cost-optimizer-backend/src/utils/helpers.ts`
+- Encryption/decryption handled in `costkatana-backend/src/utils/helpers.ts`
 
 **Available Services:**
 - OpenAI
@@ -53,7 +53,7 @@ await userService.removeApiKey('openai');
 ### Backend Implementation
 
 **Project Model:**
-- Projects are stored in `ai-cost-optimizer-backend/src/models/Project.ts`
+- Projects are stored in `costkatana-backend/src/models/Project.ts`
 - Each project has a unique ObjectId used as project ID
 - Projects include budget tracking, member management, and settings
 

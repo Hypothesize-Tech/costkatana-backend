@@ -2,7 +2,7 @@
 
 > **The world's first AI-powered cost optimization coach for AI usage** - featuring intelligent monitoring, personalized recommendations, predictive analytics, and seamless onboarding.
 
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/cost-katana/ai-cost-optimizer-backend)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/cost-katana/costkatana-backend)
 [![Node Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![AI-Powered](https://img.shields.io/badge/AI--Powered-AWS%20Bedrock-orange.svg)](https://aws.amazon.com/bedrock/)
@@ -82,8 +82,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/cost-katana/ai-cost-optimizer-backend.git
-cd ai-cost-optimizer-backend
+git clone https://github.com/cost-katana/costkatana-backend.git
+cd costkatana-backend
 
 # Install dependencies
 npm install
@@ -565,7 +565,7 @@ See [OBSERVABILITY.md](OBSERVABILITY.md) for complete documentation.
 
 ### **Get Help**
 - 📧 **Email**: abdul@hypothesize.tech
-- 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/ai-cost-optimizer-backend/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/costkatana-backend/issues)
 
 ### **AI Feature Support**
 For AI-specific issues:
@@ -584,5 +584,5 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 **🚀 Transform your AI cost management with intelligent, personalized coaching!**
 
-[![GitHub Stars](https://img.shields.io/github/stars/cost-katana/ai-cost-optimizer-backend?style=social)](https://github.com/cost-katana/ai-cost-optimizer-backend)
+[![GitHub Stars](https://img.shields.io/github/stars/cost-katana/costkatana-backend?style=social)](https://github.com/cost-katana/costkatana-backend)
 </div>

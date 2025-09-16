@@ -645,6 +645,6 @@ See [WEBHOOK_DOCUMENTATION.md](./WEBHOOK_DOCUMENTATION.md)
 For API support:
 - 📧 **Email**: abdul@hypothesize.tech
 - 📖 **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/Hypothesize-Tech/ai-cost-optimizer-backend/issues)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/Hypothesize-Tech/costkatana-backend/issues)
 
 **Latest Update**: August 2025 - AI Intelligence v2.0 with personalized recommendations and predictive analytics.

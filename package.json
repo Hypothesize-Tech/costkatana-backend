@@ -1,5 +1,5 @@
 {
-  "name": "ai-cost-optimizer-backend",
+  "name": "costkatana-backend",
   "version": "2.0.0",
   "description": "AI-powered cost optimization backend for Cost Katana - Intelligent monitoring, personalized recommendations, predictive analytics, and seamless onboarding for AI usage optimization",
   "main": "dist/server.js",
@@ -138,10 +138,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/cost-katana/ai-cost-optimizer-backend.git"
+    "url": "https://github.com/cost-katana/costkatana-backend.git"
   },
   "homepage": "https://costkatana.com",
   "bugs": {
-    "url": "https://github.com/cost-katana/ai-cost-optimizer-backend/issues"
+    "url": "https://github.com/cost-katana/costkatana-backend/issues"
   }
 }
