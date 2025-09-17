@@ -1142,7 +1142,7 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
                     success: false,
                     error: 'Usage limit exceeded',
                     violation,
-                    upgradeUrl: 'https://costkatana.com/pricing'
+                    upgradeUrl: 'https://www.costkatana.com/#pricing'
                 });
                 return;
             }

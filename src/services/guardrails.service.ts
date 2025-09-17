@@ -573,7 +573,7 @@ export class GuardrailsService {
                             success: false,
                             error: 'Usage limit exceeded',
                             violation,
-                            upgradeUrl: 'https://costkatana.com/pricing'
+                            upgradeUrl: 'https://www.costkatana.com/#pricing'
                         });
                         return;
                     
@@ -598,7 +598,7 @@ export class GuardrailsService {
                     success: false,
                     error: 'Token limit exceeded',
                     violation: tokenViolation,
-                    upgradeUrl: 'https://costkatana.com/pricing'
+                    upgradeUrl: 'https://www.costkatana.com/#pricing'
                 });
                 return;
             }
@@ -869,7 +869,7 @@ export class GuardrailsService {
         }
         
         suggestions.push(`Current ${metric} usage can be optimized - check recommendations`);
-        suggestions.push('Visit https://costkatana.com/pricing for plan details');
+        suggestions.push('Visit https://www.costkatana.com/#pricing for plan details');
         
         return suggestions;
     }
