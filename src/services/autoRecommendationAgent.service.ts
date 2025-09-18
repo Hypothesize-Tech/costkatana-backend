@@ -593,7 +593,7 @@ Return valid JSON array of recommendations.`;
                     jitterFactor: 0.25
                 },
                 {
-                    modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                    modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
                     operation: 'generateRecommendations'
                 }
             );

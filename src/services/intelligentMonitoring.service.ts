@@ -519,7 +519,7 @@ JSON Format:
 
 Make recommendations highly specific to their usage patterns, not generic advice.`;
 
-            const response = await BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20241022-v2:0');
+            const response = await BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20240620-v1:0');
             const cleanedResponse = BedrockService.extractJson(response);
             const aiRecommendations = JSON.parse(cleanedResponse);
 

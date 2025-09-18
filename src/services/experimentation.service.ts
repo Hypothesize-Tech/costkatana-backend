@@ -437,10 +437,10 @@ export class ExperimentationService {
         // Map frontend model names to WORKING Bedrock model IDs (compatible with on-demand throughput)
         const modelMap: Record<string, string> = {
             // Claude models (use older stable versions that support on-demand)
-            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+            'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
             'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
-            'claude-3-opus': 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Upgraded to 3.5 Sonnet
-            'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Upgraded to 3.5  
+            'claude-3-opus': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5 Sonnet
+            'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5  
             'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
             'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 support
             
@@ -2423,7 +2423,7 @@ Return a JSON object with this structure:
 
 Make the data realistic and consistent with the scenario type.`;
 
-            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20241022-v2:0');
+            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
             const jsonResponse = BedrockService.extractJson(response);
             
             try {
@@ -2482,7 +2482,7 @@ Return a JSON object with this structure:
 
 Base your analysis on real-world AI cost optimization patterns and industry best practices.`;
 
-            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20241022-v2:0');
+            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
             const jsonResponse = BedrockService.extractJson(response);
             
             try {

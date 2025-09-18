@@ -8,7 +8,6 @@ import { loggingService } from './logging.service';
 import { BedrockService } from './bedrock.service';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
-import { calculateUnifiedSavings } from '../utils/calculationUtils';
 import { estimateCost } from '../utils/pricing';
 
 export interface CortexImpactMetrics {
@@ -367,40 +366,6 @@ Return ONLY a JSON object with these exact fields:
         
         // Return as percentage (0-100), not multiply by 100 again
         return Math.round(tokenScore + qualityScore);
-    }
-    
-    /**
-     * Get model cost per 1k tokens
-     */
-    private static getModelCost(model: string): number {
-        const costs: Record<string, number> = {
-            // AWS Bedrock Claude models (input + output pricing per 1k tokens)
-            'anthropic.claude-3-5-sonnet-20240620-v1:0': 0.003,
-            'anthropic.claude-3-5-haiku-20241022-v1:0': 0.001,
-            'anthropic.claude-3-5-sonnet-20241022-v2:0': 0.003,
-            'anthropic.claude-opus-4-1-20250805-v1:0': 0.045, // Claude Opus 4.1 - premium pricing (avg of input/output)
-            
-            // Regional variants
-            'us.anthropic.claude-3-5-sonnet-20240620-v1:0': 0.003,
-            'us.anthropic.claude-3-5-haiku-20241022-v1:0': 0.001,
-            'us.anthropic.claude-3-5-sonnet-20241022-v2:0': 0.003,
-            'us.anthropic.claude-opus-4-1-20250805-v1:0': 0.045, // Claude Opus 4.1 - premium pricing (avg of input/output)
-            
-            // OpenAI models
-            'gpt-4': 0.03,
-            'gpt-4-turbo': 0.01,
-            'gpt-4o': 0.005,
-            'gpt-4o-mini': 0.0015,
-            'gpt-3.5-turbo': 0.002,
-            
-            // For backward compatibility
-            'claude-3-5-sonnet': 0.003,
-            'claude-3-5-haiku': 0.001,
-            'claude-3-sonnet': 0.003,
-            'claude-3-haiku': 0.001
-        };
-        
-        return costs[model] || 0.001; // Default to reasonable cost
     }
     
     /**

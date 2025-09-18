@@ -114,9 +114,9 @@ export class PromptTemplateController {
             const filters = {
                 userId,
                 projectId: projectId as string,
-                category: category as string,
+                category: category as any,
                 tags: tags ? (tags as string).split(',') : undefined,
-                visibility: visibility as string,
+                visibility: visibility as any,
                 search: search as string,
                 page: page ? parseInt(page as string) : 1,
                 limit: limit ? parseInt(limit as string) : 20
@@ -363,6 +363,266 @@ export class PromptTemplateController {
             res.status(500).json({
                 success: false,
                 error: error.message || 'Failed to get popular templates'
+            });
+        }
+    }
+
+    /**
+     * AI: Generate template from intent
+     */
+    static async generateFromIntent(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { intent, category, context, constraints } = req.body;
+
+            loggingService.info('🤖 AI template generation requested', {
+                userId,
+                intent,
+                category
+            });
+
+            const result = await PromptTemplateService.generateTemplateFromIntent(
+                userId,
+                intent,
+                {
+                    category,
+                    details: context,
+                    constraints
+                }
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+        } catch (error: any) {
+            loggingService.error('Error generating template from intent:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to generate template'
+            });
+        }
+    }
+
+    /**
+     * AI: Detect variables in content
+     */
+    static async detectVariables(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { content, autoFillDefaults, validateTypes } = req.body;
+
+            const result = await PromptTemplateService.detectVariables(
+                content,
+                userId,
+                {
+                    autoFillDefaults,
+                    validateTypes
+                }
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+        } catch (error: any) {
+            loggingService.error('Error detecting variables:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to detect variables'
+            });
+        }
+    }
+
+    /**
+     * AI: Optimize template
+     */
+    static async optimizeTemplate(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { templateId } = req.params;
+            const { optimizationType, targetModel, preserveIntent } = req.body;
+
+            const result = await PromptTemplateService.optimizeTemplate(
+                templateId,
+                userId,
+                optimizationType || 'token',
+                {
+                    targetModel,
+                    preserveIntent
+                }
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+        } catch (error: any) {
+            loggingService.error('Error optimizing template:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to optimize template'
+            });
+        }
+    }
+
+    /**
+     * AI: Get template recommendations
+     */
+    static async getRecommendations(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { currentProject, taskType } = req.query;
+
+            const recommendations = await PromptTemplateService.getRecommendations(
+                userId,
+                {
+                    currentProject,
+                    taskType
+                }
+            );
+
+            res.json({
+                success: true,
+                data: recommendations
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting recommendations:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to get recommendations'
+            });
+        }
+    }
+
+    /**
+     * AI: Predict template effectiveness
+     */
+    static async predictEffectiveness(req: any, res: Response): Promise<void> {
+        try {
+            const { templateId } = req.params;
+            const { variables } = req.body;
+            const userId = req.user!.id;
+
+            const effectiveness = await PromptTemplateService.predictEffectiveness(
+                templateId,
+                userId,
+                variables
+            );
+
+            res.json({
+                success: true,
+                data: effectiveness
+            });
+        } catch (error: any) {
+            loggingService.error('Error predicting effectiveness:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to predict effectiveness'
+            });
+        }
+    }
+
+    /**
+     * AI: Get template insights
+     */
+    static async getInsights(req: any, res: Response): Promise<void> {
+        try {
+            const { templateId } = req.params;
+
+            const insights = await PromptTemplateService.getInsights(templateId);
+
+            res.json({
+                success: true,
+                data: insights
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting insights:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to get insights'
+            });
+        }
+    }
+
+    /**
+     * AI: Semantic search templates
+     */
+    static async searchSemantic(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { query, limit = 10 } = req.query;
+
+            const results = await PromptTemplateService.searchSemantic(
+                query,
+                userId,
+                parseInt(limit)
+            );
+
+            res.json({
+                success: true,
+                data: results
+            });
+        } catch (error: any) {
+            loggingService.error('Error in semantic search:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to search templates'
+            });
+        }
+    }
+
+    /**
+     * AI: Personalize template
+     */
+    static async personalizeTemplate(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { templateId } = req.params;
+
+            const personalized = await PromptTemplateService.personalizeTemplate(
+                templateId,
+                userId
+            );
+
+            res.json({
+                success: true,
+                data: personalized
+            });
+        } catch (error: any) {
+            loggingService.error('Error personalizing template:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to personalize template'
+            });
+        }
+    }
+
+    /**
+     * AI: Apply optimization to template
+     */
+    static async applyOptimization(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { templateId } = req.params;
+            const { optimizedContent, metadata } = req.body;
+
+            const updated = await PromptTemplateService.applyOptimization(
+                templateId,
+                optimizedContent,
+                userId,
+                metadata
+            );
+
+            res.json({
+                success: true,
+                data: updated
+            });
+        } catch (error: any) {
+            loggingService.error('Error applying optimization:', error);
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to apply optimization'
             });
         }
     }

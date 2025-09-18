@@ -64,7 +64,7 @@ export class AgentService {
     constructor() {
         const defaultModel = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
         const isMasterAgent = process.env.AGENT_TYPE === 'master';
-        const selectedModel = isMasterAgent ? 'anthropic.claude-3-5-sonnet-20241022-v2:0' : defaultModel;
+        const selectedModel = isMasterAgent ? 'anthropic.claude-3-5-sonnet-20240620-v1:0' : defaultModel;
         
         this.model = new ChatBedrockConverse({
             region: process.env.AWS_BEDROCK_REGION || 'us-east-1',

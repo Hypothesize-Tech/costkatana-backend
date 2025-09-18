@@ -592,7 +592,7 @@ function suggestAlternativeModel(
     // Dynamic model alternatives by provider - prioritize newer, more efficient models
     const alternatives: Record<AIProvider, string[]> = {
         [AIProvider.OpenAI]: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'],
-        [AIProvider.AWSBedrock]: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-sonnet-20241022-v2:0', 'anthropic.claude-opus-4-1-20250805-v1:0', 'amazon.nova-lite-v1:0'],
+        [AIProvider.AWSBedrock]: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-sonnet-20240620-v1:0', 'anthropic.claude-opus-4-1-20250805-v1:0', 'amazon.nova-lite-v1:0'],
         [AIProvider.Anthropic]: ['claude-3-5-haiku-20241022', 'claude-3-5-sonnet-20241022'],
         [AIProvider.Google]: ['gemini-1.5-flash', 'gemini-1.5-pro'],
         [AIProvider.Cohere]: ['command-r', 'command-r-plus'],

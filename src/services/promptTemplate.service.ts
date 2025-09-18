@@ -3,42 +3,72 @@ import { Project } from '../models/Project';
 import { Usage } from '../models/Usage';
 import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
+import { aiTemplateEngine } from './aiTemplateEngine.service';
 import mongoose from 'mongoose';
+import {
+    CreateTemplateDto,
+    UpdateTemplateDto,
+    TemplateQueryParams,
+    TemplateActivityType,
+    ITemplateActivityMetadata,
+    AITemplateGenerationRequest,
+    AITemplateOptimizationRequest,
+    OptimizationType
+} from '../types/template.types';
 
-interface CreatePromptTemplateDto {
-    name: string;
-    description?: string;
-    content: string;
-    category?: string;
-    projectId?: string;
-    variables?: Array<{
-        name: string;
-        description?: string;
-        defaultValue?: string;
-        required?: boolean;
-    }>;
-    metadata?: {
-        estimatedTokens?: number;
-        recommendedModel?: string;
-        tags?: string[];
-        language?: string;
-    };
-    sharing?: {
-        visibility?: 'private' | 'project' | 'organization' | 'public';
-        sharedWith?: string[];
-        allowFork?: boolean;
-    };
-}
+// Helper function for tracking template activities
+async function trackTemplateActivity(
+    userId: string,
+    activityType: TemplateActivityType,
+    template: IPromptTemplate,
+    additionalMetadata?: Partial<ITemplateActivityMetadata>
+): Promise<void> {
+    try {
+        const baseMetadata: ITemplateActivityMetadata = {
+            templateId: template._id,
+            templateName: template.name,
+            templateCategory: template.category,
+            templateVersion: template.version,
+            ...additionalMetadata
+        };
 
-interface PromptTemplateQuery {
-    userId: string;
-    projectId?: string;
-    category?: string;
-    tags?: string[];
-    visibility?: string;
-    search?: string;
-    page?: number;
-    limit?: number;
+        const activityTitles: Record<TemplateActivityType, string> = {
+            'template_created': 'Template Created',
+            'template_updated': 'Template Updated',
+            'template_deleted': 'Template Deleted',
+            'template_forked': 'Template Forked',
+            'template_ai_generated': 'AI Template Generated',
+            'template_optimized': 'Template Optimized',
+            'template_used': 'Template Used',
+            'template_shared': 'Template Shared',
+            'template_feedback_added': 'Template Feedback Added',
+            'template_variables_detected': 'Template Variables Detected',
+            'template_effectiveness_predicted': 'Template Effectiveness Predicted'
+        };
+
+        const activityDescriptions: Record<TemplateActivityType, string> = {
+            'template_created': `Created template "${template.name}" in ${template.category} category`,
+            'template_updated': `Updated template "${template.name}" to version ${template.version}`,
+            'template_deleted': `Deleted template "${template.name}"`,
+            'template_forked': `Forked template "${template.name}"`,
+            'template_ai_generated': `Generated template "${template.name}" using AI${additionalMetadata?.intent ? ` from intent: "${additionalMetadata.intent}"` : ''}`,
+            'template_optimized': `Optimized template "${template.name}"${additionalMetadata?.optimizationType ? ` for ${additionalMetadata.optimizationType}` : ''}`,
+            'template_used': `Used template "${template.name}"${additionalMetadata?.variablesUsed ? ` with ${Object.keys(additionalMetadata.variablesUsed).length} variables` : ''}`,
+            'template_shared': `Shared template "${template.name}" with visibility: ${template.sharing.visibility}`,
+            'template_feedback_added': `Added feedback to template "${template.name}"${additionalMetadata?.rating ? ` (Rating: ${additionalMetadata.rating}/5)` : ''}`,
+            'template_variables_detected': `Detected ${additionalMetadata?.variablesCount || 0} variables in template "${template.name}"`,
+            'template_effectiveness_predicted': `Predicted effectiveness for template "${template.name}"${additionalMetadata?.effectivenessScore ? ` (Score: ${additionalMetadata.effectivenessScore}%)` : ''}`
+        };
+
+        await ActivityService.trackActivity(userId, {
+            type: activityType,
+            title: activityTitles[activityType],
+            description: activityDescriptions[activityType],
+            metadata: baseMetadata
+        });
+    } catch (error) {
+        loggingService.warn(`Failed to track template activity: ${activityType}`, error as Error);
+    }
 }
 
 export class PromptTemplateService {
@@ -47,7 +77,7 @@ export class PromptTemplateService {
      */
     static async createTemplate(
         userId: string,
-        data: CreatePromptTemplateDto
+        data: CreateTemplateDto
     ): Promise<IPromptTemplate> {
         try {
             // Verify project access if projectId is provided
@@ -95,17 +125,8 @@ export class PromptTemplateService {
                 }
             });
 
-            // Track activity
-            await ActivityService.trackActivity(userId, {
-                type: 'settings_updated',
-                title: 'Created Prompt Template',
-                description: `Created template "${template.name}" in ${template.category} category`,
-                metadata: {
-                    templateId: template._id,
-                    category: template.category,
-                    visibility: template.sharing.visibility
-                }
-            });
+            // Track template creation activity
+            await trackTemplateActivity(userId, 'template_created', template);
 
             loggingService.info(`Prompt template created: ${template.name} by user ${userId}`);
             return template;
@@ -118,7 +139,7 @@ export class PromptTemplateService {
     /**
      * Get accessible prompt templates for a user
      */
-    static async getTemplates(query: PromptTemplateQuery): Promise<{
+    static async getTemplates(query: TemplateQueryParams): Promise<{
         templates: IPromptTemplate[];
         total: number;
         page: number;
@@ -303,6 +324,11 @@ export class PromptTemplateService {
             template.usage.lastUsed = new Date();
             await template.save();
 
+            // Track template usage activity
+            await trackTemplateActivity(userId, 'template_used', template, {
+                variablesUsed: variables || {}
+            });
+
             return {
                 prompt,
                 estimatedTokens: template.metadata.estimatedTokens || this.estimateTokenCount(prompt),
@@ -352,15 +378,10 @@ export class PromptTemplateService {
 
             await forkedTemplate.save();
 
-            // Track activity
-            await ActivityService.trackActivity(userId, {
-                type: 'settings_updated',
-                title: 'Forked Prompt Template',
-                description: `Forked template "${originalTemplate.name}"`,
-                metadata: {
-                    originalTemplateId: originalTemplate._id,
-                    forkedTemplateId: forkedTemplate._id
-                }
+            // Track template fork activity
+            await trackTemplateActivity(userId, 'template_forked', forkedTemplate, {
+                originalTemplateId: originalTemplate._id,
+                forkedTemplateId: forkedTemplate._id
             });
 
             return forkedTemplate;
@@ -604,16 +625,8 @@ export class PromptTemplateService {
 
         await template.save();
 
-        // Track activity
-        await ActivityService.trackActivity(userId, {
-            type: 'settings_updated',
-            title: 'Updated Prompt Template',
-            description: `Updated template "${template.name}"`,
-            metadata: {
-                templateId: template._id,
-                version: template.version
-            }
-        });
+        // Track template update activity
+        await trackTemplateActivity(userId, 'template_updated', template);
 
         return template;
     }
@@ -637,14 +650,350 @@ export class PromptTemplateService {
         template.isActive = false;
         await template.save();
 
-        // Track activity
-        await ActivityService.trackActivity(userId, {
-            type: 'settings_updated',
-            title: 'Deleted Prompt Template',
-            description: `Deleted template "${template.name}"`,
-            metadata: {
-                templateId: template._id
+        // Track template deletion activity
+        await trackTemplateActivity(userId, 'template_deleted', template);
+    }
+
+    /**
+     * Generate template from AI intent
+     */
+    static async generateTemplateFromIntent(
+        userId: string,
+        intent: string,
+        context?: any
+    ): Promise<any> {
+        try {
+            loggingService.info('🤖 Generating template from intent', {
+                userId,
+                intent,
+                context
+            });
+
+            const result = await aiTemplateEngine.generateTemplateFromIntent({
+                userId,
+                intent,
+                category: context?.category,
+                context: context?.details,
+                constraints: context?.constraints
+            });
+
+            // Save the generated template
+            const template = await this.createTemplate(userId, {
+                ...result.template,
+                metadata: {
+                    ...result.template.metadata,
+                    aiGenerated: true,
+                    generationConfidence: result.metadata.confidence
+                }
+            });
+
+            // Track AI template generation activity
+            await trackTemplateActivity(userId, 'template_ai_generated', template, {
+                intent,
+                confidence: result.metadata.confidence,
+                alternatives: result.metadata.alternativeVersions?.length || 0
+            });
+
+            return {
+                template,
+                metadata: result.metadata,
+                alternatives: result.metadata.alternativeVersions
+            };
+        } catch (error: any) {
+            loggingService.error('Failed to generate template from intent', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Detect variables in template content
+     */
+    static async detectVariables(
+        content: string,
+        userId: string,
+        options?: {
+            autoFillDefaults?: boolean;
+            validateTypes?: boolean;
+        }
+    ): Promise<any> {
+        try {
+            const result = await aiTemplateEngine.detectVariables({
+                content,
+                userId,
+                autoFillDefaults: options?.autoFillDefaults,
+                validateTypes: options?.validateTypes
+            });
+
+            // Track variables detection activity (using general activity tracking since we don't have a specific template)
+            await ActivityService.trackActivity(userId, {
+                type: 'settings_updated',
+                title: 'Template Variables Detected',
+                description: `Detected ${result.variables?.length || 0} variables using AI`,
+                metadata: {
+                    variablesCount: result.variables?.length || 0,
+                    detectedVariables: result.variables?.map(v => v.name) || []
+                }
+            });
+
+            return result;
+        } catch (error: any) {
+            loggingService.error('Failed to detect variables', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Optimize an existing template
+     */
+    static async optimizeTemplate(
+        templateId: string,
+        userId: string,
+        optimizationType: 'token' | 'cost' | 'quality' | 'model-specific',
+        options?: {
+            targetModel?: string;
+            preserveIntent?: boolean;
+        }
+    ): Promise<any> {
+        try {
+            // Check access
+            const template = await PromptTemplate.findById(templateId);
+            if (!template) {
+                throw new Error('Template not found');
             }
-        });
+
+            const canEdit = await this.canEditTemplate(templateId, userId);
+            if (!canEdit) {
+                throw new Error('Unauthorized: Cannot optimize this template');
+            }
+
+            const result = await aiTemplateEngine.optimizeTemplate({
+                templateId,
+                userId,
+                optimizationType,
+                targetModel: options?.targetModel,
+                preserveIntent: options?.preserveIntent
+            });
+
+            // Track template optimization activity
+            if (template) {
+                await trackTemplateActivity(userId, 'template_optimized', template, {
+                    optimizationType,
+                    tokenReduction: result.metrics.tokenReduction,
+                    costSaving: result.metrics.costSaving
+                });
+            }
+
+            return result;
+        } catch (error: any) {
+            loggingService.error('Failed to optimize template', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get AI-powered template recommendations
+     */
+    static async getRecommendations(
+        userId: string,
+        context?: {
+            currentProject?: string;
+            recentActivity?: string[];
+            taskType?: string;
+        }
+    ): Promise<any[]> {
+        try {
+            const recommendations = await aiTemplateEngine.getTemplateRecommendations(
+                userId,
+                context || {}
+            );
+
+            // Track template recommendations viewed (using general activity tracking)
+            await ActivityService.trackActivity(userId, {
+                type: 'settings_updated',
+                title: 'Template Recommendations Viewed',
+                description: `Viewed ${recommendations.length} template recommendations`,
+                metadata: {
+                    count: recommendations.length,
+                    context
+                }
+            });
+
+            return recommendations;
+        } catch (error: any) {
+            loggingService.error('Failed to get recommendations', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Predict template effectiveness
+     */
+    static async predictEffectiveness(
+        templateId: string,
+        userId: string,
+        variables?: Record<string, any>
+    ): Promise<any> {
+        try {
+            const effectiveness = await aiTemplateEngine.predictEffectiveness(
+                templateId,
+                variables
+            );
+
+            // Track effectiveness prediction activity
+            const template = await PromptTemplate.findById(templateId);
+            if (template) {
+                await trackTemplateActivity(userId, 'template_effectiveness_predicted', template, {
+                    effectivenessScore: effectiveness.overall,
+                    clarity: effectiveness.clarity,
+                    specificity: effectiveness.specificity,
+                    tokenEfficiency: effectiveness.tokenEfficiency,
+                    expectedOutputQuality: effectiveness.expectedOutputQuality
+                });
+            }
+
+            return effectiveness;
+        } catch (error: any) {
+            loggingService.error('Failed to predict effectiveness', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get AI insights for a template
+     */
+    static async getInsights(templateId: string): Promise<any> {
+        try {
+            const insights = await aiTemplateEngine.getTemplateInsights(templateId);
+            return insights;
+        } catch (error: any) {
+            loggingService.error('Failed to get insights', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Semantic search for templates
+     */
+    static async searchSemantic(
+        query: string,
+        userId: string,
+        limit: number = 10
+    ): Promise<any[]> {
+        try {
+            const results = await aiTemplateEngine.searchTemplatesSemantic(
+                query,
+                userId,
+                limit
+            );
+
+            return results;
+        } catch (error: any) {
+            loggingService.error('Failed semantic search', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Personalize template for user
+     */
+    static async personalizeTemplate(
+        templateId: string,
+        userId: string
+    ): Promise<any> {
+        try {
+            const personalized = await aiTemplateEngine.personalizeTemplate(
+                templateId,
+                userId
+            );
+
+            return personalized;
+        } catch (error: any) {
+            loggingService.error('Failed to personalize template', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Apply optimized version to template
+     */
+    static async applyOptimization(
+        templateId: string,
+        optimizedContent: string,
+        userId: string,
+        metadata?: any
+    ): Promise<IPromptTemplate> {
+        try {
+            const template = await PromptTemplate.findById(templateId);
+            if (!template) {
+                throw new Error('Template not found');
+            }
+
+            // Check permissions
+            const canEdit = await this.canEditTemplate(templateId, userId);
+            if (!canEdit) {
+                throw new Error('Unauthorized: Cannot edit this template');
+            }
+
+            // Store original version history
+            const originalVersion = {
+                content: template.content,
+                metadata: template.metadata,
+                version: template.version,
+                updatedAt: template.updatedAt
+            };
+
+            // Update with optimized content
+            template.content = optimizedContent;
+            template.version = template.version + 1;
+            template.metadata = {
+                ...template.metadata,
+                ...metadata,
+                lastOptimized: new Date()
+                // Note: previousVersions would need to be added to the schema
+                // previousVersions: [
+                //     ...(template.metadata.previousVersions || []),
+                //     originalVersion
+                // ]
+            };
+
+            await template.save();
+
+            // Track optimization application activity
+            await trackTemplateActivity(userId, 'template_optimized', template, {
+                optimizationType: metadata?.optimizationType,
+                tokenReduction: metadata?.tokenReduction,
+                costSaving: metadata?.costSaving
+            });
+
+            return template;
+        } catch (error: any) {
+            loggingService.error('Failed to apply optimization', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Check if user can edit template
+     */
+    private static async canEditTemplate(templateId: string, userId: string): Promise<boolean> {
+        const template = await PromptTemplate.findById(templateId);
+        if (!template) return false;
+
+        // Owner can always edit
+        if (template.createdBy.toString() === userId) return true;
+
+        // Check project membership if template is project-based
+        if (template.projectId) {
+            const project = await Project.findOne({
+                _id: template.projectId,
+                $or: [
+                    { ownerId: userId },
+                    { 'members.userId': userId, 'members.role': { $in: ['admin', 'editor'] } }
+                ]
+            });
+            return !!project;
+        }
+
+        return false;
     }
 } 

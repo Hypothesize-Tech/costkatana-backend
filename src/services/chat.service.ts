@@ -554,7 +554,7 @@ export class ChatService {
                     pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' }
                 },
                 {
-                    id: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                    id: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
                     name: 'Claude 3.5 Sonnet',
                     provider: 'Anthropic',
                     description: 'Advanced reasoning and analysis capabilities',
@@ -810,7 +810,7 @@ export class ChatService {
             'amazon.titan-text-lite-v1': 'Titan Text Lite',
             'anthropic.claude-3-5-haiku-20241022-v1:0': 'Claude 3.5 Haiku',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'Claude Sonnet 4',
-            'anthropic.claude-3-5-sonnet-20241022-v2:0': 'Claude 3.5 Sonnet',
+            'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Claude 3.5 Sonnet',
             'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude 4 Opus',
             'meta.llama3-1-8b-instruct-v1:0': 'Llama 3.1 8B',
             'meta.llama3-1-70b-instruct-v1:0': 'Llama 3.1 70B',
@@ -979,7 +979,7 @@ export class ChatService {
             'amazon.nova-pro-v1:0': 'High-performance model for complex tasks',
             'amazon.titan-text-lite-v1': 'Lightweight text generation model',
             'anthropic.claude-3-5-haiku-20241022-v1:0': 'Fast and intelligent for quick responses',
-            'anthropic.claude-3-5-sonnet-20241022-v2:0': 'Advanced reasoning and analysis capabilities',
+            'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Advanced reasoning and analysis capabilities',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'High-performance model with exceptional reasoning',
             'anthropic.claude-opus-4-1-20250805-v1:0': 'Most powerful model for complex reasoning',
             'meta.llama3-1-8b-instruct-v1:0': 'Good balance of performance and efficiency',

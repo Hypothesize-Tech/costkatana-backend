@@ -124,9 +124,9 @@ const MODEL_TIERS: Record<string, ModelTier> = {
     premium: {
         name: 'Premium Tier',
         models: {
-            encoder: 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Claude 3.5 Sonnet for premium encoding
+            encoder: 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Claude 3.5 Sonnet for premium encoding
             core: 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 for core processing
-            decoder: 'anthropic.claude-3-5-sonnet-20241022-v2:0' // Claude 3.5 Sonnet for premium decoding
+            decoder: 'anthropic.claude-3-5-sonnet-20240620-v1:0' // Claude 3.5 Sonnet for premium decoding
         },
         characteristics: {
             speed: 'medium',
@@ -154,9 +154,9 @@ const MODEL_TIERS: Record<string, ModelTier> = {
     expert: {
         name: 'Expert Tier',
         models: {
-            encoder: 'anthropic.claude-3-5-sonnet-20241022-v2:0', // Claude 3.5 Sonnet for premium encoding
+            encoder: 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Claude 3.5 Sonnet for premium encoding
             core: 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 for core processing
-            decoder: 'anthropic.claude-3-5-sonnet-20241022-v2:0' // Claude 3.5 Sonnet for premium decoding
+            decoder: 'anthropic.claude-3-5-sonnet-20240620-v1:0' // Claude 3.5 Sonnet for premium decoding
         },
         characteristics: {
             speed: 'slow',

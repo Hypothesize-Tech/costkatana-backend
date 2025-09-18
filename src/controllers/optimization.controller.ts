@@ -14,8 +14,8 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         // Claude 3.5 models (upgraded)
         'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
         'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
-        'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+        'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         
         // Claude 4 models
         'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0',
@@ -28,7 +28,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         
         // Full model IDs (pass through)
         'anthropic.claude-3-5-haiku-20241022-v1:0': 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        'anthropic.claude-3-5-sonnet-20241022-v2:0': 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        'anthropic.claude-3-5-sonnet-20240620-v1:0': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'anthropic.claude-opus-4-1-20250805-v1:0': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0'
     };

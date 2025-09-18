@@ -699,7 +699,7 @@ export const isErrorFrame = (frame: CortexFrame): frame is CortexErrorFrame => f
  */
 export const DEFAULT_CORTEX_CONFIG: CortexConfig = {
     encoding: {
-        model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        model: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         strategy: 'balanced'
     },
     coreProcessing: {
@@ -707,7 +707,7 @@ export const DEFAULT_CORTEX_CONFIG: CortexConfig = {
         optimizationLevel: 'balanced'
     },
     decoding: {
-        model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        model: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         style: 'conversational'
     },
     instructionGenerator: {

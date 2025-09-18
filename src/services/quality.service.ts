@@ -300,10 +300,13 @@ Provide your response in JSON format:
                     description: 'Quality score generated for optimization',
                     metadata: {
                         qualityScoreId: qualityScore._id,
-                        optimizationType: scoreData.optimizationType
+                        optimizationType: Array.isArray(scoreData.optimizationType) ? 
+                            (scoreData.optimizationType[0] as unknown as 'token' | 'cost' | 'quality' | 'model-specific') : 
+                            (scoreData.optimizationType as unknown as 'token' | 'cost' | 'quality' | 'model-specific')
                     }
                 });
             }
+            
 
             return qualityScore;
         } catch (error) {

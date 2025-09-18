@@ -7,7 +7,10 @@ export interface IActivity {
     'alert_created' | 'alert_resolved' | 'tip_viewed' | 'tip_applied' |
     'quality_scored' | 'settings_updated' | 'profile_updated' |
     'dashboard_api_key_created' | 'dashboard_api_key_deleted' | 'file_uploaded' | 'export_generated' |
-    'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed';
+    'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed' |
+    'template_created' | 'template_updated' | 'template_deleted' | 'template_forked' |
+    'template_ai_generated' | 'template_optimized' | 'template_used' | 'template_shared' |
+    'template_feedback_added' | 'template_variables_detected' | 'template_effectiveness_predicted';                                                                      
     title: string;
     description?: string;
     metadata?: {
@@ -19,6 +22,23 @@ export interface IActivity {
         alertId?: mongoose.Types.ObjectId;
         tipId?: mongoose.Types.ObjectId;
         qualityScoreId?: mongoose.Types.ObjectId;
+        // Template-specific metadata
+        templateId?: mongoose.Types.ObjectId;
+        templateName?: string;
+        templateCategory?: string;
+        templateVersion?: number;
+        intent?: string;
+        confidence?: number;
+        optimizationType?: 'token' | 'cost' | 'quality' | 'model-specific';
+        tokenReduction?: number;
+        costSaving?: number;
+        effectivenessScore?: number;
+        variablesCount?: number;
+        targetModel?: string;
+        originalTemplateId?: mongoose.Types.ObjectId;
+        forkedTemplateId?: mongoose.Types.ObjectId;
+        rating?: number;
+        feedback?: string;
         [key: string]: any;
     };
     ipAddress?: string;
@@ -40,7 +60,10 @@ const activitySchema = new Schema<IActivity>({
             'alert_created', 'alert_resolved', 'tip_viewed', 'tip_applied',
             'quality_scored', 'settings_updated', 'profile_updated',
             'dashboard_api_key_created', 'dashboard_api_key_deleted', 'file_uploaded', 'export_generated',
-            'bulk_optimization', 'cost_audit_completed', 'subscription_changed'
+            'bulk_optimization', 'cost_audit_completed', 'subscription_changed',
+            'template_created', 'template_updated', 'template_deleted', 'template_forked',
+            'template_ai_generated', 'template_optimized', 'template_used', 'template_shared',
+            'template_feedback_added', 'template_variables_detected', 'template_effectiveness_predicted'
         ],
         required: true
     },

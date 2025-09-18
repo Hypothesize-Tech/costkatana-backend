@@ -405,7 +405,7 @@ Respond in JSON format:
       
       // Updated Claude 3.5 models
       'anthropic.claude-3-5-haiku-20241022-v1:0': { input: 0.00025, output: 0.00125 },
-      'anthropic.claude-3-5-sonnet-20241022-v2:0': { input: 0.003, output: 0.015 },
+      'anthropic.claude-3-5-sonnet-20240620-v1:0': { input: 0.003, output: 0.015 },
       
       // Claude 4 models
       'anthropic.claude-opus-4-1-20250805-v1:0': { input: 0.015, output: 0.075 }, // Premium pricing

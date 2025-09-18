@@ -131,7 +131,7 @@ export class UserPreferenceService {
                 }
                 
                 if (contextLower.includes('creative') || contextLower.includes('writing')) {
-                    return 'anthropic.claude-3-5-sonnet-20241022-v2:0'; // Good for creative tasks
+                    return 'anthropic.claude-3-5-sonnet-20240620-v1:0'; // Good for creative tasks
                 }
                 
                 if (contextLower.includes('analysis') || contextLower.includes('data')) {

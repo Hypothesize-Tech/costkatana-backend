@@ -144,4 +144,109 @@ router.get(
     PromptTemplateController.getTemplateAnalytics
 );
 
+// ============ AI-POWERED ENDPOINTS ============
+
+// AI: Generate template from intent
+router.post(
+    '/ai/generate',
+    [
+        body('intent').notEmpty().withMessage('Intent is required'),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        body('context').optional().isObject(),
+        body('constraints').optional().isObject()
+    ],
+    validateRequest,
+    PromptTemplateController.generateFromIntent
+);
+
+// AI: Detect variables in content
+router.post(
+    '/ai/detect-variables',
+    [
+        body('content').notEmpty().withMessage('Content is required'),
+        body('autoFillDefaults').optional().isBoolean(),
+        body('validateTypes').optional().isBoolean()
+    ],
+    validateRequest,
+    PromptTemplateController.detectVariables
+);
+
+// AI: Get template recommendations
+router.get(
+    '/ai/recommendations',
+    [
+        query('currentProject').optional().isMongoId(),
+        query('taskType').optional().isString()
+    ],
+    validateRequest,
+    PromptTemplateController.getRecommendations
+);
+
+// AI: Semantic search
+router.get(
+    '/ai/search',
+    [
+        query('query').notEmpty().withMessage('Search query is required'),
+        query('limit').optional().isInt({ min: 1, max: 50 })
+    ],
+    validateRequest,
+    PromptTemplateController.searchSemantic
+);
+
+// AI: Optimize template
+router.post(
+    '/:templateId/ai/optimize',
+    [
+        param('templateId').isMongoId(),
+        body('optimizationType').optional().isIn(['token', 'cost', 'quality', 'model-specific']),
+        body('targetModel').optional().isString(),
+        body('preserveIntent').optional().isBoolean()
+    ],
+    validateRequest,
+    PromptTemplateController.optimizeTemplate
+);
+
+// AI: Predict effectiveness
+router.post(
+    '/:templateId/ai/predict-effectiveness',
+    [
+        param('templateId').isMongoId(),
+        body('variables').optional().isObject()
+    ],
+    validateRequest,
+    PromptTemplateController.predictEffectiveness
+);
+
+// AI: Get insights
+router.get(
+    '/:templateId/ai/insights',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.getInsights
+);
+
+// AI: Personalize template
+router.post(
+    '/:templateId/ai/personalize',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.personalizeTemplate
+);
+
+// AI: Apply optimization
+router.post(
+    '/:templateId/ai/apply-optimization',
+    [
+        param('templateId').isMongoId(),
+        body('optimizedContent').notEmpty().withMessage('Optimized content is required'),
+        body('metadata').optional().isObject()
+    ],
+    validateRequest,
+    PromptTemplateController.applyOptimization
+);
+
 export default router; 
