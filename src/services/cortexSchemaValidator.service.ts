@@ -6,7 +6,7 @@
  * preventing costly errors and guaranteeing predictable output structure.
  */
 
-import { CortexFrame, CortexFrameType, CortexPrimitive, CortexRole } from '../types/cortex.types';
+import { CortexFrame, CortexFrameType, CortexPrimitive } from '../types/cortex.types';
 import { loggingService } from './logging.service';
 
 // ============================================================================

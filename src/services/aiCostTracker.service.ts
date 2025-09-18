@@ -213,7 +213,7 @@ export class AICostTrackerService {
                             estimatedCost: estimatedCost,
                             estimatedTokens: finalTotalTokens,
                             model: request.model,
-                            prompt: request.prompt?.substring(0, 500),
+                            prompt: request.prompt, 
                             reason: 'Exceeds project approval threshold'
                         }
                     );

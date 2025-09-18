@@ -263,7 +263,7 @@ export class AutoRecommendationAgentService {
                     model: u.model,
                     cost: u.cost,
                     tokens: u.totalTokens,
-                    prompt: u.prompt.substring(0, 200), // Truncate for privacy
+                    prompt: u.prompt,
                     timestamp: u.createdAt
                 })),
                 currentDate: new Date().toISOString()

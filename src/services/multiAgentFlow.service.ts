@@ -1178,8 +1178,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             .replace(/\s+/g, ' ') // Normalize whitespace
             .replace(/\b(please|kindly|could you)\b/gi, '') // Remove politeness tokens
             .replace(/\b(um|uh|well|you know)\b/gi, '') // Remove filler words
-            .trim()
-            .substring(0, Math.min(prompt.length, 1000)); // Limit length
+            .trim();
     }
 
     private semanticCache: Map<string, { response: string; embedding: number[]; timestamp: number; hits: number }> = new Map();

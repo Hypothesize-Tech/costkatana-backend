@@ -1111,7 +1111,7 @@ REPLY FORMAT (JSON only):
                 if (await this.isTerribleResponse(optimizedPrompt, request.prompt)) {
                     loggingService.warn('🚨 FINAL QUALITY CHECK: Cortex returned terrible response, using intelligent fallback', {
                         userId: request.userId,
-                        originalPrompt: request.prompt.substring(0, 100),
+                        originalPrompt: request.prompt, // Full prompt for training data
                         terribleCortexResponse: optimizedPrompt,
                         reason: 'Final quality check detected unusable response'
                     });
