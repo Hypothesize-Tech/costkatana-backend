@@ -318,32 +318,32 @@ export class AutoSimulationService {
                 }).select('autoOptimize').lean()
             ]);
 
-            // Track simulation and update queue item in parallel
-            const [trackingId] = await Promise.all([
-                SimulationTrackingService.trackSimulation({
-                    userId: queueItem.userId.toString(),
-                    sessionId: `auto-${queueItem._id}`,
-                    originalUsageId: usage._id.toString(),
-                    simulationType: 'real_time_analysis',
-                    originalModel: usage.model,
-                    originalPrompt: usage.prompt,
-                    originalCost: usage.cost,
-                    originalTokens: usage.totalTokens,
-                    optimizationOptions: result.optimizedOptions || [],
-                    recommendations: result.recommendations || [],
-                    potentialSavings: result.potentialSavings || 0,
-                    confidence: result.confidence || 0
-                }),
-                AutoSimulationQueue.findByIdAndUpdate(queueItem._id, {
-                    status: 'completed',
-                    simulationId: trackingId,
-                    optimizationOptions: result.optimizedOptions,
-                    recommendations: result.recommendations,
-                    potentialSavings: result.potentialSavings,
-                    confidence: result.confidence,
-                    updatedAt: new Date()
-                })
-            ]);
+            // Track simulation first
+            const trackingId = await SimulationTrackingService.trackSimulation({
+                userId: queueItem.userId.toString(),
+                sessionId: `auto-${queueItem._id}`,
+                originalUsageId: usage._id.toString(),
+                simulationType: 'real_time_analysis',
+                originalModel: usage.model,
+                originalPrompt: usage.prompt,
+                originalCost: usage.cost,
+                originalTokens: usage.totalTokens,
+                optimizationOptions: result.optimizedOptions || [],
+                recommendations: result.recommendations || [],
+                potentialSavings: result.potentialSavings || 0,
+                confidence: result.confidence || 0
+            });
+
+            // Update queue item with tracking ID
+            await AutoSimulationQueue.findByIdAndUpdate(queueItem._id, {
+                status: 'completed',
+                simulationId: trackingId,
+                optimizationOptions: result.optimizedOptions,
+                recommendations: result.recommendations,
+                potentialSavings: result.potentialSavings,
+                confidence: result.confidence,
+                updatedAt: new Date()
+            });
 
             // Check if auto-optimization should be applied
             if (settings?.autoOptimize?.enabled) {
