@@ -151,15 +151,18 @@ export class AuthService {
         password: string;
         name: string;
     }): Promise<{ user: IUser; tokens: AuthTokens }> {
+        const startTime = Date.now();
+        
         try {
             // Check if user already exists
-            const existingUser = await User.findOne({ email: data.email });
+            const existingUser = await User.findOne({ email: data.email }).select('_id email');
+            
+            // Generate verification token
+            const verificationToken = generateToken();
+
             if (existingUser) {
                 throw new Error('User with this email already exists');
             }
-
-            // Create verification token
-            const verificationToken = generateToken();
 
             // Create new user
             const user = await User.create({
@@ -171,30 +174,52 @@ export class AuthService {
             // Generate tokens
             const tokens = this.generateTokens(user);
 
-            // Send verification email (handled by email service)
-
-            loggingService.info(`New user registered: ${user.email}`);
+            loggingService.info(`New user registered: ${user.email}`, {
+                userId: (user as any)._id,
+                executionTime: Date.now() - startTime
+            });
 
             return { user, tokens };
         } catch (error: unknown) {
-            loggingService.error('Error in registration:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error in registration:', { 
+                error: error instanceof Error ? error.message : String(error),
+                email: data.email,
+                executionTime
+            });
             throw error;
         }
     }
 
     static async login(email: string, password: string, deviceInfo?: { userAgent: string; ipAddress: string }): Promise<{ user: IUser; tokens?: AuthTokens; requiresMFA?: boolean; mfaToken?: string }> {
+        const startTime = Date.now();
+        
         try {
-            // Find user
-            const user = await User.findOne({ email });
+            // Find user with optimized query - only select needed fields
+            const user = await User.findOne({ email }).select('email password isActive mfa lastLogin _id');
             if (!user) {
                 throw new Error('Invalid credentials');
             }
 
-            // Check password
-            if (typeof user.comparePassword !== 'function') {
-                throw new Error('Password comparison not implemented');
-            }
-            const isPasswordValid = await user.comparePassword(password);
+            // Run password validation and user checks in parallel
+            const [isPasswordValid, deviceTrustCheck] = await Promise.all([
+                // Password validation
+                (async () => {
+                    if (typeof user.comparePassword !== 'function') {
+                        throw new Error('Password comparison not implemented');
+                    }
+                    return await user.comparePassword(password);
+                })(),
+                // Device trust check (if MFA enabled and device info provided)
+                (async () => {
+                    if (user.mfa.enabled && user.mfa.methods.length > 0 && deviceInfo) {
+                        const deviceId = MFAService.generateDeviceId(deviceInfo.userAgent, deviceInfo.ipAddress);
+                        return await MFAService.isTrustedDevice(user._id.toString(), deviceId);
+                    }
+                    return true; // No MFA or no device info
+                })()
+            ]);
+
             if (!isPasswordValid) {
                 throw new Error('Invalid credentials');
             }
@@ -204,69 +229,84 @@ export class AuthService {
                 throw new Error('Account is deactivated');
             }
 
-            // Check if MFA is enabled
-            if (user.mfa.enabled && user.mfa.methods.length > 0) {
-                // Check if device is trusted
-                let isTrustedDevice = false;
-                if (deviceInfo) {
-                    const deviceId = MFAService.generateDeviceId(deviceInfo.userAgent, deviceInfo.ipAddress);
-                    isTrustedDevice = await MFAService.isTrustedDevice(user._id.toString(), deviceId);
-                }
-
-                if (!isTrustedDevice) {
-                    // Generate temporary MFA token for verification
-                    const mfaToken = this.generateMFAToken(user._id.toString());
-                    
-                    loggingService.info(`MFA required for user: ${user.email}`);
-                    
-                    return {
-                        user,
-                        requiresMFA: true,
-                        mfaToken,
-                    };
-                }
+            // Check if MFA is required
+            if (user.mfa.enabled && user.mfa.methods.length > 0 && !deviceTrustCheck) {
+                // Generate MFA token
+                const mfaToken = this.generateMFAToken(user._id.toString());
+                
+                loggingService.info(`MFA required for user: ${user.email}`, {
+                    userId: user._id.toString(),
+                    executionTime: Date.now() - startTime
+                });
+                
+                return {
+                    user,
+                    requiresMFA: true,
+                    mfaToken,
+                };
             }
 
             // Complete login (no MFA required or trusted device)
             return this.completeLogin(user);
         } catch (error: unknown) {
-            loggingService.error('Error in login:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error in login:', { 
+                error: error instanceof Error ? error.message : String(error),
+                email,
+                executionTime
+            });
             throw error;
         }
     }
 
     static async completeLogin(user: any): Promise<{ user: any; tokens: AuthTokens }> {
+        const startTime = Date.now();
+        
         try {
-            // Update last login
-            user.lastLogin = new Date();
-            await user.save();
+            // Update last login and track activity in parallel
+            const [, tokens] = await Promise.all([
+                // Update last login
+                (async () => {
+                    user.lastLogin = new Date();
+                    return await user.save();
+                })(),
+                // Track login activity
+                ActivityService.trackActivity(user._id.toString(), {
+                    type: 'login',
+                    title: 'User Login',
+                    description: 'Successfully logged in'
+                })
+            ]);
 
-            // Track login activity
-            await ActivityService.trackActivity(user._id.toString(), {
-                type: 'login',
-                title: 'User Login',
-                description: 'Successfully logged in'
+            // Generate tokens (synchronous operation)
+            const authTokens = this.generateTokens(user);
+
+            const executionTime = Date.now() - startTime;
+            loggingService.info(`User logged in: ${user.email}`, {
+                userId: user._id.toString(),
+                executionTime
             });
 
-            // Generate tokens
-            const tokens = this.generateTokens(user);
-
-            loggingService.info(`User logged in: ${user.email}`);
-
-            return { user, tokens };
+            return { user, tokens: authTokens };
         } catch (error: unknown) {
-            loggingService.error('Error completing login:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error completing login:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId: user._id?.toString(),
+                executionTime
+            });
             throw error;
         }
     }
 
     static async refreshTokens(refreshToken: string): Promise<AuthTokens> {
+        const startTime = Date.now();
+        
         try {
             // Verify refresh token
             const payload = this.verifyRefreshToken(refreshToken);
 
-            // Find user
-            const user = await User.findById(payload.id);
+            const user = await User.findById(payload.id).select('isActive email _id role');
             if (!user || !user.isActive) {
                 throw new Error('User not found or inactive');
             }
@@ -274,9 +314,19 @@ export class AuthService {
             // Generate new tokens
             const tokens = this.generateTokens(user);
 
+            const executionTime = Date.now() - startTime;
+            loggingService.debug('Tokens refreshed successfully', {
+                userId: payload.id,
+                executionTime
+            });
+
             return tokens;
         } catch (error: unknown) {
-            loggingService.error('Error refreshing tokens:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error refreshing tokens:', { 
+                error: error instanceof Error ? error.message : String(error),
+                executionTime
+            });
             throw error;
         }
     }
@@ -345,26 +395,41 @@ export class AuthService {
     }
 
     static async changePassword(userId: string, oldPassword: string, newPassword: string): Promise<void> {
+        const startTime = Date.now();
+        
         try {
-            const user = await User.findById(userId);
+            // Find user with optimized query
+            const user = await User.findById(userId).select('password email _id');
             if (!user) {
                 throw new Error('User not found');
             }
 
+            // Validate old password
             if (typeof user.comparePassword !== 'function') {
                 throw new Error('Password comparison not implemented');
             }
             const isPasswordValid = await user.comparePassword(oldPassword);
+
             if (!isPasswordValid) {
                 throw new Error('Invalid current password');
             }
 
+            // Update password
             user.password = newPassword;
             await user.save();
 
-            loggingService.info(`Password changed for user: ${user.email}`);
+            loggingService.info(`Password changed for user: ${user.email}`, {
+                userId,
+                executionTime: Date.now() - startTime
+            });
+
         } catch (error: unknown) {
-            loggingService.error('Error changing password:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error changing password:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                executionTime
+            });
             throw error;
         }
     }

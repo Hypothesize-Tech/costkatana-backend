@@ -59,21 +59,23 @@ export class AnalyticsService {
             // Add mixpanel tracking operation (non-blocking)
             if (filters.userId) {
                 operations.push(
-                    mixpanelService.trackAnalyticsEvent('dashboard_viewed', {
-                        userId: filters.userId,
-                        projectId: filters.projectId,
-                        reportType: options.groupBy,
-                        dateRange: filters.startDate && filters.endDate 
-                            ? `${filters.startDate.toISOString()}-${filters.endDate.toISOString()}` 
-                            : undefined,
-                        filters: {
-                            service: filters.service,
-                            model: filters.model,
-                            groupBy: options.groupBy
-                        },
-                        page: '/analytics',
-                        component: 'analytics_service'
-                    }).catch(err => loggingService.warn('Mixpanel tracking failed:', { error: err.message }))
+                    Promise.resolve().then(() => 
+                        mixpanelService.trackAnalyticsEvent('dashboard_viewed', {
+                            userId: filters.userId,
+                            projectId: filters.projectId,
+                            reportType: options.groupBy,
+                            dateRange: filters.startDate && filters.endDate 
+                                ? `${filters.startDate.toISOString()}-${filters.endDate.toISOString()}` 
+                                : undefined,
+                            filters: {
+                                service: filters.service,
+                                model: filters.model,
+                                groupBy: options.groupBy
+                            },
+                            page: '/analytics',
+                            component: 'analytics_service'
+                        })
+                    ).catch((err: any) => loggingService.warn('Mixpanel tracking failed:', { error: err.message }))
                 );
             }
 
@@ -177,7 +179,7 @@ export class AnalyticsService {
             }
 
             // Use Promise.all for parallel aggregation operations
-            const [comparison, projectDetails] = await Promise.all([
+            const [comparison, projectDetails]: any = await Promise.all([
                 Usage.aggregate([
                     { $match: match },
                     {
@@ -200,15 +202,15 @@ export class AnalyticsService {
                     }
                 ]),
                 // Separate project lookup for better performance
-                Usage.collection.db.collection('projects').find(
+                mongoose.connection?.db?.collection('projects').find(
                     { _id: { $in: projectIds.map(id => new mongoose.Types.ObjectId(id)) } },
                     { projection: { name: 1 } }
-                ).toArray()
+                ).toArray() || Promise.resolve([])
             ]);
 
             // Merge project details with comparison data
-            const projectMap = new Map(projectDetails.map(p => [p._id.toString(), p.name]));
-            const enrichedComparison = comparison.map(item => ({
+            const projectMap = new Map(projectDetails.map((p: any) => [p._id.toString(), p.name]));
+            const enrichedComparison = comparison.map((item: any) => ({
                 ...item,
                 projectName: projectMap.get(item.projectId.toString()) || 'Unknown'
             }));
