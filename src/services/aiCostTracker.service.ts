@@ -471,15 +471,15 @@ export class AICostTrackerService {
                     try {
                         await Promise.all([
                             ActivityService.trackActivity(userId, {
-                                type: 'api_call',
-                                title: `Made AI request using ${request.model}`,
-                                description: `AI request with ${finalTotalTokens} tokens and cost $${estimatedCost.toFixed(6)}`,
-                                metadata: {
-                                    model: request.model,
-                                    tokens: finalTotalTokens,
-                                    cost: estimatedCost,
-                                    projectId: metadata?.projectId
-                                }
+                    type: 'api_call',
+                    title: `Made AI request using ${request.model}`,
+                    description: `AI request with ${finalTotalTokens} tokens and cost $${estimatedCost.toFixed(6)}`,
+                    metadata: {
+                        model: request.model,
+                        tokens: finalTotalTokens,
+                        cost: estimatedCost,
+                        projectId: metadata?.projectId
+                    }
                             }),
                             Promise.resolve(RealtimeUpdateService.emitUsageUpdate(userId, {
                                 type: 'usage_tracked',
