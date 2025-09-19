@@ -33,6 +33,7 @@ import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
 import { loggingService } from './services/logging.service';
+import { loggerMiddleware } from './middleware/logger.middleware';
 
 // Create Express app
 const app: Application = express();
@@ -119,6 +120,9 @@ const customLogger = morgan('combined', {
 
 // Apply custom logging
 app.use(customLogger);
+
+// Logger middleware - apply early to capture all requests with UUID tracking
+app.use(loggerMiddleware);
 
 // OpenTelemetry middleware - apply early to capture all requests
 app.use(otelBaggageMiddleware);
@@ -215,6 +219,7 @@ const PORT = process.env.PORT || 8000;
 
 export const startServer = async () => {
     try {
+        // Use existing loggingService which now integrates BasicLoggerService internally
         loggingService.info('=== SERVER STARTUP INITIATED ===', {
             component: 'Server',
             operation: 'startServer',

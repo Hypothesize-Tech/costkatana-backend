@@ -1,21 +1,4 @@
-// Simple logger to avoid circular dependencies
-const simpleLogger = {
-    info: (message: string, context: any = {}) => console.log(`[INFO] ${message}`, context),
-    error: (message: string, context: any = {}) => console.error(`[ERROR] ${message}`, context),
-    warn: (message: string, context: any = {}) => console.warn(`[WARN] ${message}`, context),
-    debug: (message: string, context: any = {}) => console.log(`[DEBUG] ${message}`, context),
-    verbose: (message: string, context: any = {}) => console.log(`[VERBOSE] ${message}`, context),
-    logError: (error: Error, context: any = {}) => console.error(`[ERROR] ${error.message}`, { ...context, stack: error.stack }),
-    logPerformance: (operation: string, duration: number, context: any = {}) => console.log(`[PERF] ${operation} took ${duration}ms`, context),
-    logSecurity: (event: string, context: any = {}) => console.warn(`[SECURITY] ${event}`, context),
-    logBusiness: (event: string, context: any = {}) => console.log(`[BUSINESS] ${event}`, context),
-    logRequest: (method: string, endpoint: string, context: any = {}) => console.log(`[REQUEST] ${method} ${endpoint}`, context),
-    logResponse: (method: string, endpoint: string, statusCode: number, responseTime: number, context: any = {}) => console.log(`[RESPONSE] ${method} ${endpoint} ${statusCode} ${responseTime}ms`, context),
-    setRequestContext: (requestId: string, userId?: string) => {
-        console.log(`[CONTEXT] Setting request context`, { requestId, userId });
-    },
-    clearRequestContext: () => {}
-};
+import { BasicLoggerService } from './basic-logger.service';
 import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
 
 export interface LogContext {
@@ -89,33 +72,33 @@ export class LoggingService {
     // ===== BASIC LOGGING METHODS =====
     
     info(message: string, context: LogContext = {}): void {
-        simpleLogger.info(message, context);
+        BasicLoggerService.info(message, context);
     }
 
     error(message: string, context: LogContext = {}): void {
-        simpleLogger.error(message, context);
+        BasicLoggerService.error(message, context);
     }
 
     warn(message: string, context: LogContext = {}): void {
-        simpleLogger.warn(message, context);
+        BasicLoggerService.warn(message, context);
     }
 
     debug(message: string, context: LogContext = {}): void {
-        simpleLogger.debug(message, context);
+        BasicLoggerService.debug(message, context);
     }
 
     verbose(message: string, context: LogContext = {}): void {
-        simpleLogger.verbose(message, context);
+        BasicLoggerService.verbose(message, context);
     }
 
     // ===== SPECIALIZED LOGGING METHODS =====
 
     logError(error: Error, context: LogContext = {}): void {
-        simpleLogger.logError(error, context);
+        BasicLoggerService.logError(error, context);
     }
 
     logPerformance(metric: PerformanceMetric, context: LogContext = {}): void {
-        simpleLogger.logPerformance(metric.operation, metric.duration, {
+        BasicLoggerService.logPerformance(metric.operation, metric.duration, {
             ...context,
             success: metric.success,
             error: metric.error,
@@ -150,7 +133,7 @@ export class LoggingService {
     }
 
     logSecurity(event: SecurityEvent, context: LogContext = {}): void {
-        simpleLogger.logSecurity(event.event, {
+        BasicLoggerService.logSecurity(event.event, {
             ...context,
             severity: event.severity,
             source: event.source,
@@ -174,7 +157,7 @@ export class LoggingService {
     }
 
     logBusiness(event: BusinessEvent, context: LogContext = {}): void {
-        simpleLogger.logBusiness(event.event, {
+        BasicLoggerService.logBusiness(event.event, {
             ...context,
             category: event.category,
             value: event.value,
@@ -214,11 +197,36 @@ export class LoggingService {
     // ===== HTTP REQUEST/RESPONSE LOGGING =====
 
     logRequest(method: string, endpoint: string, context: LogContext = {}): void {
-        simpleLogger.logRequest(method, endpoint, context);
+        BasicLoggerService.info(`Request: ${method} ${endpoint}`, {
+            ...context,
+            request: {
+                method,
+                endpoint,
+                type: 'incoming'
+            }
+        });
     }
 
     logResponse(method: string, endpoint: string, statusCode: number, responseTime: number, context: LogContext = {}): void {
-        simpleLogger.logResponse(method, endpoint, statusCode, responseTime, context);
+        const level = statusCode >= 400 ? 'error' : statusCode >= 300 ? 'warn' : 'info';
+        const message = `Response: ${method} ${endpoint} ${statusCode} ${responseTime}ms`;
+        
+        if (level === 'error') {
+            BasicLoggerService.error(message, {
+                ...context,
+                response: { method, endpoint, statusCode, responseTime, type: 'outgoing' }
+            });
+        } else if (level === 'warn') {
+            BasicLoggerService.warn(message, {
+                ...context,
+                response: { method, endpoint, statusCode, responseTime, type: 'outgoing' }
+            });
+        } else {
+            BasicLoggerService.info(message, {
+                ...context,
+                response: { method, endpoint, statusCode, responseTime, type: 'outgoing' }
+            });
+        }
 
         // Send HTTP metrics to CloudWatch
         this.addMetric({
@@ -397,11 +405,20 @@ export class LoggingService {
     // ===== UTILITY METHODS =====
 
     setRequestContext(requestId: string, userId?: string): void {
-        simpleLogger.setRequestContext(requestId, userId);
+        BasicLoggerService.info('Setting request context', { 
+            requestId, 
+            userId,
+            component: 'LoggingService',
+            operation: 'setRequestContext'
+        });
     }
 
     clearRequestContext(): void {
-        simpleLogger.clearRequestContext();
+        // Context clearing is handled by request-scoped loggers
+        BasicLoggerService.debug('Request context cleared', {
+            component: 'LoggingService',
+            operation: 'clearRequestContext'
+        });
     }
 
     // ===== SHUTDOWN =====
