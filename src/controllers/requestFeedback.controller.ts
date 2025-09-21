@@ -3,6 +3,22 @@ import { RequestFeedbackService, FeedbackData } from '../services/requestFeedbac
 import { loggingService } from '../services/logging.service';
 
 export class RequestFeedbackController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
 
     /**
      * Submit feedback for a specific request
@@ -15,22 +31,15 @@ export class RequestFeedbackController {
         const { requestId: feedbackRequestId } = req.params;
 
         try {
-            loggingService.info('Feedback submission initiated', {
+            this.conditionalLog('info', 'Feedback submission initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 feedbackRequestId,
-                hasFeedbackRequestId: !!feedbackRequestId,
-                rating: req.body?.rating,
-                hasRating: typeof req.body?.rating === 'boolean',
-                hasComment: !!req.body?.comment,
-                hasImplicitSignals: !!req.body?.implicitSignals,
-                userAgent: req.headers['user-agent'],
-                hasUserAgent: !!req.headers['user-agent']
+                rating: req.body?.rating
             });
 
             if (!userId) {
-                loggingService.warn('Feedback submission failed - user not authenticated', {
+                this.conditionalLog('warn', 'Feedback submission failed - user not authenticated', {
                     requestId,
                     feedbackRequestId
                 });
@@ -42,7 +51,7 @@ export class RequestFeedbackController {
             }
 
             if (!feedbackRequestId) {
-                loggingService.warn('Feedback submission failed - request ID is required', {
+                this.conditionalLog('warn', 'Feedback submission failed - request ID is required', {
                     userId,
                     requestId
                 });
@@ -56,12 +65,11 @@ export class RequestFeedbackController {
             const { rating, comment, implicitSignals } = req.body;
 
             if (typeof rating !== 'boolean') {
-                loggingService.warn('Feedback submission failed - invalid rating type', {
+                this.conditionalLog('warn', 'Feedback submission failed - invalid rating type', {
                     userId,
                     requestId,
                     feedbackRequestId,
-                    ratingType: typeof rating,
-                    ratingValue: rating
+                    ratingType: typeof rating
                 });
                 res.status(400).json({
                     success: false,
@@ -81,28 +89,27 @@ export class RequestFeedbackController {
             await RequestFeedbackService.submitFeedback(feedbackRequestId, userId, feedbackData);
             const duration = Date.now() - startTime;
 
-            loggingService.info('Feedback submitted successfully', {
+            this.conditionalLog('info', 'Feedback submitted successfully', {
                 userId,
                 duration,
                 feedbackRequestId,
-                rating,
-                hasComment: !!comment,
-                hasImplicitSignals: !!implicitSignals,
-                requestId
+                rating
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'feedback_submitted',
-                category: 'request_feedback',
-                value: duration,
-                metadata: {
-                    userId,
-                    feedbackRequestId,
-                    rating,
-                    hasComment: !!comment,
-                    hasImplicitSignals: !!implicitSignals
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'feedback_submitted',
+                    category: 'request_feedback',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        feedbackRequestId,
+                        rating,
+                        hasComment: !!comment,
+                        hasImplicitSignals: !!implicitSignals
+                    }
+                });
             });
 
             res.json({
@@ -111,16 +118,14 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
-            loggingService.error('Feedback submission failed', {
+            this.conditionalLog('error', 'Feedback submission failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 feedbackRequestId,
-                rating: req.body?.rating,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
 
@@ -146,9 +151,8 @@ export class RequestFeedbackController {
         const requestId = req.headers['x-request-id'] as string;
 
         try {
-            loggingService.info('Feedback analytics retrieval initiated', {
+            this.conditionalLog('info', 'Feedback analytics retrieval initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId
             });
 
@@ -509,6 +513,84 @@ export class RequestFeedbackController {
             });
 
             next(error);
+        }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Conditional logging utility
+     */
+    private static conditionalLog(level: 'info' | 'warn' | 'error', message: string, metadata?: any): void {
+        // Only log if it's an error or if we're in development mode
+        if (level === 'error') {
+            loggingService[level](message, metadata);
+        }
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }

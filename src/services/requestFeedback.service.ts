@@ -41,6 +41,22 @@ export interface FeedbackAnalytics {
 }
 
 export class RequestFeedbackService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
 
     /**
      * Submit feedback for a specific request
@@ -99,103 +115,145 @@ export class RequestFeedbackService {
     }
 
     /**
-     * Get feedback analytics for a user
+     * Get feedback analytics for a user (optimized with aggregation pipeline)
      */
     static async getFeedbackAnalytics(userId: string): Promise<FeedbackAnalytics> {
         try {
-            // Get all feedback records for the user
-            const feedbackRecords = await RequestFeedback.find({ userId });
-            
-            if (feedbackRecords.length === 0) {
-                return RequestFeedbackService.getEmptyAnalytics();
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
             }
 
-            const totalRequests = feedbackRecords.length;
-            const positiveRatings = feedbackRecords.filter(f => f.rating === true).length;
-            const negativeRatings = feedbackRecords.filter(f => f.rating === false).length;
+            // Use MongoDB aggregation pipeline for efficient analytics calculation
+            const analyticsResults = await RequestFeedback.aggregate([
+                { $match: { userId } },
+                {
+                    $facet: {
+                        // Basic statistics
+                        basicStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalRequests: { $sum: 1 },
+                                    positiveRatings: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negativeRatings: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    totalCost: { $sum: { $ifNull: ['$cost', 0] } },
+                                    positiveCost: { $sum: { $cond: ['$rating', { $ifNull: ['$cost', 0] }, 0] } },
+                                    negativeCost: { $sum: { $cond: ['$rating', 0, { $ifNull: ['$cost', 0] }] } }
+                                }
+                            }
+                        ],
+                        // Ratings by provider
+                        byProvider: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$provider', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Ratings by model
+                        byModel: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$modelName', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Ratings by feature
+                        byFeature: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$feature', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Implicit signals analysis
+                        implicitSignals: [
+                            { $match: { implicitSignals: { $exists: true, $ne: null } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalWithSignals: { $sum: 1 },
+                                    copiedCount: { $sum: { $cond: ['$implicitSignals.copied', 1, 0] } },
+                                    continuedCount: { $sum: { $cond: ['$implicitSignals.conversationContinued', 1, 0] } },
+                                    rephrasedCount: { $sum: { $cond: ['$implicitSignals.immediateRephrase', 1, 0] } },
+                                    codeAcceptedCount: { $sum: { $cond: ['$implicitSignals.codeAccepted', 1, 0] } },
+                                    totalSessionDuration: { $sum: { $ifNull: ['$implicitSignals.sessionDuration', 0] } }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
+
+            const result = analyticsResults[0];
             
-            const totalCost = feedbackRecords.reduce((sum, f) => sum + (f.cost || 0), 0);
-            const positiveCost = feedbackRecords
-                .filter(f => f.rating === true)
-                .reduce((sum, f) => sum + (f.cost || 0), 0);
-            const negativeCost = feedbackRecords
-                .filter(f => f.rating === false)
-                .reduce((sum, f) => sum + (f.cost || 0), 0);
+            if (!result || !result.basicStats || result.basicStats.length === 0) {
+                return this.getEmptyAnalytics();
+            }
 
-            // Calculate ratings by provider
+            const basicStats = result.basicStats[0];
+            const implicitStats = result.implicitSignals[0] || { totalWithSignals: 0, copiedCount: 0, continuedCount: 0, rephrasedCount: 0, codeAcceptedCount: 0, totalSessionDuration: 0 };
+
+            // Transform aggregation results to expected format
             const ratingsByProvider: Record<string, { positive: number; negative: number; cost: number }> = {};
-            feedbackRecords.forEach(record => {
-                const provider = record.provider || 'unknown';
-                if (!ratingsByProvider[provider]) {
-                    ratingsByProvider[provider] = { positive: 0, negative: 0, cost: 0 };
-                }
-                
-                if (record.rating) {
-                    ratingsByProvider[provider].positive++;
-                } else {
-                    ratingsByProvider[provider].negative++;
-                }
-                ratingsByProvider[provider].cost += record.cost || 0;
+            result.byProvider.forEach((item: any) => {
+                ratingsByProvider[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
             });
 
-            // Calculate ratings by model
             const ratingsByModel: Record<string, { positive: number; negative: number; cost: number }> = {};
-            feedbackRecords.forEach(record => {
-                const model = record.modelName || 'unknown';
-                if (!ratingsByModel[model]) {
-                    ratingsByModel[model] = { positive: 0, negative: 0, cost: 0 };
-                }
-                
-                if (record.rating) {
-                    ratingsByModel[model].positive++;
-                } else {
-                    ratingsByModel[model].negative++;
-                }
-                ratingsByModel[model].cost += record.cost || 0;
+            result.byModel.forEach((item: any) => {
+                ratingsByModel[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
             });
 
-            // Calculate ratings by feature
             const ratingsByFeature: Record<string, { positive: number; negative: number; cost: number }> = {};
-            feedbackRecords.forEach(record => {
-                const feature = record.feature || 'unknown';
-                if (!ratingsByFeature[feature]) {
-                    ratingsByFeature[feature] = { positive: 0, negative: 0, cost: 0 };
-                }
-                
-                if (record.rating) {
-                    ratingsByFeature[feature].positive++;
-                } else {
-                    ratingsByFeature[feature].negative++;
-                }
-                ratingsByFeature[feature].cost += record.cost || 0;
+            result.byFeature.forEach((item: any) => {
+                ratingsByFeature[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
             });
 
-            // Calculate implicit signals analysis
-            const recordsWithSignals = feedbackRecords.filter(r => r.implicitSignals);
             const implicitSignalsAnalysis = {
-                copyRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.copied).length / recordsWithSignals.length : 0,
-                continuationRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.conversationContinued).length / recordsWithSignals.length : 0,
-                rephraseRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.immediateRephrase).length / recordsWithSignals.length : 0,
-                codeAcceptanceRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.codeAccepted).length / recordsWithSignals.length : 0,
-                averageSessionDuration: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.reduce((sum, r) => sum + (r.implicitSignals?.sessionDuration || 0), 0) / recordsWithSignals.length : 0
+                copyRate: implicitStats.totalWithSignals > 0 ? implicitStats.copiedCount / implicitStats.totalWithSignals : 0,
+                continuationRate: implicitStats.totalWithSignals > 0 ? implicitStats.continuedCount / implicitStats.totalWithSignals : 0,
+                rephraseRate: implicitStats.totalWithSignals > 0 ? implicitStats.rephrasedCount / implicitStats.totalWithSignals : 0,
+                codeAcceptanceRate: implicitStats.totalWithSignals > 0 ? implicitStats.codeAcceptedCount / implicitStats.totalWithSignals : 0,
+                averageSessionDuration: implicitStats.totalWithSignals > 0 ? implicitStats.totalSessionDuration / implicitStats.totalWithSignals : 0
             };
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return {
-                totalRequests,
-                ratedRequests: totalRequests,
-                positiveRatings,
-                negativeRatings,
-                totalCost,
-                positiveCost,
-                negativeCost,
-                averageRating: positiveRatings / totalRequests,
-                costPerPositiveRating: positiveRatings > 0 ? positiveCost / positiveRatings : 0,
-                costPerNegativeRating: negativeRatings > 0 ? negativeCost / negativeRatings : 0,
+                totalRequests: basicStats.totalRequests,
+                ratedRequests: basicStats.totalRequests,
+                positiveRatings: basicStats.positiveRatings,
+                negativeRatings: basicStats.negativeRatings,
+                totalCost: basicStats.totalCost,
+                positiveCost: basicStats.positiveCost,
+                negativeCost: basicStats.negativeCost,
+                averageRating: basicStats.totalRequests > 0 ? basicStats.positiveRatings / basicStats.totalRequests : 0,
+                costPerPositiveRating: basicStats.positiveRatings > 0 ? basicStats.positiveCost / basicStats.positiveRatings : 0,
+                costPerNegativeRating: basicStats.negativeRatings > 0 ? basicStats.negativeCost / basicStats.negativeRatings : 0,
                 ratingsByProvider,
                 ratingsByModel,
                 ratingsByFeature,
@@ -203,94 +261,151 @@ export class RequestFeedbackService {
             };
 
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting feedback analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Get global feedback analytics (admin only)
+     * Get global feedback analytics (admin only) - optimized with aggregation pipeline
      */
     static async getGlobalFeedbackAnalytics(): Promise<FeedbackAnalytics> {
         try {
-            const feedbackRecords = await RequestFeedback.find({});
-            
-            if (feedbackRecords.length === 0) {
-                return RequestFeedbackService.getEmptyAnalytics();
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
             }
 
-            // Similar calculation as getFeedbackAnalytics but for all users
-            const totalRequests = feedbackRecords.length;
-            const positiveRatings = feedbackRecords.filter(f => f.rating === true).length;
-            const negativeRatings = feedbackRecords.filter(f => f.rating === false).length;
+            // Use the same optimized aggregation pipeline but without userId filter
+            const analyticsResults = await RequestFeedback.aggregate([
+                {
+                    $facet: {
+                        // Basic statistics
+                        basicStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalRequests: { $sum: 1 },
+                                    positiveRatings: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negativeRatings: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    totalCost: { $sum: { $ifNull: ['$cost', 0] } },
+                                    positiveCost: { $sum: { $cond: ['$rating', { $ifNull: ['$cost', 0] }, 0] } },
+                                    negativeCost: { $sum: { $cond: ['$rating', 0, { $ifNull: ['$cost', 0] }] } }
+                                }
+                            }
+                        ],
+                        // Ratings by provider
+                        byProvider: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$provider', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Ratings by model
+                        byModel: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$modelName', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Ratings by feature
+                        byFeature: [
+                            {
+                                $group: {
+                                    _id: { $ifNull: ['$feature', 'unknown'] },
+                                    positive: { $sum: { $cond: ['$rating', 1, 0] } },
+                                    negative: { $sum: { $cond: ['$rating', 0, 1] } },
+                                    cost: { $sum: { $ifNull: ['$cost', 0] } }
+                                }
+                            }
+                        ],
+                        // Implicit signals analysis
+                        implicitSignals: [
+                            { $match: { implicitSignals: { $exists: true, $ne: null } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalWithSignals: { $sum: 1 },
+                                    copiedCount: { $sum: { $cond: ['$implicitSignals.copied', 1, 0] } },
+                                    continuedCount: { $sum: { $cond: ['$implicitSignals.conversationContinued', 1, 0] } },
+                                    rephrasedCount: { $sum: { $cond: ['$implicitSignals.immediateRephrase', 1, 0] } },
+                                    codeAcceptedCount: { $sum: { $cond: ['$implicitSignals.codeAccepted', 1, 0] } },
+                                    totalSessionDuration: { $sum: { $ifNull: ['$implicitSignals.sessionDuration', 0] } }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
+
+            const result = analyticsResults[0];
             
-            const totalCost = feedbackRecords.reduce((sum, f) => sum + (f.cost || 0), 0);
-            const positiveCost = feedbackRecords
-                .filter(f => f.rating === true)
-                .reduce((sum, f) => sum + (f.cost || 0), 0);
-            const negativeCost = feedbackRecords
-                .filter(f => f.rating === false)
-                .reduce((sum, f) => sum + (f.cost || 0), 0);
+            if (!result || !result.basicStats || result.basicStats.length === 0) {
+                return this.getEmptyAnalytics();
+            }
 
-            // Calculate other metrics (same logic as above)
+            const basicStats = result.basicStats[0];
+            const implicitStats = result.implicitSignals[0] || { totalWithSignals: 0, copiedCount: 0, continuedCount: 0, rephrasedCount: 0, codeAcceptedCount: 0, totalSessionDuration: 0 };
+
+            // Transform aggregation results to expected format (same as user analytics)
             const ratingsByProvider: Record<string, { positive: number; negative: number; cost: number }> = {};
-            const ratingsByModel: Record<string, { positive: number; negative: number; cost: number }> = {};
-            const ratingsByFeature: Record<string, { positive: number; negative: number; cost: number }> = {};
-
-            feedbackRecords.forEach(record => {
-                // Provider stats
-                const provider = record.provider || 'unknown';
-                if (!ratingsByProvider[provider]) {
-                    ratingsByProvider[provider] = { positive: 0, negative: 0, cost: 0 };
-                }
-                if (record.rating) ratingsByProvider[provider].positive++;
-                else ratingsByProvider[provider].negative++;
-                ratingsByProvider[provider].cost += record.cost || 0;
-
-                // Model stats
-                const model = record.modelName || 'unknown';
-                if (!ratingsByModel[model]) {
-                    ratingsByModel[model] = { positive: 0, negative: 0, cost: 0 };
-                }
-                if (record.rating) ratingsByModel[model].positive++;
-                else ratingsByModel[model].negative++;
-                ratingsByModel[model].cost += record.cost || 0;
-
-                // Feature stats
-                const feature = record.feature || 'unknown';
-                if (!ratingsByFeature[feature]) {
-                    ratingsByFeature[feature] = { positive: 0, negative: 0, cost: 0 };
-                }
-                if (record.rating) ratingsByFeature[feature].positive++;
-                else ratingsByFeature[feature].negative++;
-                ratingsByFeature[feature].cost += record.cost || 0;
+            result.byProvider.forEach((item: any) => {
+                ratingsByProvider[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
             });
 
-            const recordsWithSignals = feedbackRecords.filter(r => r.implicitSignals);
+            const ratingsByModel: Record<string, { positive: number; negative: number; cost: number }> = {};
+            result.byModel.forEach((item: any) => {
+                ratingsByModel[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
+            });
+
+            const ratingsByFeature: Record<string, { positive: number; negative: number; cost: number }> = {};
+            result.byFeature.forEach((item: any) => {
+                ratingsByFeature[item._id] = {
+                    positive: item.positive,
+                    negative: item.negative,
+                    cost: item.cost
+                };
+            });
+
             const implicitSignalsAnalysis = {
-                copyRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.copied).length / recordsWithSignals.length : 0,
-                continuationRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.conversationContinued).length / recordsWithSignals.length : 0,
-                rephraseRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.immediateRephrase).length / recordsWithSignals.length : 0,
-                codeAcceptanceRate: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.filter(r => r.implicitSignals?.codeAccepted).length / recordsWithSignals.length : 0,
-                averageSessionDuration: recordsWithSignals.length > 0 ? 
-                    recordsWithSignals.reduce((sum, r) => sum + (r.implicitSignals?.sessionDuration || 0), 0) / recordsWithSignals.length : 0
+                copyRate: implicitStats.totalWithSignals > 0 ? implicitStats.copiedCount / implicitStats.totalWithSignals : 0,
+                continuationRate: implicitStats.totalWithSignals > 0 ? implicitStats.continuedCount / implicitStats.totalWithSignals : 0,
+                rephraseRate: implicitStats.totalWithSignals > 0 ? implicitStats.rephrasedCount / implicitStats.totalWithSignals : 0,
+                codeAcceptanceRate: implicitStats.totalWithSignals > 0 ? implicitStats.codeAcceptedCount / implicitStats.totalWithSignals : 0,
+                averageSessionDuration: implicitStats.totalWithSignals > 0 ? implicitStats.totalSessionDuration / implicitStats.totalWithSignals : 0
             };
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return {
-                totalRequests,
-                ratedRequests: totalRequests,
-                positiveRatings,
-                negativeRatings,
-                totalCost,
-                positiveCost,
-                negativeCost,
-                averageRating: positiveRatings / totalRequests,
-                costPerPositiveRating: positiveRatings > 0 ? positiveCost / positiveRatings : 0,
-                costPerNegativeRating: negativeRatings > 0 ? negativeCost / negativeRatings : 0,
+                totalRequests: basicStats.totalRequests,
+                ratedRequests: basicStats.totalRequests,
+                positiveRatings: basicStats.positiveRatings,
+                negativeRatings: basicStats.negativeRatings,
+                totalCost: basicStats.totalCost,
+                positiveCost: basicStats.positiveCost,
+                negativeCost: basicStats.negativeCost,
+                averageRating: basicStats.totalRequests > 0 ? basicStats.positiveRatings / basicStats.totalRequests : 0,
+                costPerPositiveRating: basicStats.positiveRatings > 0 ? basicStats.positiveCost / basicStats.positiveRatings : 0,
+                costPerNegativeRating: basicStats.negativeRatings > 0 ? basicStats.negativeCost / basicStats.negativeRatings : 0,
                 ratingsByProvider,
                 ratingsByModel,
                 ratingsByFeature,
@@ -298,6 +413,7 @@ export class RequestFeedbackService {
             };
 
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting global feedback analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -376,5 +492,66 @@ export class RequestFeedbackService {
                 averageSessionDuration: 0
             }
         };
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
     }
 }
