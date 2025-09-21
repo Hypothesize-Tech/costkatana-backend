@@ -24,36 +24,42 @@ export class MFAService {
     private static readonly MAX_EMAIL_ATTEMPTS = 5;
     private static readonly BACKUP_CODES_COUNT = 10;
     private static readonly TRUSTED_DEVICE_EXPIRY = 30 * 24 * 60 * 60 * 1000; // 30 days
+    private static readonly RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+    private static emailQueue: Array<() => Promise<void>> = [];
+    private static emailProcessor?: NodeJS.Timeout;
 
     /**
      * Generate TOTP secret and QR code for authenticator app setup
      */
     static async setupTOTP(userId: string, userEmail: string): Promise<MFASetupResult> {
         try {
-            const user = await User.findById(userId);
+            // Optimized user query - only fetch MFA fields
+            const user = await User.findById(userId).select('mfa');
             if (!user) {
                 throw new Error('User not found');
             }
 
-            // Generate secret
+            // Generate secret and QR code in parallel
             const secret = speakeasy.generateSecret({
                 name: `AI Cost Optimizer (${userEmail})`,
                 issuer: 'AI Cost Optimizer',
                 length: 32,
             });
 
-            // Generate QR code
-            const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url!);
+            const [qrCodeUrl, backupCodes] = await Promise.all([
+                qrcode.toDataURL(secret.otpauth_url!),
+                Promise.resolve(this.generateBackupCodes())
+            ]);
 
-            // Generate backup codes
-            const backupCodes = this.generateBackupCodes();
+            // Atomic update using findByIdAndUpdate
+            await User.findByIdAndUpdate(userId, {
+                $set: {
+                    'mfa.totp.secret': secret.base32,
+                    'mfa.totp.backupCodes': backupCodes
+                }
+            });
 
-            // Save secret to user (but don't enable TOTP yet)
-            user.mfa.totp.secret = secret.base32;
-            user.mfa.totp.backupCodes = backupCodes;
-            await user.save();
-
-            loggingService.info(`TOTP setup initiated for user: ${userId}`);
+            this.debugLog(`TOTP setup initiated for user: ${userId}`);
 
             return {
                 secret: secret.base32!,
@@ -71,7 +77,8 @@ export class MFAService {
      */
     static async verifyAndEnableTOTP(userId: string, token: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            // Optimized query - only fetch MFA fields
+            const user = await User.findById(userId).select('mfa');
             if (!user || !user.mfa.totp.secret) {
                 throw new Error('TOTP setup not found');
             }
@@ -84,21 +91,21 @@ export class MFAService {
             });
 
             if (verified) {
-                // Enable TOTP
-                user.mfa.totp.enabled = true;
-                user.mfa.totp.lastUsed = new Date();
-                
-                // Add TOTP to enabled methods if not already present
-                if (!user.mfa.methods.includes('totp')) {
-                    user.mfa.methods.push('totp');
-                }
-                
-                // Enable MFA if not already enabled
-                user.mfa.enabled = true;
-                
-                await user.save();
+                // Atomic update to enable TOTP
+                const updateFields: any = {
+                    'mfa.totp.enabled': true,
+                    'mfa.totp.lastUsed': new Date(),
+                    'mfa.enabled': true
+                };
 
-                loggingService.info(`TOTP enabled for user: ${userId}`);
+                // Add TOTP to methods if not present
+                if (!user.mfa.methods.includes('totp')) {
+                    updateFields['$addToSet'] = { 'mfa.methods': 'totp' };
+                }
+
+                await User.findByIdAndUpdate(userId, updateFields);
+
+                this.debugLog(`TOTP enabled for user: ${userId}`);
                 return true;
             }
 
@@ -114,19 +121,21 @@ export class MFAService {
      */
     static async verifyTOTP(userId: string, token: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            // Optimized query - only fetch TOTP fields
+            const user = await User.findById(userId).select('mfa.totp');
             if (!user || !user.mfa.totp.enabled || !user.mfa.totp.secret) {
                 return false;
             }
 
             // Check if it's a backup code
             if (user.mfa.totp.backupCodes.includes(token)) {
-                // Remove used backup code
-                user.mfa.totp.backupCodes = user.mfa.totp.backupCodes.filter(code => code !== token);
-                user.mfa.totp.lastUsed = new Date();
-                await user.save();
+                // Atomic update to remove backup code and update lastUsed
+                await User.findByIdAndUpdate(userId, {
+                    $pull: { 'mfa.totp.backupCodes': token },
+                    $set: { 'mfa.totp.lastUsed': new Date() }
+                });
 
-                loggingService.info(`Backup code used for user: ${userId}`);
+                this.debugLog(`Backup code used for user: ${userId}`);
                 return true;
             }
 
@@ -139,10 +148,12 @@ export class MFAService {
             });
 
             if (verified) {
-                user.mfa.totp.lastUsed = new Date();
-                await user.save();
+                // Atomic update for lastUsed
+                await User.findByIdAndUpdate(userId, {
+                    $set: { 'mfa.totp.lastUsed': new Date() }
+                });
 
-                loggingService.info(`TOTP verified for user: ${userId}`);
+                this.debugLog(`TOTP verified for user: ${userId}`);
                 return true;
             }
 
@@ -158,60 +169,38 @@ export class MFAService {
      */
     static async sendEmailCode(userId: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            // Optimized query - only fetch email and MFA fields
+            const user = await User.findById(userId).select('email mfa.email');
             if (!user) {
                 throw new Error('User not found');
             }
 
-            // Check rate limiting
             const now = new Date();
-            if (user.mfa.email.lastAttempt && 
-                (now.getTime() - user.mfa.email.lastAttempt.getTime()) < 60000) { // 1 minute
-                throw new Error('Please wait before requesting another code');
+            
+            // Streamlined rate limiting check
+            const rateLimitResult = this.checkEmailRateLimit(user.mfa.email, now);
+            if (!rateLimitResult.allowed) {
+                throw new Error(rateLimitResult.message);
             }
 
-            if (user.mfa.email.attempts >= this.MAX_EMAIL_ATTEMPTS) {
-                const resetTime = new Date(user.mfa.email.lastAttempt!.getTime() + 60 * 60 * 1000); // 1 hour
-                if (now < resetTime) {
-                    throw new Error('Too many attempts. Please try again later.');
-                }
-                // Reset attempts after 1 hour
-                user.mfa.email.attempts = 0;
-            }
-
-            // Generate code
+            // Generate code and expiry
             const code = this.generateEmailCode();
             const expiresAt = new Date(now.getTime() + this.EMAIL_CODE_EXPIRY);
 
-            // Save code to user
-            user.mfa.email.code = code;
-            user.mfa.email.codeExpires = expiresAt;
-            user.mfa.email.attempts += 1;
-            user.mfa.email.lastAttempt = now;
-            await user.save();
-
-            // Send email
-            const transporter = await emailTransporter;
-            await transporter.sendMail({
-                from: EMAIL_CONFIG.from,
-                to: user.email,
-                subject: 'Your AI Cost Optimizer Security Code',
-                html: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                        <h2 style="color: #333;">Security Verification Code</h2>
-                        <p>Your verification code is:</p>
-                        <div style="background: #f5f5f5; padding: 20px; text-align: center; margin: 20px 0;">
-                            <h1 style="color: #4F46E5; font-size: 32px; margin: 0; letter-spacing: 5px;">${code}</h1>
-                        </div>
-                        <p>This code will expire in 10 minutes.</p>
-                        <p>If you didn't request this code, please ignore this email or contact support if you have concerns.</p>
-                        <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-                        <p style="color: #666; font-size: 12px;">AI Cost Optimizer Security Team</p>
-                    </div>
-                `,
+            // Atomic update for email code and rate limiting
+            await User.findByIdAndUpdate(userId, {
+                $set: {
+                    'mfa.email.code': code,
+                    'mfa.email.codeExpires': expiresAt,
+                    'mfa.email.lastAttempt': now
+                },
+                $inc: { 'mfa.email.attempts': 1 }
             });
 
-            loggingService.info(`Email MFA code sent to user: ${userId}`);
+            // Queue email sending for background processing
+            this.queueEmailSending(user.email, code);
+
+            this.debugLog(`Email MFA code generated for user: ${userId}`);
             return true;
         } catch (error) {
             loggingService.error('Error sending email code:', { error: error instanceof Error ? error.message : String(error) });
@@ -224,7 +213,8 @@ export class MFAService {
      */
     static async verifyEmailCode(userId: string, code: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            // Optimized query - only fetch email MFA fields
+            const user = await User.findById(userId).select('mfa.email');
             if (!user || !user.mfa.email.code || !user.mfa.email.codeExpires) {
                 return false;
             }
@@ -233,22 +223,28 @@ export class MFAService {
             
             // Check if code is expired
             if (now > user.mfa.email.codeExpires) {
-                // Clear expired code
-                user.mfa.email.code = undefined;
-                user.mfa.email.codeExpires = undefined;
-                await user.save();
+                // Atomic clear of expired code
+                await User.findByIdAndUpdate(userId, {
+                    $unset: {
+                        'mfa.email.code': '',
+                        'mfa.email.codeExpires': ''
+                    }
+                });
                 return false;
             }
 
             // Verify code
             if (user.mfa.email.code === code) {
-                // Clear code after successful verification
-                user.mfa.email.code = undefined;
-                user.mfa.email.codeExpires = undefined;
-                user.mfa.email.attempts = 0; // Reset attempts on success
-                await user.save();
+                // Atomic clear code and reset attempts on success
+                await User.findByIdAndUpdate(userId, {
+                    $unset: {
+                        'mfa.email.code': '',
+                        'mfa.email.codeExpires': ''
+                    },
+                    $set: { 'mfa.email.attempts': 0 }
+                });
 
-                loggingService.info(`Email code verified for user: ${userId}`);
+                this.debugLog(`Email code verified for user: ${userId}`);
                 return true;
             }
 
@@ -264,24 +260,26 @@ export class MFAService {
      */
     static async enableEmailMFA(userId: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            // Check if email method already exists
+            const user = await User.findById(userId).select('mfa.methods');
             if (!user) {
                 throw new Error('User not found');
             }
 
-            user.mfa.email.enabled = true;
-            
-            // Add email to enabled methods if not already present
-            if (!user.mfa.methods.includes('email')) {
-                user.mfa.methods.push('email');
-            }
-            
-            // Enable MFA if not already enabled
-            user.mfa.enabled = true;
-            
-            await user.save();
+            // Atomic update to enable email MFA
+            const updateFields: any = {
+                'mfa.email.enabled': true,
+                'mfa.enabled': true
+            };
 
-            loggingService.info(`Email MFA enabled for user: ${userId}`);
+            // Add email to methods if not present
+            if (!user.mfa.methods.includes('email')) {
+                updateFields['$addToSet'] = { 'mfa.methods': 'email' };
+            }
+
+            await User.findByIdAndUpdate(userId, updateFields);
+
+            this.debugLog(`Email MFA enabled for user: ${userId}`);
             return true;
         } catch (error) {
             loggingService.error('Error enabling email MFA:', { error: error instanceof Error ? error.message : String(error) });
@@ -421,7 +419,7 @@ export class MFAService {
      */
     static async getMFAStatus(userId: string): Promise<any> {
         try {
-            const user = await User.findById(userId);
+            const user = await User.findById(userId).select('mfa');
             if (!user) {
                 throw new Error('User not found');
             }
@@ -476,6 +474,99 @@ export class MFAService {
             .update(`${userAgent}-${ipAddress}`)
             .digest('hex')
             .substring(0, 16);
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Conditional debug logging
+     */
+    private static debugLog(message: string): void {
+            loggingService.info(message);
+    }
+
+    /**
+     * Streamlined email rate limiting check
+     */
+    private static checkEmailRateLimit(emailMfa: any, now: Date): { allowed: boolean; message?: string } {
+        // Check 1-minute cooldown
+        if (emailMfa.lastAttempt && (now.getTime() - emailMfa.lastAttempt.getTime()) < 60000) {
+            return { allowed: false, message: 'Please wait before requesting another code' };
+        }
+
+        // Check max attempts with 1-hour reset
+        if (emailMfa.attempts >= this.MAX_EMAIL_ATTEMPTS) {
+            const resetTime = new Date(emailMfa.lastAttempt.getTime() + this.RATE_LIMIT_WINDOW);
+            if (now < resetTime) {
+                return { allowed: false, message: 'Too many attempts. Please try again later.' };
+            }
+        }
+
+        return { allowed: true };
+    }
+
+    /**
+     * Queue email sending for background processing
+     */
+    private static queueEmailSending(userEmail: string, code: string): void {
+        const emailOperation = async () => {
+            try {
+                const transporter = await emailTransporter;
+                await transporter.sendMail({
+                    from: EMAIL_CONFIG.from,
+                    to: userEmail,
+                    subject: 'Your AI Cost Optimizer Security Code',
+                    html: `
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <h2 style="color: #333;">Security Verification Code</h2>
+                            <p>Your verification code is:</p>
+                            <div style="background: #f5f5f5; padding: 20px; text-align: center; margin: 20px 0;">
+                                <h1 style="color: #4F46E5; font-size: 32px; margin: 0; letter-spacing: 5px;">${code}</h1>
+                            </div>
+                            <p>This code will expire in 10 minutes.</p>
+                            <p>If you didn't request this code, please ignore this email or contact support if you have concerns.</p>
+                            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                            <p style="color: #666; font-size: 12px;">AI Cost Optimizer Security Team</p>
+                        </div>
+                    `,
+                });
+                this.debugLog(`Email sent successfully to: ${userEmail}`);
+            } catch (error) {
+                loggingService.error('Background email sending failed:', { 
+                    error: error instanceof Error ? error.message : String(error),
+                    userEmail 
+                });
+            }
+        };
+
+        this.emailQueue.push(emailOperation);
+        this.startEmailProcessor();
+    }
+
+    /**
+     * Start background email processor
+     */
+    private static startEmailProcessor(): void {
+        if (this.emailProcessor) return;
+
+        this.emailProcessor = setTimeout(async () => {
+            await this.processEmailQueue();
+            this.emailProcessor = undefined;
+
+            if (this.emailQueue.length > 0) {
+                this.startEmailProcessor();
+            }
+        }, 100);
+    }
+
+    /**
+     * Process background email queue
+     */
+    private static async processEmailQueue(): Promise<void> {
+        const operations = this.emailQueue.splice(0, 3); // Process 3 emails at a time
+        await Promise.allSettled(operations.map(op => op()));
     }
 }
 

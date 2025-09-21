@@ -33,6 +33,8 @@ const removeTrustedDeviceSchema = z.object({
 });
 
 export class MFAController {
+    // Device ID memoization per request
+    private static deviceIdCache = new Map<string, string>();
     /**
      * Get MFA status for the current user
      */
@@ -647,9 +649,7 @@ export class MFAController {
                 // Check if user wants to remember device
                 let trustedDeviceAdded = false;
                 if (rememberDevice === true) {
-                    const userAgent = req.headers['user-agent'] || 'Unknown';
-                    const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
-                    const deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
+                    const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
                     const finalDeviceName = deviceName || 'Unknown Device';
 
                     await MFAService.addTrustedDevice(userId, {
@@ -889,9 +889,7 @@ export class MFAController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const userAgent = req.headers['user-agent'] || 'Unknown';
-            const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
-            const deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
+            const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
 
             await MFAService.addTrustedDevice(userId, {
                 deviceId,
@@ -1088,9 +1086,7 @@ export class MFAController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const userAgent = req.headers['user-agent'] || 'Unknown';
-            const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
-            const deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
+            const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
 
             const isTrusted = await MFAService.isTrustedDevice(userId, deviceId);
 
@@ -1144,5 +1140,34 @@ export class MFAController {
                 error: error.message,
             });
         }
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Get device information with memoization
+     */
+    private static getDeviceInfo(req: any): { deviceId: string; userAgent: string; ipAddress: string } {
+        const userAgent = req.headers['user-agent'] || 'Unknown';
+        const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
+        
+        // Create cache key for this request
+        const cacheKey = `${userAgent}-${ipAddress}`;
+        
+        let deviceId = this.deviceIdCache.get(cacheKey);
+        if (!deviceId) {
+            deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
+            this.deviceIdCache.set(cacheKey, deviceId);
+            
+            // Clean cache periodically (keep last 100 entries)
+            if (this.deviceIdCache.size > 100) {
+                const firstKey = this.deviceIdCache.keys().next().value;
+                this.deviceIdCache.delete(firstKey || '');
+            }
+        }
+
+        return { deviceId, userAgent, ipAddress };
     }
 }
