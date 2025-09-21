@@ -9,9 +9,12 @@ export class CacheService {
     private static instance: CacheService;
     private inMemoryCache: Map<string, { value: any; expiry: number; metadata?: any }> = new Map();
     private cacheStats: Map<string, { hits: number; misses: number; sets: number }> = new Map();
+    private readonly MAX_STATS_ENTRIES = 10000; // Prevent memory leaks
+    private readonly ENABLE_DEBUG_LOGS = process.env.CACHE_DEBUG === 'true'; // Set CACHE_DEBUG=true for detailed cache logs
 
     private constructor() {
         this.startCleanupInterval();
+        this.startStatsCleanupInterval();
     }
 
     public static getInstance(): CacheService {
@@ -31,90 +34,43 @@ export class CacheService {
         metadata?: any
     ): Promise<void> {
         const startTime = Date.now();
+        let redisSuccess = false;
         
-        loggingService.info('=== CACHE SET OPERATION STARTED ===', { value:  { 
-            component: 'CacheService',
-            operation: 'set',
-            type: 'cache_set',
-            key,
-            ttl,
-            hasMetadata: !!metadata
-         } });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache set operation started', { key, ttl });
+        }
 
-        try {
-            // Try Redis first
-            if (redisService.isConnected) {
-                loggingService.info('Step 1: Attempting to set cache in Redis', { value:  { 
-                    component: 'CacheService',
-                    operation: 'set',
-                    type: 'cache_set',
-                    step: 'redis_set_attempt',
-                    key,
-                    ttl
-                 } });
-
+        // Streamlined Redis operation with single try-catch
+        if (redisService.isConnected) {
+            try {
                 await redisService.set(key, value, ttl);
-                
-                loggingService.info('Cache set in Redis successfully', {
-                    component: 'CacheService',
-                    operation: 'set',
-                    type: 'cache_set',
-                    step: 'redis_set_success',
-                    key,
-                    ttl,
-                    redisTime: `${Date.now() - startTime}ms`
-                });
-            } else {
-                loggingService.warn('Redis not connected, skipping Redis cache set', { value:  { component: 'CacheService',
-                    operation: 'set',
-                    type: 'cache_set',
-                    step: 'redis_skip',
-                    key,
-                    reason: 'redis_not_connected'
-                 } });
+                redisSuccess = true;
+                if (this.ENABLE_DEBUG_LOGS) {
+                    loggingService.debug('Cache set in Redis', { key, time: `${Date.now() - startTime}ms` });
+                }
+            } catch (error) {
+                // Only log Redis errors if they're not connection-related
+                if (this.ENABLE_DEBUG_LOGS || !(error instanceof Error && error.message.includes('connection'))) {
+                    loggingService.warn('Redis cache set failed', { 
+                        key, 
+                        error: error instanceof Error ? error.message : 'Unknown error' 
+                    });
+                }
             }
-        } catch (error) {
-            loggingService.warn('Redis cache set failed, falling back to in-memory', { value:  { component: 'CacheService',
-                operation: 'set',
-                type: 'cache_set',
-                step: 'redis_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // Always set in in-memory cache as fallback
-        loggingService.info('Step 2: Setting cache in in-memory fallback', { value:  { 
-            component: 'CacheService',
-            operation: 'set',
-            type: 'cache_set',
-            step: 'memory_set',
-            key,
-            ttl
-         } });
-
         const expiry = Date.now() + (ttl * 1000);
         this.inMemoryCache.set(key, { value, expiry, metadata });
         this.updateStats(key, 'sets');
 
-        loggingService.info('Cache set in in-memory fallback successfully', {
-            component: 'CacheService',
-            operation: 'set',
-            type: 'cache_set',
-            step: 'memory_set_success',
-            key,
-            expiry: new Date(expiry).toISOString(),
-            totalTime: `${Date.now() - startTime}ms`
-        });
-
-        loggingService.info('=== CACHE SET OPERATION COMPLETED ===', {
-            component: 'CacheService',
-            operation: 'set',
-            type: 'cache_set',
-            step: 'completed',
-            key,
-            totalTime: `${Date.now() - startTime}ms`
-        });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache set completed', {
+                key,
+                redisSuccess,
+                totalTime: `${Date.now() - startTime}ms`
+            });
+        }
     }
 
     /**
@@ -122,99 +78,45 @@ export class CacheService {
      */
     public async get<T = any>(key: string): Promise<T | null> {
         const startTime = Date.now();
-        
-        loggingService.info('=== CACHE GET OPERATION STARTED ===', { value:  { 
-            component: 'CacheService',
-            operation: 'get',
-            type: 'cache_get',
-            key
-         } });
-
         let value: T | null = null;
         let source: 'redis' | 'memory' | 'none' = 'none';
 
-        // Try Redis first
-        try {
-            if (redisService.isConnected) {
-                loggingService.info('Step 1: Attempting to get cache from Redis', { value:  { 
-                    component: 'CacheService',
-                    operation: 'get',
-                    type: 'cache_get',
-                    step: 'redis_get_attempt',
-                    key
-                 } });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache get operation started', { key });
+        }
 
+        // Streamlined Redis operation
+        if (redisService.isConnected) {
+            try {
                 value = await redisService.get(key);
-                
                 if (value !== null) {
                     source = 'redis';
                     this.updateStats(key, 'hits');
                     
-                    loggingService.info('Cache retrieved from Redis successfully', {
-                        component: 'CacheService',
-                        operation: 'get',
-                        type: 'cache_get',
-                        step: 'redis_get_success',
-                        key,
-                        hasValue: !!value,
-                        redisTime: `${Date.now() - startTime}ms`
+                    // Efficiently update in-memory cache without additional Redis call
+                    // Use a reasonable default TTL for memory cache
+                    this.inMemoryCache.set(key, { 
+                        value, 
+                        expiry: Date.now() + (3600 * 1000), // 1 hour default
+                        metadata: { source: 'redis' }
                     });
                     
-                    // Update in-memory cache for faster subsequent access
-                    const ttl = await redisService.getTTL(key);
-                    if (ttl > 0) {
-                        this.inMemoryCache.set(key, { 
-                            value, 
-                            expiry: Date.now() + (ttl * 1000),
-                            metadata: { source: 'redis', originalTTL: ttl }
-                        });
+                    if (this.ENABLE_DEBUG_LOGS) {
+                        loggingService.debug('Cache hit from Redis', { key, time: `${Date.now() - startTime}ms` });
                     }
-                    
-                    loggingService.info('Cache updated in in-memory for faster access', { value:  { 
-                        component: 'CacheService',
-                        operation: 'get',
-                        type: 'cache_get',
-                        step: 'memory_update',
-                        key,
-                        ttl
-                     } });
-                } else {
-                    loggingService.debug('Cache not found in Redis', { value:  { component: 'CacheService',
-                        operation: 'get',
-                        type: 'cache_get',
-                        step: 'redis_miss',
-                        key
-                     } });
                 }
-            } else {
-                loggingService.warn('Redis not connected, skipping Redis cache get', { value:  { component: 'CacheService',
-                    operation: 'get',
-                    type: 'cache_get',
-                    step: 'redis_skip',
-                    key,
-                    reason: 'redis_not_connected'
-                 } });
+            } catch (error) {
+                if (this.ENABLE_DEBUG_LOGS || !(error instanceof Error && error.message.includes('connection'))) {
+                    loggingService.warn('Redis cache get failed', { 
+                        key, 
+                        error: error instanceof Error ? error.message : 'Unknown error' 
+                    });
+                }
             }
-        } catch (error) {
-            loggingService.warn('Redis cache get failed, falling back to in-memory', { value:  { component: 'CacheService',
-                operation: 'get',
-                type: 'cache_get',
-                step: 'redis_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
-        // If Redis failed or returned null, try in-memory cache
+        // Fallback to in-memory cache
         if (value === null) {
-            loggingService.info('Step 2: Attempting to get cache from in-memory fallback', { value:  { 
-                component: 'CacheService',
-                operation: 'get',
-                type: 'cache_get',
-                step: 'memory_get_attempt',
-                key
-             } });
-
             const memoryEntry = this.inMemoryCache.get(key);
             
             if (memoryEntry && memoryEntry.expiry > Date.now()) {
@@ -222,62 +124,28 @@ export class CacheService {
                 source = 'memory';
                 this.updateStats(key, 'hits');
                 
-                loggingService.info('Cache retrieved from in-memory fallback successfully', {
-                    component: 'CacheService',
-                    operation: 'get',
-                    type: 'cache_get',
-                    step: 'memory_get_success',
-                    key,
-                    hasValue: !!value,
-                    expiry: new Date(memoryEntry.expiry).toISOString(),
-                    metadata: memoryEntry.metadata
-                });
+                if (this.ENABLE_DEBUG_LOGS) {
+                    loggingService.debug('Cache hit from memory', { key });
+                }
             } else if (memoryEntry && memoryEntry.expiry <= Date.now()) {
                 // Clean up expired entry
                 this.inMemoryCache.delete(key);
-                loggingService.debug('Expired cache entry removed from in-memory', {
-                    component: 'CacheService',
-                    operation: 'get',
-                    type: 'cache_get',
-                    step: 'memory_cleanup',
-                    key,
-                    expiredAt: new Date(memoryEntry.expiry).toISOString()
-                });
-            } else {
-                loggingService.debug('Cache not found in in-memory fallback', { value:  { component: 'CacheService',
-                    operation: 'get',
-                    type: 'cache_get',
-                    step: 'memory_miss',
-                    key
-                 } });
             }
         }
 
-        // Update stats
+        // Update miss stats
         if (value === null) {
             this.updateStats(key, 'misses');
         }
 
-        loggingService.info('Cache get operation completed', {
-            component: 'CacheService',
-            operation: 'get',
-            type: 'cache_get',
-            step: 'completed',
-            key,
-            hasValue: !!value,
-            source,
-            totalTime: `${Date.now() - startTime}ms`
-        });
-
-        loggingService.info('=== CACHE GET OPERATION COMPLETED ===', {
-            component: 'CacheService',
-            operation: 'get',
-            type: 'cache_get',
-            step: 'completed',
-            key,
-            source,
-            totalTime: `${Date.now() - startTime}ms`
-        });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache get completed', {
+                key,
+                source,
+                hasValue: !!value,
+                totalTime: `${Date.now() - startTime}ms`
+            });
+        }
 
         return value;
     }
@@ -286,138 +154,52 @@ export class CacheService {
      * Delete cache entry from both Redis and in-memory
      */
     public async delete(key: string): Promise<void> {
-        const startTime = Date.now();
-        
-        loggingService.info('=== CACHE DELETE OPERATION STARTED ===', { value:  { 
-            component: 'CacheService',
-            operation: 'delete',
-            type: 'cache_delete',
-            key
-         } });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache delete operation started', { key });
+        }
 
-        // Try Redis first
-        try {
-            if (redisService.isConnected) {
-                loggingService.info('Step 1: Attempting to delete cache from Redis', { value:  { 
-                    component: 'CacheService',
-                    operation: 'delete',
-                    type: 'cache_delete',
-                    step: 'redis_delete_attempt',
-                    key
-                 } });
-
+        // Streamlined Redis delete
+        if (redisService.isConnected) {
+            try {
                 await redisService.del(key);
-                
-                loggingService.info('Cache deleted from Redis successfully', {
-                    component: 'CacheService',
-                    operation: 'delete',
-                    type: 'cache_delete',
-                    step: 'redis_delete_success',
-                    key,
-                    redisTime: `${Date.now() - startTime}ms`
-                });
-            } else {
-                loggingService.warn('Redis not connected, skipping Redis cache delete', { value:  { component: 'CacheService',
-                    operation: 'delete',
-                    type: 'cache_delete',
-                    step: 'redis_skip',
-                    key,
-                    reason: 'redis_not_connected'
-                 } });
+            } catch (error) {
+                if (this.ENABLE_DEBUG_LOGS) {
+                    loggingService.warn('Redis cache delete failed', { 
+                        key, 
+                        error: error instanceof Error ? error.message : 'Unknown error' 
+                    });
+                }
             }
-        } catch (error) {
-            loggingService.warn('Redis cache delete failed, continuing with in-memory delete', { value:  { component: 'CacheService',
-                operation: 'delete',
-                type: 'cache_delete',
-                step: 'redis_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // Always delete from in-memory cache
-        loggingService.info('Step 2: Deleting cache from in-memory fallback', { value:  { 
-            component: 'CacheService',
-            operation: 'delete',
-            type: 'cache_delete',
-            step: 'memory_delete',
-            key
-         } });
-
-        const deleted = this.inMemoryCache.delete(key);
+        this.inMemoryCache.delete(key);
         
-        loggingService.info('Cache delete from in-memory completed', {
-            component: 'CacheService',
-            operation: 'delete',
-            type: 'cache_delete',
-            step: 'memory_delete_complete',
-            key,
-            wasDeleted: deleted,
-            totalTime: `${Date.now() - startTime}ms`
-        });
-
-        loggingService.info('=== CACHE DELETE OPERATION COMPLETED ===', {
-            component: 'CacheService',
-            operation: 'delete',
-            type: 'cache_delete',
-            step: 'completed',
-            key,
-            totalTime: `${Date.now() - startTime}ms`
-        });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache delete completed', { key });
+        }
     }
 
     /**
      * Check if cache entry exists
      */
     public async exists(key: string): Promise<boolean> {
-        const startTime = Date.now();
-        
-        loggingService.debug('=== CACHE EXISTS OPERATION STARTED ===', { value:  { component: 'CacheService',
-            operation: 'exists',
-            type: 'cache_exists',
-            key
-         } });
-
         let exists = false;
-        let source: 'redis' | 'memory' | 'none' = 'none';
 
         // Try Redis first
-        try {
-            if (redisService.isConnected) {
+        if (redisService.isConnected) {
+            try {
                 exists = await redisService.exists(key);
-                if (exists) {
-                    source = 'redis';
-                }
+            } catch (error) {
+                // Silently fall back to memory check
             }
-        } catch (error) {
-            loggingService.debug('Redis exists check failed, falling back to in-memory', { value:  { component: 'CacheService',
-                operation: 'exists',
-                type: 'cache_exists',
-                step: 'redis_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // If Redis failed or returned false, check in-memory
         if (!exists) {
             const memoryEntry = this.inMemoryCache.get(key);
-            if (memoryEntry && memoryEntry.expiry > Date.now()) {
-                exists = true;
-                source = 'memory';
-            }
+            exists = !!(memoryEntry && memoryEntry.expiry > Date.now());
         }
-
-        loggingService.debug('Cache exists operation completed', {
-            component: 'CacheService',
-            operation: 'exists',
-            type: 'cache_exists',
-            step: 'completed',
-            key,
-            exists,
-            source,
-            totalTime: `${Date.now() - startTime}ms`
-        });
 
         return exists;
     }
@@ -433,30 +215,16 @@ export class CacheService {
      * Get cache entry with TTL
      */
     public async getEx<T = any>(key: string): Promise<{ value: T | null; ttl: number }> {
-        const startTime = Date.now();
-        
-        loggingService.debug('=== CACHE GETEX OPERATION STARTED ===', { value:  { component: 'CacheService',
-            operation: 'getEx',
-            type: 'cache_getex',
-            key
-         } });
-
         const value = await this.get<T>(key);
         let ttl = -1;
 
         // Try to get TTL from Redis
-        try {
-            if (redisService.isConnected) {
+        if (redisService.isConnected && value !== null) {
+            try {
                 ttl = await redisService.getTTL(key);
+            } catch (error) {
+                // Fall back to in-memory TTL calculation
             }
-        } catch (error) {
-            loggingService.debug('Redis TTL check failed, using in-memory expiry', { value:  { component: 'CacheService',
-                operation: 'getEx',
-                type: 'cache_getex',
-                step: 'redis_ttl_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // If Redis TTL failed, calculate from in-memory expiry
@@ -467,17 +235,6 @@ export class CacheService {
             }
         }
 
-        loggingService.debug('Cache getex operation completed', {
-            component: 'CacheService',
-            operation: 'getEx',
-            type: 'cache_getex',
-            step: 'completed',
-            key,
-            hasValue: !!value,
-            ttl,
-            totalTime: `${Date.now() - startTime}ms`
-        });
-
         return { value, ttl };
     }
 
@@ -485,30 +242,15 @@ export class CacheService {
      * Increment cache counter
      */
     public async incr(key: string, amount: number = 1): Promise<number> {
-        const startTime = Date.now();
-        
-        loggingService.debug('=== CACHE INCR OPERATION STARTED ===', { value:  { component: 'CacheService',
-            operation: 'incr',
-            type: 'cache_incr',
-            key,
-            amount
-         } });
-
         let newValue = amount;
 
         // Try Redis first
-        try {
-            if (redisService.isConnected) {
+        if (redisService.isConnected) {
+            try {
                 newValue = await redisService.incr(key, amount);
+            } catch (error) {
+                // Fall back to in-memory increment
             }
-        } catch (error) {
-            loggingService.debug('Redis incr failed, falling back to in-memory', { value:  { component: 'CacheService',
-                operation: 'incr',
-                type: 'cache_incr',
-                step: 'redis_fallback',
-                key,
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // Fallback to in-memory
@@ -525,16 +267,6 @@ export class CacheService {
                 expiry: Date.now() + (3600 * 1000) // 1 hour default
             });
         }
-
-        loggingService.debug('Cache incr operation completed', {
-            component: 'CacheService',
-            operation: 'incr',
-            type: 'cache_incr',
-            step: 'completed',
-            key,
-            newValue,
-            totalTime: `${Date.now() - startTime}ms`
-        });
 
         return newValue;
     }
@@ -556,50 +288,31 @@ export class CacheService {
      * Clear all cache entries
      */
     public async clear(): Promise<void> {
-        loggingService.info('=== CACHE CLEAR OPERATION STARTED ===', { value:  { 
-            component: 'CacheService',
-            operation: 'clear',
-            type: 'cache_clear',
-            step: 'started'
-         } });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache clear operation started');
+        }
 
         // Clear Redis cache
-        try {
-            if (redisService.isConnected) {
+        if (redisService.isConnected) {
+            try {
                 await redisService.flushDB();
-                loggingService.info('Redis cache cleared successfully', { value:  { 
-                    component: 'CacheService',
-                    operation: 'clear',
-                    type: 'cache_clear',
-                    step: 'redis_cleared'
-                 } });
+                if (this.ENABLE_DEBUG_LOGS) {
+                    loggingService.debug('Redis cache cleared');
+                }
+            } catch (error) {
+                loggingService.warn('Redis cache clear failed', { 
+                    error: error instanceof Error ? error.message : 'Unknown error' 
+                });
             }
-        } catch (error) {
-            loggingService.warn('Redis cache clear failed', { value:  { component: 'CacheService',
-                operation: 'clear',
-                type: 'cache_clear',
-                step: 'redis_clear_failed',
-                error: error instanceof Error ? error.message : 'Unknown error'
-             } });
         }
 
         // Clear in-memory cache
         this.inMemoryCache.clear();
         this.cacheStats.clear();
         
-        loggingService.info('In-memory cache cleared successfully', { value:  { 
-            component: 'CacheService',
-            operation: 'clear',
-            type: 'cache_clear',
-            step: 'memory_cleared'
-         } });
-
-        loggingService.info('=== CACHE CLEAR OPERATION COMPLETED ===', { value:  { 
-            component: 'CacheService',
-            operation: 'clear',
-            type: 'cache_clear',
-            step: 'completed'
-         } });
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache clear completed');
+        }
     }
 
     /**
@@ -614,9 +327,18 @@ export class CacheService {
     }
 
     /**
-     * Update cache statistics
+     * Update cache statistics with memory leak prevention
      */
     private updateStats(key: string, operation: 'hits' | 'misses' | 'sets'): void {
+        // Prevent memory leaks by limiting stats entries
+        if (this.cacheStats.size >= this.MAX_STATS_ENTRIES && !this.cacheStats.has(key)) {
+            // Remove oldest entry (first entry in Map)
+            const firstKey = this.cacheStats.keys().next().value;
+            if (firstKey) {
+                this.cacheStats.delete(firstKey);
+            }
+        }
+        
         if (!this.cacheStats.has(key)) {
             this.cacheStats.set(key, { hits: 0, misses: 0, sets: 0 });
         }
@@ -640,15 +362,47 @@ export class CacheService {
                 }
             }
             
-            if (cleanedCount > 0) {
-                loggingService.debug('Cache cleanup completed', { value:  { component: 'CacheService',
-                    operation: 'cleanup',
-                    type: 'cache_cleanup',
+            if (cleanedCount > 0 && this.ENABLE_DEBUG_LOGS) {
+                loggingService.debug('Cache cleanup completed', {
                     cleanedCount,
                     remainingEntries: this.inMemoryCache.size
-                 } });
+                });
             }
         }, 60000); // Run every minute
+    }
+
+    /**
+     * Start stats cleanup interval to prevent memory leaks
+     */
+    private startStatsCleanupInterval(): void {
+        setInterval(() => {
+            // If stats map is getting too large, clean up entries with low activity
+            if (this.cacheStats.size > this.MAX_STATS_ENTRIES * 0.8) {
+                const entries = Array.from(this.cacheStats.entries());
+                
+                // Sort by total activity (hits + misses + sets) and keep most active
+                entries.sort((a, b) => {
+                    const totalA = a[1].hits + a[1].misses + a[1].sets;
+                    const totalB = b[1].hits + b[1].misses + b[1].sets;
+                    return totalB - totalA;
+                });
+                
+                // Keep top 80% most active entries
+                const keepCount = Math.floor(this.MAX_STATS_ENTRIES * 0.8);
+                const toRemove = entries.slice(keepCount);
+                
+                for (const [key] of toRemove) {
+                    this.cacheStats.delete(key);
+                }
+                
+                if (toRemove.length > 0 && this.ENABLE_DEBUG_LOGS) {
+                    loggingService.debug('Stats cleanup completed', {
+                        removedEntries: toRemove.length,
+                        remainingEntries: this.cacheStats.size
+                    });
+                }
+            }
+        }, 300000); // Run every 5 minutes
     }
 }
 
