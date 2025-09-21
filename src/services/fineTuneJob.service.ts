@@ -44,6 +44,61 @@ export class FineTuneJobService {
     private static s3Client?: S3Client;
     private static openaiClient?: OpenAI;
 
+    // Centralized monitoring system
+    private static monitoringJobs = new Map<string, {
+        jobId: string,
+        provider: string,
+        lastCheck: number,
+        checkCount: number,
+        maxChecks: number,
+        interval: number
+    }>();
+    private static monitoringTimer?: NodeJS.Timeout;
+
+    // Circuit breaker for provider calls
+    private static circuitBreaker = {
+        failures: new Map<string, number>(),
+        lastFailure: new Map<string, number>(),
+        isOpen: (provider: string) => {
+            const failures = FineTuneJobService.circuitBreaker.failures.get(provider) || 0;
+            const lastFailure = FineTuneJobService.circuitBreaker.lastFailure.get(provider) || 0;
+            const now = Date.now();
+            
+            // Reset after 10 minutes
+            if (now - lastFailure > 10 * 60 * 1000) {
+                FineTuneJobService.circuitBreaker.failures.set(provider, 0);
+                return false;
+            }
+            
+            return failures >= 3; // Open circuit after 3 failures
+        },
+        recordFailure: (provider: string) => {
+            const current = FineTuneJobService.circuitBreaker.failures.get(provider) || 0;
+            FineTuneJobService.circuitBreaker.failures.set(provider, current + 1);
+            FineTuneJobService.circuitBreaker.lastFailure.set(provider, Date.now());
+        }
+    };
+
+    // Batch progress updates
+    private static progressUpdateQueue = new Map<string, any>();
+    private static progressUpdateTimer?: NodeJS.Timeout;
+
+    // Conditional logging
+    private static DEBUG_ENABLED = process.env.FINETUNE_DEBUG === 'true';
+
+    // Pre-computed pricing matrix for fast cost estimation
+    private static pricingMatrix = new Map([
+        ['openai-gpt-3.5-turbo', 8],
+        ['openai-gpt-4', 30],
+        ['openai-babbage-002', 8],
+        ['openai-davinci-002', 8],
+        ['aws-bedrock-claude-3-5-haiku', 15],
+        ['aws-bedrock-claude-3-sonnet', 25],
+        ['aws-bedrock-titan-text', 20],
+        ['anthropic-claude-3-haiku', 15],
+        ['anthropic-claude-3-sonnet', 25]
+    ]);
+
     static {
         // Initialize AWS clients
         if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
@@ -64,83 +119,99 @@ export class FineTuneJobService {
     }
 
     /**
-     * Create a new fine-tune job
+     * Create a new fine-tune job with database transaction optimization
      */
     static async createFineTuneJob(userId: string, jobData: CreateFineTuneJobData): Promise<IFineTuneJob> {
+        const session = await mongoose.startSession();
+        
         try {
-            // Validate dataset exists and user has access
-            const dataset = await TrainingDataset.findOne({
-                _id: new mongoose.Types.ObjectId(jobData.datasetId),
-                userId: new mongoose.Types.ObjectId(userId)
-            });
+            return await session.withTransaction(async () => {
+                // Validate dataset exists and user has access
+                const dataset = await TrainingDataset.findOne({
+                    _id: new mongoose.Types.ObjectId(jobData.datasetId),
+                    userId: new mongoose.Types.ObjectId(userId)
+                }).session(session);
 
-            if (!dataset) {
-                throw new Error('Dataset not found or access denied');
-            }
+                if (!dataset) {
+                    throw new Error('Dataset not found or access denied');
+                }
 
-            if (dataset.items.length === 0) {
-                throw new Error('Dataset is empty. Please add training data first.');
-            }
+                if (dataset.items.length === 0) {
+                    throw new Error('Dataset is empty. Please add training data first.');
+                }
 
-            // Estimate cost based on provider and dataset size
-            const estimatedCost = await this.estimateFineTuneCost(
-                jobData.provider, 
-                jobData.baseModel, 
-                dataset.items.length,
-                dataset.stats.totalTokens
-            );
+                // Fast cost estimation (non-blocking)
+                const estimatedCost = this.estimateFineTuneCostFast(
+                    jobData.provider, 
+                    jobData.baseModel, 
+                    dataset.items.length,
+                    dataset.stats.totalTokens
+                );
 
-            // Create the fine-tune job
-            const fineTuneJob = new FineTuneJob({
-                userId: new mongoose.Types.ObjectId(userId),
-                name: jobData.name,
-                description: jobData.description,
-                datasetId: new mongoose.Types.ObjectId(jobData.datasetId),
-                datasetVersion: jobData.datasetVersion || dataset.version,
-                baseModel: jobData.baseModel,
-                provider: jobData.provider,
-                hyperparameters: {
-                    learningRate: 0.0001,
-                    batchSize: 8,
-                    epochs: 3,
-                    validationSplit: 0.1,
-                    earlyStoppingPatience: 3,
-                    ...jobData.hyperparameters
-                },
-                providerConfig: jobData.providerConfig || {},
-                cost: {
-                    estimated: estimatedCost,
-                    currency: 'USD'
-                },
-                status: 'queued',
-                progress: {
-                    percentage: 0,
-                    lastUpdated: new Date()
-                },
-                timing: {
-                    queuedAt: new Date()
-                },
-                lineage: {
-                    childJobIds: []
-                },
-                evaluationIds: []
-            });
+                // Create the fine-tune job
+                const fineTuneJob = new FineTuneJob({
+                    userId: new mongoose.Types.ObjectId(userId),
+                    name: jobData.name,
+                    description: jobData.description,
+                    datasetId: new mongoose.Types.ObjectId(jobData.datasetId),
+                    datasetVersion: jobData.datasetVersion || dataset.version,
+                    baseModel: jobData.baseModel,
+                    provider: jobData.provider,
+                    hyperparameters: {
+                        learningRate: 0.0001,
+                        batchSize: 8,
+                        epochs: 3,
+                        validationSplit: 0.1,
+                        earlyStoppingPatience: 3,
+                        ...jobData.hyperparameters
+                    },
+                    providerConfig: jobData.providerConfig || {},
+                    cost: {
+                        estimated: estimatedCost,
+                        currency: 'USD'
+                    },
+                    status: 'queued',
+                    progress: {
+                        percentage: 0,
+                        lastUpdated: new Date()
+                    },
+                    timing: {
+                        queuedAt: new Date()
+                    },
+                    lineage: {
+                        childJobIds: []
+                    },
+                    evaluationIds: []
+                });
 
-            const savedJob = await fineTuneJob.save();
-
-            // Update dataset lineage
-            dataset.lineage.relatedFineTuneJobs.push(savedJob._id?.toString() || savedJob.id);
-            await dataset.save();
+                // Save job and update dataset lineage atomically
+                const [savedJob] = await Promise.all([
+                    fineTuneJob.save({ session }),
+                    TrainingDataset.findByIdAndUpdate(
+                        dataset._id,
+                        { 
+                            $push: { 
+                                'lineage.relatedFineTuneJobs': fineTuneJob._id?.toString() || fineTuneJob.id 
+                            } 
+                        },
+                        { session }
+                    )
+                ]);
 
             loggingService.info(`Created fine-tune job: ${savedJob.name} for user ${userId}`);
 
-            // Queue the job for execution
-            await this.queueJobExecution(savedJob._id?.toString() || savedJob.id);
+                // Queue the job for execution (non-blocking)
+                setImmediate(() => {
+                    this.queueJobExecution(savedJob._id?.toString() || savedJob.id);
+                });
 
-            return savedJob;
+                return savedJob;
+            });
         } catch (error) {
             loggingService.error('Error creating fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
+        } finally {
+            await session.endSession();
         }
     }
 
@@ -161,16 +232,46 @@ export class FineTuneJobService {
     }
 
     /**
-     * Get a specific fine-tune job
+     * Get a specific fine-tune job with projection optimization
      */
     static async getFineTuneJob(userId: string, jobId: string): Promise<IFineTuneJob | null> {
         try {
             return await FineTuneJob.findOne({
                 _id: new mongoose.Types.ObjectId(jobId),
                 userId: new mongoose.Types.ObjectId(userId)
-            }            ).populate('datasetId', 'name version stats items');
+            }).populate('datasetId', 'name version stats items');
         } catch (error) {
             loggingService.error('Error getting fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+    }
+
+    /**
+     * Get job status with minimal data transfer
+     */
+    static async getJobStatus(userId: string, jobId: string): Promise<Partial<IFineTuneJob> | null> {
+        try {
+            return await FineTuneJob.findOne({
+                _id: new mongoose.Types.ObjectId(jobId),
+                userId: new mongoose.Types.ObjectId(userId)
+            }).select('status progress cost timing error results providerJobId');
+        } catch (error) {
+            loggingService.error('Error getting job status:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+    }
+
+    /**
+     * Get job metrics with minimal data transfer
+     */
+    static async getJobMetrics(userId: string, jobId: string): Promise<Partial<IFineTuneJob> | null> {
+        try {
+            return await FineTuneJob.findOne({
+                _id: new mongoose.Types.ObjectId(jobId),
+                userId: new mongoose.Types.ObjectId(userId)
+            }).select('metrics progress hyperparameters timing cost');
+        } catch (error) {
+            loggingService.error('Error getting job metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -208,7 +309,7 @@ export class FineTuneJobService {
     }
 
     /**
-     * Update job progress (called by background processes)
+     * Update job progress with batching optimization
      */
     static async updateJobProgress(
         jobId: string, 
@@ -240,10 +341,47 @@ export class FineTuneJobService {
                 });
             }
 
-            await FineTuneJob.findByIdAndUpdate(jobId, { $set: updateData });
+            // Queue update for batching
+            this.queueProgressUpdate(jobId, updateData);
         } catch (error) {
             loggingService.error('Error updating job progress:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
+        }
+    }
+
+    /**
+     * Queue progress update for batch processing
+     */
+    private static queueProgressUpdate(jobId: string, updateData: any): void {
+        this.progressUpdateQueue.set(jobId, updateData);
+        
+        if (!this.progressUpdateTimer) {
+            this.progressUpdateTimer = setTimeout(() => {
+                this.processBatchProgressUpdates();
+            }, 2000); // Batch updates every 2 seconds
+        }
+    }
+
+    /**
+     * Process batched progress updates
+     */
+    private static async processBatchProgressUpdates(): Promise<void> {
+        if (this.progressUpdateQueue.size === 0) return;
+
+        try {
+            const bulkOps = Array.from(this.progressUpdateQueue.entries()).map(([jobId, updateData]) => ({
+                updateOne: {
+                    filter: { _id: jobId },
+                    update: { $set: updateData }
+                }
+            }));
+
+            await FineTuneJob.bulkWrite(bulkOps);
+            this.progressUpdateQueue.clear();
+        } catch (error) {
+            loggingService.error('Error processing batch progress updates:', { error: error instanceof Error ? error.message : String(error) });
+        } finally {
+            this.progressUpdateTimer = undefined;
         }
     }
 
@@ -359,8 +497,8 @@ export class FineTuneJobService {
 
         loggingService.info(`Started Bedrock fine-tune job: ${jobName}`);
 
-        // Start monitoring the job
-        this.monitorBedrockJob(job._id?.toString() || job.id);
+        // Add job to centralized monitoring
+        this.addJobToMonitoring(job._id?.toString() || job.id, 'aws-bedrock');
     }
 
     /**
@@ -405,161 +543,203 @@ export class FineTuneJobService {
 
         loggingService.info(`Started OpenAI fine-tune job: ${fineTune.id}`);
 
-        // Start monitoring the job
-        this.monitorOpenAIJob(job._id?.toString() || job.id);
+        // Add job to centralized monitoring
+        this.addJobToMonitoring(job._id?.toString() || job.id, 'openai');
     }
 
     /**
-     * Monitor AWS Bedrock job status (simplified)
+     * Add job to centralized monitoring system
      */
-    private static async monitorBedrockJob(jobId: string): Promise<void> {
-        const checkInterval = 60000; // Check every minute
-        const maxChecks = 360; // Max 6 hours
-        let checkCount = 0;
+    private static addJobToMonitoring(jobId: string, provider: string): void {
+        const config = {
+            jobId,
+            provider,
+            lastCheck: Date.now(),
+            checkCount: 0,
+            maxChecks: provider === 'openai' ? 480 : 360, // 4h for OpenAI, 6h for Bedrock
+            interval: provider === 'openai' ? 30000 : 60000 // 30s for OpenAI, 60s for Bedrock
+        };
 
-        const monitor = async () => {
-            try {
-                const job = await FineTuneJob.findById(jobId);
-                if (!job || !job.providerJobId) return;
+        this.monitoringJobs.set(jobId, config);
+        this.startCentralizedMonitoring();
+    }
 
-                if (job.status !== 'running') return; // Job was cancelled or failed
+    /**
+     * Start centralized monitoring system
+     */
+    private static startCentralizedMonitoring(): void {
+        if (this.monitoringTimer) return; // Already running
 
-                // Simulate progress updates (in production, use real AWS SDK calls)
-                let percentage = Math.min(90, job.progress.percentage + 5);
-                
-                // Simulate completion after reasonable time
-                if (checkCount > 10) { // After ~10 minutes, mark as completed for demo
+        this.monitoringTimer = setInterval(async () => {
+            await this.processAllMonitoringJobs();
+        }, 30000); // Check every 30 seconds
+    }
+
+    /**
+     * Process all monitoring jobs in parallel
+     */
+    private static async processAllMonitoringJobs(): Promise<void> {
+        if (this.monitoringJobs.size === 0) {
+            if (this.monitoringTimer) {
+                clearInterval(this.monitoringTimer);
+                this.monitoringTimer = undefined;
+            }
+            return;
+        }
+
+        const jobsToProcess = Array.from(this.monitoringJobs.entries())
+            .filter(([_, config]) => Date.now() - config.lastCheck >= config.interval);
+
+        if (jobsToProcess.length === 0) return;
+
+        // Process jobs in parallel
+        const results = await Promise.allSettled(
+            jobsToProcess.map(([jobId, config]) => this.checkJobStatus(jobId, config))
+        );
+
+        // Remove completed jobs from monitoring
+        results.forEach((result, index) => {
+            if (result.status === 'fulfilled' && result.value === 'completed') {
+                const [jobId] = jobsToProcess[index];
+                this.monitoringJobs.delete(jobId);
+            }
+        });
+    }
+
+    /**
+     * Check individual job status
+     */
+    private static async checkJobStatus(jobId: string, config: any): Promise<string> {
+        try {
+            const job = await FineTuneJob.findById(jobId);
+            if (!job || !job.providerJobId) return 'completed';
+
+            if (job.status !== 'running') return 'completed';
+
+            config.lastCheck = Date.now();
+            config.checkCount++;
+
+            if (config.provider === 'aws-bedrock') {
+                return await this.checkBedrockJobStatus(job, config);
+            } else if (config.provider === 'openai') {
+                return await this.checkOpenAIJobStatus(job, config);
+            }
+
+            return 'continue';
+        } catch (error) {
+            this.logDebug(`Error checking job status ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
+            return 'continue';
+        }
+    }
+
+    /**
+     * Check Bedrock job status
+     */
+    private static async checkBedrockJobStatus(job: any, config: any): Promise<string> {
+        // Simulate progress updates (in production, use real AWS SDK calls)
+        let percentage = Math.min(90, job.progress.percentage + 5);
+        
+        // Simulate completion after reasonable time
+        if (config.checkCount > 10) {
+            percentage = 100;
+            job.status = 'succeeded';
+            job.results = {
+                modelId: `${job.providerJobId}-model`,
+                modelArn: `arn:aws:bedrock:us-east-1:123456789:custom-model/${job.providerJobId}`
+            };
+            job.timing.completedAt = new Date();
+            if (job.timing.startedAt) {
+                job.timing.actualDuration = Math.floor(
+                    (job.timing.completedAt.getTime() - job.timing.startedAt.getTime()) / 1000
+                );
+            }
+            await job.save();
+            this.logInfo(`Bedrock fine-tune job completed: ${job.providerJobId}`);
+            
+            // Auto-trigger evaluation
+            await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(job._id?.toString() || job.id);
+            return 'completed';
+        }
+
+        await this.updateJobProgress(job._id?.toString() || job.id, { percentage });
+
+        if (config.checkCount >= config.maxChecks) {
+            job.status = 'failed';
+            job.error = {
+                code: 'MONITORING_TIMEOUT',
+                message: 'Job monitoring timed out after 6 hours',
+                timestamp: new Date()
+            };
+            await job.save();
+            return 'completed';
+        }
+
+        return 'continue';
+    }
+
+    /**
+     * Check OpenAI job status
+     */
+    private static async checkOpenAIJobStatus(job: any, config: any): Promise<string> {
+        if (!this.openaiClient) return 'continue';
+
+        try {
+            const fineTune = await this.openaiClient.fineTuning.jobs.retrieve(job.providerJobId);
+
+            let percentage = job.progress.percentage;
+            switch (fineTune.status) {
+                case 'validating_files':
+                    percentage = 10;
+                    break;
+                case 'queued':
+                    percentage = 20;
+                    break;
+                case 'running':
+                    percentage = Math.min(90, 30 + (config.checkCount * 2));
+                    break;
+                case 'succeeded':
                     percentage = 100;
                     job.status = 'succeeded';
-                    job.results = {
-                        modelId: `${job.providerJobId}-model`,
-                        modelArn: `arn:aws:bedrock:us-east-1:123456789:custom-model/${job.providerJobId}`
-                    };
+                    job.results = { modelId: fineTune.fine_tuned_model || undefined };
                     job.timing.completedAt = new Date();
-                    if (job.timing.startedAt) {
-                        job.timing.actualDuration = Math.floor(
-                            (job.timing.completedAt.getTime() - job.timing.startedAt.getTime()) / 1000
-                        );
-                    }
                     await job.save();
-                    loggingService.info(`Bedrock fine-tune job completed: ${job.providerJobId}`);
+                    this.logInfo(`OpenAI fine-tune job completed: ${job.providerJobId}`);
                     
-                    // Auto-trigger evaluation
-                    await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(jobId);
-                    return;
-                }
-
-                await this.updateJobProgress(jobId, { percentage });
-
-                checkCount++;
-                if (checkCount < maxChecks) {
-                    setTimeout(monitor, checkInterval);
-                } else {
-                    // Timeout
+                    await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(job._id?.toString() || job.id);
+                    return 'completed';
+                case 'failed':
                     job.status = 'failed';
                     job.error = {
-                        code: 'MONITORING_TIMEOUT',
-                        message: 'Job monitoring timed out after 6 hours',
+                        code: 'OPENAI_JOB_FAILED',
+                        message: fineTune.error?.message || 'OpenAI job failed',
+                        details: fineTune.error,
                         timestamp: new Date()
                     };
                     await job.save();
-                }
-
-            } catch (error) {
-                loggingService.error(`Error monitoring Bedrock job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
-                setTimeout(monitor, checkInterval); // Retry after interval
-            }
-        };
-
-        setTimeout(monitor, checkInterval);
-    }
-
-    /**
-     * Monitor OpenAI job status
-     */
-    private static async monitorOpenAIJob(jobId: string): Promise<void> {
-        const checkInterval = 30000; // Check every 30 seconds
-        const maxChecks = 480; // Max 4 hours
-        let checkCount = 0;
-
-        const monitor = async () => {
-            try {
-                const job = await FineTuneJob.findById(jobId);
-                if (!job || !job.providerJobId) return;
-
-                if (job.status !== 'running') return; // Job was cancelled or failed
-
-                // In production, use real OpenAI API calls
-                if (this.openaiClient) {
-                    try {
-                        const fineTune = await this.openaiClient.fineTuning.jobs.retrieve(job.providerJobId);
-
-                        // Update progress based on OpenAI status
-                        let percentage = job.progress.percentage;
-                        switch (fineTune.status) {
-                            case 'validating_files':
-                                percentage = 10;
-                                break;
-                            case 'queued':
-                                percentage = 20;
-                                break;
-                            case 'running':
-                                percentage = Math.min(90, 30 + (checkCount * 2));
-                                break;
-                            case 'succeeded':
-                                percentage = 100;
-                                job.status = 'succeeded';
-                                job.results = { modelId: fineTune.fine_tuned_model || undefined };
-                                job.timing.completedAt = new Date();
-                                await job.save();
-                                loggingService.info(`OpenAI fine-tune job completed: ${job.providerJobId}`);
-                                
-                                // Auto-trigger evaluation
-                                await EvaluationJobService.triggerEvaluationOnFineTuneCompletion(jobId);
-                                return;
-                            case 'failed':
-                                job.status = 'failed';
-                                job.error = {
-                                    code: 'OPENAI_JOB_FAILED',
-                                    message: fineTune.error?.message || 'OpenAI job failed',
-                                    details: fineTune.error,
-                                    timestamp: new Date()
-                                };
-                                await job.save();
-                                loggingService.error(`OpenAI fine-tune job failed: ${job.providerJobId}`);
-                                return;
-                            case 'cancelled':
-                                job.status = 'cancelled';
-                                await job.save();
-                                return;
-                        }
-
-                        await this.updateJobProgress(jobId, { percentage });
-                    } catch (apiError) {
-                        loggingService.error(`OpenAI API error for job ${jobId}:`, { error: apiError instanceof Error ? apiError.message : String(apiError) });
-                    }
-                }
-
-                checkCount++;
-                if (checkCount < maxChecks) {
-                    setTimeout(monitor, checkInterval);
-                } else {
-                    job.status = 'failed';
-                    job.error = {
-                        code: 'MONITORING_TIMEOUT',
-                        message: 'Job monitoring timed out after 4 hours',
-                        timestamp: new Date()
-                    };
+                    return 'completed';
+                case 'cancelled':
+                    job.status = 'cancelled';
                     await job.save();
-                }
-
-            } catch (error) {
-                loggingService.error(`Error monitoring OpenAI job ${jobId}:`, { error: error instanceof Error ? error.message : String(error) });
-                setTimeout(monitor, checkInterval);
+                    return 'completed';
             }
-        };
 
-        setTimeout(monitor, checkInterval);
+            await this.updateJobProgress(job._id?.toString() || job.id, { percentage });
+        } catch (apiError) {
+            this.logDebug(`OpenAI API error for job ${job._id}:`, { error: apiError instanceof Error ? apiError.message : String(apiError) });
+        }
+
+        if (config.checkCount >= config.maxChecks) {
+            job.status = 'failed';
+            job.error = {
+                code: 'MONITORING_TIMEOUT',
+                message: 'Job monitoring timed out after 4 hours',
+                timestamp: new Date()
+            };
+            await job.save();
+            return 'completed';
+        }
+
+        return 'continue';
     }
 
     /**
@@ -589,7 +769,24 @@ export class FineTuneJobService {
     }
 
     /**
-     * Estimate fine-tuning cost
+     * Fast cost estimation using pre-computed pricing matrix
+     */
+    private static estimateFineTuneCostFast(
+        provider: string, 
+        baseModel: string, 
+        itemCount: number, 
+        totalTokens: number
+    ): number {
+        const key = `${provider}-${baseModel}`;
+        const costPer1M = this.pricingMatrix.get(key) || 
+                         this.pricingMatrix.get(`${provider}-${baseModel.split('-')[0]}`) || 
+                         10; // Default fallback
+
+        return (totalTokens / 1000000) * costPer1M;
+    }
+
+    /**
+     * Legacy cost estimation method (kept for compatibility)
      */
     private static async estimateFineTuneCost(
         provider: string, 
@@ -597,50 +794,53 @@ export class FineTuneJobService {
         itemCount: number, 
         totalTokens: number
     ): Promise<number> {
-        // Cost estimation logic based on provider pricing
-        switch (provider) {
-            case 'openai':
-                // OpenAI pricing: ~$8 per 1M tokens for GPT-3.5
-                const openaiCostPer1MTokens = baseModel.includes('gpt-4') ? 30 : 8;
-                return (totalTokens / 1000000) * openaiCostPer1MTokens;
-            
-            case 'aws-bedrock':
-                // AWS Bedrock pricing varies by model, roughly $10-50 per 1M tokens
-                const bedrockCostPer1MTokens = 20;
-                return (totalTokens / 1000000) * bedrockCostPer1MTokens;
-            
-            default:
-                // Default estimation
-                return itemCount * 0.01; // $0.01 per training example
-        }
+        return this.estimateFineTuneCostFast(provider, baseModel, itemCount, totalTokens);
     }
 
     /**
-     * Prepare training data for Bedrock format
+     * Prepare training data for Bedrock format with streaming
      */
     private static async prepareBedrockTrainingData(dataset: any): Promise<string> {
-        const lines = dataset.items.map((item: any) => {
-            return JSON.stringify({
-                prompt: item.input,
-                completion: item.expectedOutput || ""
-            });
-        });
-        return lines.join('\n');
+        return this.processTrainingDataInBatches(dataset.items, (item: any) => ({
+            prompt: item.input,
+            completion: item.expectedOutput || ""
+        }));
     }
 
     /**
-     * Prepare training data for OpenAI format
+     * Prepare training data for OpenAI format with streaming
      */
     private static async prepareOpenAITrainingData(dataset: any): Promise<string> {
-        const lines = dataset.items.map((item: any) => {
-            return JSON.stringify({
-                messages: [
-                    { role: "user", content: item.input },
-                    { role: "assistant", content: item.expectedOutput || "" }
-                ]
-            });
-        });
-        return lines.join('\n');
+        return this.processTrainingDataInBatches(dataset.items, (item: any) => ({
+            messages: [
+                { role: "user", content: item.input },
+                { role: "assistant", content: item.expectedOutput || "" }
+            ]
+        }));
+    }
+
+    /**
+     * Process training data in batches for memory efficiency
+     */
+    private static async processTrainingDataInBatches(
+        items: any[], 
+        formatter: (item: any) => any
+    ): Promise<string> {
+        const BATCH_SIZE = 1000;
+        const chunks: string[] = [];
+        
+        for (let i = 0; i < items.length; i += BATCH_SIZE) {
+            const batch = items.slice(i, i + BATCH_SIZE);
+            const batchLines = batch.map(item => JSON.stringify(formatter(item)));
+            chunks.push(batchLines.join('\n'));
+            
+            // Allow event loop to process other tasks
+            if (i + BATCH_SIZE < items.length) {
+                await new Promise(resolve => setImmediate(resolve));
+            }
+        }
+        
+        return chunks.join('\n');
     }
 
     /**
@@ -666,11 +866,59 @@ export class FineTuneJobService {
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
-            loggingService.info(`Deleted fine-tune job ${jobId} for user ${userId}`);
+            this.logInfo(`Deleted fine-tune job ${jobId} for user ${userId}`);
             return result.deletedCount > 0;
         } catch (error) {
             loggingService.error('Error deleting fine-tune job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
+        }
+    }
+
+    // ============================================================================
+    // UTILITY METHODS FOR OPTIMIZATION
+    // ============================================================================
+
+    /**
+     * Conditional logging - info level
+     */
+    private static logInfo(message: string, data?: any): void {
+        loggingService.info(message, data);
+    }
+
+    /**
+     * Conditional logging - debug level
+     */
+    private static logDebug(message: string, data?: any): void {
+        if (this.DEBUG_ENABLED) {
+            loggingService.debug(message, data);
+        }
+    }
+
+    /**
+     * Execute provider operation with circuit breaker
+     */
+    private static async executeWithCircuitBreaker<T>(
+        operation: () => Promise<T>,
+        provider: string,
+        fallback: () => T,
+        timeout: number = 30000
+    ): Promise<T> {
+        if (this.circuitBreaker.isOpen(provider)) {
+            this.logDebug(`Circuit breaker open for ${provider}, using fallback`);
+            return fallback();
+        }
+
+        try {
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`Provider ${provider} timeout after ${timeout}ms`)), timeout);
+            });
+
+            const result = await Promise.race([operation(), timeoutPromise]);
+            return result;
+        } catch (error) {
+            this.circuitBreaker.recordFailure(provider);
+            this.logDebug(`Provider ${provider} operation failed:`, { error: error instanceof Error ? error.message : String(error) });
+            return fallback();
         }
     }
 }
