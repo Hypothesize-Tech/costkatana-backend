@@ -2,7 +2,7 @@ import { loggingService } from './logging.service';
 import { Usage } from '../models';
 import mongoose from 'mongoose';
 import { webhookEventEmitter } from './webhookEventEmitter.service';
-import { WEBHOOK_EVENTS } from '../types/webhook.types';
+import { WEBHOOK_EVENTS, WebhookEventType } from '../types/webhook.types';
 
 interface BudgetStatus {
   overall: {
@@ -35,25 +35,34 @@ interface BudgetStatus {
 }
 
 export class BudgetService {
+  /**
+   * Get month date range for budget calculations
+   */
+  private static getMonthDateRange(): { startOfMonth: Date; endOfMonth: Date } {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const endOfMonth = new Date();
+    endOfMonth.setMonth(endOfMonth.getMonth() + 1);
+    endOfMonth.setDate(0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    return { startOfMonth, endOfMonth };
+  }
+
   static async getBudgetStatus(userId: string, projectFilter?: string): Promise<BudgetStatus> {
     try {
-      const startOfMonth = new Date();
-      startOfMonth.setDate(1);
-      startOfMonth.setHours(0, 0, 0, 0);
-
-      const endOfMonth = new Date();
-      endOfMonth.setMonth(endOfMonth.getMonth() + 1);
-      endOfMonth.setDate(0);
-      endOfMonth.setHours(23, 59, 59, 999);
+      const { startOfMonth, endOfMonth } = this.getMonthDateRange();
 
       // Get user's budget settings (default to 100K tokens)
       const userBudget = 100000; // This would come from user settings
 
-      // Get overall usage for the month
-      const overallUsage = await this.getOverallUsage(userId, startOfMonth, endOfMonth);
-      
-      // Get project-specific usage
-      const projectUsage = await this.getProjectUsage(userId, startOfMonth, endOfMonth, projectFilter);
+      // Execute aggregations in parallel for better performance
+      const [overallUsage, projectUsage] = await Promise.all([
+        this.getOverallUsage(userId, startOfMonth, endOfMonth),
+        this.getProjectUsage(userId, startOfMonth, endOfMonth, projectFilter)
+      ]);
 
       // Calculate overall budget status
       const overall = {
@@ -165,6 +174,81 @@ export class BudgetService {
     });
   }
 
+  /**
+   * Get alert level and type based on usage percentage
+   */
+  private static getAlertLevel(percentage: number): { level: string; severity: 'low' | 'medium' | 'high' } | null {
+    if (percentage >= 90) return { level: 'critical', severity: 'high' };
+    if (percentage >= 75) return { level: 'warning', severity: 'medium' };
+    if (percentage >= 50) return { level: 'notice', severity: 'low' };
+    return null;
+  }
+
+  /**
+   * Create budget alert object
+   */
+  private static createBudgetAlert(
+    type: string,
+    percentage: number,
+    severity: 'low' | 'medium' | 'high',
+    timestamp: string,
+    isProject = false,
+    projectName?: string
+  ) {
+    const target = isProject ? `Project "${projectName}"` : 'You';
+    const budgetType = isProject ? 'its' : 'your monthly';
+    
+    let messagePrefix: string;
+    switch (severity) {
+      case 'high':
+        messagePrefix = 'Critical';
+        break;
+      case 'medium':
+        messagePrefix = 'Warning';
+        break;
+      default:
+        messagePrefix = 'Notice';
+    }
+
+    return {
+      type,
+      message: `${messagePrefix}: ${target} ${isProject ? 'has' : 've'} used ${percentage.toFixed(1)}% of ${budgetType} budget`,
+      severity,
+      timestamp
+    };
+  }
+
+  /**
+   * Emit webhook event for budget alerts
+   */
+  private static async emitBudgetWebhook(
+    userId: string,
+    overall: any,
+    eventType: WebhookEventType
+  ): Promise<void> {
+    try {
+      const webhookData = {
+        cost: { amount: overall.cost, currency: 'USD' },
+        metrics: {
+          current: overall.used,
+          threshold: overall.budget,
+          changePercentage: eventType === WEBHOOK_EVENTS.BUDGET_EXCEEDED 
+            ? overall.usagePercentage - 100 
+            : overall.usagePercentage,
+          unit: 'tokens'
+        }
+      };
+
+      await webhookEventEmitter.emitWebhookEvent(eventType, userId, webhookData);
+    } catch (error) {
+      loggingService.error('Failed to emit budget webhook', { 
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        eventType
+      });
+    }
+  }
+
   private static generateAlerts(overall: any, projects: any[], userId: string): Array<{
     type: string;
     message: string;
@@ -179,80 +263,49 @@ export class BudgetService {
     }> = [];
     const now = new Date().toISOString();
 
-    // Overall budget alerts
-    if (overall.usagePercentage >= 90) {
-      alerts.push({
-        type: 'budget_critical',
-        message: `Critical: You've used ${overall.usagePercentage.toFixed(1)}% of your monthly budget`,
-        severity: 'high' as const,
-        timestamp: now,
-      });
-      
-      // Emit webhook event for budget exceeded or warning
-      if (overall.usagePercentage >= 100) {
-        webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_EXCEEDED, userId, {
-          cost: { amount: overall.cost, currency: 'USD' },
-          metrics: {
-            current: overall.used,
-            threshold: overall.budget,
-            changePercentage: overall.usagePercentage - 100,
-            unit: 'tokens'
-          }
-        });
-      } else {
-        webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_WARNING, userId, {
-          cost: { amount: overall.cost, currency: 'USD' },
-          metrics: {
-            current: overall.used,
-            threshold: overall.budget,
-            changePercentage: overall.usagePercentage,
-            unit: 'tokens'
-          }
-        });
-      }
-    } else if (overall.usagePercentage >= 75) {
-      alerts.push({
-        type: 'budget_warning',
-        message: `Warning: You've used ${overall.usagePercentage.toFixed(1)}% of your monthly budget`,
-        severity: 'medium' as const,
-        timestamp: now,
-      });
-      
-      // Emit webhook event for budget warning
-      webhookEventEmitter.emitWebhookEvent(WEBHOOK_EVENTS.BUDGET_WARNING, userId, {
-        cost: { amount: overall.cost, currency: 'USD' },
-        metrics: {
-          current: overall.used,
-          threshold: overall.budget,
-          changePercentage: overall.usagePercentage,
-          unit: 'tokens'
-        }
-      });
-    } else if (overall.usagePercentage >= 50) {
-      alerts.push({
-        type: 'budget_notice',
-        message: `Notice: You've used ${overall.usagePercentage.toFixed(1)}% of your monthly budget`,
-        severity: 'low' as const,
-        timestamp: now,
-      });
+    // Early return if no usage
+    if (overall.usagePercentage === 0) {
+      return alerts;
     }
 
-    // Project-specific alerts
+    // Overall budget alerts with optimized logic
+    const overallAlertLevel = this.getAlertLevel(overall.usagePercentage);
+    if (overallAlertLevel) {
+      const alertType = overallAlertLevel.level === 'critical' ? 'budget_critical' : 
+                       overallAlertLevel.level === 'warning' ? 'budget_warning' : 'budget_notice';
+      
+      alerts.push(this.createBudgetAlert(
+        alertType,
+        overall.usagePercentage,
+        overallAlertLevel.severity,
+        now
+      ));
+      
+      // Emit webhook events for critical and warning levels
+      if (overallAlertLevel.severity === 'high') {
+        const eventType = overall.usagePercentage >= 100 
+          ? WEBHOOK_EVENTS.BUDGET_EXCEEDED 
+          : WEBHOOK_EVENTS.BUDGET_WARNING;
+        this.emitBudgetWebhook(userId, overall, eventType);
+      } else if (overallAlertLevel.severity === 'medium') {
+        this.emitBudgetWebhook(userId, overall, WEBHOOK_EVENTS.BUDGET_WARNING);
+      }
+    }
+
+    // Project-specific alerts with optimized logic
     projects.forEach(project => {
-      if (project.usagePercentage >= 90) {
-        alerts.push({
-          type: 'project_critical',
-          message: `Critical: Project "${project.name}" has used ${project.usagePercentage.toFixed(1)}% of its budget`,
-          severity: 'high' as const,
-          timestamp: now,
-        });
-      } else if (project.usagePercentage >= 75) {
-        alerts.push({
-          type: 'project_warning',
-          message: `Warning: Project "${project.name}" has used ${project.usagePercentage.toFixed(1)}% of its budget`,
-          severity: 'medium' as const,
-          timestamp: now,
-        });
+      const projectAlertLevel = this.getAlertLevel(project.usagePercentage);
+      if (projectAlertLevel && projectAlertLevel.severity !== 'low') {
+        const alertType = projectAlertLevel.level === 'critical' ? 'project_critical' : 'project_warning';
+        
+        alerts.push(this.createBudgetAlert(
+          alertType,
+          project.usagePercentage,
+          projectAlertLevel.severity,
+          now,
+          true,
+          project.name
+        ));
       }
     });
 
