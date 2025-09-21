@@ -33,26 +33,87 @@ const createApiKeySchema = z.object({
 });
 
 export class UserController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Circuit breaker for S3 operations
+    private static s3FailureCount: number = 0;
+    private static readonly MAX_S3_FAILURES = 3;
+    private static readonly S3_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
+    private static lastS3FailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
+    private static readonly STATS_TIMEOUT = 30000; // 30 seconds for stats
+    private static readonly HISTORY_TIMEOUT = 25000; // 25 seconds for history
+    
+    // Pre-computed subscription limits
+    private static readonly SUBSCRIPTION_LIMITS = {
+        free: { 
+            apiCalls: 10000, 
+            optimizations: 10,
+            tokensPerMonth: 1000000,
+            logsPerMonth: 15000,
+            projects: 5,
+            workflows: 10
+        },
+        plus: { 
+            apiCalls: 50000, 
+            optimizations: 100,
+            tokensPerMonth: 10000000,
+            logsPerMonth: -1, // Unlimited
+            projects: -1,
+            workflows: 100
+        },
+        pro: { 
+            apiCalls: 100000, 
+            optimizations: 1000,
+            tokensPerMonth: 15000000,
+            logsPerMonth: -1,
+            projects: -1,
+            workflows: 100
+        },
+        enterprise: { 
+            apiCalls: -1, 
+            optimizations: -1,
+            tokensPerMonth: -1,
+            logsPerMonth: -1,
+            projects: -1,
+            workflows: -1
+        }
+    };
+    
+    // ObjectId conversion utilities
+    private static objectIdCache = new Map<string, mongoose.Types.ObjectId>();
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     static async getProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user!.id;
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return;
 
         try {
-            loggingService.info('User profile retrieval initiated', {
-                requestId,
-                userId,
-                hasUserId: !!userId
-            });
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
 
             const user = await User.findById(userId).select('-password -resetPasswordToken -resetPasswordExpires -verificationToken');
 
             if (!user) {
-                loggingService.warn('User profile retrieval failed - user not found', {
-                    requestId,
-                    userId
-                });
-
+                loggingService.warn('User profile retrieval failed - user not found', { requestId, userId });
                 res.status(404).json({
                     success: false,
                     message: 'User not found',
@@ -62,42 +123,35 @@ export class UserController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('User profile retrieved successfully', {
-                requestId,
-                duration,
-                userId,
-                hasUser: !!user,
-                userEmail: user.email,
-                userName: user.name,
-                hasAvatar: !!user.avatar,
-                hasPreferences: !!user.preferences
+            // Queue business event logging to background
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'user_profile_retrieved',
+                    category: 'user_management',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        userEmail: user.email,
+                        userName: user.name
+                    }
+                });
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'user_profile_retrieved',
-                category: 'user_management',
-                value: duration,
-                metadata: {
-                    userId,
-                    userEmail: user.email,
-                    userName: user.name
-                }
-            });
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             res.json({
                 success: true,
                 data: user,
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('User profile retrieval failed', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -108,75 +162,59 @@ export class UserController {
 
     static async updateProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user!.id;
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return;
 
         try {
-            loggingService.info('User profile update initiated', {
-                requestId,
-                userId,
-                hasUserId: !!userId
-            });
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
 
             const { name, preferences, avatar } = updateProfileSchema.parse(req.body);
-
-            loggingService.info('User profile update parameters received', {
-                requestId,
-                userId,
-                hasName: !!name,
-                hasPreferences: !!preferences,
-                hasAvatar: !!avatar,
-                preferencesKeys: preferences ? Object.keys(preferences) : []
-            });
 
             const user = await User.findById(userId);
 
             if (!user) {
-                loggingService.warn('User profile update failed - user not found', {
-                    requestId,
-                    userId
-                });
-
+                loggingService.warn('User profile update failed - user not found', { requestId, userId });
                 return next(new AppError('User not found', 404));
             }
 
-            if (name) user.name = name;
-            if (avatar) user.avatar = avatar;
+            // Track updated fields for logging
+            const updatedFields: string[] = [];
+            if (name) {
+                user.name = name;
+                updatedFields.push('name');
+            }
+            if (avatar) {
+                user.avatar = avatar;
+                updatedFields.push('avatar');
+            }
             if (preferences) {
                 user.preferences = { ...user.preferences, ...preferences };
+                updatedFields.push('preferences');
             }
 
             await user.save();
             const duration = Date.now() - startTime;
 
-            const updatedFields = [];
-            if (name) updatedFields.push('name');
-            if (preferences) updatedFields.push('preferences');
-            if (avatar) updatedFields.push('avatar');
-
-            loggingService.info('User profile updated successfully', {
-                requestId,
-                duration,
-                userId,
-                userEmail: user.email,
-                userName: user.name,
-                hasAvatar: !!user.avatar,
-                hasPreferences: !!user.preferences,
-                updatedFields
+            // Queue business event logging to background
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'user_profile_updated',
+                    category: 'user_management',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        userEmail: user.email,
+                        userName: user.name,
+                        updatedFields
+                    }
+                });
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'user_profile_updated',
-                category: 'user_management',
-                value: duration,
-                metadata: {
-                    userId,
-                    userEmail: user.email,
-                    userName: user.name,
-                    updatedFields
-                }
-            });
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             res.json({
                 success: true,
@@ -184,17 +222,13 @@ export class UserController {
                 data: user,
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('User profile update failed', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
-                name: req.body?.name,
-                hasPreferences: !!req.body?.preferences,
-                hasAvatar: !!req.body?.avatar,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -204,54 +238,38 @@ export class UserController {
 
     static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user!.id;
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return;
 
         try {
-            loggingService.info('Presigned avatar URL generation initiated', {
-                requestId,
-                userId,
-                hasUserId: !!userId
-            });
+            // Check S3 circuit breaker
+            if (this.isS3CircuitBreakerOpen()) {
+                throw new Error('S3 service circuit breaker is open');
+            }
 
             const { fileName, fileType } = presignedUrlSchema.parse(req.body);
-
-            loggingService.info('Presigned avatar URL parameters received', {
-                requestId,
-                userId,
-                fileName,
-                fileType,
-                hasFileName: !!fileName,
-                hasFileType: !!fileType
-            });
 
             const { uploadUrl, key } = await S3Service.getPresignedAvatarUploadUrl(userId, fileName, fileType);
 
             const finalUrl = `https://${process.env.AWS_S3_BUCKETNAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
             const duration = Date.now() - startTime;
 
-            loggingService.info('Presigned avatar URL generated successfully', {
-                requestId,
-                duration,
-                userId,
-                fileName,
-                fileType,
-                hasUploadUrl: !!uploadUrl,
-                hasKey: !!key,
-                hasFinalUrl: !!finalUrl
+            // Queue business event logging to background
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'presigned_avatar_url_generated',
+                    category: 'user_management',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        fileName,
+                        fileType
+                    }
+                });
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'presigned_avatar_url_generated',
-                category: 'user_management',
-                value: duration,
-                metadata: {
-                    userId,
-                    fileName,
-                    fileType
-                }
-            });
+            // Reset failure count on success
+            this.s3FailureCount = 0;
 
             res.json({
                 success: true,
@@ -262,16 +280,15 @@ export class UserController {
                 },
             });
         } catch (error: any) {
+            this.recordS3Failure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Get presigned avatar URL failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user!.id,
-                hasUserId: !!req.user!.id,
+                requestId,
+                userId,
                 fileName: req.body?.fileName,
                 fileType: req.body?.fileType,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -834,8 +851,15 @@ export class UserController {
     }
 
     static async updateSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return;
+
         try {
-            const userId = req.user!.id;
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const { plan } = updateSubscriptionSchema.parse(req.body);
 
             if (!['free', 'plus', 'pro', 'enterprise'].includes(plan)) {
@@ -846,46 +870,14 @@ export class UserController {
                 return;
             }
 
-            const limits = {
-                free: { 
-                    apiCalls: 10000, 
-                    optimizations: 10,
-                    tokensPerMonth: 1000000,
-                    logsPerMonth: 15000,
-                    projects: 5,
-                    workflows: 10
-                },
-                plus: { 
-                    apiCalls: 50000, 
-                    optimizations: 100,
-                    tokensPerMonth: 10000000,
-                    logsPerMonth: -1, // Unlimited
-                    projects: -1,
-                    workflows: 100
-                },
-                pro: { 
-                    apiCalls: 100000, 
-                    optimizations: 1000,
-                    tokensPerMonth: 15000000,
-                    logsPerMonth: -1,
-                    projects: -1,
-                    workflows: 100
-                },
-                enterprise: { 
-                    apiCalls: -1, 
-                    optimizations: -1,
-                    tokensPerMonth: -1,
-                    logsPerMonth: -1,
-                    projects: -1,
-                    workflows: -1
-                }
-            };
+            // Use pre-computed subscription limits
+            const planLimits = this.SUBSCRIPTION_LIMITS[plan as keyof typeof this.SUBSCRIPTION_LIMITS];
 
             const user: any = await User.findByIdAndUpdate(
                 userId,
                 {
                     'subscription.plan': plan,
-                    'subscription.limits': limits[plan as keyof typeof limits],
+                    'subscription.limits': planLimits,
                     'subscription.startDate': new Date(),
                 },
                 { new: true }
@@ -896,7 +888,11 @@ export class UserController {
                     success: false,
                     message: 'User not found',
                 });
+                return;
             }
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             res.json({
                 success: true,
@@ -904,13 +900,12 @@ export class UserController {
                 data: user.subscription,
             });
         } catch (error: any) {
+            this.recordDbFailure();
             loggingService.error('Update subscription failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user!.id,
-                hasUserId: !!req.user!.id,
+                requestId,
+                userId,
                 plan: req.body?.plan,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                error: error.message || 'Unknown error'
             });
             next(error);
         }
@@ -918,170 +913,37 @@ export class UserController {
     }
 
     static async getUserStats(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return;
+
         try {
-            const userId = req.user!.id;
-
-            // Import required models
-            const { Usage } = await import('../models/Usage');
-            const { Optimization } = await import('../models/Optimization');
-
-            // Get user data
-            const user: any = await User.findById(userId).select('createdAt usage subscription');
-            if (!user) {
-                res.status(404).json({
-                    success: false,
-                    message: 'User not found',
-                });
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
             }
 
-            // Calculate account age in days
-            const accountAge = Math.floor((Date.now() - user.createdAt.getTime()) / (1000 * 60 * 60 * 24));
-
-            // Get total stats (all time)
-            const [totalStats] = await Usage.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                {
-                    $group: {
-                        _id: null,
-                        totalCost: { $sum: '$cost' },
-                        totalCalls: { $sum: 1 },
-                        totalTokens: { $sum: '$totalTokens' },
-                    }
-                }
+            // Add timeout handling
+            const statsPromise = this.getUserStatsWithTimeout(userId);
+            const result = await Promise.race([
+                statsPromise,
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Stats operation timeout')), this.STATS_TIMEOUT)
+                )
             ]);
 
-            // Get current month stats
-            const currentMonthStart = new Date();
-            currentMonthStart.setDate(1);
-            currentMonthStart.setHours(0, 0, 0, 0);
-
-            const [currentMonthStats] = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: currentMonthStart }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        monthCost: { $sum: '$cost' },
-                        monthCalls: { $sum: 1 },
-                    }
-                }
-            ]);
-
-            // Get optimization stats
-            const [optimizationStats] = await Optimization.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                {
-                    $group: {
-                        _id: null,
-                        totalOptimizations: { $sum: 1 },
-                        totalSaved: { $sum: '$costSaved' },
-                        appliedOptimizations: {
-                            $sum: { $cond: [{ $eq: ['$applied', true] }, 1, 0] }
-                        }
-                    }
-                }
-            ]);
-
-            // Get current month optimization stats
-            const [currentMonthOptStats] = await Optimization.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: currentMonthStart }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        monthSaved: { $sum: '$costSaved' },
-                    }
-                }
-            ]);
-
-            // Get most used service and model
-            const [serviceStats] = await Usage.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                {
-                    $group: {
-                        _id: '$service',
-                        count: { $sum: 1 },
-                        cost: { $sum: '$cost' }
-                    }
-                },
-                { $sort: { count: -1 } },
-                { $limit: 1 }
-            ]);
-
-            const [modelStats] = await Usage.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                {
-                    $group: {
-                        _id: '$model',
-                        count: { $sum: 1 },
-                        cost: { $sum: '$cost' }
-                    }
-                },
-                { $sort: { count: -1 } },
-                { $limit: 1 }
-            ]);
-
-            // Calculate average daily cost (for days with activity)
-            const [dailyStats] = await Usage.aggregate([
-                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-                        dailyCost: { $sum: '$cost' }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        avgDailyCost: { $avg: '$dailyCost' },
-                        activeDays: { $sum: 1 }
-                    }
-                }
-            ]);
-
-            // Calculate savings rate
-            const totalSpent = totalStats?.totalCost || 0;
-            const totalSaved = optimizationStats?.totalSaved || 0;
-            const savingsRate = totalSpent > 0 ? (totalSaved / (totalSpent + totalSaved)) * 100 : 0;
-
-            const stats = {
-                totalSpent: totalStats?.totalCost || 0,
-                totalSaved: optimizationStats?.totalSaved || 0,
-                apiCalls: totalStats?.totalCalls || 0,
-                optimizations: optimizationStats?.totalOptimizations || 0,
-                currentMonthSpent: currentMonthStats?.monthCost || 0,
-                currentMonthSaved: currentMonthOptStats?.monthSaved || 0,
-                avgDailyCost: dailyStats?.avgDailyCost || 0,
-                mostUsedService: serviceStats?._id || 'N/A',
-                mostUsedModel: modelStats?._id || 'N/A',
-                accountAge,
-                savingsRate: Math.round(savingsRate * 100) / 100,
-                appliedOptimizations: optimizationStats?.appliedOptimizations || 0,
-                subscription: {
-                    plan: user.subscription.plan,
-                    limits: user.subscription.limits
-                }
-            };
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             res.json({
                 success: true,
-                data: stats,
+                data: result,
             });
         } catch (error: any) {
+            this.recordDbFailure();
             loggingService.error('Get user stats failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user!.id,
-                hasUserId: !!req.user!.id,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                requestId,
+                userId,
+                error: error.message || 'Unknown error'
             });
             next(error);
         }
@@ -1367,5 +1229,305 @@ export class UserController {
             next(error);
         }
         return;
+    }
+
+    /**
+     * Authentication validation utility
+     */
+    private static validateAuthentication(req: any, res: Response): { requestId: string; userId: string } | { requestId: null; userId: null } {
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id;
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required',
+            });
+            return { requestId: null, userId: null };
+        }
+
+        return { requestId, userId };
+    }
+
+    /**
+     * ObjectId validation and conversion utilities
+     */
+    private static validateAndConvertObjectId(id: string): mongoose.Types.ObjectId {
+        // Check cache first
+        if (this.objectIdCache.has(id)) {
+            return this.objectIdCache.get(id)!;
+        }
+
+        let objectId: mongoose.Types.ObjectId;
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            objectId = new mongoose.Types.ObjectId(id);
+        } else {
+            throw new Error(`Invalid ObjectId: ${id}`);
+        }
+
+        // Cache the result
+        this.objectIdCache.set(id, objectId);
+        return objectId;
+    }
+
+    /**
+     * Get user stats with optimized aggregation
+     */
+    private static async getUserStatsWithTimeout(userId: string): Promise<any> {
+        // Import required models
+        const { Usage } = await import('../models/Usage');
+        const { Optimization } = await import('../models/Optimization');
+
+        // Get user data
+        const user: any = await User.findById(userId).select('createdAt usage subscription');
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        // Calculate account age in days
+        const accountAge = Math.floor((Date.now() - user.createdAt.getTime()) / (1000 * 60 * 60 * 24));
+
+        const currentMonthStart = new Date();
+        currentMonthStart.setDate(1);
+        currentMonthStart.setHours(0, 0, 0, 0);
+
+        const userObjectId = this.validateAndConvertObjectId(userId);
+
+        // Use $facet to combine all Usage aggregations
+        const [usageResults] = await Usage.aggregate([
+            {
+                $facet: {
+                    totalStats: [
+                        { $match: { userId: userObjectId } },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCost: { $sum: '$cost' },
+                                totalCalls: { $sum: 1 },
+                                totalTokens: { $sum: '$totalTokens' },
+                            }
+                        }
+                    ],
+                    currentMonthStats: [
+                        {
+                            $match: {
+                                userId: userObjectId,
+                                createdAt: { $gte: currentMonthStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                monthCost: { $sum: '$cost' },
+                                monthCalls: { $sum: 1 },
+                            }
+                        }
+                    ],
+                    serviceStats: [
+                        { $match: { userId: userObjectId } },
+                        {
+                            $group: {
+                                _id: '$service',
+                                count: { $sum: 1 },
+                                cost: { $sum: '$cost' }
+                            }
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 1 }
+                    ],
+                    modelStats: [
+                        { $match: { userId: userObjectId } },
+                        {
+                            $group: {
+                                _id: '$model',
+                                count: { $sum: 1 },
+                                cost: { $sum: '$cost' }
+                            }
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 1 }
+                    ],
+                    dailyStats: [
+                        { $match: { userId: userObjectId } },
+                        {
+                            $group: {
+                                _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+                                dailyCost: { $sum: '$cost' }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                avgDailyCost: { $avg: '$dailyCost' },
+                                activeDays: { $sum: 1 }
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+
+        // Use $facet for Optimization aggregations
+        const [optimizationResults] = await Optimization.aggregate([
+            {
+                $facet: {
+                    totalOptimizations: [
+                        { $match: { userId: userObjectId } },
+                        {
+                            $group: {
+                                _id: null,
+                                totalOptimizations: { $sum: 1 },
+                                totalSaved: { $sum: '$costSaved' },
+                                appliedOptimizations: {
+                                    $sum: { $cond: [{ $eq: ['$applied', true] }, 1, 0] }
+                                }
+                            }
+                        }
+                    ],
+                    currentMonthOptStats: [
+                        {
+                            $match: {
+                                userId: userObjectId,
+                                createdAt: { $gte: currentMonthStart }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                monthSaved: { $sum: '$costSaved' },
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+
+        // Extract results
+        const totalStats = usageResults.totalStats[0];
+        const currentMonthStats = usageResults.currentMonthStats[0];
+        const serviceStats = usageResults.serviceStats[0];
+        const modelStats = usageResults.modelStats[0];
+        const dailyStats = usageResults.dailyStats[0];
+        
+        const optimizationStats = optimizationResults.totalOptimizations[0];
+        const currentMonthOptStats = optimizationResults.currentMonthOptStats[0];
+
+        // Calculate savings rate
+        const totalSpent = totalStats?.totalCost || 0;
+        const totalSaved = optimizationStats?.totalSaved || 0;
+        const savingsRate = totalSpent > 0 ? (totalSaved / (totalSpent + totalSaved)) * 100 : 0;
+
+        return {
+            totalSpent: totalStats?.totalCost || 0,
+            totalSaved: optimizationStats?.totalSaved || 0,
+            apiCalls: totalStats?.totalCalls || 0,
+            optimizations: optimizationStats?.totalOptimizations || 0,
+            currentMonthSpent: currentMonthStats?.monthCost || 0,
+            currentMonthSaved: currentMonthOptStats?.monthSaved || 0,
+            avgDailyCost: dailyStats?.avgDailyCost || 0,
+            mostUsedService: serviceStats?._id || 'N/A',
+            mostUsedModel: modelStats?._id || 'N/A',
+            accountAge,
+            savingsRate: Math.round(savingsRate * 100) / 100,
+            appliedOptimizations: optimizationStats?.appliedOptimizations || 0,
+            subscription: {
+                plan: user.subscription.plan,
+                limits: user.subscription.limits
+            }
+        };
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Circuit breaker utilities for S3 operations
+     */
+    private static isS3CircuitBreakerOpen(): boolean {
+        if (this.s3FailureCount >= this.MAX_S3_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastS3FailureTime;
+            if (timeSinceLastFailure < this.S3_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.s3FailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordS3Failure(): void {
+        this.s3FailureCount++;
+        this.lastS3FailureTime = Date.now();
+    }
+
+    /**
+     * Background processing queue utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operations = this.backgroundQueue.splice(0, 10); // Process up to 10 operations at once
+                
+                await Promise.allSettled(
+                    operations.map(async (operation) => {
+                        try {
+                            await operation();
+                        } catch (error) {
+                            loggingService.error('Background operation failed', { 
+                                error: error instanceof Error ? error.message : String(error) 
+                            });
+                        }
+                    })
+                );
+            }
+        }, 1000); // Process every second
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Clear background processor
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Clear background queue
+        this.backgroundQueue.length = 0;
+        
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
+        this.s3FailureCount = 0;
+        this.lastS3FailureTime = 0;
+        
+        // Clear ObjectId cache
+        this.objectIdCache.clear();
     }
 }

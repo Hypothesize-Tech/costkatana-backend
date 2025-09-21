@@ -25,14 +25,32 @@ interface DashboardApiKey {
 }
 
 export class AuthService {
+    // User ID string cache for token generation
+    private static userIdCache = new Map<string, string>();
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
     static generateTokens(user: IUser): AuthTokens {
-        // Ensure _id is string
-        const id: string =
-            typeof (user as any)._id === 'string'
+        // Use cached user ID string conversion
+        const userIdKey = (user as any)._id?.toString() || '';
+        let id: string;
+        
+        if (this.userIdCache.has(userIdKey)) {
+            id = this.userIdCache.get(userIdKey)!;
+        } else {
+            id = typeof (user as any)._id === 'string'
                 ? (user as any)._id
                 : (user as any)._id && typeof (user as any)._id.toString === 'function'
                     ? (user as any)._id.toString()
                     : '';
+            
+            // Cache the result
+            this.userIdCache.set(userIdKey, id);
+        }
+
         const payload: TokenPayload = {
             id,
             email: user.email,
@@ -195,6 +213,11 @@ export class AuthService {
         const startTime = Date.now();
         
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             // Find user with optimized query - only select needed fields
             const user = await User.findOne({ email }).select('email password isActive mfa lastLogin _id');
             if (!user) {
@@ -246,9 +269,13 @@ export class AuthService {
                 };
             }
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             // Complete login (no MFA required or trusted device)
             return this.completeLogin(user);
         } catch (error: unknown) {
+            this.recordDbFailure();
             const executionTime = Date.now() - startTime;
             loggingService.error('Error in login:', { 
                 error: error instanceof Error ? error.message : String(error),
@@ -432,5 +459,39 @@ export class AuthService {
             });
             throw error;
         }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
+        
+        // Clear user ID cache
+        this.userIdCache.clear();
     }
 }
