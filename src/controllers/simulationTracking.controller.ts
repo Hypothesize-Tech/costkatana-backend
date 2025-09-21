@@ -3,6 +3,26 @@ import { SimulationTrackingService, SimulationTrackingData, OptimizationApplicat
 import { loggingService } from '../services/logging.service';
 
 export class SimulationTrackingController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // ObjectId conversion utilities
+    private static objectIdCache = new Map<string, any>();
+    private static readonly OBJECTID_CACHE_TTL = 300000; // 5 minutes
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     
     /**
      * Track a new simulation
@@ -30,23 +50,14 @@ export class SimulationTrackingController {
         try {
             loggingService.info('Simulation tracking initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 sessionId,
-                hasSessionId: !!sessionId,
                 simulationType,
-                hasSimulationType: !!simulationType,
                 originalModel,
-                hasOriginalModel: !!originalModel,
-                hasOriginalPrompt: !!originalPrompt,
                 originalCost,
                 originalTokens,
-                hasParameters: !!parameters,
-                hasOptimizationOptions: !!optimizationOptions,
-                hasRecommendations: !!recommendations,
                 potentialSavings,
-                confidence,
-                hasProjectId: !!projectId
+                confidence
             });
 
             if (!userId) {
@@ -61,25 +72,21 @@ export class SimulationTrackingController {
                 });
             }
 
-            // Validate required fields
-            if (!sessionId || !simulationType || !originalModel || !originalPrompt || 
-                originalCost === undefined || originalTokens === undefined ||
-                potentialSavings === undefined || confidence === undefined) {
+            // Validate required fields using optimized validation
+            const validationError = this.validateSimulationData({
+                sessionId, simulationType, originalModel, originalPrompt,
+                originalCost, originalTokens, potentialSavings, confidence
+            });
+            
+            if (validationError) {
                 loggingService.warn('Simulation tracking failed - missing required fields', {
                     userId,
                     requestId,
-                    sessionId,
-                    simulationType,
-                    originalModel,
-                    hasOriginalPrompt: !!originalPrompt,
-                    originalCost,
-                    originalTokens,
-                    potentialSavings,
-                    confidence
+                    error: validationError
                 });
                 return res.status(400).json({
                     success: false,
-                    message: 'Missing required fields'
+                    message: validationError
                 });
             }
 
@@ -111,27 +118,24 @@ export class SimulationTrackingController {
                 trackingId,
                 sessionId,
                 simulationType,
-                originalModel,
-                originalCost,
-                originalTokens,
-                potentialSavings,
-                confidence,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'simulation_tracked',
-                category: 'simulation',
-                value: duration,
-                metadata: {
-                    userId,
-                    trackingId,
-                    simulationType,
-                    originalModel,
-                    potentialSavings,
-                    confidence
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'simulation_tracked',
+                    category: 'simulation',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        trackingId,
+                        simulationType,
+                        originalModel,
+                        potentialSavings,
+                        confidence
+                    }
+                });
             });
 
             return res.status(201).json({
@@ -140,21 +144,15 @@ export class SimulationTrackingController {
                 data: { trackingId }
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Simulation tracking failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 sessionId,
                 simulationType,
-                originalModel,
-                originalCost,
-                originalTokens,
-                potentialSavings,
-                confidence,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -183,14 +181,9 @@ export class SimulationTrackingController {
             loggingService.info('Optimization application tracking initiated', {
                 requestId,
                 trackingId,
-                hasTrackingId: !!trackingId,
                 optionIndex,
-                hasOptionIndex: optionIndex !== undefined,
                 type,
-                hasType: !!type,
-                estimatedSavings,
-                hasEstimatedSavings: estimatedSavings !== undefined,
-                hasUserFeedback: !!userFeedback
+                estimatedSavings
             });
 
             if (!trackingId || optionIndex === undefined || !type || estimatedSavings === undefined) {
@@ -223,22 +216,23 @@ export class SimulationTrackingController {
                 trackingId,
                 optionIndex,
                 type,
-                estimatedSavings,
-                hasUserFeedback: !!userFeedback
+                estimatedSavings
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'optimization_application_tracked',
-                category: 'simulation',
-                value: duration,
-                metadata: {
-                    trackingId,
-                    optionIndex,
-                    type,
-                    estimatedSavings,
-                    hasUserFeedback: !!userFeedback
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'optimization_application_tracked',
+                    category: 'simulation',
+                    value: duration,
+                    metadata: {
+                        trackingId,
+                        optionIndex,
+                        type,
+                        estimatedSavings,
+                        hasUserFeedback: !!userFeedback
+                    }
+                });
             });
 
             return res.status(200).json({
@@ -562,6 +556,120 @@ export class SimulationTrackingController {
                 message: 'Internal server error'
             });
         }
+    }
+
+    /**
+     * Optimized validation for simulation data
+     */
+    private static validateSimulationData(data: any): string | null {
+        const required = [
+            { field: 'sessionId', value: data.sessionId },
+            { field: 'simulationType', value: data.simulationType },
+            { field: 'originalModel', value: data.originalModel },
+            { field: 'originalPrompt', value: data.originalPrompt },
+            { field: 'originalCost', value: data.originalCost },
+            { field: 'originalTokens', value: data.originalTokens },
+            { field: 'potentialSavings', value: data.potentialSavings },
+            { field: 'confidence', value: data.confidence }
+        ];
+
+        for (const { field, value } of required) {
+            if (value === undefined || value === null || value === '') {
+                return `Missing required field: ${field}`;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * ObjectId conversion utilities
+     */
+    private static getOptimizedObjectId(id: string): any {
+        const cached = this.objectIdCache.get(id);
+        if (cached && Date.now() - cached.timestamp < this.OBJECTID_CACHE_TTL) {
+            return cached.objectId;
+        }
+
+        const mongoose = require('mongoose');
+        const objectId = new mongoose.Types.ObjectId(id);
+        this.objectIdCache.set(id, {
+            objectId,
+            timestamp: Date.now()
+        });
+
+        return objectId;
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.objectIdCache.clear();
     }
 }
 

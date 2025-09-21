@@ -3,6 +3,26 @@ import { TaggingService } from '../services/tagging.service';
 import { loggingService } from '../services/logging.service';
 
 export class TaggingController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly DEFAULT_TIMEOUT = 10000; // 10 seconds
+    private static readonly ANALYTICS_TIMEOUT = 15000; // 15 seconds for complex analytics
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
 
     /**
      * Get comprehensive tag analytics
@@ -23,14 +43,10 @@ export class TaggingController {
         try {
             loggingService.info('Tag analytics retrieval initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 startDate,
-                hasStartDate: !!startDate,
                 endDate,
-                hasEndDate: !!endDate,
                 tagFilter,
-                hasTagFilter: !!tagFilter,
                 includeHierarchy,
                 includeRealTime
             });
@@ -51,9 +67,14 @@ export class TaggingController {
                 includeRealTime: includeRealTime === 'true'
             };
 
-            // Add timeout handling (10 seconds)
+            // Check circuit breaker before proceeding
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
+
+            // Add timeout handling with configurable timeout
             const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout')), 10000);
+                setTimeout(() => reject(new Error('Request timeout')), this.ANALYTICS_TIMEOUT);
             });
 
             const analyticsPromise = TaggingService.getTagAnalytics(userId, options);
@@ -67,30 +88,26 @@ export class TaggingController {
             loggingService.info('Tag analytics retrieved successfully', {
                 userId,
                 duration,
-                startDate,
-                endDate,
-                hasTagFilter: !!options.tagFilter,
-                tagFilterCount: options.tagFilter?.length || 0,
-                includeHierarchy: options.includeHierarchy,
-                includeRealTime: options.includeRealTime,
                 totalTags: analytics.length,
                 totalCost,
                 totalCalls,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'tag_analytics_retrieved',
-                category: 'tagging',
-                value: duration,
-                metadata: {
-                    userId,
-                    totalTags: analytics.length,
-                    totalCost,
-                    totalCalls,
-                    hasDateRange: !!(startDate && endDate)
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'tag_analytics_retrieved',
+                    category: 'tagging',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        totalTags: analytics.length,
+                        totalCost,
+                        totalCalls,
+                        hasDateRange: !!(startDate && endDate)
+                    }
+                });
             });
 
             res.json({
@@ -104,16 +121,13 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             if (error.message === 'Request timeout') {
                 loggingService.warn('Tag analytics retrieval timed out', {
                     userId,
-                    hasUserId: !!userId,
                     requestId,
-                    startDate,
-                    endDate,
-                    tagFilter,
                     duration
                 });
                 
@@ -121,16 +135,22 @@ export class TaggingController {
                     success: false,
                     message: 'Request timeout - analysis took too long. Please try with fewer tags or a smaller date range.' 
                 });
+            } else if (error.message === 'Service temporarily unavailable') {
+                loggingService.warn('Tag analytics service unavailable', {
+                    userId,
+                    requestId,
+                    duration
+                });
+                
+                res.status(503).json({ 
+                    success: false,
+                    message: 'Service temporarily unavailable. Please try again later.' 
+                });
             } else {
                 loggingService.error('Tag analytics retrieval failed', {
                     userId,
-                    hasUserId: !!userId,
                     requestId,
-                    startDate,
-                    endDate,
-                    tagFilter,
                     error: error.message || 'Unknown error',
-                    stack: error.stack,
                     duration
                 });
                 
@@ -155,10 +175,8 @@ export class TaggingController {
         try {
             loggingService.info('Real-time tag metrics retrieval initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
-                tags,
-                hasTags: !!tags
+                tags
             });
 
             if (!userId) {
@@ -169,9 +187,20 @@ export class TaggingController {
                 return;
             }
 
+            // Check circuit breaker before proceeding
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
+
             const tagFilter = tags ? (tags as string).split(',') : undefined;
 
-            const metrics = await TaggingService.getRealTimeTagMetrics(userId, tagFilter);
+            // Add timeout handling for real-time metrics
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), this.DEFAULT_TIMEOUT);
+            });
+
+            const metricsPromise = TaggingService.getRealTimeTagMetrics(userId, tagFilter);
+            const metrics = await Promise.race([metricsPromise, timeoutPromise]);
             const duration = Date.now() - startTime;
 
             const totalCurrentCost = metrics.reduce((sum, tag) => sum + tag.currentCost, 0);
@@ -934,6 +963,75 @@ export class TaggingController {
             });
             
             res.status(500).json({ message: 'Internal server error' });
+        }
+    }
+
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }

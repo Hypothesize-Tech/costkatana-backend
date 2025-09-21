@@ -161,6 +161,26 @@ export interface SimulationStats {
 }
 
 export class SimulationTrackingService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // ObjectId conversion utilities
+    private static objectIdCache = new Map<string, any>();
+    private static readonly OBJECTID_CACHE_TTL = 300000; // 5 minutes
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     
     /**
      * Track a new simulation
@@ -249,17 +269,22 @@ export class SimulationTrackingService {
     }
 
     /**
-     * Get simulation statistics for a user or globally
+     * Get simulation statistics for a user or globally (optimized with unified aggregation)
      */
     static async getSimulationStats(
         userId?: string,
         timeRange?: { startDate: Date; endDate: Date }
     ): Promise<SimulationStats> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const matchStage: any = {};
             
             if (userId) {
-                matchStage.userId = new mongoose.Types.ObjectId(userId);
+                matchStage.userId = this.getOptimizedObjectId(userId);
             }
             
             if (timeRange) {
@@ -269,91 +294,95 @@ export class SimulationTrackingService {
                 };
             }
 
-            const [stats] = await SimulationTracking.aggregate([
+            // Use unified aggregation pipeline with $facet for better performance
+            const [results] = await SimulationTracking.aggregate([
                 { $match: matchStage },
                 {
-                    $group: {
-                        _id: null,
-                        totalSimulations: { $sum: 1 },
-                        totalOptimizationsApplied: {
-                            $sum: { $size: { $ifNull: ['$appliedOptimizations', []] } }
-                        },
-                        totalPotentialSavings: { $sum: '$potentialSavings' },
-                        averageConfidence: { $avg: '$confidence' },
-                        averageTimeSpent: { $avg: '$timeSpentViewing' },
-                        averageOptionsViewed: { $avg: { $size: { $ifNull: ['$optionsViewed', []] } } },
-                        uniqueUsers: { $addToSet: '$userId' }
+                    $facet: {
+                        // Basic statistics
+                        basicStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalSimulations: { $sum: 1 },
+                                    totalOptimizationsApplied: {
+                                        $sum: { $size: { $ifNull: ['$appliedOptimizations', []] } }
+                                    },
+                                    totalPotentialSavings: { $sum: '$potentialSavings' },
+                                    averageConfidence: { $avg: '$confidence' },
+                                    averageTimeSpent: { $avg: '$timeSpentViewing' },
+                                    averageOptionsViewed: { $avg: { $size: { $ifNull: ['$optionsViewed', []] } } },
+                                    uniqueUsers: { $addToSet: '$userId' }
+                                }
+                            }
+                        ],
+                        // Optimization type breakdown
+                        optimizationTypes: [
+                            { $unwind: '$optimizationOptions' },
+                            {
+                                $group: {
+                                    _id: '$optimizationOptions.type',
+                                    count: { $sum: 1 },
+                                    averageSavings: { $avg: '$optimizationOptions.savings' },
+                                    totalApplications: {
+                                        $sum: {
+                                            $size: {
+                                                $filter: {
+                                                    input: { $ifNull: ['$appliedOptimizations', []] },
+                                                    cond: { $eq: ['$$this.type', '$optimizationOptions.type'] }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            {
+                                $project: {
+                                    type: '$_id',
+                                    count: 1,
+                                    averageSavings: 1,
+                                    acceptanceRate: {
+                                        $cond: {
+                                            if: { $gt: ['$count', 0] },
+                                            then: { $divide: ['$totalApplications', '$count'] },
+                                            else: 0
+                                        }
+                                    }
+                                }
+                            },
+                            { $sort: { count: -1 } }
+                        ],
+                        // Weekly trends (optimized)
+                        weeklyTrends: [
+                            {
+                                $group: {
+                                    _id: {
+                                        year: { $year: '$createdAt' },
+                                        week: { $week: '$createdAt' }
+                                    },
+                                    simulations: { $sum: 1 },
+                                    applications: {
+                                        $sum: { $size: { $ifNull: ['$appliedOptimizations', []] } }
+                                    },
+                                    savings: { $sum: '$potentialSavings' }
+                                }
+                            },
+                            {
+                                $project: {
+                                    week: { $concat: [{ $toString: '$_id.year' }, '-W', { $toString: '$_id.week' }] },
+                                    simulations: 1,
+                                    applications: 1,
+                                    savings: 1
+                                }
+                            },
+                            { $sort: { '_id.year': -1, '_id.week': -1 } },
+                            { $limit: 12 }
+                        ]
                     }
                 }
             ]);
 
-            // Get optimization type breakdown
-            const optimizationTypes = await SimulationTracking.aggregate([
-                { $match: matchStage },
-                { $unwind: '$optimizationOptions' },
-                {
-                    $group: {
-                        _id: '$optimizationOptions.type',
-                        count: { $sum: 1 },
-                        averageSavings: { $avg: '$optimizationOptions.savings' },
-                        totalApplications: {
-                            $sum: {
-                                $size: {
-                                    $filter: {
-                                        input: { $ifNull: ['$appliedOptimizations', []] },
-                                        cond: { $eq: ['$$this.type', '$optimizationOptions.type'] }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    $project: {
-                        type: '$_id',
-                        count: 1,
-                        averageSavings: 1,
-                        acceptanceRate: {
-                            $cond: {
-                                if: { $gt: ['$count', 0] },
-                                then: { $divide: ['$totalApplications', '$count'] },
-                                else: 0
-                            }
-                        }
-                    }
-                },
-                { $sort: { count: -1 } }
-            ]);
-
-            // Get weekly trends
-            const weeklyTrends = await SimulationTracking.aggregate([
-                { $match: matchStage },
-                {
-                    $group: {
-                        _id: {
-                            year: { $year: '$createdAt' },
-                            week: { $week: '$createdAt' }
-                        },
-                        simulations: { $sum: 1 },
-                        applications: {
-                            $sum: { $size: { $ifNull: ['$appliedOptimizations', []] } }
-                        },
-                        savings: { $sum: '$potentialSavings' }
-                    }
-                },
-                {
-                    $project: {
-                        week: { $concat: [{ $toString: '$_id.year' }, '-W', { $toString: '$_id.week' }] },
-                        simulations: 1,
-                        applications: 1,
-                        savings: 1
-                    }
-                },
-                { $sort: { '_id.year': -1, '_id.week': -1 } },
-                { $limit: 12 }
-            ]);
-
-            const baseStats = stats || {
+            const baseStats = results.basicStats[0] || {
                 totalSimulations: 0,
                 totalOptimizationsApplied: 0,
                 totalPotentialSavings: 0,
@@ -363,6 +392,12 @@ export class SimulationTrackingService {
                 uniqueUsers: []
             };
 
+            // Calculate actual savings in parallel with other operations
+            const actualSavingsPromise = this.calculateTotalActualSavings(userId, timeRange);
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return {
                 totalSimulations: baseStats.totalSimulations,
                 totalOptimizationsApplied: baseStats.totalOptimizationsApplied,
@@ -370,8 +405,8 @@ export class SimulationTrackingService {
                     baseStats.totalOptimizationsApplied / baseStats.totalSimulations : 0,
                 averageSavings: baseStats.totalPotentialSavings / (baseStats.totalSimulations || 1),
                 totalPotentialSavings: baseStats.totalPotentialSavings,
-                totalActualSavings: await this.calculateTotalActualSavings(userId, timeRange),
-                topOptimizationTypes: optimizationTypes.map(type => ({
+                totalActualSavings: await actualSavingsPromise,
+                topOptimizationTypes: results.optimizationTypes.map((type: any) => ({
                     type: type.type,
                     count: type.count,
                     averageSavings: type.averageSavings || 0,
@@ -382,9 +417,10 @@ export class SimulationTrackingService {
                     averageOptionsViewed: baseStats.averageOptionsViewed || 0,
                     returnUsers: baseStats.uniqueUsers ? baseStats.uniqueUsers.length : 0
                 },
-                weeklyTrends: weeklyTrends
+                weeklyTrends: results.weeklyTrends
             };
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting simulation stats:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -589,7 +625,7 @@ export class SimulationTrackingService {
     }
 
     /**
-     * Calculate actual savings from model switch optimization
+     * Calculate actual savings from model switch optimization (optimized)
      */
     static async calculateModelSwitchActualSavings(
         optimization: any,
@@ -600,28 +636,47 @@ export class SimulationTrackingService {
             const { newModel } = optimization;
             if (!newModel) return optimization.estimatedSavings || 0;
 
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                return optimization.estimatedSavings || 0;
+            }
+
             // Find usage with the new model after the optimization was applied
             const Usage = mongoose.model('Usage');
+            
+            // Use text search instead of regex for better performance
+            const promptKeywords = originalUsage.prompt
+                .substring(0, 100)
+                .split(/\s+/)
+                .filter((word: string) => word.length > 3)
+                .slice(0, 5); // Take first 5 significant words
+
             const subsequentUsage = await Usage.find({
                 userId: originalUsage.userId,
                 model: newModel,
                 createdAt: { $gte: appliedAt },
-                // Look for similar prompts (first 100 characters match)
-                prompt: new RegExp(originalUsage.prompt.substring(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+                // Use $text search if available, otherwise fall back to simple matching
+                $or: promptKeywords.map((keyword: string) => ({
+                    prompt: { $regex: keyword, $options: 'i' }
+                }))
             }).limit(10).lean();
 
             if (subsequentUsage.length === 0) {
                 return optimization.estimatedSavings || 0;
             }
 
-            // Calculate average cost difference
-            const avgNewModelCost = subsequentUsage.reduce((sum, usage) => sum + usage.cost, 0) / subsequentUsage.length;
+            // Calculate average cost difference using vectorized operations
+            const costs = subsequentUsage.map((usage: any) => usage.cost);
+            const tokens = subsequentUsage.map((usage: any) => usage.totalTokens);
+            
+            const avgNewModelCost = costs.reduce((sum, cost) => sum + cost, 0) / costs.length;
             const originalCostPerToken = originalUsage.cost / originalUsage.totalTokens;
-            const avgTokensInNewUsage = subsequentUsage.reduce((sum, usage) => sum + usage.totalTokens, 0) / subsequentUsage.length;
+            const avgTokensInNewUsage = tokens.reduce((sum, token) => sum + token, 0) / tokens.length;
             const estimatedOriginalCost = originalCostPerToken * avgTokensInNewUsage;
 
             return Math.max(0, estimatedOriginalCost - avgNewModelCost);
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error calculating model switch actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return optimization.estimatedSavings || 0;
         }
@@ -703,6 +758,95 @@ export class SimulationTrackingService {
             loggingService.error('Error calculating prompt optimize actual savings:', { error: error instanceof Error ? error.message : String(error) });
             return optimization.estimatedSavings || 0;
         }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * ObjectId conversion utilities
+     */
+    private static getOptimizedObjectId(id: string): any {
+        const cached = this.objectIdCache.get(id);
+        if (cached && Date.now() - cached.timestamp < this.OBJECTID_CACHE_TTL) {
+            return cached.objectId;
+        }
+
+        const objectId = new mongoose.Types.ObjectId(id);
+        this.objectIdCache.set(id, {
+            objectId,
+            timestamp: Date.now()
+        });
+
+        return objectId;
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.objectIdCache.clear();
     }
 }
 

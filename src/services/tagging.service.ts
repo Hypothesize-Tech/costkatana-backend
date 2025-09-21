@@ -66,9 +66,14 @@ export interface RealTimeTagMetrics {
 }
 
 export class TaggingService {
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
 
     /**
-     * Get comprehensive tag analytics for a user
+     * Get comprehensive tag analytics for a user (optimized with unified aggregation)
      */
     static async getTagAnalytics(
         userId: string,
@@ -81,6 +86,11 @@ export class TaggingService {
         } = {}
     ): Promise<TagAnalytics[]> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const {
                 startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
                 endDate = new Date(),
@@ -97,177 +107,188 @@ export class TaggingService {
                 matchStage.tags = { $in: tagFilter };
             }
 
-            // Use aggregation pipeline for better performance
-            const tagAnalyticsData = await Usage.aggregate([
+            // Use optimized aggregation pipeline with $facet for unified processing
+            const [results] = await Usage.aggregate([
                 { $match: matchStage },
                 { $unwind: "$tags" },
                 ...(tagFilter && tagFilter.length > 0 ? [{ $match: { tags: { $in: tagFilter } } }] : []),
                 {
-                    $group: {
-                        _id: "$tags",
-                        totalCost: { $sum: "$cost" },
-                        totalCalls: { $sum: 1 },
-                        totalTokens: { $sum: "$totalTokens" },
-                        lastUsed: { $max: "$createdAt" },
-                        services: { $addToSet: "$service" },
-                        models: { $addToSet: "$model" },
-                        usagesByService: {
-                            $push: {
-                                service: "$service",
-                                cost: "$cost"
-                            }
-                        },
-                        usagesByModel: {
-                            $push: {
-                                model: "$model",
-                                cost: "$cost"
-                            }
-                        },
-                        timeSeriesData: {
-                            $push: {
-                                date: {
-                                    $dateToString: {
-                                        format: "%Y-%m-%d",
-                                        date: "$createdAt"
+                    $facet: {
+                        // Main analytics data
+                        analytics: [
+                            {
+                                $group: {
+                                    _id: "$tags",
+                                    totalCost: { $sum: "$cost" },
+                                    totalCalls: { $sum: 1 },
+                                    totalTokens: { $sum: "$totalTokens" },
+                                    lastUsed: { $max: "$createdAt" },
+                                    // Service breakdown aggregation
+                                    serviceBreakdown: {
+                                        $push: {
+                                            service: "$service",
+                                            cost: "$cost"
+                                        }
+                                    },
+                                    // Model breakdown aggregation
+                                    modelBreakdown: {
+                                        $push: {
+                                            model: "$model",
+                                            cost: "$cost"
+                                        }
+                                    },
+                                    // Time series aggregation
+                                    timeSeriesRaw: {
+                                        $push: {
+                                            date: {
+                                                $dateToString: {
+                                                    format: "%Y-%m-%d",
+                                                    date: "$createdAt"
+                                                }
+                                            },
+                                            cost: "$cost",
+                                            tokens: "$totalTokens"
+                                        }
                                     }
-                                },
-                                cost: "$cost",
-                                tokens: "$totalTokens"
-                            }
-                        }
+                                }
+                            },
+                            {
+                                $project: {
+                                    _id: 0,
+                                    tag: "$_id",
+                                    totalCost: 1,
+                                    totalCalls: 1,
+                                    totalTokens: 1,
+                                    averageCost: { $divide: ["$totalCost", "$totalCalls"] },
+                                    lastUsed: 1,
+                                    serviceBreakdown: 1,
+                                    modelBreakdown: 1,
+                                    timeSeriesRaw: 1
+                                }
+                            },
+                            { $sort: { totalCost: -1 } },
+                            { $limit: 50 }
+                        ]
                     }
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        tag: "$_id",
-                        totalCost: 1,
-                        totalCalls: 1,
-                        totalTokens: 1,
-                        averageCost: { $divide: ["$totalCost", "$totalCalls"] },
-                        lastUsed: 1,
-                        usagesByService: 1,
-                        usagesByModel: 1,
-                        timeSeriesData: 1
-                    }
-                },
-                { $sort: { totalCost: -1 } },
-                { $limit: 50 } // Limit to prevent excessive data
+                }
             ]);
 
-            // Process the aggregated data and calculate trends in parallel
-            const tagAnalytics: TagAnalytics[] = await Promise.all(
-                tagAnalyticsData.map(async (tagData) => {
-                    // Calculate trend (compare with previous period) - simplified for performance
-                    const trendData = { trend: 'stable' as const, percentage: 0 };
-                    
-                    // Process service breakdown
-                    const serviceBreakdown = this.processServiceBreakdown(tagData.usagesByService, tagData.totalCost);
-                    
-                    // Process model breakdown
-                    const modelBreakdown = this.processModelBreakdown(tagData.usagesByModel, tagData.totalCost);
-                    
-                    // Generate time series data
-                    const timeSeriesData = this.processTimeSeriesData(tagData.timeSeriesData);
+            // Process the aggregated data efficiently
+            const tagAnalytics: TagAnalytics[] = results.analytics.map((tagData: any) => {
+                // Process breakdowns using optimized methods
+                const topServices = this.processServiceBreakdownOptimized(tagData.serviceBreakdown, tagData.totalCost);
+                const topModels = this.processModelBreakdownOptimized(tagData.modelBreakdown, tagData.totalCost);
+                const timeSeriesData = this.processTimeSeriesDataOptimized(tagData.timeSeriesRaw);
 
-                    return {
-                        tag: tagData.tag,
-                        totalCost: tagData.totalCost,
-                        totalCalls: tagData.totalCalls,
-                        totalTokens: tagData.totalTokens,
-                        averageCost: tagData.averageCost,
-                        trend: trendData.trend,
-                        trendPercentage: trendData.percentage,
-                        lastUsed: tagData.lastUsed,
-                        topServices: serviceBreakdown,
-                        topModels: modelBreakdown,
-                        timeSeriesData
-                    };
-                })
-            );
+                return {
+                    tag: tagData.tag,
+                    totalCost: tagData.totalCost,
+                    totalCalls: tagData.totalCalls,
+                    totalTokens: tagData.totalTokens,
+                    averageCost: tagData.averageCost,
+                    trend: 'stable' as const, // Simplified for performance
+                    trendPercentage: 0,
+                    lastUsed: tagData.lastUsed,
+                    topServices,
+                    topModels,
+                    timeSeriesData
+                };
+            });
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             return tagAnalytics;
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting tag analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Get real-time tag metrics
+     * Get real-time tag metrics (optimized with unified aggregation)
      */
     static async getRealTimeTagMetrics(
         userId: string,
         tags?: string[]
     ): Promise<RealTimeTagMetrics[]> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const now = new Date();
             const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
             const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-            const baseQuery: any = { userId };
+            const baseMatch: any = { userId };
             if (tags && tags.length > 0) {
-                baseQuery.tags = { $in: tags };
+                baseMatch.tags = { $in: tags };
             }
 
-            // Get current hour data
-            const currentHourData = await Usage.find({
-                ...baseQuery,
-                createdAt: { $gte: hourAgo, $lte: now }
-            }).lean();
+            // Use unified aggregation pipeline with $facet for both current hour and 24-hour data
+            const [results] = await Usage.aggregate([
+                { $match: baseMatch },
+                { $unwind: "$tags" },
+                ...(tags && tags.length > 0 ? [{ $match: { tags: { $in: tags } } }] : []),
+                {
+                    $facet: {
+                        // Current hour metrics
+                        currentHour: [
+                            { $match: { createdAt: { $gte: hourAgo, $lte: now } } },
+                            {
+                                $group: {
+                                    _id: "$tags",
+                                    currentCost: { $sum: "$cost" },
+                                    currentCalls: { $sum: 1 }
+                                }
+                            }
+                        ],
+                        // 24-hour baseline
+                        baseline24h: [
+                            { $match: { createdAt: { $gte: dayAgo, $lte: now } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalCost: { $sum: "$cost" }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
 
-            // Get last 24 hours for trend
-            const last24HoursData = await Usage.find({
-                ...baseQuery,
-                createdAt: { $gte: dayAgo, $lte: now }
-            }).lean();
-
-            // Process metrics by tag
-            const tagMetrics = new Map<string, RealTimeTagMetrics>();
-
-            // Calculate baseline from 24 hours data
-            const baseline24h = last24HoursData.reduce((sum, usage) => sum + usage.cost, 0);
+            // Calculate baseline
+            const baseline24h = results.baseline24h[0]?.totalCost || 0;
             const avgHourlyBaseline = baseline24h / 24;
 
-            // Process current hour data
-            currentHourData.forEach(usage => {
-                if (usage.tags && usage.tags.length > 0) {
-                    usage.tags.forEach(tag => {
-                        if (!tagMetrics.has(tag)) {
-                            tagMetrics.set(tag, {
-                                tag,
-                                currentCost: 0,
-                                currentCalls: 0,
-                                hourlyRate: 0,
-                                projectedDailyCost: 0,
-                                projectedMonthlyCost: 0,
-                                lastUpdate: now
-                            });
-                        }
+            // Process current hour data into metrics
+            const tagMetrics: RealTimeTagMetrics[] = results.currentHour.map((tagData: any) => {
+                const hourlyRate = tagData.currentCost;
+                const projectedDailyCost = hourlyRate * 24;
+                const projectedMonthlyCost = projectedDailyCost * 30;
+                const isAboveBaseline = tagData.currentCost > (avgHourlyBaseline * 1.1);
 
-                        const metric = tagMetrics.get(tag)!;
-                        metric.currentCost += usage.cost;
-                        metric.currentCalls += 1;
-                    });
-                }
+                return {
+                    tag: tagData._id,
+                    currentCost: tagData.currentCost,
+                    currentCalls: tagData.currentCalls,
+                    hourlyRate,
+                    projectedDailyCost,
+                    projectedMonthlyCost,
+                    lastUpdate: now,
+                    isAboveBaseline
+                };
             });
 
-            // Calculate hourly rates and projections
-            for (const [tag, metric] of tagMetrics.entries()) {
-                metric.hourlyRate = metric.currentCost;
-                metric.projectedDailyCost = metric.hourlyRate * 24;
-                metric.projectedMonthlyCost = metric.projectedDailyCost * 30;
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
-                // Compare with baseline for trend analysis
-                const isAboveBaseline = metric.currentCost > (avgHourlyBaseline * 1.1);
-
-                // Use tag name for validation/labeling and baseline comparison
-                metric.tag = tag;
-                metric.isAboveBaseline = isAboveBaseline;
-            }
-
-            return Array.from(tagMetrics.values());
+            return tagMetrics;
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting real-time tag metrics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -308,7 +329,7 @@ export class TaggingService {
     }
 
     /**
-     * Get tag suggestions based on usage patterns
+     * Get tag suggestions based on usage patterns (optimized with aggregation)
      */
     static async getTagSuggestions(
         userId: string,
@@ -320,31 +341,42 @@ export class TaggingService {
         }
     ): Promise<string[]> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const suggestions = new Set<string>();
 
-            // Get recent usage patterns
-            const recentUsage = await Usage.find({
-                userId,
-                createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }
-            }).limit(100).lean();
-
-            // Extract popular tags
-            const tagFrequency = new Map<string, number>();
-            recentUsage.forEach(usage => {
-                if (usage.tags && usage.tags.length > 0) {
-                    usage.tags.forEach(tag => {
-                        tagFrequency.set(tag, (tagFrequency.get(tag) || 0) + 1);
-                    });
+            // Use aggregation pipeline to get tag frequency efficiently
+            const tagFrequencyData = await Usage.aggregate([
+                {
+                    $match: {
+                        userId,
+                        createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+                        tags: { $exists: true, $not: { $size: 0 } }
+                    }
+                },
+                { $unwind: "$tags" },
+                {
+                    $group: {
+                        _id: "$tags",
+                        frequency: { $sum: 1 }
+                    }
+                },
+                { $sort: { frequency: -1 } },
+                { $limit: 10 },
+                {
+                    $project: {
+                        _id: 0,
+                        tag: "$_id",
+                        frequency: 1
+                    }
                 }
-            });
+            ]);
 
-            // Get top tags
-            const topTags = Array.from(tagFrequency.entries())
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 10)
-                .map(([tag]) => tag);
-
-            topTags.forEach(tag => suggestions.add(tag));
+            // Add popular tags from aggregation
+            tagFrequencyData.forEach(({ tag }) => suggestions.add(tag));
 
             // Add context-based suggestions
             if (context.service) {
@@ -357,7 +389,7 @@ export class TaggingService {
                 suggestions.add('project');
             }
 
-            // Add common tag patterns
+            // Add common tag patterns (pre-computed for performance)
             const commonTags = [
                 'development', 'production', 'testing', 'staging',
                 'frontend', 'backend', 'api', 'ui', 'ml', 'data',
@@ -366,8 +398,12 @@ export class TaggingService {
 
             commonTags.forEach(tag => suggestions.add(tag));
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return Array.from(suggestions).slice(0, 20);
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting tag suggestions:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -409,18 +445,20 @@ export class TaggingService {
     }
 
     /**
-     * Process service breakdown efficiently
+     * Process service breakdown efficiently (optimized version)
      */
-    private static processServiceBreakdown(
+    private static processServiceBreakdownOptimized(
         usagesByService: Array<{ service: string; cost: number }>,
         totalCost: number
     ): Array<{ service: string; cost: number; percentage: number }> {
         const serviceMap = new Map<string, number>();
         
-        usagesByService.forEach(({ service, cost }) => {
+        // Single pass aggregation
+        for (const { service, cost } of usagesByService) {
             serviceMap.set(service, (serviceMap.get(service) || 0) + cost);
-        });
+        }
 
+        // Convert to array and sort in single operation
         return Array.from(serviceMap.entries())
             .map(([service, cost]) => ({
                 service,
@@ -432,18 +470,30 @@ export class TaggingService {
     }
 
     /**
-     * Process model breakdown efficiently
+     * Process service breakdown efficiently (legacy method for compatibility)
      */
-    private static processModelBreakdown(
+    private static processServiceBreakdown(
+        usagesByService: Array<{ service: string; cost: number }>,
+        totalCost: number
+    ): Array<{ service: string; cost: number; percentage: number }> {
+        return this.processServiceBreakdownOptimized(usagesByService, totalCost);
+    }
+
+    /**
+     * Process model breakdown efficiently (optimized version)
+     */
+    private static processModelBreakdownOptimized(
         usagesByModel: Array<{ model: string; cost: number }>,
         totalCost: number
     ): Array<{ model: string; cost: number; percentage: number }> {
         const modelMap = new Map<string, number>();
         
-        usagesByModel.forEach(({ model, cost }) => {
+        // Single pass aggregation
+        for (const { model, cost } of usagesByModel) {
             modelMap.set(model, (modelMap.get(model) || 0) + cost);
-        });
+        }
 
+        // Convert to array and sort in single operation
         return Array.from(modelMap.entries())
             .map(([model, cost]) => ({
                 model,
@@ -455,21 +505,36 @@ export class TaggingService {
     }
 
     /**
-     * Process time series data efficiently
+     * Process model breakdown efficiently (legacy method for compatibility)
      */
-    private static processTimeSeriesData(
+    private static processModelBreakdown(
+        usagesByModel: Array<{ model: string; cost: number }>,
+        totalCost: number
+    ): Array<{ model: string; cost: number; percentage: number }> {
+        return this.processModelBreakdownOptimized(usagesByModel, totalCost);
+    }
+
+    /**
+     * Process time series data efficiently (optimized version)
+     */
+    private static processTimeSeriesDataOptimized(
         timeSeriesData: Array<{ date: string; cost: number; tokens: number }>
     ): Array<{ date: string; cost: number; calls: number; tokens: number }> {
         const dateMap = new Map<string, { cost: number; calls: number; tokens: number }>();
         
-        timeSeriesData.forEach(({ date, cost, tokens }) => {
-            const existing = dateMap.get(date) || { cost: 0, calls: 0, tokens: 0 };
-            existing.cost += cost;
-            existing.calls += 1;
-            existing.tokens += tokens;
-            dateMap.set(date, existing);
-        });
+        // Single pass aggregation with optimized loop
+        for (const { date, cost, tokens } of timeSeriesData) {
+            const existing = dateMap.get(date);
+            if (existing) {
+                existing.cost += cost;
+                existing.calls += 1;
+                existing.tokens += tokens;
+            } else {
+                dateMap.set(date, { cost, calls: 1, tokens });
+            }
+        }
 
+        // Convert to array and sort in single operation
         return Array.from(dateMap.entries())
             .map(([date, data]) => ({
                 date,
@@ -479,6 +544,15 @@ export class TaggingService {
             }))
             .sort((a, b) => a.date.localeCompare(b.date))
             .slice(-30); // Only return last 30 days
+    }
+
+    /**
+     * Process time series data efficiently (legacy method for compatibility)
+     */
+    private static processTimeSeriesData(
+        timeSeriesData: Array<{ date: string; cost: number; tokens: number }>
+    ): Array<{ date: string; cost: number; calls: number; tokens: number }> {
+        return this.processTimeSeriesDataOptimized(timeSeriesData);
     }
 
     /**
@@ -497,5 +571,36 @@ export class TaggingService {
             '#06B6D4', '#84CC16', '#F97316', '#EC4899', '#6366F1'
         ];
         return colors[Math.floor(Math.random() * colors.length)];
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
     }
 } 
