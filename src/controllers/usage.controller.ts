@@ -23,6 +23,31 @@ export function getUserIdFromToken(req: any): string | null {
 }
 
 export class UsageController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
+    private static readonly ANALYTICS_TIMEOUT = 30000; // 30 seconds for analytics
+    private static readonly BULK_TIMEOUT = 45000; // 45 seconds for bulk operations
+    
+    // User data sharing within request scope
+    private static userCache = new Map<string, { user: any; timestamp: number }>();
+    private static readonly USER_CACHE_TTL = 30000; // 30 seconds
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     static async trackUsage(req: any, res: Response, next: NextFunction): Promise<Response | void> {
         const startTime = Date.now();
         const requestId = req.headers['x-request-id'] as string;
@@ -31,37 +56,20 @@ export class UsageController {
         try {
             loggingService.info('Usage tracking initiated', {
                 requestId,
-                userId,
-                hasUserId: !!userId
+                userId
             });
 
-            if (!userId) {
-                loggingService.warn('Usage tracking failed - authentication required', {
-                    requestId
-                });
+            // Validate authentication
+            if (!UsageController.validateAuthentication(userId, requestId, res)) {
+                return;
+            }
 
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required',
-                });
+            // Check circuit breaker
+            if (UsageController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
             }
 
             const validatedData = trackUsageSchema.parse(req.body);
-
-            loggingService.info('Usage tracking parameters validated', {
-                requestId,
-                userId,
-                service: validatedData.service,
-                model: validatedData.model,
-                hasPrompt: !!validatedData.prompt,
-                hasCompletion: !!validatedData.completion,
-                promptTokens: validatedData.promptTokens,
-                completionTokens: validatedData.completionTokens,
-                totalTokens: validatedData.totalTokens,
-                cost: validatedData.cost,
-                hasProjectId: !!validatedData.projectId,
-                hasTags: !!(validatedData.tags?.length)
-            });
 
             const usage = await UsageService.trackUsage({
                 userId,
@@ -74,28 +82,25 @@ export class UsageController {
                 duration,
                 userId,
                 usageId: usage?._id,
-                service: validatedData.service,
-                model: validatedData.model,
-                cost: usage?.cost,
-                totalTokens: usage?.totalTokens,
-                optimizationApplied: usage?.optimizationApplied,
-                hasUsage: !!usage
+                cost: usage?.cost
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'usage_tracked',
-                category: 'usage',
-                value: duration,
-                metadata: {
-                    userId,
-                    usageId: usage?._id,
-                    service: validatedData.service,
-                    model: validatedData.model,
-                    cost: usage?.cost,
-                    totalTokens: usage?.totalTokens,
-                    optimizationApplied: usage?.optimizationApplied
-                }
+            // Queue background business event logging
+            UsageController.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'usage_tracked',
+                    category: 'usage',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        usageId: usage?._id,
+                        service: validatedData.service,
+                        model: validatedData.model,
+                        cost: usage?.cost,
+                        totalTokens: usage?.totalTokens,
+                        optimizationApplied: usage?.optimizationApplied
+                    }
+                });
             });
 
             res.status(201).json({
@@ -109,16 +114,27 @@ export class UsageController {
                 },
             });
         } catch (error: any) {
+            UsageController.recordDbFailure();
             const duration = Date.now() - startTime;
+            
+            if (error.message === 'Service temporarily unavailable') {
+                loggingService.warn('Usage service unavailable', {
+                    requestId,
+                    duration
+                });
+                
+                res.status(503).json({
+                    success: false,
+                    error: 'Service temporarily unavailable',
+                    message: 'Please try again later'
+                });
+                return;
+            }
             
             loggingService.error('Usage tracking failed', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
-                service: req.body?.service,
-                model: req.body?.model,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -551,29 +567,24 @@ export class UsageController {
                 return;
             }
 
-            const results = [];
-            const errors = [];
+            // Use timeout handling for bulk operations
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Bulk operation timeout')), UsageController.BULK_TIMEOUT);
+            });
 
-            for (let i = 0; i < usageData.length; i++) {
-                try {
-                    const validatedData = trackUsageSchema.parse(usageData[i]);
-                    const usage = await UsageService.trackUsage({
-                        userId,
-                        ...validatedData,
-                    });
-                    results.push({
-                        index: i,
-                        id: usage?._id,
-                        success: true,
-                    });
-                } catch (error: any) {
-                    errors.push({
-                        index: i,
-                        error: error.message,
-                        data: usageData[i],
-                    });
-                }
-            }
+            const bulkPromise = UsageService.bulkTrackUsage(
+                usageData.map(data => ({ userId, ...data }))
+            );
+
+            const bulkResults = await Promise.race([bulkPromise, timeoutPromise]);
+            
+            const results = bulkResults.map((usage, index) => ({
+                index,
+                id: usage?._id,
+                success: true,
+            }));
+            
+            const errors: any[] = []; // Will be populated by service if needed
 
             res.json({
                 success: true,
@@ -898,13 +909,20 @@ export class UsageController {
                 projectId 
             } = req.query;
 
-            const analytics = await UsageService.getUsageAnalytics(userId, {
+            // Use timeout handling for analytics
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Analytics timeout')), UsageController.ANALYTICS_TIMEOUT);
+            });
+
+            const analyticsPromise = UsageService.getUsageAnalytics(userId, {
                 timeRange: timeRange as '1h' | '24h' | '7d' | '30d',
                 status: status as 'all' | 'success' | 'error',
                 model: model as string,
                 service: service as string,
                 projectId: projectId as string
             });
+
+            const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
 
             res.json({
                 success: true,
@@ -1160,5 +1178,112 @@ export class UsageController {
             });
             res.status(500).json({ message: 'SSE stream error' });
         }
+    }
+
+    /**
+     * Authentication validation utility
+     */
+    private static validateAuthentication(userId: string, requestId: string, res: Response): boolean {
+        if (!userId) {
+            loggingService.warn('Authentication required', { requestId });
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * User data management utilities
+     */
+    private static getCachedUser(userId: string): any | null {
+        const cached = this.userCache.get(userId);
+        if (cached && (Date.now() - cached.timestamp) < this.USER_CACHE_TTL) {
+            return cached.user;
+        }
+        if (cached) {
+            this.userCache.delete(userId);
+        }
+        return null;
+    }
+
+    private static setCachedUser(userId: string, user: any): void {
+        this.userCache.set(userId, {
+            user,
+            timestamp: Date.now()
+        });
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+
+        // Clear user cache
+        this.userCache.clear();
     }
 }

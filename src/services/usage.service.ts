@@ -43,6 +43,17 @@ interface UsageFilters {
 
 
 export class UsageService {
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // ObjectId validation and conversion utilities
+    private static objectIdCache = new Map<string, mongoose.Types.ObjectId>();
+    
+    // Batch processing configuration
+    private static readonly BATCH_SIZE = 100;
 
     static async trackUsage(data: any, req?: any): Promise<IUsage | null> {
         try {
@@ -513,20 +524,75 @@ export class UsageService {
     }
 
     /**
-     * Bulk track usage for multiple requests
+     * Bulk track usage for multiple requests (optimized with bulkWrite)
      * Useful for batch processing and integration with ai-cost-tracker package
      */
     static async bulkTrackUsage(usageData: TrackUsageData[]): Promise<IUsage[]> {
         try {
-            const results: IUsage[] = [];
-
-            for (const data of usageData) {
-                const usage = await this.trackUsage(data);
-                results.push(usage!);
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
             }
 
+            if (usageData.length === 0) {
+                return [];
+            }
+
+            // Process in batches to avoid overwhelming the database
+            const results: IUsage[] = [];
+            
+            for (let i = 0; i < usageData.length; i += this.BATCH_SIZE) {
+                const batch = usageData.slice(i, i + this.BATCH_SIZE);
+                
+                // Prepare bulk operations
+                const bulkOps = batch.map(data => {
+                    const usageDoc = {
+                        userId: this.validateAndConvertObjectId(data.userId),
+                        service: data.service || 'openai',
+                        model: data.model,
+                        prompt: data.prompt || '',
+                        completion: data.completion,
+                        promptTokens: data.promptTokens,
+                        completionTokens: data.completionTokens,
+                        totalTokens: data.totalTokens || (data.promptTokens + data.completionTokens),
+                        cost: data.cost || 0,
+                        responseTime: data.responseTime || 0,
+                        metadata: data.metadata || {},
+                        tags: data.tags || [],
+                        workflowId: data.workflowId,
+                        workflowName: data.workflowName,
+                        workflowStep: data.workflowStep,
+                        workflowSequence: data.workflowSequence,
+                        optimizationApplied: false,
+                        errorOccurred: false
+                    };
+
+                    // Only add projectId if it exists and is valid
+                    if (data.projectId && typeof data.projectId === 'string' && data.projectId.trim() !== '') {
+                        (usageDoc as any).projectId = this.validateAndConvertObjectId(data.projectId);
+                    }
+
+                    return {
+                        insertOne: {
+                            document: usageDoc
+                        }
+                    };
+                });
+
+                // Execute bulk write
+                const bulkResult = await Usage.bulkWrite(bulkOps, { ordered: false });
+                
+                // Fetch the inserted documents
+                const insertedIds = Object.values(bulkResult.insertedIds);
+                const insertedDocs = await Usage.find({ _id: { $in: insertedIds } }).lean();
+                results.push(...insertedDocs as IUsage[]);
+            }
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
             return results;
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error bulk tracking usage:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -546,81 +612,102 @@ export class UsageService {
             const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
             const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-            const [currentPeriod, previousPeriod, modelBreakdown, serviceBreakdown, recentRequests] = await Promise.all([
-                // Current period stats (last 24 hours)
-                Usage.aggregate([
-                    { $match: { ...match, createdAt: { $gte: last24Hours } } },
-                    {
-                        $group: {
-                            _id: null,
-                            totalCost: { $sum: '$cost' },
-                            totalTokens: { $sum: '$totalTokens' },
-                            totalRequests: { $sum: 1 },
-                            avgResponseTime: { $avg: '$responseTime' },
-                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
-                            successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
-                        }
+            // Use single aggregation with $facet for better performance
+            const aggregationResult = await Usage.aggregate([
+                {
+                    $facet: {
+                        currentPeriod: [
+                            { $match: { ...match, createdAt: { $gte: last24Hours } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalCost: { $sum: '$cost' },
+                                    totalTokens: { $sum: '$totalTokens' },
+                                    totalRequests: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
+                                    successCount: { $sum: { $cond: ['$errorOccurred', 0, 1] } }
+                                }
+                            }
+                        ],
+                        previousPeriod: [
+                            { 
+                                $match: { 
+                                    ...match, 
+                                    createdAt: { 
+                                        $gte: new Date(last24Hours.getTime() - 24 * 60 * 60 * 1000),
+                                        $lt: last24Hours 
+                                    } 
+                                } 
+                            },
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalCost: { $sum: '$cost' },
+                                    totalTokens: { $sum: '$totalTokens' },
+                                    totalRequests: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$responseTime' }
+                                }
+                            }
+                        ],
+                        modelBreakdown: [
+                            { $match: { ...match, createdAt: { $gte: last7Days } } },
+                            {
+                                $group: {
+                                    _id: '$model',
+                                    totalCost: { $sum: '$cost' },
+                                    totalTokens: { $sum: '$totalTokens' },
+                                    requestCount: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            },
+                            { $sort: { totalCost: -1 } },
+                            { $limit: 10 }
+                        ],
+                        serviceBreakdown: [
+                            { $match: { ...match, createdAt: { $gte: last7Days } } },
+                            {
+                                $group: {
+                                    _id: '$service',
+                                    totalCost: { $sum: '$cost' },
+                                    totalTokens: { $sum: '$totalTokens' },
+                                    requestCount: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            },
+                            { $sort: { totalCost: -1 } }
+                        ],
+                        recentRequests: [
+                            { $match: match },
+                            { $sort: { createdAt: -1 } },
+                            { $limit: 50 },
+                            {
+                                $project: {
+                                    model: 1,
+                                    service: 1,
+                                    promptTokens: 1,
+                                    completionTokens: 1,
+                                    totalTokens: 1,
+                                    cost: 1,
+                                    responseTime: 1,
+                                    errorOccurred: 1,
+                                    createdAt: 1
+                                }
+                            }
+                        ]
                     }
-                ]),
-                // Previous period stats (24 hours before that)
-                Usage.aggregate([
-                    { 
-                        $match: { 
-                            ...match, 
-                            createdAt: { 
-                                $gte: new Date(last24Hours.getTime() - 24 * 60 * 60 * 1000),
-                                $lt: last24Hours 
-                            } 
-                        } 
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            totalCost: { $sum: '$cost' },
-                            totalTokens: { $sum: '$totalTokens' },
-                            totalRequests: { $sum: 1 },
-                            avgResponseTime: { $avg: '$responseTime' }
-                        }
-                    }
-                ]),
-                // Model breakdown
-                Usage.aggregate([
-                    { $match: { ...match, createdAt: { $gte: last7Days } } },
-                    {
-                        $group: {
-                            _id: '$model',
-                            totalCost: { $sum: '$cost' },
-                            totalTokens: { $sum: '$totalTokens' },
-                            requestCount: { $sum: 1 },
-                            avgResponseTime: { $avg: '$responseTime' },
-                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
-                        }
-                    },
-                    { $sort: { totalCost: -1 } },
-                    { $limit: 10 }
-                ]),
-                // Service breakdown
-                Usage.aggregate([
-                    { $match: { ...match, createdAt: { $gte: last7Days } } },
-                    {
-                        $group: {
-                            _id: '$service',
-                            totalCost: { $sum: '$cost' },
-                            totalTokens: { $sum: '$totalTokens' },
-                            requestCount: { $sum: 1 },
-                            avgResponseTime: { $avg: '$responseTime' },
-                            errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
-                        }
-                    },
-                    { $sort: { totalCost: -1 } }
-                ]),
-                // Recent requests (last 50)
-                Usage.find(match)
-                    .sort({ createdAt: -1 })
-                    .limit(50)
-                    .select('model service promptTokens completionTokens totalTokens cost responseTime errorOccurred createdAt')
-                    .lean()
+                }
             ]);
+
+            const [currentPeriod, previousPeriod, modelBreakdown, serviceBreakdown, recentRequests] = [
+                aggregationResult[0].currentPeriod,
+                aggregationResult[0].previousPeriod,
+                aggregationResult[0].modelBreakdown,
+                aggregationResult[0].serviceBreakdown,
+                aggregationResult[0].recentRequests
+            ];
 
             const current = currentPeriod[0] || {
                 totalCost: 0, totalTokens: 0, totalRequests: 0, avgResponseTime: 0, errorCount: 0, successCount: 0
@@ -650,7 +737,7 @@ export class UsageService {
                 },
                 modelBreakdown,
                 serviceBreakdown,
-                recentRequests: recentRequests.map(req => ({
+                recentRequests: recentRequests.map((req: any) => ({
                     ...req,
                     timestamp: req.createdAt,
                     status: req.errorOccurred ? 'error' : 'success',
@@ -1525,5 +1612,60 @@ export class UsageService {
             loggingService.error('Error getting recent usage:', { error: error instanceof Error ? error.message : String(error) });
             return [];
         }
+    }
+
+    /**
+     * ObjectId validation and conversion utilities
+     */
+    private static validateAndConvertObjectId(id: string): mongoose.Types.ObjectId {
+        // Check cache first
+        if (this.objectIdCache.has(id)) {
+            return this.objectIdCache.get(id)!;
+        }
+
+        let objectId: mongoose.Types.ObjectId;
+        if (mongoose.Types.ObjectId.isValid(id)) {
+            objectId = new mongoose.Types.ObjectId(id);
+        } else {
+            throw new Error(`Invalid ObjectId: ${id}`);
+        }
+
+        // Cache the result
+        this.objectIdCache.set(id, objectId);
+        return objectId;
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
+        
+        // Clear ObjectId cache
+        this.objectIdCache.clear();
     }
 }
