@@ -205,17 +205,56 @@ const CortexTrainingData = mongoose.model('CortexTrainingData', CortexTrainingDa
 export class CortexTrainingDataCollectorService {
     private static instance: CortexTrainingDataCollectorService;
     private collectionQueue: Map<string, Partial<CortexTrainingDataEntry>> = new Map();
+    private batchQueue: CortexTrainingDataEntry[] = [];
+    
+    // Optimized: Bounded queue configuration
+    private readonly MAX_QUEUE_SIZE = 1000;
+    private readonly BATCH_SIZE = 50;
+    private readonly BATCH_INTERVAL = 30000; // 30 seconds
+    
     private stats = {
         totalCollected: 0,
         successfulSaves: 0,
         failedSaves: 0,
-        averageProcessingTime: 0
+        averageProcessingTime: 0,
+        batchesProcessed: 0
     };
 
     private constructor() {
-        // Initialize cleanup interval to prevent memory leaks
-        setInterval(() => this.cleanupStaleEntries(), 300000); // 5 minutes
+        // Optimized: Batch processing instead of individual saves
+        setInterval(() => this.processBatch(), this.BATCH_INTERVAL);
+        // More frequent cleanup to prevent memory leaks
+        setInterval(() => this.cleanupStaleEntries(), 60000); // 1 minute
     }
+
+    /**
+     * Process batch of training data entries
+     */
+    private async processBatch(): Promise<void> {
+        if (this.batchQueue.length === 0) return;
+        
+        const batch = this.batchQueue.splice(0, this.BATCH_SIZE);
+        
+        try {
+            // Batch insert instead of individual saves
+            await CortexTrainingData.insertMany(batch, { ordered: false });
+            this.stats.successfulSaves += batch.length;
+            this.stats.batchesProcessed++;
+            
+            loggingService.debug('✅ Batch training data saved', {
+                batchSize: batch.length,
+                totalBatches: this.stats.batchesProcessed
+            });
+        } catch (error) {
+            this.stats.failedSaves += batch.length;
+            
+            loggingService.debug('❌ Batch save failed', {
+                batchSize: batch.length,
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    }
+
 
     public static getInstance(): CortexTrainingDataCollectorService {
         if (!this.instance) {
@@ -410,7 +449,7 @@ export class CortexTrainingDataCollectorService {
     }
 
     /**
-     * Finalize and save the complete training data entry
+     * Finalize and save the complete training data entry - Optimized with batch processing
      */
     public finalizeSession(
         sessionId: string,
@@ -422,12 +461,22 @@ export class CortexTrainingDataCollectorService {
             qualityScore?: number;
         }
     ): void {
-        // Fire-and-forget async save
-        setImmediate(async () => {
+        // Fire-and-forget async processing
+        setImmediate(() => {
             try {
                 const entry = this.collectionQueue.get(sessionId);
                 if (!entry) {
                     return; // Session not found, skip silently
+                }
+
+                // Check queue size limit to prevent memory leaks
+                if (this.batchQueue.length >= this.MAX_QUEUE_SIZE) {
+                    loggingService.debug('🚨 Batch queue full, dropping oldest entries', {
+                        queueSize: this.batchQueue.length,
+                        maxSize: this.MAX_QUEUE_SIZE
+                    });
+                    // Drop oldest entries to make room
+                    this.batchQueue.splice(0, this.BATCH_SIZE);
                 }
 
                 // Add performance metrics
@@ -438,26 +487,24 @@ export class CortexTrainingDataCollectorService {
                     isSuccessful: true
                 };
 
-                // Save to database asynchronously
-                await this.saveTrainingData(entry as CortexTrainingDataEntry);
+                // Add to batch queue instead of immediate save
+                this.batchQueue.push(entry as CortexTrainingDataEntry);
                 
-                // Remove from queue
+                // Remove from collection queue
                 this.collectionQueue.delete(sessionId);
                 
                 this.stats.totalCollected++;
-                this.stats.successfulSaves++;
                 
-                loggingService.debug('✅ Cortex training data saved successfully', {
+                loggingService.debug('✅ Cortex training data queued for batch processing', {
                     sessionId,
+                    batchQueueSize: this.batchQueue.length,
                     totalTokenReduction: performance.totalTokenReduction,
                     reductionPercentage: performance.tokenReductionPercentage
                 });
                 
             } catch (error) {
-                this.stats.failedSaves++;
-                
                 // Log error but don't throw - silent failure
-                loggingService.debug('❌ Cortex training data save failed (silent)', {
+                loggingService.debug('❌ Cortex training data finalization failed (silent)', {
                     sessionId,
                     error: error instanceof Error ? error.message : String(error)
                 });
@@ -507,12 +554,13 @@ export class CortexTrainingDataCollectorService {
     }
 
     /**
-     * Get training data statistics
+     * Get training data statistics - Enhanced with batch processing metrics
      */
-    public getStats(): typeof this.stats & { queueSize: number } {
+    public getStats(): typeof this.stats & { queueSize: number; batchQueueSize: number } {
         return {
             ...this.stats,
-            queueSize: this.collectionQueue.size
+            queueSize: this.collectionQueue.size,
+            batchQueueSize: this.batchQueue.length
         };
     }
 
@@ -566,11 +614,6 @@ export class CortexTrainingDataCollectorService {
     // PRIVATE HELPER METHODS
     // ========================================================================
 
-    private async saveTrainingData(entry: CortexTrainingDataEntry): Promise<void> {
-        const trainingData = new CortexTrainingData(entry);
-        await trainingData.save();
-    }
-
     private estimateTokenCount(text: string): number {
         // Simple token estimation: ~4 characters per token
         return Math.ceil(text.length / 4);
@@ -589,12 +632,18 @@ export class CortexTrainingDataCollectorService {
         const now = Date.now();
         const staleThreshold = 30 * 60 * 1000; // 30 minutes
         
-        for (const [sessionId, entry] of this.collectionQueue.entries()) {
+        const entriesToDelete: string[] = [];
+        
+        this.collectionQueue.forEach((entry, sessionId) => {
             if (entry.timestamp && (now - entry.timestamp.getTime()) > staleThreshold) {
-                this.collectionQueue.delete(sessionId);
-                loggingService.debug('🧹 Cleaned up stale training data entry', { sessionId });
+                entriesToDelete.push(sessionId);
             }
-        }
+        });
+        
+        entriesToDelete.forEach(sessionId => {
+            this.collectionQueue.delete(sessionId);
+            loggingService.debug('🧹 Cleaned up stale training data entry', { sessionId });
+        });
     }
 }
 
