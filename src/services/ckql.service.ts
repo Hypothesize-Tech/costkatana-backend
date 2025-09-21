@@ -26,11 +26,34 @@ export interface CKQLResult {
 export class CKQLService {
   private static instance: CKQLService;
   private bedrockClient: BedrockRuntimeClient;
+  private readonly DEBUG_ENABLED = process.env.CKQL_DEBUG === 'true';
 
   private constructor() {
     this.bedrockClient = new BedrockRuntimeClient({
       region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
     });
+  }
+
+  /**
+   * Conditional debug logging
+   */
+  private debugLog(message: string, data?: any): void {
+    if (this.DEBUG_ENABLED) {
+      loggingService.debug(message, data);
+    }
+  }
+
+  /**
+   * Assess query complexity for optimization
+   */
+  private assessQueryComplexity(naturalLanguage: string): 'simple' | 'medium' | 'complex' {
+    const lower = naturalLanguage.toLowerCase();
+    const complexKeywords = ['similar', 'pattern', 'anomaly', 'compare', 'analyze', 'like', 'behavior'];
+    const simpleKeywords = ['show', 'get', 'find', 'list', 'what', 'count'];
+    
+    if (complexKeywords.some(k => lower.includes(k))) return 'complex';
+    if (simpleKeywords.some(k => lower.includes(k))) return 'simple';
+    return 'medium';
   }
 
   static getInstance(): CKQLService {
@@ -198,7 +221,7 @@ export class CKQLService {
   }
 
   /**
-   * Execute CKQL query
+   * Execute CKQL query - Optimized version
    */
   async executeQuery(query: CKQLQuery, options?: {
     limit?: number;
@@ -216,60 +239,33 @@ export class CKQLService {
       const needsSemanticSearch = this.needsSemanticSearch(query.naturalLanguage);
 
       if (needsSemanticSearch && query.vectorSearch) {
-        // Ensure vector search query is also safe
-        const safeQuery = { ...query, mongoQuery: this.ensureSafeFindQuery(query.mongoQuery) };
+
+        const vectorResults = await this.executeVectorSearchOptimized(query, limit, offset);
+        results = vectorResults.results;
+        totalCount = vectorResults.totalCount;
         
-        try {
-          // Use MongoDB Atlas Vector Search
-          const vectorResults = await this.executeVectorSearch(safeQuery, limit, offset);
-          results = vectorResults;
-          totalCount = results.length; // Vector search doesn't provide total count easily
-          
-          // If vector search returns no results, try fallback query
-          if (results.length === 0) {
-            loggingService.info('Vector search returned no results, trying fallback query');
-            const fallbackQuery = this.generateFallbackQuery(query.naturalLanguage);
-            const safeFilter = this.ensureSafeFindQuery(fallbackQuery);
-            const mongoResults = await Telemetry.find(safeFilter)
-              .sort({ timestamp: -1 })
-              .limit(limit)
-              .skip(offset)
-              .lean();
-
-            results = mongoResults;
-            totalCount = await Telemetry.countDocuments(safeFilter);
-          }
-        } catch (vectorError) {
-          loggingService.error('Vector search failed, falling back to regular search:', { error: vectorError instanceof Error ? vectorError.message : String(vectorError) });
-          // Fallback to regular MongoDB query with enhanced pattern matching
-          const fallbackQuery = this.generateFallbackQuery(query.naturalLanguage);
-          const safeFilter = this.ensureSafeFindQuery(fallbackQuery);
-          const mongoResults = await Telemetry.find(safeFilter)
-            .sort({ timestamp: -1 })
-            .limit(limit)
-            .skip(offset)
-            .lean();
-
-          results = mongoResults;
-          totalCount = await Telemetry.countDocuments(safeFilter);
+        // If vector search returns no results, try fallback query
+        if (results.length === 0) {
+          loggingService.info('Vector search returned no results, trying fallback query');
+          const fallbackResults = await this.executeSingleAggregationQuery(
+            this.generateFallbackQuery(query.naturalLanguage), 
+            limit, 
+            offset
+          );
+          results = fallbackResults.results;
+          totalCount = fallbackResults.totalCount;
         }
       } else {
-        // Final safety check: ensure no aggregation operators in find query
-        const safeQuery = this.ensureSafeFindQuery(query.mongoQuery);
-        
-        // Use traditional MongoDB query
-        const mongoResults = await Telemetry.find(safeQuery)
-          .sort({ timestamp: -1 })
-          .limit(limit)
-          .skip(offset)
-          .lean();
-
-        results = mongoResults;
-        totalCount = await Telemetry.countDocuments(safeQuery);
+        const aggregationResults = await this.executeSingleAggregationQuery(
+          this.ensureSafeFindQuery(query.mongoQuery), 
+          limit, 
+          offset
+        );
+        results = aggregationResults.results;
+        totalCount = aggregationResults.totalCount;
       }
 
-      // Generate insights from results
-      const insights = await this.generateInsights(query.naturalLanguage, results);
+      const insights = await this.generateInsightsOptimized(query.naturalLanguage, results);
 
       const executionTime = Date.now() - startTime;
 
@@ -283,6 +279,52 @@ export class CKQLService {
     } catch (error) {
       loggingService.error('Failed to execute CKQL query:', { error: error instanceof Error ? error.message : String(error) });
       throw new Error(`CKQL execution failed: ${error}`);
+    }
+  }
+
+  /**
+   * Single aggregation query to get both results and count
+   */
+  private async executeSingleAggregationQuery(
+    matchQuery: any, 
+    limit: number, 
+    offset: number
+  ): Promise<{ results: any[]; totalCount: number }> {
+    try {
+      const pipeline = [
+        { $match: matchQuery },
+        { $sort: { timestamp: -1 as const } },
+        {
+          $facet: {
+            results: [
+              { $skip: offset },
+              { $limit: limit }
+            ],
+            totalCount: [
+              { $count: "count" }
+            ]
+          }
+        }
+      ] as any;
+
+      const [aggregationResult] = await Telemetry.aggregate(pipeline);
+      const results = aggregationResult?.results || [];
+      const totalCount = aggregationResult?.totalCount?.[0]?.count || 0;
+
+      return { results, totalCount };
+    } catch (error) {
+      this.debugLog('Single aggregation query failed, falling back to separate queries:', { error });
+      
+      // Fallback to original approach if aggregation fails
+      const results = await Telemetry.find(matchQuery)
+        .sort({ timestamp: -1 })
+        .limit(limit)
+        .skip(offset)
+        .lean();
+      
+      const totalCount = await Telemetry.countDocuments(matchQuery);
+      
+      return { results, totalCount };
     }
   }
 
@@ -449,23 +491,28 @@ Return ONLY the JSON query object:`;
 
 
   /**
-   * Execute vector search using MongoDB Atlas Vector Search
+   * Optimized vector search with smart candidate calculation
    */
-  private async executeVectorSearch(query: CKQLQuery, limit: number, offset: number): Promise<any[]> {
+  private async executeVectorSearchOptimized(
+    query: CKQLQuery, 
+    limit: number, 
+    offset: number
+  ): Promise<{ results: any[]; totalCount: number }> {
     try {
-      // Ensure the filter is safe for vector search (no aggregation operators)
       const safeFilter = this.ensureSafeFindQuery(query.mongoQuery);
       
-      // MongoDB Atlas Vector Search aggregation pipeline
+      const queryComplexity = this.assessQueryComplexity(query.naturalLanguage);
+      const optimalCandidates = this.calculateOptimalCandidates(limit, queryComplexity);
+      
       const pipeline = [
         {
           $vectorSearch: {
             index: "semantic_search_index",
             path: "semantic_embedding",
             queryVector: query.vectorSearch!.embedding,
-            numCandidates: limit * 10, // Search more candidates for better results
-            limit: limit + offset,
-            filter: safeFilter // Use safe filter
+            numCandidates: optimalCandidates,
+            limit: limit + offset + 100, 
+            filter: safeFilter
           }
         },
         {
@@ -479,25 +526,52 @@ Return ONLY the JSON query object:`;
           }
         },
         {
-          $skip: offset
-        },
-        {
-          $limit: limit
+          $facet: {
+            results: [
+              { $skip: offset },
+              { $limit: limit }
+            ],
+            totalCount: [
+              { $count: "count" }
+            ]
+          }
         }
       ];
 
-      const results = await Telemetry.aggregate(pipeline);
-      return results;
+      const [aggregationResult] = await Telemetry.aggregate(pipeline);
+      const results = aggregationResult?.results || [];
+      const totalCount = aggregationResult?.totalCount?.[0]?.count || results.length;
+
+      return { results, totalCount };
     } catch (error) {
-      loggingService.error('Vector search failed, falling back to regular search:', { error: error instanceof Error ? error.message : String(error) });
-      // Fallback to regular MongoDB query with safe filter
-      const safeQuery = this.ensureSafeFindQuery(query.mongoQuery);
-      return await Telemetry.find(safeQuery)
-        .sort({ timestamp: -1 })
-        .limit(limit)
-        .skip(offset)
-        .lean();
+      loggingService.error('Optimized vector search failed, falling back to regular search:', { error: error instanceof Error ? error.message : String(error) });
+      
+      // Fallback to regular aggregation query
+      return await this.executeSingleAggregationQuery(
+        this.ensureSafeFindQuery(query.mongoQuery), 
+        limit, 
+        offset
+      );
     }
+  }
+
+  /**
+   * Calculate optimal candidates based on query complexity
+   */
+  private calculateOptimalCandidates(limit: number, complexity: 'simple' | 'medium' | 'complex'): number {
+    const multipliers = {
+      simple: 2,   // Simple queries need fewer candidates
+      medium: 3,   // Medium complexity
+      complex: 5   // Complex queries need more candidates
+    };
+    
+    const maxCandidates = {
+      simple: 100,
+      medium: 200, 
+      complex: 500
+    };
+    
+    return Math.min(limit * multipliers[complexity], maxCandidates[complexity]);
   }
 
   /**
@@ -563,49 +637,91 @@ Provide a 1-sentence explanation of what this query will find.`;
   }
 
   /**
-   * Generate insights from query results
+   * Optimized insights generation - fast basic insights with optional AI enhancement
    */
-  private async generateInsights(naturalLanguage: string, results: any[]): Promise<string[]> {
+  private async generateInsightsOptimized(naturalLanguage: string, results: any[]): Promise<string[]> {
     if (results.length === 0) {
       return ['No data found matching your query. Try adjusting the time range or search terms.'];
     }
 
     try {
-      // Analyze results for patterns
-      const totalCost = results.reduce((sum, r) => sum + (r.cost_usd || 0), 0);
-      const avgDuration = results.reduce((sum, r) => sum + (r.duration_ms || 0), 0) / results.length;
-      const errorCount = results.filter(r => r.status === 'error').length;
-      const uniqueOperations = new Set(results.map(r => r.operation_name)).size;
-
-      const insights: string[] = [];
-
-      if (totalCost > 0) {
-        insights.push(`Total cost: $${totalCost.toFixed(4)} across ${results.length} operations`);
+      // Generate basic insights immediately (fast)
+      const basicInsights = this.generateBasicInsights(results);
+      
+      // Try to add AI insight with timeout (non-blocking for user experience)
+      try {
+        const aiInsightPromise = this.generateAIInsight(naturalLanguage, results);
+        const timeoutPromise = new Promise<string>((_, reject) => 
+          setTimeout(() => reject(new Error('AI insight timeout')), 2000) // 2 second timeout
+        );
+        
+        const aiInsight = await Promise.race([aiInsightPromise, timeoutPromise]);
+        if (aiInsight && aiInsight.trim()) {
+          basicInsights.push(aiInsight);
+        }
+      } catch (aiError) {
+        this.debugLog('AI insight generation failed or timed out, using basic insights only:', { error: aiError });
+        // Continue with basic insights only
       }
 
-      if (avgDuration > 0) {
-        insights.push(`Average duration: ${avgDuration.toFixed(0)}ms`);
-      }
-
-      if (errorCount > 0) {
-        insights.push(`${errorCount} errors found (${(errorCount/results.length*100).toFixed(1)}% error rate)`);
-      }
-
-      if (uniqueOperations > 1) {
-        insights.push(`${uniqueOperations} different operation types found`);
-      }
-
-      // Add AI-generated insight
-      const aiInsight = await this.generateAIInsight(naturalLanguage, results);
-      if (aiInsight) {
-        insights.push(aiInsight);
-      }
-
-      return insights;
+      return basicInsights;
     } catch (error) {
       loggingService.error('Failed to generate insights:', { error: error instanceof Error ? error.message : String(error) });
       return [`Found ${results.length} results matching your query.`];
     }
+  }
+
+  /**
+   * Generate basic insights quickly without AI
+   */
+  private generateBasicInsights(results: any[]): string[] {
+    const insights: string[] = [];
+    
+    // Basic statistical analysis
+    const totalCost = results.reduce((sum, r) => sum + (r.cost_usd || 0), 0);
+    const avgDuration = results.reduce((sum, r) => sum + (r.duration_ms || 0), 0) / results.length;
+    const errorCount = results.filter(r => r.status === 'error' || (typeof r.status === 'number' && r.status >= 400)).length;
+    const uniqueOperations = new Set(results.map(r => r.operation_name)).size;
+    const uniqueModels = Array.from(new Set(results.filter(r => r.gen_ai_model).map(r => r.gen_ai_model))).length;
+
+    // Cost insights
+    if (totalCost > 0) {
+      insights.push(`Total cost: $${totalCost.toFixed(4)} across ${results.length} operations`);
+      
+      if (totalCost > 1) {
+        insights.push('⚠️ High cost detected - consider optimizing expensive operations');
+      }
+    }
+
+    // Performance insights
+    if (avgDuration > 0) {
+      insights.push(`Average duration: ${avgDuration.toFixed(0)}ms`);
+      
+      if (avgDuration > 5000) {
+        insights.push('🐌 Slow operations detected - investigate performance bottlenecks');
+      }
+    }
+
+    // Error insights
+    if (errorCount > 0) {
+      const errorRate = (errorCount / results.length * 100).toFixed(1);
+      insights.push(`${errorCount} errors found (${errorRate}% error rate)`);
+      
+      if (errorCount / results.length > 0.1) {
+        insights.push('🚨 High error rate - investigate failing operations');
+      }
+    }
+
+    // Diversity insights
+    if (uniqueOperations > 1) {
+      insights.push(`${uniqueOperations} different operation types found`);
+    }
+    
+    if (uniqueModels > 1) {
+      insights.push(`${uniqueModels} different AI models used`);
+    }
+
+    return insights;
   }
 
   /**
