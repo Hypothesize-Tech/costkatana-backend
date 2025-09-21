@@ -4,6 +4,33 @@ import { PIIDetectionService } from '../services/piiDetection.service';
 import { loggingService } from '../services/logging.service';
 
 export class TrainingDatasetController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Circuit breaker for AI operations
+    private static aiFailureCount: number = 0;
+    private static readonly MAX_AI_FAILURES = 3;
+    private static readonly AI_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
+    private static lastAiFailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
+    private static readonly PII_ANALYSIS_TIMEOUT = 30000; // 30 seconds for PII analysis
+    private static readonly EXPORT_TIMEOUT = 45000; // 45 seconds for export operations
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Create a new training dataset
      * POST /api/training/datasets
@@ -16,45 +43,31 @@ export class TrainingDatasetController {
         try {
             loggingService.info('Training dataset creation initiated', {
                 requestId,
-                userId,
-                hasUserId: !!userId
+                userId
             });
 
+            // Validate authentication
             if (!userId) {
                 loggingService.warn('Training dataset creation failed - authentication required', {
                     requestId
                 });
-
                 res.status(401).json({ success: false, message: 'Authentication required' });
                 return;
             }
 
-            const datasetData: CreateDatasetData = req.body;
+            // Check circuit breaker before proceeding
+            if (TrainingDatasetController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
 
-            loggingService.info('Training dataset creation parameters received', {
-                requestId,
-                userId,
-                datasetName: datasetData.name,
-                hasName: !!datasetData.name,
-                targetUseCase: datasetData.targetUseCase,
-                hasTargetUseCase: !!datasetData.targetUseCase,
-                targetModel: datasetData.targetModel,
-                hasTargetModel: !!datasetData.targetModel,
-                hasDescription: !!datasetData.description,
-                hasFilters: !!datasetData.filters,
-                hasExportFormat: !!(datasetData as any).exportFormat
-            });
+            const datasetData: CreateDatasetData = req.body;
 
             // Validate required fields
             if (!datasetData.name || !datasetData.targetUseCase || !datasetData.targetModel) {
                 loggingService.warn('Training dataset creation failed - missing required fields', {
                     requestId,
-                    userId,
-                    hasName: !!datasetData.name,
-                    hasTargetUseCase: !!datasetData.targetUseCase,
-                    hasTargetModel: !!datasetData.targetModel
+                    userId
                 });
-
                 res.status(400).json({ 
                     success: false, 
                     message: 'Name, target use case, and target model are required' 
@@ -70,26 +83,23 @@ export class TrainingDatasetController {
                 duration,
                 userId,
                 datasetId: dataset._id,
-                datasetName: dataset.name,
-                targetUseCase: dataset.targetUseCase,
-                targetModel: dataset.targetModel,
-                hasDescription: !!dataset.description,
-                hasFilters: !!dataset.filters,
-                hasExportFormat: !!dataset.exportFormat
+                datasetName: dataset.name
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'training_dataset_created',
-                category: 'training',
-                value: duration,
-                metadata: {
-                    userId,
-                    datasetId: dataset._id,
-                    datasetName: dataset.name,
-                    targetUseCase: dataset.targetUseCase,
-                    targetModel: dataset.targetModel
-                }
+            // Queue background business event logging
+            TrainingDatasetController.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'training_dataset_created',
+                    category: 'training',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        datasetId: dataset._id,
+                        datasetName: dataset.name,
+                        targetUseCase: dataset.targetUseCase,
+                        targetModel: dataset.targetModel
+                    }
+                });
             });
 
             res.status(201).json({
@@ -98,17 +108,27 @@ export class TrainingDatasetController {
                 message: 'Training dataset created successfully'
             });
         } catch (error: any) {
+            TrainingDatasetController.recordDbFailure();
             const duration = Date.now() - startTime;
+            
+            if (error.message === 'Service temporarily unavailable') {
+                loggingService.warn('Training dataset service unavailable', {
+                    requestId,
+                    duration
+                });
+                
+                res.status(503).json({
+                    success: false,
+                    error: 'Service temporarily unavailable',
+                    message: 'Please try again later'
+                });
+                return;
+            }
             
             loggingService.error('Training dataset creation failed', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
-                datasetName: req.body?.name,
-                targetUseCase: req.body?.targetUseCase,
-                targetModel: req.body?.targetModel,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -1194,7 +1214,6 @@ export class TrainingDatasetController {
             loggingService.info('Training dataset PII analysis initiated', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
                 datasetId: req.params.datasetId
             });
 
@@ -1203,8 +1222,15 @@ export class TrainingDatasetController {
                     requestId,
                     datasetId: req.params.datasetId
                 });
-
                 return res.status(401).json({ success: false, message: 'Authentication required' });
+            }
+
+            // Check circuit breakers before proceeding
+            if (TrainingDatasetController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
+            if (TrainingDatasetController.isAiCircuitBreakerOpen()) {
+                throw new Error('AI service temporarily unavailable');
             }
 
             const { datasetId } = req.params;
@@ -1216,31 +1242,13 @@ export class TrainingDatasetController {
                     userId,
                     datasetId
                 });
-
                 return res.status(404).json({ success: false, message: 'Dataset not found' });
             }
 
             // Extract texts for PII analysis
             const texts = dataset.items.map(item => item.input);
             
-            loggingService.info('Training dataset PII analysis parameters processed', {
-                requestId,
-                userId,
-                datasetId,
-                datasetName: dataset.name,
-                itemCount: dataset.items.length,
-                textCount: texts.length,
-                hasTexts: texts.length > 0
-            });
-            
             if (texts.length === 0) {
-                loggingService.info('Training dataset PII analysis completed - empty dataset', {
-                    requestId,
-                    userId,
-                    datasetId,
-                    duration: Date.now() - startTime
-                });
-
                 return res.json({
                     success: true,
                     data: {
@@ -1253,7 +1261,13 @@ export class TrainingDatasetController {
                 });
             }
 
-            const piiAnalysis = await PIIDetectionService.detectPIIBatch(texts, true);
+            // Use timeout handling for PII analysis
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('PII analysis timeout')), TrainingDatasetController.PII_ANALYSIS_TIMEOUT);
+            });
+
+            const analysisPromise = PIIDetectionService.detectPIIBatch(texts, true);
+            const piiAnalysis = await Promise.race([analysisPromise, timeoutPromise]);
             const duration = Date.now() - startTime;
 
             loggingService.info('Training dataset PII analysis completed successfully', {
@@ -2028,6 +2042,91 @@ export class TrainingDatasetController {
             });
             
             next(error);
+        }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Circuit breaker utilities for AI operations
+     */
+    private static isAiCircuitBreakerOpen(): boolean {
+        if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
+            if (timeSinceLastFailure < this.AI_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.aiFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }

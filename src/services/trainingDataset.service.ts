@@ -38,6 +38,15 @@ export interface DatasetExportFormat {
 }
 
 export class TrainingDatasetService {
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Batch processing configuration
+    private static readonly PII_BATCH_SIZE = 10;
+    private static readonly STATS_BATCH_SIZE = 100;
     /**
      * Create a new training dataset
      */
@@ -173,13 +182,23 @@ export class TrainingDatasetService {
 
             loggingService.info(`Processing ${items.length} items for PII detection and validation`);
 
-            // Process each item with PII detection
-            const processedItems = [];
-            for (const item of items) {
-                // Run PII detection
-                const piiResult = await PIIDetectionService.detectPII(item.input, true);
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
 
-                // Create dataset item
+            // Process items with batch PII detection for better performance
+            const processedItems = [];
+            const texts = items.map(item => item.input);
+            
+            // Use batch PII detection
+            const batchPiiResults = await PIIDetectionService.detectPIIBatch(texts, true);
+            
+            // Create dataset items with PII results
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                const piiResult = batchPiiResults.results[i];
+
                 const datasetItem = {
                     requestId: item.requestId,
                     input: item.input,
@@ -266,14 +285,14 @@ export class TrainingDatasetService {
     }
 
     /**
-     * Assign items to train/dev/test splits
+     * Assign items to train/dev/test splits (optimized)
      */
     private static async assignItemsToSplits(
         dataset: ITrainingDataset, 
         items: any[]
     ): Promise<void> {
-        // Shuffle items for random distribution
-        const shuffledItems = [...items].sort(() => Math.random() - 0.5);
+        // Use optimized Fisher-Yates shuffle for better randomization
+        const shuffledItems = this.shuffleArray(items);
         
         const totalItems = shuffledItems.length;
         const trainCount = Math.floor(totalItems * dataset.splits.train.percentage / 100);
@@ -595,59 +614,92 @@ export class TrainingDatasetService {
     }
 
     /**
-     * Calculate dataset statistics
+     * Calculate dataset statistics using optimized aggregation
      */
     private static async calculateDatasetStats(
         dataset: ITrainingDataset, 
         usageRecords: any[], 
         scores: any[]
     ): Promise<void> {
-        const scoreMap = new Map(scores.map(score => [score.requestId, score]));
+        // Check circuit breaker
+        if (this.isDbCircuitBreakerOpen()) {
+            throw new Error('Database circuit breaker is open');
+        }
 
-        const totalRequests = usageRecords.length;
-        const totalTokens = usageRecords.reduce((sum, usage) => sum + usage.totalTokens, 0);
-        const totalCost = usageRecords.reduce((sum, usage) => sum + usage.cost, 0);
-        
-        const validScores = usageRecords
-            .map(usage => scoreMap.get(usage.metadata?.requestId)?.score)
-            .filter(Boolean);
-        const averageScore = validScores.length > 0 
-            ? validScores.reduce((sum, score) => sum + score, 0) / validScores.length 
-            : 0;
-
-        // Provider and model breakdowns
-        const providerBreakdown: Record<string, number> = {};
-        const modelBreakdown: Record<string, number> = {};
-
-        usageRecords.forEach(usage => {
-            providerBreakdown[usage.service] = (providerBreakdown[usage.service] || 0) + 1;
-            modelBreakdown[usage.model] = (modelBreakdown[usage.model] || 0) + 1;
-        });
-
-        // Calculate PII statistics
-        const itemsWithPII = dataset.items.filter(item => item.piiFlags?.hasPII);
-        const piiTypeBreakdown: Record<string, number> = {};
-        
-        itemsWithPII.forEach(item => {
-            item.piiFlags?.piiTypes.forEach(type => {
-                piiTypeBreakdown[type] = (piiTypeBreakdown[type] || 0) + 1;
-            });
-        });
-
-        dataset.stats = {
-            totalRequests,
-            averageScore,
-            totalTokens,
-            totalCost,
-            averageTokensPerRequest: totalRequests > 0 ? totalTokens / totalRequests : 0,
-            averageCostPerRequest: totalRequests > 0 ? totalCost / totalRequests : 0,
-            providerBreakdown,
-            modelBreakdown,
-            piiStats: {
-                totalWithPII: itemsWithPII.length,
-                piiTypeBreakdown
+        try {
+            // Use MongoDB aggregation for usage statistics
+            const requestIds = dataset.requestIds;
+            if (requestIds.length === 0) {
+                dataset.stats = this.getEmptyStats();
+                return;
             }
-        };
+
+            const [usageStats, scoreStats] = await Promise.all([
+                Usage.aggregate([
+                    { $match: { 'metadata.requestId': { $in: requestIds } } },
+                    {
+                        $group: {
+                            _id: null,
+                            totalRequests: { $sum: 1 },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalCost: { $sum: '$cost' },
+                            providerBreakdown: {
+                                $push: { service: '$service', model: '$model' }
+                            }
+                        }
+                    }
+                ]),
+                RequestScore.aggregate([
+                    { $match: { requestId: { $in: requestIds } } },
+                    {
+                        $group: {
+                            _id: null,
+                            averageScore: { $avg: '$score' },
+                            totalScores: { $sum: 1 }
+                        }
+                    }
+                ])
+            ]);
+
+            // Process aggregation results
+            const usageResult = usageStats[0] || {};
+            const scoreResult = scoreStats[0] || {};
+
+            // Calculate provider and model breakdowns
+            const providerBreakdown: Record<string, number> = {};
+            const modelBreakdown: Record<string, number> = {};
+            
+            (usageResult.providerBreakdown || []).forEach((item: any) => {
+                providerBreakdown[item.service] = (providerBreakdown[item.service] || 0) + 1;
+                modelBreakdown[item.model] = (modelBreakdown[item.model] || 0) + 1;
+            });
+
+            // Calculate PII statistics efficiently
+            const piiStats = this.calculatePiiStats(dataset.items);
+
+            const totalRequests = usageResult.totalRequests || 0;
+            const totalTokens = usageResult.totalTokens || 0;
+            const totalCost = usageResult.totalCost || 0;
+
+            dataset.stats = {
+                totalRequests,
+                averageScore: scoreResult.averageScore || 0,
+                totalTokens,
+                totalCost,
+                averageTokensPerRequest: totalRequests > 0 ? totalTokens / totalRequests : 0,
+                averageCostPerRequest: totalRequests > 0 ? totalCost / totalRequests : 0,
+                providerBreakdown,
+                modelBreakdown,
+                piiStats
+            };
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+        } catch (error) {
+            this.recordDbFailure();
+            loggingService.error('Error calculating dataset stats:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
     }
 
     /**
@@ -795,5 +847,90 @@ export class TrainingDatasetService {
         });
 
         return JSON.stringify(data, null, 2);
+    }
+
+    /**
+     * Get empty statistics object
+     */
+    private static getEmptyStats() {
+        return {
+            totalRequests: 0,
+            averageScore: 0,
+            totalTokens: 0,
+            totalCost: 0,
+            averageTokensPerRequest: 0,
+            averageCostPerRequest: 0,
+            providerBreakdown: {},
+            modelBreakdown: {},
+            piiStats: {
+                totalWithPII: 0,
+                piiTypeBreakdown: {}
+            }
+        };
+    }
+
+    /**
+     * Calculate PII statistics efficiently
+     */
+    private static calculatePiiStats(items: any[]) {
+        const piiStats = {
+            totalWithPII: 0,
+            piiTypeBreakdown: {} as Record<string, number>
+        };
+
+        // Single pass calculation
+        for (const item of items) {
+            if (item.piiFlags?.hasPII) {
+                piiStats.totalWithPII++;
+                item.piiFlags.piiTypes.forEach((type: string) => {
+                    piiStats.piiTypeBreakdown[type] = (piiStats.piiTypeBreakdown[type] || 0) + 1;
+                });
+            }
+        }
+
+        return piiStats;
+    }
+
+    /**
+     * Optimized Fisher-Yates shuffle algorithm
+     */
+    private static shuffleArray<T>(array: T[]): T[] {
+        const shuffled = [...array];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        return shuffled;
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
     }
 }
