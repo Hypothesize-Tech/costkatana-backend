@@ -18,6 +18,23 @@ export class WebhookDeliveryService {
     private deliveryWorker!: Worker<WebhookDeliveryJob>;
     private redisClient!: Redis;
     private bullConnection!: Redis; // dedicated connection for BullMQ
+    
+    // Circuit breaker for Redis operations
+    private static redisFailureCount: number = 0;
+    private static readonly MAX_REDIS_FAILURES = 3;
+    private static readonly REDIS_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
+    private static lastRedisFailureTime: number = 0;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Connection pool optimization
+    private static readonly MAX_RETRY_ATTEMPTS = 3;
+    private static readonly CONNECTION_TIMEOUT = 10000;
+    
     private constructor() {
         this.initializeRedis().catch(error => {
             loggingService.error('Failed to initialize Redis during construction', { error });
@@ -322,15 +339,18 @@ export class WebhookDeliveryService {
     private async processDelivery(jobData: WebhookDeliveryJob): Promise<void> {
         const { deliveryId } = jobData;
         try {
+            // Check database circuit breaker
+            if (WebhookDeliveryService.isDbCircuitBreakerOpen()) {
+                loggingService.warn('Webhook delivery processing skipped - database circuit breaker open', { deliveryId });
+                return;
+            }
+
             const delivery = await WebhookDelivery.findById(deliveryId);
             if (!delivery) {
                 loggingService.error('Delivery not found', { deliveryId });
                 return;
             }
             if (delivery.status !== 'pending') {
-                loggingService.debug('Delivery already processed', { value:  { deliveryId,
-                    status: delivery.status
-                 } });
                 return;
             }
             const webhook = await Webhook.findById(delivery.webhookId);
@@ -348,8 +368,13 @@ export class WebhookDeliveryService {
                 });
                 return;
             }
+
+            // Reset failure count on successful database operations
+            WebhookDeliveryService.dbFailureCount = 0;
+
             await this.attemptDelivery(delivery, webhook);
         } catch (error) {
+            WebhookDeliveryService.recordDbFailure();
             loggingService.error('Error processing webhook delivery', { error, deliveryId });
         }
     }
@@ -701,6 +726,61 @@ export class WebhookDeliveryService {
         } catch (error) {
             loggingService.error('Error during webhook delivery service shutdown', { error });
         }
+    }
+
+    /**
+     * Circuit breaker utilities for Redis operations
+     */
+    private static isRedisCircuitBreakerOpen(): boolean {
+        if (this.redisFailureCount >= this.MAX_REDIS_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastRedisFailureTime;
+            if (timeSinceLastFailure < this.REDIS_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.redisFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordRedisFailure(): void {
+        this.redisFailureCount++;
+        this.lastRedisFailureTime = Date.now();
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.redisFailureCount = 0;
+        this.lastRedisFailureTime = 0;
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
     }
 }
 

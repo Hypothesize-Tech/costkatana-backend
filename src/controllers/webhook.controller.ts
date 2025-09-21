@@ -5,105 +5,73 @@ import { loggingService } from '../services/logging.service';
 import { WEBHOOK_EVENTS } from '../types/webhook.types';
 
 export class WebhookController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
+    private static readonly STATS_TIMEOUT = 30000; // 30 seconds for stats
+    private static readonly DELIVERY_TIMEOUT = 25000; // 25 seconds for deliveries
+    
+    // Pre-computed valid events for validation
+    private static readonly VALID_EVENTS = Object.values(WEBHOOK_EVENTS);
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Create a new webhook
      */
     static async createWebhook(req: any, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user?.id;
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
         try {
-            loggingService.info('Webhook creation initiated', {
-                requestId,
-                userId,
-                hasUserId: !!userId
-            });
-
-            if (!userId) {
-                loggingService.warn('Webhook creation failed - unauthorized', {
-                    requestId,
-                    hasUserId: !!userId
-                });
-
-                return res.status(401).json({ error: 'Unauthorized' });
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                return res.status(503).json({ error: 'Service temporarily unavailable' });
             }
 
             const webhookData = req.body;
 
-            loggingService.info('Webhook creation parameters received', {
-                requestId,
-                userId,
-                hasName: !!webhookData.name,
-                hasUrl: !!webhookData.url,
-                hasEvents: !!webhookData.events,
-                eventsCount: webhookData.events?.length || 0,
-                webhookName: webhookData.name,
-                webhookUrl: webhookData.url
-            });
-
             // Validate required fields
-            if (!webhookData.name || !webhookData.url || !webhookData.events || webhookData.events.length === 0) {
-                loggingService.warn('Webhook creation failed - missing required fields', {
-                    requestId,
-                    userId,
-                    hasName: !!webhookData.name,
-                    hasUrl: !!webhookData.url,
-                    hasEvents: !!webhookData.events,
-                    eventsCount: webhookData.events?.length || 0
-                });
-
-                return res.status(400).json({ 
-                    error: 'Missing required fields: name, url, and events are required' 
-                });
-            }
-
-            // Validate events
-            const validEvents = Object.values(WEBHOOK_EVENTS);
-            const invalidEvents = webhookData.events.filter((event: string) => !validEvents.includes(event as any));
-            if (invalidEvents.length > 0) {
-                loggingService.warn('Webhook creation failed - invalid events', {
-                    requestId,
-                    userId,
-                    invalidEvents,
-                    validEventsCount: validEvents.length
-                });
-
-                return res.status(400).json({ 
-                    error: 'Invalid events', 
-                    invalidEvents 
-                });
+            const validation = this.validateWebhookData(webhookData);
+            if (!validation.isValid) {
+                return res.status(400).json({ error: validation.error, invalidEvents: validation.invalidEvents });
             }
 
             const webhook = await webhookService.createWebhook(userId, webhookData);
             const duration = Date.now() - startTime;
 
-            loggingService.info('Webhook created successfully', {
-                requestId,
-                duration,
-                userId,
-                webhookId: webhook._id,
-                webhookName: webhook.name,
-                webhookUrl: webhook.url,
-                eventsCount: webhook.events.length,
-                isActive: webhook.active,
-                hasSecret: !!webhook.maskedSecret,
-                hasRetryConfig: !!webhook.retryConfig
+            // Queue business event logging to background
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'webhook_created',
+                    category: 'webhook_management',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        webhookId: webhook._id,
+                        webhookName: webhook.name,
+                        eventsCount: webhook.events.length,
+                        isActive: webhook.active
+                    }
+                });
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'webhook_created',
-                category: 'webhook_management',
-                value: duration,
-                metadata: {
-                    userId,
-                    webhookId: webhook._id,
-                    webhookName: webhook.name,
-                    eventsCount: webhook.events.length,
-                    isActive: webhook.active
-                }
-            });
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             return res.status(201).json({
                 success: true,
@@ -123,17 +91,14 @@ export class WebhookController {
                 }
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Webhook creation failed', {
                 requestId,
                 userId,
-                hasUserId: !!userId,
                 webhookName: req.body?.name,
-                webhookUrl: req.body?.url,
-                eventsCount: req.body?.events?.length,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -605,28 +570,40 @@ export class WebhookController {
      * Get webhook statistics
      */
     static async getWebhookStats(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
+        const { requestId, userId } = this.validateAuthentication(req, res);
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
+        try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                return res.status(503).json({ error: 'Service temporarily unavailable' });
             }
 
-            const stats = await webhookService.getWebhookStats(id, userId);
+            const { id } = req.params;
+
+            // Add timeout handling
+            const statsPromise = webhookService.getWebhookStats(id, userId);
+            const stats = await Promise.race([
+                statsPromise,
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Stats operation timeout')), this.STATS_TIMEOUT)
+                )
+            ]);
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             return res.json({
                 success: true,
                 stats
             });
         } catch (error: any) {
+            this.recordDbFailure();
             loggingService.error('Get webhook stats failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
+                requestId,
+                userId,
                 webhookId: req.params.id,
-                error: error.message || 'Unknown error',
-                stack: error.stack
+                error: error.message || 'Unknown error'
             });
             return res.status(500).json({ 
                 error: 'Failed to fetch webhook statistics' 
@@ -687,5 +664,111 @@ export class WebhookController {
                 error: 'Failed to fetch queue statistics' 
             });
         }
+    }
+
+    /**
+     * Authentication validation utility
+     */
+    private static validateAuthentication(req: any, res: Response): { requestId: string; userId: string } | { requestId: null; userId: null } {
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id;
+
+        if (!userId) {
+            return { requestId: null, userId: null };
+        }
+
+        return { requestId, userId };
+    }
+
+    /**
+     * Webhook data validation utility
+     */
+    private static validateWebhookData(webhookData: any): { isValid: boolean; error?: string; invalidEvents?: string[] } {
+        // Validate required fields
+        if (!webhookData.name || !webhookData.url || !webhookData.events || webhookData.events.length === 0) {
+            return {
+                isValid: false,
+                error: 'Missing required fields: name, url, and events are required'
+            };
+        }
+
+        // Validate events
+        const invalidEvents = webhookData.events.filter((event: string) => !this.VALID_EVENTS.includes(event as any));
+        if (invalidEvents.length > 0) {
+            return {
+                isValid: false,
+                error: 'Invalid events',
+                invalidEvents
+            };
+        }
+
+        return { isValid: true };
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing queue utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operations = this.backgroundQueue.splice(0, 10); // Process up to 10 operations at once
+                
+                await Promise.allSettled(
+                    operations.map(async (operation) => {
+                        try {
+                            await operation();
+                        } catch (error) {
+                            loggingService.error('Background operation failed', { 
+                                error: error instanceof Error ? error.message : String(error) 
+                            });
+                        }
+                    })
+                );
+            }
+        }, 1000); // Process every second
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Clear background processor
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Clear background queue
+        this.backgroundQueue.length = 0;
+        
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
     }
 }

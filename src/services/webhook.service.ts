@@ -16,6 +16,21 @@ import Handlebars from 'handlebars';
 
 export class WebhookService {
     private static instance: WebhookService;
+    
+    // Template compilation cache
+    private static templateCache = new Map<string, HandlebarsTemplateDelegate>();
+    
+    // Encryption result cache
+    private static encryptionCache = new Map<string, string>();
+    
+    // Signature cache
+    private static signatureCache = new Map<string, string>();
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
 
     private constructor() {
         this.registerHandlebarsHelpers();
@@ -204,35 +219,53 @@ export class WebhookService {
     }
 
     /**
-     * Process an event and trigger matching webhooks
+     * Process an event and trigger matching webhooks (optimized with parallel processing)
      */
     async processEvent(eventData: WebhookEventData): Promise<void> {
         try {
-            loggingService.info('Processing webhook event', { value:  {  
-                eventType: eventData.eventType, 
-                eventId: eventData.eventId 
-             } });
+            // Check circuit breaker
+            if (WebhookService.isDbCircuitBreakerOpen()) {
+                loggingService.warn('Webhook processing skipped - circuit breaker open', { 
+                    eventType: eventData.eventType, 
+                    eventId: eventData.eventId 
+                });
+                return;
+            }
 
             // Find matching webhooks
             const webhooks = await this.findMatchingWebhooks(eventData);
 
             if (webhooks.length === 0) {
-                loggingService.debug('No matching webhooks found', { value:  { eventType: eventData.eventType  } });
                 return;
             }
 
-            // Create delivery records for each webhook
+            // Create delivery records for each webhook in parallel
             const deliveryPromises = webhooks.map(webhook => 
-                this.createDelivery(webhook, eventData)
+                this.createDelivery(webhook, eventData).catch(error => {
+                    loggingService.error('Failed to create delivery for webhook', { 
+                        error, 
+                        webhookId: webhook._id,
+                        eventId: eventData.eventId 
+                    });
+                    return null; // Don't fail the entire batch
+                })
             );
 
-            await Promise.all(deliveryPromises);
+            const deliveries = await Promise.allSettled(deliveryPromises);
+            const successfulDeliveries = deliveries.filter(result => 
+                result.status === 'fulfilled' && result.value !== null
+            ).length;
 
-            loggingService.info('Event processed for webhooks', { value:  {  
+            // Reset failure count on success
+            WebhookService.dbFailureCount = 0;
+
+            loggingService.info('Event processed for webhooks', { 
                 eventId: eventData.eventId,
-                webhookCount: webhooks.length 
-             } });
+                webhookCount: webhooks.length,
+                successfulDeliveries
+            });
         } catch (error) {
+            WebhookService.recordDbFailure();
             loggingService.error('Error processing webhook event', { error, eventData });
             // Don't throw - webhook failures shouldn't break the main flow
         }
@@ -387,7 +420,7 @@ export class WebhookService {
     }
 
     /**
-     * Build the payload for a webhook
+     * Build the payload for a webhook (optimized with template caching)
      */
     private async buildPayload(webhook: IWebhook, eventData: WebhookEventData): Promise<string> {
         try {
@@ -395,14 +428,20 @@ export class WebhookService {
                 ? DEFAULT_WEBHOOK_PAYLOAD 
                 : webhook.payloadTemplate || DEFAULT_WEBHOOK_PAYLOAD;
 
-            // Get additional context
-            const user = await User.findById(eventData.userId);
-            const project = eventData.projectId 
-                ? await Project.findById(eventData.projectId) 
-                : null;
+            // Get or compile template with caching
+            let compiledTemplate = WebhookService.templateCache.get(template);
+            if (!compiledTemplate) {
+                compiledTemplate = Handlebars.compile(template);
+                WebhookService.templateCache.set(template, compiledTemplate);
+            }
 
-            // Compile template
-            const compiledTemplate = Handlebars.compile(template);
+            // Get additional context in parallel
+            const [user, project] = await Promise.all([
+                User.findById(eventData.userId).select('_id name email').lean(),
+                eventData.projectId 
+                    ? Project.findById(eventData.projectId).select('_id name').lean()
+                    : Promise.resolve(null)
+            ]);
             
             // Build context
             const context = {
@@ -497,16 +536,29 @@ export class WebhookService {
     }
 
     /**
-     * Generate HMAC signature for webhook payload
+     * Generate HMAC signature for webhook payload (optimized with caching)
      */
     private generateSignature(secret: string, payload: string, timestamp: string): string {
         const signaturePayload = `${timestamp}.${payload}`;
-        const signature = crypto
-            .createHmac('sha256', secret)
-            .update(signaturePayload)
-            .digest('hex');
+        const cacheKey = `${secret}:${signaturePayload}`;
         
-        return `sha256=${signature}`;
+        // Check cache first
+        let signature = WebhookService.signatureCache.get(cacheKey);
+        if (!signature) {
+            const hmacSignature = crypto
+                .createHmac('sha256', secret)
+                .update(signaturePayload)
+                .digest('hex');
+            
+            signature = `sha256=${hmacSignature}`;
+            
+            // Cache the result (with size limit)
+            if (WebhookService.signatureCache.size < 1000) {
+                WebhookService.signatureCache.set(cacheKey, signature);
+            }
+        }
+        
+        return signature;
     }
 
     /**
@@ -679,32 +731,101 @@ export class WebhookService {
     }
 
     /**
-     * Get webhook statistics
+     * Get webhook statistics (optimized with $facet aggregation)
      */
     async getWebhookStats(webhookId: string, userId: string): Promise<any> {
         try {
+            // Check circuit breaker
+            if (WebhookService.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const webhook = await Webhook.findOne({ _id: webhookId, userId });
             if (!webhook) {
                 throw new Error('Webhook not found');
             }
 
-            // Get delivery stats for last 24 hours, 7 days, and 30 days
+            // Get delivery stats for multiple time periods using $facet
             const now = new Date();
             const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
             const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
             const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-            const [day, week, month] = await Promise.all([
-                this.getDeliveryStats(webhookId, oneDayAgo),
-                this.getDeliveryStats(webhookId, sevenDaysAgo),
-                this.getDeliveryStats(webhookId, thirtyDaysAgo)
+            const [statsResult] = await WebhookDelivery.aggregate([
+                {
+                    $facet: {
+                        last24Hours: [
+                            { $match: { webhookId: webhookId, createdAt: { $gte: oneDayAgo } } },
+                            {
+                                $group: {
+                                    _id: '$status',
+                                    count: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$response.responseTime' }
+                                }
+                            }
+                        ],
+                        last7Days: [
+                            { $match: { webhookId: webhookId, createdAt: { $gte: sevenDaysAgo } } },
+                            {
+                                $group: {
+                                    _id: '$status',
+                                    count: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$response.responseTime' }
+                                }
+                            }
+                        ],
+                        last30Days: [
+                            { $match: { webhookId: webhookId, createdAt: { $gte: thirtyDaysAgo } } },
+                            {
+                                $group: {
+                                    _id: '$status',
+                                    count: { $sum: 1 },
+                                    avgResponseTime: { $avg: '$response.responseTime' }
+                                }
+                            }
+                        ],
+                        recentDeliveries: [
+                            { $match: { webhookId: webhookId } },
+                            { $sort: { createdAt: -1 } },
+                            { $limit: 10 },
+                            {
+                                $project: {
+                                    status: 1,
+                                    createdAt: 1,
+                                    'response.responseTime': 1,
+                                    eventType: 1
+                                }
+                            }
+                        ]
+                    }
+                }
             ]);
 
-            // Get recent deliveries
-            const recentDeliveries = await WebhookDelivery.find({ webhookId })
-                .sort({ createdAt: -1 })
-                .limit(10)
-                .select('status createdAt responseTime eventType');
+            // Process the aggregated results
+            const processStats = (stats: any[]) => {
+                const result = {
+                    total: 0,
+                    success: 0,
+                    failed: 0,
+                    pending: 0,
+                    timeout: 0,
+                    cancelled: 0,
+                    avgResponseTime: 0
+                };
+
+                stats.forEach(stat => {
+                    (result as any)[stat._id] = stat.count;
+                    result.total += stat.count;
+                    if (stat._id === 'success' && stat.avgResponseTime) {
+                        result.avgResponseTime = Math.round(stat.avgResponseTime);
+                    }
+                });
+
+                return result;
+            };
+
+            // Reset failure count on success
+            WebhookService.dbFailureCount = 0;
 
             return {
                 webhook: {
@@ -716,58 +837,20 @@ export class WebhookService {
                     stats: webhook.stats
                 },
                 deliveryStats: {
-                    last24Hours: day,
-                    last7Days: week,
-                    last30Days: month
+                    last24Hours: processStats(statsResult.last24Hours),
+                    last7Days: processStats(statsResult.last7Days),
+                    last30Days: processStats(statsResult.last30Days)
                 },
-                recentDeliveries
+                recentDeliveries: statsResult.recentDeliveries
             };
         } catch (error) {
+            WebhookService.recordDbFailure();
             loggingService.error('Error getting webhook stats', { error, webhookId, userId });
             throw error;
         }
     }
 
-    /**
-     * Get delivery statistics for a time period
-     */
-    private async getDeliveryStats(webhookId: string, since: Date): Promise<any> {
-        const stats = await WebhookDelivery.aggregate([
-            {
-                $match: {
-                    webhookId: webhookId,
-                    createdAt: { $gte: since }
-                }
-            },
-            {
-                $group: {
-                    _id: '$status',
-                    count: { $sum: 1 },
-                    avgResponseTime: { $avg: '$response.responseTime' }
-                }
-            }
-        ]);
 
-        const result = {
-            total: 0,
-            success: 0,
-            failed: 0,
-            pending: 0,
-            timeout: 0,
-            cancelled: 0,
-            avgResponseTime: 0
-        };
-
-        stats.forEach(stat => {
-            (result as any)[stat._id] = stat.count;
-            result.total += stat.count;
-            if (stat._id === 'success' && stat.avgResponseTime) {
-                result.avgResponseTime = Math.round(stat.avgResponseTime);
-            }
-        });
-
-        return result;
-    }
 
     /**
      * Update webhook statistics after delivery
@@ -805,6 +888,42 @@ export class WebhookService {
         } catch (error) {
             loggingService.error('Error updating webhook stats', { error, webhookId });
         }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
+        
+        // Clear caches
+        this.templateCache.clear();
+        this.encryptionCache.clear();
+        this.signatureCache.clear();
     }
 }
 
