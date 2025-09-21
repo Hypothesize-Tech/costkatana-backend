@@ -919,34 +919,19 @@ export class KeyVaultController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const [providerKeys, proxyKeys, analytics] = await Promise.all([
-                KeyVaultService.getProviderKeys(userId),
-                KeyVaultService.getProxyKeys(userId),
-                KeyVaultService.getProxyKeyAnalytics(userId)
-            ]);
-
-            // Format provider keys (remove encrypted keys)
-            const formattedProviderKeys = providerKeys.map(key => ({
-                _id: key._id,
-                name: key.name,
-                provider: key.provider,
-                maskedKey: key.maskedKey,
-                description: key.description,
-                isActive: key.isActive,
-                createdAt: key.createdAt,
-                lastUsed: key.lastUsed
-            }));
+            
+            const dashboardData = await KeyVaultService.getDashboardData(userId);
 
             const duration = Date.now() - startTime;
 
             loggingService.info('Key vault dashboard retrieved successfully', {
                 userId,
                 duration,
-                providerKeysCount: providerKeys.length,
-                proxyKeysCount: proxyKeys.length,
-                hasProviderKeys: !!providerKeys && providerKeys.length > 0,
-                hasProxyKeys: !!proxyKeys && proxyKeys.length > 0,
-                hasAnalytics: !!analytics,
+                providerKeysCount: dashboardData.providerKeys.length,
+                proxyKeysCount: dashboardData.proxyKeys.length,
+                hasProviderKeys: !!dashboardData.providerKeys && dashboardData.providerKeys.length > 0,
+                hasProxyKeys: !!dashboardData.proxyKeys && dashboardData.proxyKeys.length > 0,
+                hasAnalytics: !!dashboardData.analytics,
                 requestId: req.headers['x-request-id'] as string
             });
 
@@ -957,21 +942,17 @@ export class KeyVaultController {
                 value: duration,
                 metadata: {
                     userId,
-                    providerKeysCount: providerKeys.length,
-                    proxyKeysCount: proxyKeys.length,
-                    hasProviderKeys: !!providerKeys && providerKeys.length > 0,
-                    hasProxyKeys: !!proxyKeys && proxyKeys.length > 0,
-                    hasAnalytics: !!analytics
+                    providerKeysCount: dashboardData.providerKeys.length,
+                    proxyKeysCount: dashboardData.proxyKeys.length,
+                    hasProviderKeys: !!dashboardData.providerKeys && dashboardData.providerKeys.length > 0,
+                    hasProxyKeys: !!dashboardData.proxyKeys && dashboardData.proxyKeys.length > 0,
+                    hasAnalytics: !!dashboardData.analytics
                 }
             });
 
             res.json({
                 success: true,
-                data: {
-                    providerKeys: formattedProviderKeys,
-                    proxyKeys,
-                    analytics
-                }
+                data: dashboardData
             });
         } catch (error: any) {
             const duration = Date.now() - startTime;

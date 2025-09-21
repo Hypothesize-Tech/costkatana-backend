@@ -122,7 +122,12 @@ export class IntelligenceController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const usage = await Usage.findOne({ _id: usageId, userId });
+            // Parallel database queries for better performance
+            const [usage, user] = await Promise.all([
+                Usage.findOne({ _id: usageId, userId }).lean(),
+                User.findById(userId).select('subscription preferences').lean()
+            ]);
+
             if (!usage) {
                 loggingService.warn('Usage-specific tips retrieval failed - usage not found', {
                     userId,
@@ -137,11 +142,9 @@ export class IntelligenceController {
                 return;
             }
 
-            const user = await User.findById(userId);
-
             const tips = await intelligenceService.analyzeAndRecommendTips({
-                usage: usage.toObject(),
-                user: user?.toObject()
+                usage: usage as any,
+                user: user as any
             });
 
             const duration = Date.now() - startTime;

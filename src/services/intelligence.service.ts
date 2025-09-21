@@ -16,30 +16,40 @@ export interface TipRecommendation {
 }
 
 export class IntelligenceService {
+    // Optimization: Background processing queue for AI operations
+    private aiScoringQueue: Array<() => Promise<void>> = [];
+    private aiProcessor?: NodeJS.Timeout;
+
     /**
-     * Analyze usage and recommend relevant tips
+     * Analyze usage and recommend relevant tips with parallel processing
      */
     async analyzeAndRecommendTips(context: TipContext): Promise<TipRecommendation[]> {
         try {
-            const activeTips = await Tip.find({ isActive: true });
-            const recommendations: TipRecommendation[] = [];
-
-            for (const tip of activeTips) {
+            // Pre-filter tips based on user context before expensive evaluation
+            const relevantTips = await this.preFilterTips(context);
+            
+            // Parallel evaluation of tip relevance
+            const relevancePromises = relevantTips.map(async (tip) => {
                 const relevanceScore = await this.evaluateTipRelevance(tip, context);
-                if (relevanceScore > 0.5) { // Threshold for showing tips
-                    recommendations.push({
-                        tip: tip.toObject(),
-                        relevanceScore,
-                        context: this.generateTipContext(tip, context)
-                    });
-                }
-            }
+                return { tip, relevanceScore };
+            });
+
+            const evaluatedTips = await Promise.all(relevancePromises);
+            
+            // Filter and build recommendations
+            const recommendations = evaluatedTips
+                .filter(({ relevanceScore }) => relevanceScore > 0.5)
+                .map(({ tip, relevanceScore }) => ({
+                    tip: (tip as any).toObject ? (tip as any).toObject() : tip,
+                    relevanceScore,
+                    context: this.generateTipContext(tip, context)
+                }));
 
             // Sort by priority and relevance
             recommendations.sort((a, b) => {
-                const priorityWeight = { high: 3, medium: 2, low: 1 };
-                const aPriority = priorityWeight[a.tip.priority] * a.relevanceScore;
-                const bPriority = priorityWeight[b.tip.priority] * b.relevanceScore;
+                const priorityWeight: Record<string, number> = { high: 3, medium: 2, low: 1 };
+                const aPriority = (priorityWeight[a.tip.priority] || 1) * a.relevanceScore;
+                const bPriority = (priorityWeight[b.tip.priority] || 1) * b.relevanceScore;
                 return bPriority - aPriority;
             });
 
@@ -47,6 +57,30 @@ export class IntelligenceService {
         } catch (error) {
             loggingService.error('Error analyzing tips:', error as Error);
             return [];
+        }
+    }
+
+    /**
+     * Pre-filter tips based on user context to reduce unnecessary evaluations
+     */
+    private async preFilterTips(context: TipContext): Promise<ITip[]> {
+        try {
+            const filters: any = { isActive: true };
+            
+            // Filter by user tier for better targeting
+            if (context.user?.subscription?.plan) {
+                filters.$or = [
+                    { targetAudience: 'all' },
+                    { targetAudience: context.user.subscription.plan },
+                    { targetAudience: { $exists: false } }
+                ];
+            }
+            
+            return await Tip.find(filters).lean();
+        } catch (error) {
+            loggingService.error('Error pre-filtering tips:', error as Error);
+            // Fallback to all active tips
+            return await Tip.find({ isActive: true }).lean();
         }
     }
 
@@ -272,17 +306,23 @@ export class IntelligenceService {
     }
 
     /**
-     * Get personalized tips for dashboard
+     * Get personalized tips for dashboard with memory-efficient processing
      */
     async getPersonalizedTips(userId: string, limit: number = 3): Promise<TipRecommendation[]> {
         try {
-            const user = await User.findById(userId);
-            const recentUsages = await Usage.find({ userId })
-                .sort({ createdAt: -1 })
-                .limit(50);
+            // Parallel execution with projection for memory efficiency
+            const [user, recentUsages] = await Promise.all([
+                User.findById(userId)
+                    .select('subscription.plan preferences')
+                    .lean(),
+                Usage.find({ userId })
+                    .select('totalTokens promptTokens model cost metadata.prompt createdAt')
+                    .sort({ createdAt: -1 })
+                    .limit(50)
+                    .lean()
+            ]);
 
             // Use internal optimization utilities instead of external tracker
-            // For now, return empty config until we implement internal optimization config
             const optimizationConfig = {
                 enablePromptOptimization: true,
                 enableModelSuggestions: true,
@@ -290,8 +330,8 @@ export class IntelligenceService {
             };
 
             const context: TipContext = {
-                user: user?.toObject(),
-                recentUsages: recentUsages.map(u => u.toObject()),
+                user: user as IUser,
+                recentUsages: recentUsages as IUsage[],
                 optimizationConfig
             };
 
@@ -304,7 +344,7 @@ export class IntelligenceService {
     }
 
     /**
-     * Initialize default tips in the database
+     * Initialize default tips in the database with batch operations
      */
     async initializeDefaultTips(): Promise<void> {
         const defaultTips: Partial<ITip>[] = [
@@ -360,14 +400,16 @@ export class IntelligenceService {
             }
         ];
 
-        for (const tipData of defaultTips) {
-            await Tip.findOneAndUpdate(
-                { tipId: tipData.tipId },
-                { $setOnInsert: tipData },
-                { upsert: true, new: true }
-            );
-        }
+        // Batch operation for better performance
+        const operations = defaultTips.map(tipData => ({
+            updateOne: {
+                filter: { tipId: tipData.tipId },
+                update: { $setOnInsert: tipData },
+                upsert: true
+            }
+        }));
 
+        await Tip.bulkWrite(operations);
         loggingService.info('Default tips initialized');
     }
 
