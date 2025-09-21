@@ -78,6 +78,18 @@ export interface CostTrends {
 
 export class UnexplainedCostService {
   private static instance: UnexplainedCostService;
+  
+  // Circuit breaker for AI operations
+  private static aiFailureCount: number = 0;
+  private static readonly MAX_AI_FAILURES = 3;
+  private static readonly AI_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
+  private static lastAiFailureTime: number = 0;
+  
+  // Circuit breaker for database operations
+  private static dbFailureCount: number = 0;
+  private static readonly MAX_DB_FAILURES = 5;
+  private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+  private static lastDbFailureTime: number = 0;
 
   static getInstance(): UnexplainedCostService {
     if (!UnexplainedCostService.instance) {
@@ -136,17 +148,34 @@ export class UnexplainedCostService {
       // Calculate baseline costs from historical data
       const baselineCosts = await this.calculateBaselineCosts(userId, workspaceId, timeframe);
       
+      // Check circuit breakers
+      if (UnexplainedCostService.isDbCircuitBreakerOpen()) {
+        throw new Error('Database service temporarily unavailable');
+      }
+      if (UnexplainedCostService.isAiCircuitBreakerOpen()) {
+        throw new Error('AI service temporarily unavailable');
+      }
+
       // Analyze cost drivers
       const costDrivers = await this.analyzeCostDrivers(telemetryData, baselineCosts);
       
-      // Generate cost story using AI with timeout
-      const costStory = await this.generateCostStoryWithTimeout(costDrivers, telemetryData, baselineCosts);
-      
-      // Generate optimization recommendations with timeout
-      const recommendations = await this.generateOptimizationRecommendationsWithTimeout(costDrivers, telemetryData);
-      
-      // Calculate anomaly score
+      // Calculate anomaly score (non-AI operation, can be done immediately)
       const anomalyScore = this.calculateAnomalyScore(costDrivers, telemetryData, baselineCosts);
+      
+      // Execute AI operations in parallel for better performance
+      const [costStory, recommendations] = await Promise.allSettled([
+        this.generateCostStoryWithTimeout(costDrivers, telemetryData, baselineCosts),
+        this.generateOptimizationRecommendationsWithTimeout(costDrivers, telemetryData)
+      ]);
+
+      // Extract results from settled promises with fallbacks
+      const finalCostStory = costStory.status === 'fulfilled' 
+        ? costStory.value 
+        : this.generateFallbackCostStory(costDrivers, telemetryData, baselineCosts);
+      
+      const finalRecommendations = recommendations.status === 'fulfilled' 
+        ? recommendations.value 
+        : this.generateFallbackRecommendations(costDrivers);
 
       const totalCost = costDrivers.reduce((sum, driver) => sum + driver.cost_impact, 0);
       const expectedCost = baselineCosts.expected_daily_cost;
@@ -159,8 +188,8 @@ export class UnexplainedCostService {
         deviation_percentage: deviationPercentage,
         deviation_reason: deviationReason,
         cost_drivers: costDrivers,
-        cost_story: costStory,
-        optimization_recommendations: recommendations,
+        cost_story: finalCostStory,
+        optimization_recommendations: finalRecommendations,
         anomaly_score: anomalyScore
       };
     } catch (error) {
@@ -383,65 +412,56 @@ export class UnexplainedCostService {
         return [];
       }
 
-      // Analyze different cost drivers based on available data
+      // Single-pass cost driver analysis for better performance
       const costDrivers: CostDriver[] = [];
 
       // Calculate cost breakdown based on actual data
       const costAttribution = this.calculateDynamicCostAttribution(totalCost, telemetryData);
-      const systemPromptCost = costAttribution.system_prompt_cost;
-      const toolCallsCost = costAttribution.tool_calls_cost;
-      const contextWindowCost = costAttribution.context_window_cost;
-      const retryCost = costAttribution.retry_cost;
+      
+      // Define cost driver configurations for single-pass processing
+      const driverConfigs = [
+        {
+          type: 'system_prompt' as const,
+          cost: costAttribution.system_prompt_cost,
+          efficiencyCalc: () => this.calculateSystemPromptEfficiency(telemetryData.total_tokens, costAttribution.system_prompt_cost),
+          description: 'System prompt token usage contributing to costs'
+        },
+        {
+          type: 'tool_calls' as const,
+          cost: costAttribution.tool_calls_cost,
+          efficiencyCalc: () => this.calculateToolCallEfficiency(telemetryData.total_tokens, costAttribution.tool_calls_cost),
+          description: 'API tool calls and external service usage'
+        },
+        {
+          type: 'context_window' as const,
+          cost: costAttribution.context_window_cost,
+          efficiencyCalc: () => this.calculateContextWindowEfficiency(telemetryData.total_tokens, costAttribution.context_window_cost),
+          description: 'Large context windows and memory usage'
+        },
+        {
+          type: 'retries' as const,
+          cost: costAttribution.retry_cost,
+          efficiencyCalc: () => this.calculateRetryEfficiency(telemetryData.total_tokens, costAttribution.retry_cost),
+          description: 'Failed request retries and error handling'
+        }
+      ];
 
-      // System prompt costs (estimated from token usage)
-      if (telemetryData.total_tokens > 0) {
-        const systemPromptEfficiency = this.calculateSystemPromptEfficiency(telemetryData.total_tokens, systemPromptCost);
-        const baselineComparison = baselineCosts.expected_daily_cost > 0 ? 
-          `(${((systemPromptCost / baselineCosts.expected_daily_cost) * 100).toFixed(1)}% of daily baseline)` : '';
-        costDrivers.push({
-          driver_type: 'system_prompt',
-          cost_impact: systemPromptCost,
-          percentage_of_total: (systemPromptCost / totalCost) * 100,
-          explanation: `System prompt token usage contributing to costs ${baselineComparison}`,
-          optimization_potential: systemPromptCost * systemPromptEfficiency
-        });
+      // Process all drivers in a single loop
+      for (const config of driverConfigs) {
+        if (config.cost > 0 || config.type === 'system_prompt') {
+          const efficiency = config.efficiencyCalc();
+          const baselineComparison = baselineCosts.expected_daily_cost > 0 ? 
+            ` (${((config.cost / baselineCosts.expected_daily_cost) * 100).toFixed(1)}% of daily baseline)` : '';
+          
+          costDrivers.push({
+            driver_type: config.type,
+            cost_impact: config.cost,
+            percentage_of_total: (config.cost / totalCost) * 100,
+            explanation: `${config.description}${baselineComparison}`,
+            optimization_potential: config.cost * efficiency
+          });
+        }
       }
-
-      // Tool calls costs
-      const toolCallEfficiency = this.calculateToolCallEfficiency(telemetryData.total_tokens, toolCallsCost);
-      const toolCallBaseline = baselineCosts.expected_daily_cost > 0 ? 
-        `(${((toolCallsCost / baselineCosts.expected_daily_cost) * 100).toFixed(1)}% of daily baseline)` : '';
-      costDrivers.push({
-        driver_type: 'tool_calls',
-        cost_impact: toolCallsCost,
-        percentage_of_total: (toolCallsCost / totalCost) * 100,
-        explanation: `API tool calls and external service usage ${toolCallBaseline}`,
-        optimization_potential: toolCallsCost * toolCallEfficiency
-      });
-
-      // Context window costs
-      const contextWindowEfficiency = this.calculateContextWindowEfficiency(telemetryData.total_tokens, contextWindowCost);
-      const contextBaseline = baselineCosts.expected_daily_cost > 0 ? 
-        `(${((contextWindowCost / baselineCosts.expected_daily_cost) * 100).toFixed(1)}% of daily baseline)` : '';
-      costDrivers.push({
-        driver_type: 'context_window',
-        cost_impact: contextWindowCost,
-        percentage_of_total: (contextWindowCost / totalCost) * 100,
-        explanation: `Large context windows and memory usage ${contextBaseline}`,
-        optimization_potential: contextWindowCost * contextWindowEfficiency
-      });
-
-      // Retry costs
-      const retryEfficiency = this.calculateRetryEfficiency(telemetryData.total_tokens, retryCost);
-      const retryBaseline = baselineCosts.expected_daily_cost > 0 ? 
-        `(${((retryCost / baselineCosts.expected_daily_cost) * 100).toFixed(1)}% of daily baseline)` : '';
-      costDrivers.push({
-        driver_type: 'retries',
-        cost_impact: retryCost,
-        percentage_of_total: (retryCost / totalCost) * 100,
-        explanation: `Failed request retries and error handling ${retryBaseline}`,
-        optimization_potential: retryCost * retryEfficiency
-      });
 
       return costDrivers;
     } catch (error) {
@@ -1754,6 +1774,51 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
       loggingService.error('Failed to generate fallback recommendations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
+  }
+
+  /**
+   * Circuit breaker utilities for AI operations
+   */
+  private static isAiCircuitBreakerOpen(): boolean {
+    if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
+      if (timeSinceLastFailure < this.AI_CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.aiFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Circuit breaker utilities for database operations
+   */
+  private static isDbCircuitBreakerOpen(): boolean {
+    if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+      if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.dbFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Cleanup method for graceful shutdown
+   */
+  static cleanup(): void {
+    // Reset circuit breaker state
+    this.aiFailureCount = 0;
+    this.lastAiFailureTime = 0;
+    this.dbFailureCount = 0;
+    this.lastDbFailureTime = 0;
   }
 }
 
