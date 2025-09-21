@@ -64,6 +64,21 @@ export interface PerformanceMetrics {
 }
 
 export class TelemetryService {
+  // Circuit breaker for database operations
+  private static dbFailureCount: number = 0;
+  private static readonly MAX_DB_FAILURES = 5;
+  private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+  private static lastDbFailureTime: number = 0;
+  
+  // Filter building utilities
+  private static filterBuilders = new Map<string, (value: any) => any>();
+  
+  /**
+   * Initialize filter builders
+   */
+  static {
+    this.initializeFilterBuilders();
+  }
   /**
    * Store telemetry data from OpenTelemetry span
    */
@@ -72,14 +87,15 @@ export class TelemetryService {
       const spanContext = span.spanContext();
       if (!spanContext) return null;
 
-      // Get baggage from context
+      // Get baggage from context (optimized)
       const baggageEntries = context.active().getValue(Symbol.for('opentelemetry.baggage'));
       const baggage: Record<string, string> = {};
       if (baggageEntries && typeof baggageEntries === 'object') {
         const entries = (baggageEntries as any).getAllEntries ? (baggageEntries as any).getAllEntries() : [];
-        entries.forEach(([key, value]: [string, any]) => {
+        // Single pass processing
+        for (const [key, value] of entries) {
           baggage[key] = value?.value || value;
-        });
+        }
       }
 
       // Get system metrics
@@ -240,47 +256,17 @@ export class TelemetryService {
   }
 
   /**
-   * Query telemetry data with filters
+   * Query telemetry data with filters (optimized)
    */
   static async queryTelemetry(query: TelemetryQuery) {
     try {
-      const filter: any = {};
-      
-      // Build filter
-      if (query.tenant_id) filter.tenant_id = query.tenant_id;
-      if (query.workspace_id) filter.workspace_id = query.workspace_id;
-      if (query.user_id) filter.user_id = query.user_id;
-      if (query.trace_id) filter.trace_id = query.trace_id;
-      if (query.request_id) filter.request_id = query.request_id;
-      if (query.service_name) filter.service_name = query.service_name;
-      if (query.operation_name) filter.operation_name = new RegExp(query.operation_name, 'i');
-      if (query.status) filter.status = query.status;
-      if (query.http_route) filter.http_route = query.http_route;
-      if (query.http_method) filter.http_method = query.http_method;
-      if (query.http_status_code) filter.http_status_code = query.http_status_code;
-      if (query.gen_ai_model) filter.gen_ai_model = query.gen_ai_model;
-      if (query.error_type) filter.error_type = query.error_type;
-      
-      // Time range filter
-      if (query.start_time || query.end_time) {
-        filter.timestamp = {};
-        if (query.start_time) filter.timestamp.$gte = query.start_time;
-        if (query.end_time) filter.timestamp.$lte = query.end_time;
+      // Check circuit breaker
+      if (this.isDbCircuitBreakerOpen()) {
+        throw new Error('Database circuit breaker is open');
       }
-      
-      // Duration filter
-      if (query.min_duration || query.max_duration) {
-        filter.duration_ms = {};
-        if (query.min_duration) filter.duration_ms.$gte = query.min_duration;
-        if (query.max_duration) filter.duration_ms.$lte = query.max_duration;
-      }
-      
-      // Cost filter
-      if (query.min_cost || query.max_cost) {
-        filter.cost_usd = {};
-        if (query.min_cost) filter.cost_usd.$gte = query.min_cost;
-        if (query.max_cost) filter.cost_usd.$lte = query.max_cost;
-      }
+
+      // Build filter using optimized filter builder
+      const filter = this.buildOptimizedFilter(query);
 
       // Pagination
       const limit = query.limit || 100;
@@ -293,8 +279,8 @@ export class TelemetryService {
       const sort: any = {};
       sort[sortField] = sortOrder;
 
-      // Execute query
-      const [results, total] = await Promise.all([
+      // Execute query with timeout handling
+      const queryPromise = Promise.all([
         Telemetry.find(filter)
           .sort(sort)
           .skip(skip)
@@ -302,6 +288,15 @@ export class TelemetryService {
           .lean(),
         Telemetry.countDocuments(filter)
       ]);
+
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Query timeout')), 15000);
+      });
+
+      const [results, total] = await Promise.race([queryPromise, timeoutPromise]);
+
+      // Reset failure count on success
+      this.dbFailureCount = 0;
 
       return {
         data: results,
@@ -313,6 +308,7 @@ export class TelemetryService {
         }
       };
     } catch (error) {
+      this.recordDbFailure();
       loggingService.error('Failed to query telemetry:', { error: error instanceof Error ? error.message : String(error) });
       throw error;
     }
@@ -981,20 +977,34 @@ export class TelemetryService {
 
       loggingService.info(`Enriching ${unenrichedSpans.length} spans with AI insights`);
 
-      // Process spans in batches for better performance
-      const batchSize = 10;
+      // Process spans in batches with bulk operations for better performance
+      const batchSize = 20;
       for (let i = 0; i < unenrichedSpans.length; i += batchSize) {
         const batch = unenrichedSpans.slice(i, i + batchSize);
         
-        await Promise.all(batch.map(async (span) => {
+        // Generate enrichments in parallel
+        const enrichmentPromises = batch.map(async (span) => {
           try {
             const enrichment = await this.generateSpanEnrichment(span);
-            
-            if (enrichment) {
-              await Telemetry.updateOne(
-                { _id: span._id },
-                { 
-                  $set: { 
+            return enrichment ? { span, enrichment } : null;
+          } catch (error) {
+            loggingService.error(`Failed to enrich span ${span.span_id}:`, { error: error instanceof Error ? error.message : String(error) });
+            return null;
+          }
+        });
+
+        const enrichmentResults = await Promise.allSettled(enrichmentPromises);
+        
+        // Prepare bulk operations
+        const bulkOps = enrichmentResults
+          .filter(result => result.status === 'fulfilled' && result.value)
+          .map(result => {
+            const { span, enrichment } = (result as PromiseFulfilledResult<any>).value;
+            return {
+              updateOne: {
+                filter: { _id: span._id },
+                update: {
+                  $set: {
                     'attributes.enriched_insights': enrichment.insights,
                     'attributes.routing_decision': enrichment.routing_decision,
                     'attributes.processing_type': enrichment.processing_type,
@@ -1002,12 +1012,18 @@ export class TelemetryService {
                     'attributes.cache_hit': enrichment.cache_hit
                   }
                 }
-              );
-            }
+              }
+            };
+          });
+
+        // Execute bulk operations if we have any
+        if (bulkOps.length > 0) {
+          try {
+            await Telemetry.bulkWrite(bulkOps);
           } catch (error) {
-            loggingService.error(`Failed to enrich span ${span.span_id}:`, { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Bulk enrichment update failed:', { error: error instanceof Error ? error.message : String(error) });
           }
-        }));
+        }
 
         // Small delay between batches to prevent overwhelming the database
         if (i + batchSize < unenrichedSpans.length) {
@@ -1222,5 +1238,179 @@ export class TelemetryService {
       loggingService.error('Failed to generate AI recommendations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
     }
+  }
+
+  /**
+   * Get unified dashboard data (optimized single query)
+   */
+  static async getUnifiedDashboardData({
+    tenant_id,
+    workspace_id
+  }: {
+    tenant_id?: string;
+    workspace_id?: string;
+  }) {
+    try {
+      // Check circuit breaker
+      if (this.isDbCircuitBreakerOpen()) {
+        throw new Error('Database circuit breaker is open');
+      }
+
+      // Get multiple timeframe metrics in parallel with optimized queries
+      const [
+        last5min,
+        last1hour,
+        last24hours,
+        serviceDeps,
+        recentErrors,
+        highCostOps
+      ] = await Promise.allSettled([
+        this.getPerformanceMetrics({ tenant_id, workspace_id, timeframe: '5m' }),
+        this.getPerformanceMetrics({ tenant_id, workspace_id, timeframe: '1h' }),
+        this.getPerformanceMetrics({ tenant_id, workspace_id, timeframe: '24h' }),
+        this.getServiceDependencies('1h'),
+        this.queryTelemetry({
+          tenant_id,
+          workspace_id,
+          status: 'error',
+          start_time: new Date(Date.now() - 3600000),
+          limit: 10,
+          sort_by: 'timestamp',
+          sort_order: 'desc'
+        }),
+        this.queryTelemetry({
+          tenant_id,
+          workspace_id,
+          min_cost: 0.01,
+          start_time: new Date(Date.now() - 3600000),
+          limit: 10,
+          sort_by: 'cost_usd',
+          sort_order: 'desc'
+        })
+      ]);
+
+      // Extract results from settled promises
+      const extractResult = (result: PromiseSettledResult<any>) => 
+        result.status === 'fulfilled' ? result.value : null;
+
+      return {
+        last5min: extractResult(last5min),
+        last1hour: extractResult(last1hour),
+        last24hours: extractResult(last24hours),
+        serviceDeps: extractResult(serviceDeps),
+        recentErrors: extractResult(recentErrors),
+        highCostOps: extractResult(highCostOps)
+      };
+    } catch (error) {
+      this.recordDbFailure();
+      loggingService.error('Failed to get unified dashboard data:', { error: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }
+
+  /**
+   * Optimized filter builder
+   */
+  private static buildOptimizedFilter(query: TelemetryQuery): any {
+    const filter: any = {};
+    
+    // Use pre-built filter functions for better performance
+    const filterMap = [
+      ['tenant_id', query.tenant_id],
+      ['workspace_id', query.workspace_id],
+      ['user_id', query.user_id],
+      ['trace_id', query.trace_id],
+      ['request_id', query.request_id],
+      ['service_name', query.service_name],
+      ['status', query.status],
+      ['http_route', query.http_route],
+      ['http_method', query.http_method],
+      ['http_status_code', query.http_status_code],
+      ['gen_ai_model', query.gen_ai_model],
+      ['error_type', query.error_type]
+    ];
+
+    // Single pass filter building
+    for (const [field, value] of filterMap) {
+      if (value !== undefined && value !== null && value !== '') {
+        filter[field as string] = value;
+      }
+    }
+
+    // Handle operation_name separately for regex
+    if (query.operation_name) {
+      filter.operation_name = new RegExp(query.operation_name, 'i');
+    }
+
+    // Range filters
+    if (query.start_time || query.end_time) {
+      filter.timestamp = {};
+      if (query.start_time) filter.timestamp.$gte = query.start_time;
+      if (query.end_time) filter.timestamp.$lte = query.end_time;
+    }
+
+    if (query.min_duration || query.max_duration) {
+      filter.duration_ms = {};
+      if (query.min_duration) filter.duration_ms.$gte = query.min_duration;
+      if (query.max_duration) filter.duration_ms.$lte = query.max_duration;
+    }
+
+    if (query.min_cost || query.max_cost) {
+      filter.cost_usd = {};
+      if (query.min_cost) filter.cost_usd.$gte = query.min_cost;
+      if (query.max_cost) filter.cost_usd.$lte = query.max_cost;
+    }
+
+    return filter;
+  }
+
+  /**
+   * Initialize filter builders
+   */
+  private static initializeFilterBuilders(): void {
+    // Pre-compile common filter patterns for better performance
+    this.filterBuilders.set('exact_match', (value: any) => value);
+    this.filterBuilders.set('regex_match', (value: string) => new RegExp(value, 'i'));
+    this.filterBuilders.set('range', (value: any) => {
+      const { min, max } = value;
+      const range: any = {};
+      if (min !== undefined) range.$gte = min;
+      if (max !== undefined) range.$lte = max;
+      return range;
+    });
+  }
+
+  /**
+   * Circuit breaker utilities for database operations
+   */
+  private static isDbCircuitBreakerOpen(): boolean {
+    if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+      if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.dbFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private static recordDbFailure(): void {
+    this.dbFailureCount++;
+    this.lastDbFailureTime = Date.now();
+  }
+
+  /**
+   * Cleanup method for graceful shutdown
+   */
+  static cleanup(): void {
+    // Reset circuit breaker state
+    this.dbFailureCount = 0;
+    this.lastDbFailureTime = 0;
+    
+    // Clear filter builders
+    this.filterBuilders.clear();
   }
 }

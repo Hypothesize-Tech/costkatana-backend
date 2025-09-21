@@ -5,6 +5,25 @@ import { loggingService } from '../services/logging.service';
 import { trace } from '@opentelemetry/api';
 
 export class TelemetryController {
+  // Background processing queue
+  private static backgroundQueue: Array<() => Promise<void>> = [];
+  private static backgroundProcessor?: NodeJS.Timeout;
+  
+  // Circuit breaker for database operations
+  private static dbFailureCount: number = 0;
+  private static readonly MAX_DB_FAILURES = 5;
+  private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+  private static lastDbFailureTime: number = 0;
+  
+  // Request timeout configuration
+  private static readonly AGGREGATION_TIMEOUT = 20000; // 20 seconds for complex aggregations
+  
+  /**
+   * Initialize background processor
+   */
+  static {
+    this.startBackgroundProcessor();
+  }
   /**
    * Get telemetry data with filters
    */
@@ -41,49 +60,20 @@ export class TelemetryController {
       loggingService.info('Telemetry query initiated', {
         requestId,
         tenant_id,
-        hasTenantId: !!tenant_id,
         workspace_id,
-        hasWorkspaceId: !!workspace_id,
         user_id,
-        hasUserId: !!user_id,
         trace_id,
-        hasTraceId: !!trace_id,
-        request_id,
-        hasRequestId: !!request_id,
         service_name,
-        hasServiceName: !!service_name,
         operation_name,
-        hasOperationName: !!operation_name,
         status,
-        hasStatus: !!status,
-        start_time,
-        hasStartTime: !!start_time,
-        end_time,
-        hasEndTime: !!end_time,
-        min_duration,
-        hasMinDuration: min_duration !== undefined,
-        max_duration,
-        hasMaxDuration: max_duration !== undefined,
-        min_cost,
-        hasMinCost: min_cost !== undefined,
-        max_cost,
-        hasMaxCost: max_cost !== undefined,
-        http_route,
-        hasHttpRoute: !!http_route,
-        http_method,
-        hasHttpMethod: !!http_method,
-        http_status_code,
-        hasHttpStatusCode: http_status_code !== undefined,
-        gen_ai_model,
-        hasGenAiModel: !!gen_ai_model,
-        error_type,
-        hasErrorType: !!error_type,
         limit: limit ? Number(limit) : 100,
-        page: page ? Number(page) : 1,
-        sort_by,
-        hasSortBy: !!sort_by,
-        sort_order
+        page: page ? Number(page) : 1
       });
+
+      // Check circuit breaker before proceeding
+      if (this.isDbCircuitBreakerOpen()) {
+        throw new Error('Service temporarily unavailable');
+      }
 
       const results = await TelemetryService.queryTelemetry({
         tenant_id: tenant_id as string,
@@ -117,50 +107,30 @@ export class TelemetryController {
         duration,
         tenant_id,
         workspace_id,
-        user_id,
-        trace_id,
-        request_id,
-        service_name,
-        operation_name,
-        status,
-        start_time,
-        end_time,
-        min_duration,
-        max_duration,
-        min_cost,
-        max_cost,
-        http_route,
-        http_method,
-        http_status_code,
-        gen_ai_model,
-        error_type,
-        limit: limit ? Number(limit) : 100,
-        page: page ? Number(page) : 1,
-        sort_by,
-        sort_order,
-        resultsCount: results?.data?.length || 0,
-        hasResults: !!results
+        resultsCount: results?.data?.length || 0
       });
 
-      // Log business event
-      loggingService.logBusiness({
-        event: 'telemetry_queried',
-        category: 'telemetry',
-        value: duration,
-        metadata: {
-          tenant_id,
-          workspace_id,
-          user_id,
-          trace_id,
-          request_id,
-          service_name,
-          operation_name,
-          status,
-          hasDateRange: !!(start_time && end_time),
-          hasCostRange: !!(min_cost || max_cost),
-          hasDurationRange: !!(min_duration || max_duration),
-          resultsCount: results?.data?.length || 0
-        }
+      // Queue background business event logging
+      this.queueBackgroundOperation(async () => {
+        loggingService.logBusiness({
+          event: 'telemetry_queried',
+          category: 'telemetry',
+          value: duration,
+          metadata: {
+            tenant_id,
+            workspace_id,
+            user_id,
+            trace_id,
+            request_id,
+            service_name,
+            operation_name,
+            status,
+            hasDateRange: !!(start_time && end_time),
+            hasCostRange: !!(min_cost || max_cost),
+            hasDurationRange: !!(min_duration || max_duration),
+            resultsCount: results?.data?.length || 0
+          }
+        });
       });
 
       res.json({
@@ -168,35 +138,28 @@ export class TelemetryController {
         ...results
       });
     } catch (error: any) {
+      this.recordDbFailure();
       const duration = Date.now() - startTime;
+      
+      if (error.message === 'Service temporarily unavailable') {
+        loggingService.warn('Telemetry service unavailable', {
+          requestId,
+          duration
+        });
+        
+        res.status(503).json({
+          success: false,
+          error: 'Service temporarily unavailable',
+          message: 'Please try again later'
+        });
+        return;
+      }
       
       loggingService.error('Telemetry query failed', {
         requestId,
         tenant_id,
         workspace_id,
-        user_id,
-        trace_id,
-        request_id,
-        service_name,
-        operation_name,
-        status,
-        start_time,
-        end_time,
-        min_duration,
-        max_duration,
-        min_cost,
-        max_cost,
-        http_route,
-        http_method,
-        http_status_code,
-        gen_ai_model,
-        error_type,
-        limit,
-        page,
-        sort_by,
-        sort_order,
         error: error.message || 'Unknown error',
-        stack: error.stack,
         duration
       });
       
@@ -576,52 +539,31 @@ export class TelemetryController {
         hasWorkspaceId: !!workspace_id
       });
 
-      // Get multiple timeframe metrics in parallel
-      const [
+      // Check circuit breaker before proceeding
+      if (this.isDbCircuitBreakerOpen()) {
+        throw new Error('Service temporarily unavailable');
+      }
+
+      // Get unified dashboard data with timeout handling
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Dashboard query timeout')), this.AGGREGATION_TIMEOUT);
+      });
+
+      const dashboardPromise = TelemetryService.getUnifiedDashboardData({
+        tenant_id: tenant_id as string,
+        workspace_id: workspace_id as string
+      });
+
+      const dashboardData = await Promise.race([dashboardPromise, timeoutPromise]);
+      
+      const {
         last5min,
         last1hour,
         last24hours,
-        serviceDeps
-      ] = await Promise.all([
-        TelemetryService.getPerformanceMetrics({
-          tenant_id: tenant_id as string,
-          workspace_id: workspace_id as string,
-          timeframe: '5m'
-        }),
-        TelemetryService.getPerformanceMetrics({
-          tenant_id: tenant_id as string,
-          workspace_id: workspace_id as string,
-          timeframe: '1h'
-        }),
-        TelemetryService.getPerformanceMetrics({
-          tenant_id: tenant_id as string,
-          workspace_id: workspace_id as string,
-          timeframe: '24h'
-        }),
-        TelemetryService.getServiceDependencies('1h')
-      ]);
-
-      // Get recent errors
-      const recentErrors = await TelemetryService.queryTelemetry({
-        tenant_id: tenant_id as string,
-        workspace_id: workspace_id as string,
-        status: 'error',
-        start_time: new Date(Date.now() - 3600000), // Last hour
-        limit: 10,
-        sort_by: 'timestamp',
-        sort_order: 'desc'
-      });
-
-      // Get high-cost operations
-      const highCostOps = await TelemetryService.queryTelemetry({
-        tenant_id: tenant_id as string,
-        workspace_id: workspace_id as string,
-        min_cost: 0.01, // Operations costing more than $0.01
-        start_time: new Date(Date.now() - 3600000),
-        limit: 10,
-        sort_by: 'cost_usd',
-        sort_order: 'desc'
-      });
+        serviceDeps,
+        recentErrors,
+        highCostOps
+      } = dashboardData;
 
       const duration = Date.now() - startTime;
 
@@ -1150,5 +1092,73 @@ export class TelemetryController {
       top_operations: last1hour.top_operations,
       cost_by_model: last1hour.cost_by_model
     };
+  }
+
+  /**
+   * Circuit breaker utilities for database operations
+   */
+  private static isDbCircuitBreakerOpen(): boolean {
+    if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+      if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.dbFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  private static recordDbFailure(): void {
+    this.dbFailureCount++;
+    this.lastDbFailureTime = Date.now();
+  }
+
+  /**
+   * Background processing utilities
+   */
+  private static queueBackgroundOperation(operation: () => Promise<void>): void {
+    this.backgroundQueue.push(operation);
+  }
+
+  private static startBackgroundProcessor(): void {
+    this.backgroundProcessor = setInterval(async () => {
+      if (this.backgroundQueue.length > 0) {
+        const operation = this.backgroundQueue.shift();
+        if (operation) {
+          try {
+            await operation();
+          } catch (error) {
+            loggingService.error('Background operation failed:', {
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        }
+      }
+    }, 1000);
+  }
+
+  /**
+   * Cleanup method for graceful shutdown
+   */
+  static cleanup(): void {
+    if (this.backgroundProcessor) {
+      clearInterval(this.backgroundProcessor);
+      this.backgroundProcessor = undefined;
+    }
+    
+    // Process remaining queue items
+    while (this.backgroundQueue.length > 0) {
+      const operation = this.backgroundQueue.shift();
+      if (operation) {
+        operation().catch(error => {
+          loggingService.error('Cleanup operation failed:', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        });
+      }
+    }
   }
 }
