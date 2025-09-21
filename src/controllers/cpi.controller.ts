@@ -476,23 +476,17 @@ export class CPIController {
         try {
             const { Usage } = await import('../models/Usage');
             
-            // Calculate timeframe
-            const endDate = new Date();
-            const startDate = new Date();
-            if (timeframe === '7d') {
-                startDate.setDate(startDate.getDate() - 7);
-            } else if (timeframe === '30d') {
-                startDate.setDate(startDate.getDate() - 30);
-            } else if (timeframe === '90d') {
-                startDate.setDate(startDate.getDate() - 90);
-            }
+            // Calculate timeframe using helper method
+            const { startDate, endDate } = this.calculateDateRanges(timeframe);
 
-            // Get usage statistics
+            // Single query for usage statistics
             const usageStats = await Usage.aggregate([
                 {
                     $match: {
                         userId: new (await import('mongoose')).Types.ObjectId(userId),
-                        ...(projectId && projectId !== 'all' && { projectId: new (await import('mongoose')).Types.ObjectId(projectId) }),
+                        ...(projectId && projectId !== 'all' && { 
+                            projectId: new (await import('mongoose')).Types.ObjectId(projectId) 
+                        }),
                         createdAt: { $gte: startDate, $lte: endDate }
                     }
                 },
@@ -709,69 +703,62 @@ export class CPIController {
         try {
             const { Usage } = await import('../models/Usage');
             
-            // Calculate timeframe
-            const endDate = new Date();
-            const startDate = new Date();
-            if (timeframe === '7d') {
-                startDate.setDate(startDate.getDate() - 7);
-            } else if (timeframe === '30d') {
-                startDate.setDate(startDate.getDate() - 30);
-            } else if (timeframe === '90d') {
-                startDate.setDate(startDate.getDate() - 90);
-            }
+            // Calculate timeframe dates
+            const { startDate, endDate, historicalStartDate } = this.calculateDateRanges(timeframe);
 
-            // Get usage statistics by provider
-            const providerStats = await Usage.aggregate([
+            // Single query with facets for all data
+            const unifiedResults = await Usage.aggregate([
                 {
                     $match: {
                         userId: new (await import('mongoose')).Types.ObjectId(userId),
-                        ...(projectId && projectId !== 'all' && { projectId: new (await import('mongoose')).Types.ObjectId(projectId) }),
-                        createdAt: { $gte: startDate, $lte: endDate }
+                        ...(projectId && projectId !== 'all' && { 
+                            projectId: new (await import('mongoose')).Types.ObjectId(projectId) 
+                        }),
+                        createdAt: { $gte: historicalStartDate, $lte: endDate }
                     }
                 },
                 {
-                    $group: {
-                        _id: '$service',
-                        totalRequests: { $sum: 1 },
-                        totalCost: { $sum: '$cost' },
-                        avgResponseTime: { $avg: '$responseTime' },
-                        errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
-                        avgTokens: { $avg: '$totalTokens' }
+                    $facet: {
+                        currentPeriod: [
+                            { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+                            {
+                                $group: {
+                                    _id: '$service',
+                                    totalRequests: { $sum: 1 },
+                                    totalCost: { $sum: '$cost' },
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
+                                    avgTokens: { $avg: '$totalTokens' }
+                                }
+                            },
+                            { $sort: { totalCost: -1 } }
+                        ],
+                        historicalPeriod: [
+                            { $match: { createdAt: { $gte: historicalStartDate, $lt: startDate } } },
+                            {
+                                $group: {
+                                    _id: '$service',
+                                    totalRequests: { $sum: 1 },
+                                    totalCost: { $sum: '$cost' },
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            }
+                        ]
                     }
-                },
-                {
-                    $sort: { totalCost: -1 }
                 }
             ]);
 
-            // Get historical data for trend calculation
-            const historicalStartDate = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()));
-            const historicalStats = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new (await import('mongoose')).Types.ObjectId(userId),
-                        ...(projectId && projectId !== 'all' && { projectId: new (await import('mongoose')).Types.ObjectId(projectId) }),
-                        createdAt: { $gte: historicalStartDate, $lt: startDate }
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$service',
-                        totalRequests: { $sum: 1 },
-                        totalCost: { $sum: '$cost' },
-                        avgResponseTime: { $avg: '$responseTime' },
-                        errorCount: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
-                    }
-                }
-            ]);
+            const providerStats = unifiedResults[0]?.currentPeriod || [];
+            const historicalStats = unifiedResults[0]?.historicalPeriod || [];
 
             // Calculate total metrics
-            const totalRequests = providerStats.reduce((sum, stat) => sum + stat.totalRequests, 0);
-            const totalCost = providerStats.reduce((sum, stat) => sum + stat.totalCost, 0);
+            const totalRequests = providerStats.reduce((sum: number, stat: any) => sum + stat.totalRequests, 0);
+            const totalCost = providerStats.reduce((sum: number, stat: any) => sum + stat.totalCost, 0);
 
             // Generate provider comparison data
-            const providerComparison = providerStats.map(stat => {
-                const historical = historicalStats.find(h => h._id === stat._id);
+            const providerComparison = providerStats.map((stat: any) => {
+                const historical = historicalStats.find((h: any) => h._id === stat._id);
                 const marketShare = (stat.totalRequests / totalRequests) * 100;
                 
                 // Calculate trends with intelligent fallbacks
@@ -821,11 +808,11 @@ export class CPIController {
             });
 
             // Calculate cost savings (compare with most expensive option)
-            const maxCostProvider = providerStats.reduce((max, stat) => 
+            const maxCostProvider = providerStats.reduce((max: any, stat: any) => 
                 stat.totalCost > max.totalCost ? stat : max
             );
             
-            const costSavings = providerStats.reduce((savings, stat) => {
+            const costSavings = providerStats.reduce((savings: number, stat: any) => {
                 if (stat._id === maxCostProvider._id) return savings;
                 const potentialSavings = (maxCostProvider.totalCost / maxCostProvider.totalRequests - stat.totalCost / stat.totalRequests) * stat.totalRequests;
                 return savings + Math.max(0, potentialSavings);
@@ -947,6 +934,31 @@ export class CPIController {
     }
 
     /**
+     * Calculate date ranges for analytics queries
+     */
+    private static calculateDateRanges(timeframe: string): {
+        startDate: Date;
+        endDate: Date;
+        historicalStartDate: Date;
+    } {
+        const endDate = new Date();
+        const startDate = new Date();
+        
+        if (timeframe === '7d') {
+            startDate.setDate(startDate.getDate() - 7);
+        } else if (timeframe === '30d') {
+            startDate.setDate(startDate.getDate() - 30);
+        } else if (timeframe === '90d') {
+            startDate.setDate(startDate.getDate() - 90);
+        }
+        
+        // Historical period for trend calculation
+        const historicalStartDate = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()));
+        
+        return { startDate, endDate, historicalStartDate };
+    }
+
+    /**
      * Get provider performance trends based on industry benchmarks and model characteristics
      */
     private static getProviderPerformanceTrend(provider: string): { costTrend: number; performanceTrend: number } {
@@ -976,8 +988,7 @@ export class CPIController {
                 requestId: _req.headers['x-request-id'] as string
             });
 
-            CPIService.clearExpiredCache();
-            IntelligentRoutingService.clearExpiredCache();
+            // No caching to clear
 
             const duration = Date.now() - startTime;
 

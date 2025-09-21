@@ -12,9 +12,6 @@ import {
 import { loggingService } from './logging.service';
 
 export class CPIService {
-    private static performanceCache = new Map<string, ProviderPerformance>();
-    private static cpiCache = new Map<string, CPIMetrics>();
-    private static cacheTTL = 5 * 60 * 1000; // 5 minutes
 
     /**
      * Calculate CPI metrics for a specific provider and model
@@ -25,13 +22,6 @@ export class CPIService {
         input: CPICalculationInput
     ): Promise<CPIMetrics> {
         try {
-            const cacheKey = `${provider}:${modelId}:${input.useCase}`;
-            const cached = this.cpiCache.get(cacheKey);
-            
-            if (cached && Date.now() - Date.now() < this.cacheTTL) {
-                return cached;
-            }
-
             // Get base pricing
             const pricing = getModelPricing(provider, modelId);
             if (!pricing) {
@@ -49,11 +39,13 @@ export class CPIService {
             // Get performance metrics
             const performance = await this.getProviderPerformance(provider, modelId);
             
-            // Calculate individual scores
-            const costEfficiencyScore = this.calculateCostEfficiencyScore(normalizedCost, input.useCase);
-            const performanceScore = this.calculatePerformanceScore(performance || undefined, input.latencyRequirement);
-            const qualityScore = this.calculateQualityScore(pricing, input.useCase, input.qualityRequirement);
-            const reliabilityScore = this.calculateReliabilityScore(performance || undefined);
+            // Calculate individual scores in parallel
+            const [costEfficiencyScore, performanceScore, qualityScore, reliabilityScore] = await Promise.all([
+                Promise.resolve(this.calculateCostEfficiencyScore(normalizedCost, input.useCase)),
+                Promise.resolve(this.calculatePerformanceScore(performance || undefined, input.latencyRequirement)),
+                Promise.resolve(this.calculateQualityScore(pricing, input.useCase, input.qualityRequirement)),
+                Promise.resolve(this.calculateReliabilityScore(performance || undefined))
+            ]);
 
             // Calculate overall CPI score
             const cpiScore = this.calculateOverallCPIScore({
@@ -72,15 +64,13 @@ export class CPIService {
                 reliabilityScore
             };
 
-            // Cache the result
-            this.cpiCache.set(cacheKey, metrics);
-
-            loggingService.debug('CPI metrics calculated', { value:  { provider,
+            loggingService.debug('CPI metrics calculated', { value: { 
+                provider,
                 modelId,
                 cpiScore,
                 normalizedCost,
                 performanceScore
-             } });
+            }});
 
             return metrics;
         } catch (error) {
@@ -346,30 +336,24 @@ export class CPIService {
         provider: string,
         modelId: string
     ): Promise<ProviderPerformance | null> {
-        const cacheKey = `${provider}:${modelId}`;
-        const cached = this.performanceCache.get(cacheKey);
-        
-        if (cached && Date.now() - Date.now() < this.cacheTTL) {
-            return cached;
-        }
-
         try {
-            // Get real performance data from usage analytics
-            const performance = await this.fetchRealPerformanceData(provider, modelId);
+            // Try to get real performance data with timeout
+            const performancePromise = this.fetchRealPerformanceData(provider, modelId);
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => resolve(null), 100); // 100ms timeout
+            });
+
+            const performance = await Promise.race([performancePromise, timeoutPromise]);
+            
             if (performance) {
-                this.performanceCache.set(cacheKey, performance);
                 return performance;
             }
 
-            // Fallback to estimated performance based on provider/model characteristics
-            const estimatedPerformance = await this.generateEstimatedPerformance(provider, modelId);
-            this.performanceCache.set(cacheKey, estimatedPerformance);
-            return estimatedPerformance;
+            // Fallback to estimated performance
+            return await this.generateEstimatedPerformance(provider, modelId);
         } catch (error) {
             loggingService.warn(`Failed to fetch performance data for ${provider}:${modelId}:`, { error: error instanceof Error ? error.message : String(error) });
-            const estimatedPerformance = await this.generateEstimatedPerformance(provider, modelId);
-            this.performanceCache.set(cacheKey, estimatedPerformance);
-            return estimatedPerformance;
+            return await this.generateEstimatedPerformance(provider, modelId);
         }
     }
 
@@ -388,46 +372,56 @@ export class CPIService {
             const thirtyDaysAgo = new Date();
             thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-            const usageStats = await Usage.aggregate([
+            // Single aggregation query
+            const results = await Usage.aggregate([
                 {
                     $match: {
                         service: provider,
                         model: modelId,
                         createdAt: { $gte: thirtyDaysAgo },
-                        errorOccurred: false
+                        responseTime: { $exists: true, $gt: 0 }
                     }
                 },
                 {
-                    $group: {
-                        _id: null,
-                        avgResponseTime: { $avg: '$responseTime' },
-                        totalRequests: { $sum: 1 },
-                        totalErrors: { $sum: { $cond: ['$errorOccurred', 1, 0] } },
-                        avgTokens: { $avg: '$totalTokens' }
+                    $facet: {
+                        stats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    totalRequests: { $sum: 1 },
+                                    totalErrors: { $sum: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            }
+                        ],
+                        percentiles: [
+                            { $sort: { responseTime: 1 } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    responseTimes: { $push: '$responseTime' }
+                                }
+                            }
+                        ]
                     }
                 }
             ]);
 
-            // Get percentiles separately using a different approach
-            const responseTimes = await Usage.distinct('responseTime', {
-                service: provider,
-                model: modelId,
-                createdAt: { $gte: thirtyDaysAgo },
-                errorOccurred: false
-            });
-
-            const sortedResponseTimes = responseTimes.sort((a, b) => a - b);
-            const p95Index = Math.floor(sortedResponseTimes.length * 0.95);
-            const p99Index = Math.floor(sortedResponseTimes.length * 0.99);
-            
-            const p95ResponseTime = sortedResponseTimes[p95Index] || 5000;
-            const p99ResponseTime = sortedResponseTimes[p99Index] || 8000;
-
-            if (usageStats.length === 0) {
+            if (results.length === 0 || results[0].stats.length === 0) {
                 return null;
             }
 
-            const stats = usageStats[0];
+            const stats = results[0].stats[0];
+            const responseTimes = results[0].percentiles[0]?.responseTimes || [];
+            
+            // Calculate percentiles
+            const sortedResponseTimes = responseTimes.sort((a: number, b: number) => a - b);
+            const p95Index = Math.floor(sortedResponseTimes.length * 0.95);
+            const p99Index = Math.floor(sortedResponseTimes.length * 0.99);
+            
+            const p95ResponseTime = sortedResponseTimes[p95Index] || stats.avgResponseTime * 1.5;
+            const p99ResponseTime = sortedResponseTimes[p99Index] || stats.avgResponseTime * 2.0;
+
             const successRate = stats.totalRequests > 0 ? 
                 ((stats.totalRequests - stats.totalErrors) / stats.totalRequests) * 100 : 95;
 
@@ -450,7 +444,7 @@ export class CPIService {
 
             return performance;
         } catch (error) {
-            loggingService.error('Error fetching real performance data:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error fetching performance data:', { error: error instanceof Error ? error.message : String(error) });
             return null;
         }
     }
@@ -636,51 +630,52 @@ export class CPIService {
             const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
             const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
-            const [recentStats, historicalStats] = await Promise.all([
-                Usage.aggregate([
-                    {
-                        $match: {
-                            service: provider,
-                            model: modelId,
-                            createdAt: { $gte: thirtyDaysAgo },
-                            errorOccurred: false
-                        }
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            avgResponseTime: { $avg: '$responseTime' },
-                            avgCost: { $avg: '$cost' },
-                            errorRate: { $avg: { $cond: ['$errorOccurred', 1, 0] } }
-                        }
+            // Single query with facets
+            const trendsData = await Usage.aggregate([
+                {
+                    $match: {
+                        service: provider,
+                        model: modelId,
+                        createdAt: { $gte: sixtyDaysAgo },
+                        responseTime: { $exists: true, $gt: 0 }
                     }
-                ]),
-                Usage.aggregate([
-                    {
-                        $match: {
-                            service: provider,
-                            model: modelId,
-                            createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo },
-                            errorOccurred: false
-                        }
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            avgResponseTime: { $avg: '$responseTime' },
-                            avgCost: { $avg: '$cost' },
-                            errorRate: { $avg: { $cond: ['$errorOccurred', 1, 0] } }
-                        }
+                },
+                {
+                    $facet: {
+                        recent: [
+                            { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    avgCost: { $avg: '$cost' },
+                                    errorRate: { $avg: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            }
+                        ],
+                        historical: [
+                            { $match: { createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    avgResponseTime: { $avg: '$responseTime' },
+                                    avgCost: { $avg: '$cost' },
+                                    errorRate: { $avg: { $cond: ['$errorOccurred', 1, 0] } }
+                                }
+                            }
+                        ]
                     }
-                ])
+                }
             ]);
 
-            if (recentStats.length === 0 || historicalStats.length === 0) {
+            if (trendsData.length === 0 || 
+                trendsData[0].recent.length === 0 || 
+                trendsData[0].historical.length === 0) {
                 return { latencyTrend: 'stable', costTrend: 'stable', reliabilityTrend: 'stable' };
             }
 
-            const recent = recentStats[0];
-            const historical = historicalStats[0];
+            const recent = trendsData[0].recent[0];
+            const historical = trendsData[0].historical[0];
 
             const latencyChange = ((recent.avgResponseTime - historical.avgResponseTime) / historical.avgResponseTime) * 100;
             const costChange = ((recent.avgCost - historical.avgCost) / historical.avgCost) * 100;
@@ -770,23 +765,13 @@ export class CPIService {
     }
 
     /**
-     * Clear expired cache entries
+     * Utility method to chunk arrays for batch processing
      */
-    static clearExpiredCache(): void {
-        const now = Date.now();
-        
-        // Clear expired CPI cache
-        this.cpiCache.forEach((_value, key) => {
-            if (now - Date.now() > this.cacheTTL) {
-                this.cpiCache.delete(key);
-            }
-        });
-
-        // Clear expired performance cache
-        this.performanceCache.forEach((_value, key) => {
-            if (now - Date.now() > this.cacheTTL) {
-                this.performanceCache.delete(key);
-            }
-        });
+    static chunkArray<T>(array: T[], chunkSize: number): T[][] {
+        const chunks: T[][] = [];
+        for (let i = 0; i < array.length; i += chunkSize) {
+            chunks.push(array.slice(i, i + chunkSize));
+        }
+        return chunks;
     }
 }

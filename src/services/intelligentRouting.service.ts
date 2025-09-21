@@ -15,8 +15,6 @@ import { getModelPricing } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 
 export class IntelligentRoutingService {
-    private static routingCache = new Map<string, CPIRoutingDecision>();
-    private static cacheTTL = 2 * 60 * 1000; // 2 minutes
 
     /**
      * Get intelligent routing decision for a request
@@ -27,14 +25,6 @@ export class IntelligentRoutingService {
         availableProviders: string[] = []
     ): Promise<CPIRoutingDecision> {
         try {
-            const cacheKey = this.generateCacheKey(request, strategy);
-            const cached = this.routingCache.get(cacheKey);
-            
-            if (cached && Date.now() - Date.now() < this.cacheTTL) {
-                loggingService.debug('Returning cached routing decision', { value:  { cacheKey  } });
-                return cached;
-            }
-
             // Estimate tokens if not provided
             const promptTokens = request.promptTokens || await this.estimatePromptTokens(request);
             const completionTokens = request.completionTokens || this.estimateCompletionTokens(request);
@@ -64,9 +54,11 @@ export class IntelligentRoutingService {
             // Select best model based on strategy
             const selectedModel = this.selectBestModel(filteredModels, strategy);
             
-            // Generate alternatives and fallback options
-            const alternatives = this.generateAlternatives(filteredModels, selectedModel);
-            const fallbackOptions = this.generateFallbackOptions(filteredModels, selectedModel);
+            // Generate alternatives and fallback options in parallel
+            const [alternatives, fallbackOptions] = await Promise.all([
+                Promise.resolve(this.generateAlternatives(filteredModels, selectedModel)),
+                Promise.resolve(this.generateFallbackOptions(filteredModels, selectedModel))
+            ]);
 
             // Create routing decision
             const decision: CPIRoutingDecision = {
@@ -78,16 +70,13 @@ export class IntelligentRoutingService {
                 fallbackOptions
             };
 
-            // Cache the decision
-            this.routingCache.set(cacheKey, decision);
-
-            loggingService.info('Intelligent routing decision generated', { value:  { 
+            loggingService.info('Intelligent routing decision generated', { value: { 
                 selectedProvider: decision.selectedProvider,
                 selectedModel: decision.selectedModel,
                 cpiScore: selectedModel.cpiScore,
                 strategy: strategy.strategy,
                 alternativesCount: alternatives.length
-             } });
+            }});
 
             return decision;
         } catch (error) {
@@ -105,39 +94,42 @@ export class IntelligentRoutingService {
         modelName: string;
         pricing: any;
     }>> {
-        const models: Array<{
-            provider: string;
-            modelId: string;
-            modelName: string;
-            pricing: any;
-        }> = [];
-
         // Default providers if none specified
         const defaultProviders = providers.length > 0 ? providers : [
             'openai', 'anthropic', 'aws-bedrock', 'google-ai', 'cohere'
         ];
 
-        for (const provider of defaultProviders) {
+        // Parallel provider processing
+        const providerPromises = defaultProviders.map(async (provider) => {
             try {
-                // Get all models for this provider
                 const providerModels = await this.getProviderModels(provider);
-                for (const model of providerModels) {
+                
+                // Parallel model processing within provider
+                const modelPromises = providerModels.map(async (model) => {
                     const pricing = getModelPricing(provider, model.modelId);
-                    if (pricing) {
-                        models.push({
-                            provider,
-                            modelId: model.modelId,
-                            modelName: model.modelName,
-                            pricing
-                        });
-                    }
-                }
+                    return pricing ? {
+                        provider,
+                        modelId: model.modelId,
+                        modelName: model.modelName,
+                        pricing
+                    } : null;
+                });
+                
+                const models = await Promise.all(modelPromises);
+                return models.filter(Boolean) as Array<{
+                    provider: string;
+                    modelId: string;
+                    modelName: string;
+                    pricing: any;
+                }>;
             } catch (error) {
                 loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
+                return [];
             }
-        }
+        });
 
-        return models;
+        const allProviderModels = await Promise.all(providerPromises);
+        return allProviderModels.flat();
     }
 
     /**
@@ -193,7 +185,10 @@ export class IntelligentRoutingService {
         estimatedLatency: number;
         metrics: CPIMetrics;
     }>> {
-        const scores: Array<{
+        const BATCH_SIZE = 10; // Process 10 models at a time
+        const batches = CPIService.chunkArray(models, BATCH_SIZE);
+        
+        const allResults: Array<{
             provider: string;
             modelId: string;
             modelName: string;
@@ -202,40 +197,46 @@ export class IntelligentRoutingService {
             estimatedLatency: number;
             metrics: CPIMetrics;
         }> = [];
+        
+        for (const batch of batches) {
+            const batchResults = await Promise.all(
+                batch.map(async (model) => {
+                    try {
+                        // Parallel calculation of metrics, cost, and latency
+                        const [metrics, estimatedCost, estimatedLatency] = await Promise.all([
+                            CPIService.calculateCPIMetrics(model.provider, model.modelId, input),
+                            Promise.resolve(this.estimateModelCost(input.promptTokens, input.completionTokens, model.pricing)),
+                            this.estimateModelLatency(model.provider, model.modelId)
+                        ]);
 
-        for (const model of models) {
-            try {
-                const metrics = await CPIService.calculateCPIMetrics(
-                    model.provider,
-                    model.modelId,
-                    input
-                );
-
-                // Estimate cost
-                const estimatedCost = this.estimateModelCost(
-                    input.promptTokens,
-                    input.completionTokens,
-                    model.pricing
-                );
-
-                // Estimate latency (this would come from real performance data)
-                const estimatedLatency = await this.estimateModelLatency(model.provider, model.modelId);
-
-                scores.push({
-                    provider: model.provider,
-                    modelId: model.modelId,
-                    modelName: model.modelName,
-                    cpiScore: metrics.cpiScore,
-                    estimatedCost,
-                    estimatedLatency,
-                    metrics
-                });
-            } catch (error) {
-                loggingService.warn(`Failed to calculate CPI for ${model.provider}:${model.modelId}:`, { error: error instanceof Error ? error.message : String(error) });
-            }
+                        return {
+                            provider: model.provider,
+                            modelId: model.modelId,
+                            modelName: model.modelName,
+                            cpiScore: metrics.cpiScore,
+                            estimatedCost,
+                            estimatedLatency,
+                            metrics
+                        };
+                    } catch (error) {
+                        loggingService.warn(`Failed to calculate CPI for ${model.provider}:${model.modelId}:`, { error: error instanceof Error ? error.message : String(error) });
+                        return null;
+                    }
+                })
+            );
+            
+            allResults.push(...batchResults.filter(Boolean) as Array<{
+                provider: string;
+                modelId: string;
+                modelName: string;
+                cpiScore: number;
+                estimatedCost: number;
+                estimatedLatency: number;
+                metrics: CPIMetrics;
+            }>);
         }
-
-        return scores.sort((a, b) => b.cpiScore - a.cpiScore);
+        
+        return allResults.sort((a, b) => b.cpiScore - a.cpiScore);
     }
 
     /**
@@ -553,35 +554,31 @@ export class IntelligentRoutingService {
     /**
      * Estimate completion tokens
      */
-    private static async estimateCompletionTokens(request: any): Promise<number> {
+    private static estimateCompletionTokens(request: any): number {
         if (request.maxTokens) {
             return request.maxTokens;
         }
         
-        // Estimate based on prompt length and use case
-        if (request.prompt) {
-            const promptTokens = await this.estimatePromptTokens(request);
-            const useCase = this.detectUseCase(request);
-            
-            // Different completion ratios based on use case
-            const completionRatios: Record<string, number> = {
-                'creative': 1.5,      // Creative writing tends to be longer
-                'analytical': 0.8,     // Analysis tends to be concise
-                'conversational': 1.2,  // Chat responses are moderate
-                'code': 0.6,           // Code generation is usually shorter
-                'vision': 0.4,         // Vision tasks have minimal text output
-                'general': 1.0         // Default ratio
-            };
-            
-            return Math.ceil(promptTokens * (completionRatios[useCase] || 1.0));
-        }
+        // Estimate based on request type and use case
+        const useCase = this.detectUseCase(request);
         
-        // Estimate based on request type
-        if (request.type === 'chat') return 400;
-        if (request.type === 'completion') return 300;
-        if (request.type === 'embedding') return 0;
+        // Different completion ratios based on use case
+        const completionRatios: Record<string, number> = {
+            'creative': 1.5,      // Creative writing tends to be longer
+            'analytical': 0.8,     // Analysis tends to be concise
+            'conversational': 1.2,  // Chat responses are moderate
+            'code': 0.6,           // Code generation is usually shorter
+            'vision': 0.4,         // Vision tasks have minimal text output
+            'general': 1.0         // Default ratio
+        };
         
-        return 300; // Conservative default
+        // Base estimation
+        let baseTokens = 300;
+        if (request.type === 'chat') baseTokens = 400;
+        else if (request.type === 'completion') baseTokens = 300;
+        else if (request.type === 'embedding') baseTokens = 0;
+        
+        return Math.ceil(baseTokens * (completionRatios[useCase] || 1.0));
     }
 
     /**
@@ -774,15 +771,4 @@ export class IntelligentRoutingService {
         return 2500;
     }
 
-    /**
-     * Clear expired cache entries
-     */
-    static clearExpiredCache(): void {
-        const now = Date.now();
-        this.routingCache.forEach((_value, key) => {
-            if (now - Date.now() > this.cacheTTL) {
-                this.routingCache.delete(key);
-            }
-        });
-    }
 }
