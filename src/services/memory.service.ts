@@ -4,6 +4,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory';
 import { VectorMemoryService } from './vectorMemory.service';
 import { UserPreferenceService } from './userPreference.service';
+import mongoose from 'mongoose';
 
 export interface MemoryContext {
     userId: string;
@@ -163,7 +164,7 @@ export class MemoryService {
             // Execute all data fetching operations in parallel
             const [preferences, recentConversations, securityInsight] = await Promise.all([
                 this.userPreferenceService.getUserPreferences(userId),
-                ConversationMemory.find({ userId })
+                ConversationMemory.find({ userId: new mongoose.Types.ObjectId(userId) })
                     .sort({ createdAt: -1 })
                     .limit(10)
                     .lean(), // Use lean for better performance
@@ -235,7 +236,7 @@ export class MemoryService {
             }
             
             // Get recent conversations for pattern analysis
-            const recentConversations = await ConversationMemory.find({ userId })
+            const recentConversations = await ConversationMemory.find({ userId: new mongoose.Types.ObjectId(userId) })
                 .sort({ createdAt: -1 })
                 .limit(20);
                 
@@ -433,9 +434,9 @@ export class MemoryService {
             
             // Clear from database
             await Promise.all([
-                ConversationMemory.deleteMany({ userId }),
-                UserMemory.deleteMany({ userId }),
-                UserPreference.deleteOne({ userId })
+                ConversationMemory.deleteMany({ userId: new mongoose.Types.ObjectId(userId) }),
+                UserMemory.deleteMany({ userId: new mongoose.Types.ObjectId(userId) }),
+                UserPreference.deleteOne({ userId: new mongoose.Types.ObjectId(userId) })
             ]);
             
             // Clear from vector storage

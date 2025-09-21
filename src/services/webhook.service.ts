@@ -13,6 +13,7 @@ import {
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Handlebars from 'handlebars';
+import mongoose from 'mongoose';
 
 export class WebhookService {
     private static instance: WebhookService;
@@ -114,7 +115,7 @@ export class WebhookService {
      */
     async updateWebhook(webhookId: string, userId: string, updates: Partial<IWebhook>): Promise<IWebhook | null> {
         try {
-            const webhook = await Webhook.findOne({ _id: webhookId, userId });
+            const webhook = await Webhook.findOne({ _id: webhookId, userId: new mongoose.Types.ObjectId(userId) });
             if (!webhook) {
                 return null;
             }
@@ -162,7 +163,7 @@ export class WebhookService {
         events?: string[];
     }): Promise<IWebhook[]> {
         try {
-            const query: any = { userId };
+            const query: any = { userId: new mongoose.Types.ObjectId(userId) };
             
             if (filters?.active !== undefined) {
                 query.active = filters.active;
@@ -174,7 +175,7 @@ export class WebhookService {
 
             const webhooks = await Webhook.find(query)
                 .sort({ createdAt: -1 })
-                .select('-auth.credentials'); // Don't return encrypted credentials
+                .select('-auth.credentials');
 
             return webhooks;
         } catch (error) {
@@ -188,7 +189,7 @@ export class WebhookService {
      */
     async getWebhook(webhookId: string, userId: string): Promise<IWebhook | null> {
         try {
-            const webhook = await Webhook.findOne({ _id: webhookId, userId })
+            const webhook = await Webhook.findOne({ _id: webhookId, userId: new mongoose.Types.ObjectId(userId) })
                 .select('-auth.credentials');
             return webhook;
         } catch (error) {
@@ -202,7 +203,7 @@ export class WebhookService {
      */
     async deleteWebhook(webhookId: string, userId: string): Promise<boolean> {
         try {
-            const result = await Webhook.deleteOne({ _id: webhookId, userId });
+            const result = await Webhook.deleteOne({ _id: webhookId, userId: new mongoose.Types.ObjectId(userId) });
             
             if (result.deletedCount > 0) {
                 // Also delete associated deliveries
@@ -577,7 +578,7 @@ export class WebhookService {
      */
     async testWebhook(webhookId: string, userId: string, testData?: WebhookTestPayload): Promise<IWebhookDelivery> {
         try {
-            const webhook = await Webhook.findOne({ _id: webhookId, userId });
+            const webhook = await Webhook.findOne({ _id: webhookId, userId: new mongoose.Types.ObjectId(userId) });
             if (!webhook) {
                 throw new Error('Webhook not found');
             }
@@ -740,7 +741,7 @@ export class WebhookService {
                 throw new Error('Database circuit breaker is open');
             }
 
-            const webhook = await Webhook.findOne({ _id: webhookId, userId });
+            const webhook = await Webhook.findOne({ _id: webhookId, userId: new mongoose.Types.ObjectId(userId) });
             if (!webhook) {
                 throw new Error('Webhook not found');
             }

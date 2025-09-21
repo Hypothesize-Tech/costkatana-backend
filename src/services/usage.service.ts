@@ -142,7 +142,7 @@ export class UsageService {
         try {
             const query: any = {};
 
-            if (filters.userId) query.userId = filters.userId;
+            if (filters.userId) query.userId = new mongoose.Types.ObjectId(filters.userId);
             if (filters.projectId && filters.projectId !== 'all') {
                 query.projectId = new mongoose.Types.ObjectId(filters.projectId);
             }

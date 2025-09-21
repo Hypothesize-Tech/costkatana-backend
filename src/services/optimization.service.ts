@@ -1776,7 +1776,7 @@ REPLY FORMAT (JSON only):
         try {
             const query: any = {};
 
-            if (filters.userId) query.userId = filters.userId;
+            if (filters.userId) query.userId = new mongoose.Types.ObjectId(filters.userId);
             // Removed applied filter - no longer tracking applied status
             if (filters.category) query.category = filters.category;
             if (filters.minSavings !== undefined) query.costSaved = { $gte: filters.minSavings };
