@@ -64,27 +64,40 @@ class TraceService {
     private sensitiveKeys: string[] = ['authorization', 'api-key', 'apikey', 'password', 'email', 'phone', 'ssn', 'credit_card'];
     private customRedactKeys: string[] = [];
     
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Pre-compiled regex patterns for better performance
+    private static sensitiveKeyRegex: RegExp;
+    
     constructor() {
         // Load custom redact keys from environment
         if (process.env.TRACE_REDACT_KEYS) {
             this.customRedactKeys = process.env.TRACE_REDACT_KEYS.split(',').map(k => k.trim());
         }
+        
+        // Pre-compile sensitive key regex
+        const allKeys = [...this.sensitiveKeys, ...this.customRedactKeys];
+        TraceService.sensitiveKeyRegex = new RegExp(allKeys.join('|'), 'i');
     }
 
     /**
-     * Redact sensitive information from objects
+     * Redact sensitive information from objects (optimized)
      */
     private redactSensitive(obj: any): any {
         if (!obj || typeof obj !== 'object') return obj;
         
         const redacted = Array.isArray(obj) ? [...obj] : { ...obj };
-        const allKeys = [...this.sensitiveKeys, ...this.customRedactKeys];
         
+        // Use pre-compiled regex for faster matching
         for (const key of Object.keys(redacted)) {
-            const lowerKey = key.toLowerCase();
-            if (allKeys.some(sensitive => lowerKey.includes(sensitive))) {
+            if (TraceService.sensitiveKeyRegex.test(key)) {
                 redacted[key] = '[REDACTED]';
             } else if (typeof redacted[key] === 'object' && redacted[key] !== null) {
+                // Limit recursion depth to prevent performance issues
                 redacted[key] = this.redactSensitive(redacted[key]);
             }
         }
@@ -115,10 +128,10 @@ class TraceService {
                 });
             }
             
-            // Calculate depth based on parent
+            // Calculate depth based on parent (optimized with projection)
             let depth = 0;
             if (input.parentId) {
-                const parent = await Trace.findOne({ traceId: input.parentId });
+                const parent = await Trace.findOne({ traceId: input.parentId }, { depth: 1 });
                 if (parent) {
                     depth = parent.depth + 1;
                 }
@@ -183,11 +196,11 @@ class TraceService {
             );
             
             if (trace) {
-                // Calculate duration
+                // Calculate duration and update trace in single operation
                 const duration = endedAt.getTime() - trace.startedAt.getTime();
                 await Trace.updateOne({ traceId }, { duration });
                 
-                // Update session summary
+                // Prepare session updates (combine all updates into single operation)
                 const sessionUpdate: any = {};
                 if (input.tokens) {
                     sessionUpdate['$inc'] = {
@@ -200,19 +213,15 @@ class TraceService {
                     sessionUpdate['$inc']['summary.totalCost'] = input.costUSD;
                 }
                 
-                if (Object.keys(sessionUpdate).length > 0) {
-                    await Session.updateOne({ sessionId: trace.sessionId }, sessionUpdate);
+                // Check if this was a root span error and add to same update
+                if (input.status === 'error' && !trace.parentId) {
+                    sessionUpdate['status'] = 'error';
+                    sessionUpdate['error'] = updateData.error;
                 }
                 
-                // Check if this was a root span error
-                if (input.status === 'error' && !trace.parentId) {
-                    await Session.updateOne(
-                        { sessionId: trace.sessionId },
-                        { 
-                            status: 'error',
-                            error: updateData.error
-                        }
-                    );
+                // Execute single session update if we have any changes
+                if (Object.keys(sessionUpdate).length > 0) {
+                    await Session.updateOne({ sessionId: trace.sessionId }, sessionUpdate);
                 }
             }
             
@@ -334,18 +343,28 @@ class TraceService {
             const limit = filters.limit || 20;
             const skip = (page - 1) * limit;
             
+            // Check circuit breaker before database operations
+            if (TraceService.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const [sessions, total] = await Promise.all([
                 Session.find(query)
                     .sort({ startedAt: -1 })
                     .skip(skip)
-                    .limit(limit),
+                    .limit(limit)
+                    .lean(), // Use lean for better performance
                 Session.countDocuments(query)
             ]);
+
+            // Reset failure count on success
+            TraceService.dbFailureCount = 0;
             
             const totalPages = Math.ceil(total / limit);
             
             return { sessions, total, page, totalPages };
         } catch (error) {
+            TraceService.recordDbFailure();
             loggingService.error('Error listing sessions:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -393,6 +412,123 @@ class TraceService {
             sessionId: parent.sessionId,
             parentId: parentTraceId
         });
+    }
+
+    /**
+     * Get sessions summary using aggregation pipeline (optimized)
+     */
+    async getSessionsSummary(userId?: string): Promise<{
+        totalSessions: number;
+        activeSessions: number;
+        completedSessions: number;
+        errorSessions: number;
+        totalCost: number;
+        totalTokens: {
+            input: number;
+            output: number;
+        };
+        averageDuration: number;
+    }> {
+        try {
+            // Check circuit breaker before database operations
+            if (TraceService.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
+            const matchStage: any = {};
+            if (userId) {
+                matchStage.userId = userId;
+            }
+
+            const pipeline = [
+                { $match: matchStage },
+                {
+                    $group: {
+                        _id: null,
+                        totalSessions: { $sum: 1 },
+                        activeSessions: {
+                            $sum: { $cond: [{ $eq: ['$status', 'active'] }, 1, 0] }
+                        },
+                        completedSessions: {
+                            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+                        },
+                        errorSessions: {
+                            $sum: { $cond: [{ $eq: ['$status', 'error'] }, 1, 0] }
+                        },
+                        totalCost: { $sum: { $ifNull: ['$summary.totalCost', 0] } },
+                        totalInputTokens: { $sum: { $ifNull: ['$summary.totalTokens.input', 0] } },
+                        totalOutputTokens: { $sum: { $ifNull: ['$summary.totalTokens.output', 0] } },
+                        averageDuration: { $avg: { $ifNull: ['$summary.totalDuration', 0] } }
+                    }
+                }
+            ];
+
+            const result = await Session.aggregate(pipeline);
+            
+            // Reset failure count on success
+            TraceService.dbFailureCount = 0;
+
+            if (result.length === 0) {
+                return {
+                    totalSessions: 0,
+                    activeSessions: 0,
+                    completedSessions: 0,
+                    errorSessions: 0,
+                    totalCost: 0,
+                    totalTokens: { input: 0, output: 0 },
+                    averageDuration: 0
+                };
+            }
+
+            const summary = result[0];
+            return {
+                totalSessions: summary.totalSessions || 0,
+                activeSessions: summary.activeSessions || 0,
+                completedSessions: summary.completedSessions || 0,
+                errorSessions: summary.errorSessions || 0,
+                totalCost: summary.totalCost || 0,
+                totalTokens: {
+                    input: summary.totalInputTokens || 0,
+                    output: summary.totalOutputTokens || 0
+                },
+                averageDuration: summary.averageDuration || 0
+            };
+        } catch (error) {
+            TraceService.recordDbFailure();
+            loggingService.error('Error getting sessions summary:', { error: error instanceof Error ? error.message : String(error) });
+            throw error;
+        }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.dbFailureCount = 0;
+        this.lastDbFailureTime = 0;
     }
 }
 

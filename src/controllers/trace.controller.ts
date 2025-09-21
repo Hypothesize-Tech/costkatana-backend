@@ -47,6 +47,25 @@ const IngestTraceSchema = z.object({
 });
 
 class TraceController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    // Request timeout configuration
+    private static readonly SUMMARY_TIMEOUT = 15000; // 15 seconds for summary calculations
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * List sessions with filters
      * GET /api/v1/sessions
@@ -66,29 +85,20 @@ class TraceController {
             loggingService.info('Session listing initiated', {
                 requestId,
                 userId: userIdStr,
-                hasUserId: !!userIdStr,
                 label: labelStr,
-                hasLabel: !!labelStr,
-                from: fromStr,
-                hasFrom: !!fromStr,
-                to: toStr,
-                hasTo: !!toStr,
                 page: pageNum,
-                hasPage: pageNum !== undefined,
-                limit: limitNum,
-                hasLimit: limitNum !== undefined
+                limit: limitNum
             });
+
+            // Check circuit breaker before proceeding
+            if (TraceController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
 
             const validation = ListSessionsSchema.safeParse(req.query);
             if (!validation.success) {
                 loggingService.warn('Session listing failed - invalid query parameters', {
                     requestId,
-                    userId: userIdStr,
-                    label: labelStr,
-                    from: fromStr,
-                    to: toStr,
-                    page: pageNum,
-                    limit: limitNum,
                     validationErrors: validation.error.errors
                 });
 
@@ -111,31 +121,26 @@ class TraceController {
             loggingService.info('Sessions listed successfully', {
                 requestId,
                 duration,
-                userId: userIdStr,
-                label: labelStr,
-                from: fromStr,
-                to: toStr,
-                page: pageNum,
-                limit: limitNum,
                 totalSessions: result.total,
-                sessionsCount: result.sessions?.length || 0,
-                hasResult: !!result
+                sessionsCount: result.sessions?.length || 0
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'sessions_listed',
-                category: 'trace',
-                value: duration,
-                metadata: {
-                    userId: userIdStr,
-                    label: labelStr,
-                    hasDateRange: !!(fromStr && toStr),
-                    page: pageNum,
-                    limit: limitNum,
-                    totalSessions: result.total,
-                    sessionsCount: result.sessions?.length || 0
-                }
+            // Queue background business event logging
+            TraceController.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'sessions_listed',
+                    category: 'trace',
+                    value: duration,
+                    metadata: {
+                        userId: userIdStr,
+                        label: labelStr,
+                        hasDateRange: !!(fromStr && toStr),
+                        page: pageNum,
+                        limit: limitNum,
+                        totalSessions: result.total,
+                        sessionsCount: result.sessions?.length || 0
+                    }
+                });
             });
 
             return res.json({
@@ -143,18 +148,25 @@ class TraceController {
                 data: result
             });
         } catch (error: any) {
+            TraceController.recordDbFailure();
             const duration = Date.now() - startTime;
+            
+            if (error.message === 'Service temporarily unavailable') {
+                loggingService.warn('Trace service unavailable', {
+                    requestId,
+                    duration
+                });
+                
+                return res.status(503).json({
+                    success: false,
+                    error: 'Service temporarily unavailable',
+                    message: 'Please try again later'
+                });
+            }
             
             loggingService.error('Session listing failed', {
                 requestId,
-                userId: userIdStr,
-                label: labelStr,
-                from: fromStr,
-                to: toStr,
-                page: pageNum,
-                limit: limitNum,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -545,62 +557,47 @@ class TraceController {
         try {
             loggingService.info('Sessions summary retrieval initiated', {
                 requestId,
-                userId: userIdStr,
-                hasUserId: !!userIdStr
+                userId: userIdStr
             });
             
-            const sessions = await traceService.listSessions({
-                userId: userIdStr,
-                limit: 100
+            // Check circuit breaker before proceeding
+            if (TraceController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
+
+            // Use timeout handling for summary calculation
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Summary calculation timeout')), TraceController.SUMMARY_TIMEOUT);
             });
-            
-            // Calculate summary statistics
-            const summary = {
-                totalSessions: sessions.total,
-                activeSessions: sessions.sessions.filter(s => s.status === 'active').length,
-                completedSessions: sessions.sessions.filter(s => s.status === 'completed').length,
-                errorSessions: sessions.sessions.filter(s => s.status === 'error').length,
-                totalCost: sessions.sessions.reduce((sum, s) => sum + (s.summary?.totalCost || 0), 0),
-                totalTokens: {
-                    input: sessions.sessions.reduce((sum, s) => sum + (s.summary?.totalTokens?.input || 0), 0),
-                    output: sessions.sessions.reduce((sum, s) => sum + (s.summary?.totalTokens?.output || 0), 0)
-                },
-                averageDuration: sessions.sessions
-                    .filter(s => s.summary?.totalDuration)
-                    .reduce((sum, s, _, arr) => sum + (s.summary?.totalDuration || 0) / arr.length, 0)
-            };
+
+            const summaryPromise = traceService.getSessionsSummary(userIdStr);
+            const summary = await Promise.race([summaryPromise, timeoutPromise]);
             const duration = Date.now() - startTime;
             
             loggingService.info('Sessions summary retrieved successfully', {
                 requestId,
                 duration,
-                userId: userIdStr,
-                totalSessions: summary.totalSessions,
-                activeSessions: summary.activeSessions,
-                completedSessions: summary.completedSessions,
-                errorSessions: summary.errorSessions,
-                totalCost: summary.totalCost,
-                totalTokensInput: summary.totalTokens.input,
-                totalTokensOutput: summary.totalTokens.output,
-                averageDuration: summary.averageDuration
+                totalSessions: summary.totalSessions
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'sessions_summary_retrieved',
-                category: 'trace',
-                value: duration,
-                metadata: {
-                    userId: userIdStr,
-                    totalSessions: summary.totalSessions,
-                    activeSessions: summary.activeSessions,
-                    completedSessions: summary.completedSessions,
-                    errorSessions: summary.errorSessions,
-                    totalCost: summary.totalCost,
-                    totalTokensInput: summary.totalTokens.input,
-                    totalTokensOutput: summary.totalTokens.output,
-                    averageDuration: summary.averageDuration
-                }
+            // Queue background business event logging
+            TraceController.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'sessions_summary_retrieved',
+                    category: 'trace',
+                    value: duration,
+                    metadata: {
+                        userId: userIdStr,
+                        totalSessions: summary.totalSessions,
+                        activeSessions: summary.activeSessions,
+                        completedSessions: summary.completedSessions,
+                        errorSessions: summary.errorSessions,
+                        totalCost: summary.totalCost,
+                        totalTokensInput: summary.totalTokens.input,
+                        totalTokensOutput: summary.totalTokens.output,
+                        averageDuration: summary.averageDuration
+                    }
+                });
             });
             
             return res.json({
@@ -622,6 +619,74 @@ class TraceController {
                 success: false,
                 error: 'Failed to get sessions summary'
             });
+        }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }

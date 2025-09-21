@@ -17,6 +17,7 @@ export class TrackingController {
       });
 
       if (!userId) {
+        
         loggingService.warn('Manual request tracking failed - authentication required', {
           requestId
         });
