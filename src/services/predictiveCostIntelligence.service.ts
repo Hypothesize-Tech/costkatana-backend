@@ -195,6 +195,15 @@ export interface CrossPlatformInsight {
 }
 
 export class PredictiveCostIntelligenceService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     
     /**
      * Generate comprehensive predictive intelligence analysis
@@ -1777,5 +1786,44 @@ export class PredictiveCostIntelligenceService {
         if (timeframe <= 7) return '1 week';
         if (timeframe <= 30) return '1 month';
         return '3+ months';
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
+                });
+            }
+        }
     }
 }

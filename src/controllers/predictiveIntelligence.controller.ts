@@ -3,6 +3,22 @@ import { PredictiveCostIntelligenceService } from '../services/predictiveCostInt
 import { loggingService } from '../services/logging.service';
 
 export class PredictiveIntelligenceController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for service calls
+    private static serviceFailureCount: number = 0;
+    private static readonly MAX_SERVICE_FAILURES = 3;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastServiceFailureTime: number = 0;
+
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
 
     /**
      * Get comprehensive predictive intelligence analysis
@@ -50,7 +66,20 @@ export class PredictiveIntelligenceController {
                 });
             }
 
-            const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
+            // Check circuit breaker
+            if (this.isServiceCircuitBreakerOpen()) {
+                return res.status(503).json({
+                    success: false,
+                    message: 'Service temporarily unavailable. Please try again later.'
+                });
+            }
+
+            // Add timeout handling (30 seconds for comprehensive analysis)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 30000);
+            });
+
+            const intelligencePromise = PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
                 {
                     scope: scope as 'user' | 'project' | 'team',
@@ -61,6 +90,11 @@ export class PredictiveIntelligenceController {
                 }
             );
 
+            const intelligenceData = await Promise.race([intelligencePromise, timeoutPromise]);
+
+            // Reset failure count on success
+            this.serviceFailureCount = 0;
+
             return res.json({
                 success: true,
                 data: intelligenceData,
@@ -68,12 +102,30 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting predictive intelligence:', error);
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to generate predictive intelligence',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            this.recordServiceFailure();
+            loggingService.error('Error getting predictive intelligence:', { 
+                error: error.message,
+                userId: req.user?.id,
+                failureCount: this.serviceFailureCount
             });
+            
+            if (error.message === 'Request timeout') {
+                return res.status(408).json({
+                    success: false,
+                    message: 'Request timeout - analysis took too long. Please try again with a smaller scope.'
+                });
+            } else if (error.message === 'Service circuit breaker is open') {
+                return res.status(503).json({
+                    success: false,
+                    message: 'Service temporarily unavailable. Please try again later.'
+                });
+            } else {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to generate predictive intelligence',
+                    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                });
+            }
         }
     }
 
@@ -720,22 +772,34 @@ export class PredictiveIntelligenceController {
     private static async handleOptimizationAutoImplementation(alertId: string, userId: string) {
         loggingService.info(`Implementing optimization ${alertId} for user ${userId}`);
         
-        // Get user's current usage to calculate realistic savings
+        // Get comprehensive usage data in single query
         const Usage = (await import('../models/Usage')).Usage;
-        const recentUsage = await Usage.aggregate([
+        const [usageAnalysis] = await Usage.aggregate([
             { $match: { userId: new (await import('mongoose')).Types.ObjectId(userId) } },
             { $sort: { createdAt: -1 } },
-            { $limit: 100 },
-            { $group: { _id: null, totalCost: { $sum: '$cost' }, count: { $sum: 1 } } }
+            { $limit: 200 },
+            {
+                $facet: {
+                    recent: [
+                        { $limit: 100 },
+                        { $group: { _id: null, totalCost: { $sum: '$cost' }, count: { $sum: 1 }, avgTokens: { $avg: '$totalTokens' } } }
+                    ],
+                    patterns: [
+                        { $group: { _id: '$service', count: { $sum: 1 }, avgCost: { $avg: '$cost' } } },
+                        { $sort: { count: -1 } }
+                    ]
+                }
+            }
         ]);
         
-        const avgMonthlyCost = recentUsage.length > 0 ? (recentUsage[0].totalCost * 30) : 100;
+        const recentData = usageAnalysis.recent[0] || { totalCost: 0, count: 0, avgTokens: 0 };
+        const avgMonthlyCost = recentData.totalCost > 0 ? (recentData.totalCost * 30) : 100;
         const optimizationSavings = Math.max(avgMonthlyCost * 0.4, 10); // 40% savings, minimum $10
         
         return {
             type: 'optimization_recommendation',
             actions: [
-                `Analyzed ${recentUsage[0]?.count || 'recent'} requests for optimization patterns`,
+                `Analyzed ${recentData.count || 'recent'} requests for optimization patterns`,
                 'Implemented intelligent model switching for routine tasks',
                 'Applied dynamic prompt compression techniques',
                 'Enabled smart caching for repeated request patterns'
@@ -869,5 +933,74 @@ export class PredictiveIntelligenceController {
                 'Additional optimizations will be suggested based on results'
             ]
         };
+    }
+
+
+    /**
+     * Circuit breaker utilities
+     */
+    private static isServiceCircuitBreakerOpen(): boolean {
+        if (this.serviceFailureCount >= this.MAX_SERVICE_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastServiceFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.serviceFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordServiceFailure(): void {
+        this.serviceFailureCount++;
+        this.lastServiceFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
+                });
+            }
+        }
     }
 }

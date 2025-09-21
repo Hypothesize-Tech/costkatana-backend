@@ -3,6 +3,16 @@ import { PerformanceCostAnalysisService } from '../services/performanceCostAnaly
 import { loggingService } from '../services/logging.service';
 
 export class PerformanceCostAnalysisController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
 
     /**
      * Analyze cost-performance correlation
@@ -159,6 +169,11 @@ export class PerformanceCostAnalysisController {
                     success: false,
                     message: 'Request timeout - analysis took too long. Please try again with a smaller date range.' 
                 });
+            } else if (error.message === 'Database circuit breaker is open') {
+                res.status(503).json({ 
+                    success: false,
+                    message: 'Service temporarily unavailable. Please try again later.' 
+                });
             } else {
                 res.status(500).json({ 
                     success: false,
@@ -220,7 +235,13 @@ export class PerformanceCostAnalysisController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const comparison = await PerformanceCostAnalysisService.compareServices(userId, options);
+            // Add timeout handling (15 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 15000);
+            });
+
+            const comparisonPromise = PerformanceCostAnalysisService.compareServices(userId, options);
+            const comparison = await Promise.race([comparisonPromise, timeoutPromise]);
 
             const duration = Date.now() - startTime;
 
@@ -343,7 +364,13 @@ export class PerformanceCostAnalysisController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const trends = await PerformanceCostAnalysisService.getPerformanceTrends(userId, options);
+            // Add timeout handling (20 seconds for trends)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Request timeout')), 20000);
+            });
+
+            const trendsPromise = PerformanceCostAnalysisService.getPerformanceTrends(userId, options);
+            const trends = await Promise.race([trendsPromise, timeoutPromise]);
 
             // Calculate trend summary
             const trendSummary = {
@@ -1254,6 +1281,52 @@ export class PerformanceCostAnalysisController {
             return 'Higher cost option. Evaluate if the performance benefits justify the expense.';
         } else {
             return 'Consider optimization or alternative options for better cost-performance balance.';
+        }
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
+                });
+            }
         }
     }
 } 
