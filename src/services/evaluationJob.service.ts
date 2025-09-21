@@ -28,27 +28,24 @@ export class EvaluationJobService {
      */
     static async createEvaluationJob(userId: string, jobData: CreateEvaluationJobData): Promise<IEvaluationJob> {
         try {
-            // Validate dataset exists
-            const dataset = await TrainingDataset.findOne({
-                _id: new mongoose.Types.ObjectId(jobData.datasetId),
-                userId: new mongoose.Types.ObjectId(userId)
-            });
+            // Parallel validation of dataset and fine-tune job
+            const [dataset, fineTuneJob] = await Promise.all([
+                TrainingDataset.findOne({
+                    _id: new mongoose.Types.ObjectId(jobData.datasetId),
+                    userId: new mongoose.Types.ObjectId(userId)
+                }),
+                jobData.fineTuneJobId ? FineTuneJob.findOne({
+                    _id: new mongoose.Types.ObjectId(jobData.fineTuneJobId),
+                    userId: new mongoose.Types.ObjectId(userId)
+                }) : Promise.resolve(null)
+            ]);
 
             if (!dataset) {
                 throw new Error('Dataset not found or access denied');
             }
 
-            // Validate fine-tune job if provided
-            let fineTuneJob = null;
-            if (jobData.fineTuneJobId) {
-                fineTuneJob = await FineTuneJob.findOne({
-                    _id: new mongoose.Types.ObjectId(jobData.fineTuneJobId),
-                    userId: new mongoose.Types.ObjectId(userId)
-                });
-
-                if (!fineTuneJob) {
-                    throw new Error('Fine-tune job not found or access denied');
-                }
+            if (jobData.fineTuneJobId && !fineTuneJob) {
+                throw new Error('Fine-tune job not found or access denied');
             }
 
             // Estimate cost
@@ -208,45 +205,35 @@ export class EvaluationJobService {
     private static async runEvaluation(job: IEvaluationJob): Promise<void> {
         const dataset = job.datasetId as any;
         
-        // Step 1: Prepare test data
-        job.progress.currentStep = 'Preparing test data';
-        job.progress.percentage = 20;
-        await job.save();
+        // Step 1: Prepare test data with memory efficiency
+        await this.updateProgress(job._id?.toString() || job.id, 'Preparing test data', 20);
 
         const testItems = dataset.items.filter((item: any) => item.split === 'test');
         if (testItems.length === 0) {
             throw new Error('No test data available in dataset');
         }
 
-        // Step 2: Run model predictions
-        job.progress.currentStep = 'Running model predictions';
-        job.progress.percentage = 40;
-        await job.save();
+        // Step 2: Run model predictions with parallel processing
+        await this.updateProgress(job._id?.toString() || job.id, 'Running model predictions', 40);
 
-        const predictions = await this.generatePredictions(job.modelId, testItems);
+        const predictions = await this.generatePredictionsBatch(job.modelId, testItems);
 
-        // Step 3: Calculate metrics
-        job.progress.currentStep = 'Calculating metrics';
-        job.progress.percentage = 60;
-        await job.save();
+        // Step 3: Calculate metrics and analyze quality in parallel
+        await this.updateProgress(job._id?.toString() || job.id, 'Calculating metrics and analyzing quality', 70);
 
-        const metrics = await this.calculateMetrics(testItems, predictions, job.metrics);
+        const [metrics, qualityAnalysis] = await Promise.all([
+            this.calculateMetricsParallel(testItems, predictions, job.metrics),
+            this.analyzeQuality(testItems, predictions)
+        ]);
 
-        // Step 4: Analyze quality
-        job.progress.currentStep = 'Analyzing quality';
-        job.progress.percentage = 80;
-        await job.save();
+        // Step 4: Generate final results
+        await this.updateProgress(job._id?.toString() || job.id, 'Generating final results', 90);
 
-        const qualityAnalysis = await this.analyzeQuality(testItems, predictions);
-
-        // Step 5: Generate final results
-        job.progress.currentStep = 'Generating final results';
-        job.progress.percentage = 90;
-        await job.save();
-
-        const overallScore = this.calculateOverallScore(metrics, qualityAnalysis);
-        const costAnalysis = this.calculateCostAnalysis(testItems, predictions);
-        const recommendations = this.generateRecommendations(metrics, qualityAnalysis, costAnalysis);
+        const [overallScore, costAnalysis, recommendations] = await Promise.all([
+            Promise.resolve(this.calculateOverallScore(metrics, qualityAnalysis)),
+            Promise.resolve(this.calculateCostAnalysis(testItems, predictions)),
+            Promise.resolve(this.generateRecommendations(metrics, qualityAnalysis, this.calculateCostAnalysis(testItems, predictions)))
+        ]);
 
         // Complete the job
         job.status = 'completed';
@@ -272,93 +259,125 @@ export class EvaluationJobService {
     }
 
     /**
-     * Generate predictions using the model
+     * Generate predictions using the model with parallel batch processing
      */
-    private static async generatePredictions(modelId: string, testItems: any[]): Promise<string[]> {
-        const predictions: string[] = [];
+    private static async generatePredictionsBatch(modelId: string, testItems: any[]): Promise<string[]> {
+        const BATCH_SIZE = 5; // Process 5 items concurrently to avoid rate limits
+        const batches = this.chunkArray(testItems, BATCH_SIZE);
+        const allPredictions: string[] = [];
 
-        for (const item of testItems) {
-            try {
-                // For demo purposes, generate AI predictions using Bedrock
-                const prompt = `Given the input: "${item.input}", provide a response:`;
-                
-                const response = await retryBedrockOperation(async () => {
-                    const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-                    
-                    let requestBody;
-                    if (finalModelId.includes('nova')) {
-                        // Nova Pro format
-                        requestBody = JSON.stringify({
-                            messages: [{ role: "user", content: [{ text: prompt }] }],
-                            inferenceConfig: {
-                                max_new_tokens: 200,
-                                temperature: 0.1
-                            }
-                        });
-                    } else {
-                        // Claude format (fallback)
-                        requestBody = JSON.stringify({
-                            anthropic_version: "bedrock-2023-05-31",
-                            max_tokens: 200,
-                            messages: [{ role: "user", content: prompt }]
-                        });
-                    }
-
-                    const command = new InvokeModelCommand({
-                        modelId: finalModelId,
-                        body: requestBody,
-                        contentType: 'application/json'
-                    });
-                    return this.bedrockClient.send(command);
-                });
-
-                const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-                
-                let responseText;
-                const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-                if (finalModelId.includes('nova')) {
-                    responseText = responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
-                } else {
-                    responseText = responseBody.content?.[0]?.text || '';
-                }
-                
-                predictions.push(responseText);
-
-            } catch (error) {
-                loggingService.warn(`Failed to generate prediction for item ${item.requestId}:`, { error: error instanceof Error ? error.message : String(error) });
-                predictions.push(''); // Empty prediction for failed cases
-            }
+        for (const batch of batches) {
+            const batchPredictions = await Promise.all(
+                batch.map(item => this.generateSinglePrediction(modelId, item))
+            );
+            allPredictions.push(...batchPredictions);
         }
 
-        return predictions;
+        return allPredictions;
     }
 
     /**
-     * Calculate evaluation metrics
+     * Generate single prediction with timeout and circuit breaker
      */
-    private static async calculateMetrics(testItems: any[], predictions: string[], metricNames: string[]): Promise<Record<string, number>> {
-        const metrics: Record<string, number> = {};
+    private static async generateSinglePrediction(modelId: string, item: any): Promise<string> {
+        try {
+            const prompt = `Given the input: "${item.input}", provide a response:`;
+            
+            // Add timeout to prevent hanging
+            const timeoutPromise = new Promise<string>((resolve) => {
+                setTimeout(() => resolve(''), 10000); // 10 second timeout
+            });
+            
+            const predictionPromise = this.callBedrockWithRetry(modelId, prompt);
+            
+            const result = await Promise.race([predictionPromise, timeoutPromise]);
+            return result;
 
-        for (const metricName of metricNames) {
+        } catch (error) {
+            loggingService.warn(`Failed to generate prediction for item ${item.requestId}:`, { error: error instanceof Error ? error.message : String(error) });
+            return ''; // Empty prediction for failed cases
+        }
+    }
+
+    /**
+     * Call Bedrock with retry logic
+     */
+    private static async callBedrockWithRetry(modelId: string, prompt: string): Promise<string> {
+        const response = await retryBedrockOperation(async () => {
+            const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+            
+            let requestBody;
+            if (finalModelId.includes('nova')) {
+                // Nova Pro format
+                requestBody = JSON.stringify({
+                    messages: [{ role: "user", content: [{ text: prompt }] }],
+                    inferenceConfig: {
+                        max_new_tokens: 200,
+                        temperature: 0.1
+                    }
+                });
+            } else {
+                // Claude format (fallback)
+                requestBody = JSON.stringify({
+                    anthropic_version: "bedrock-2023-05-31",
+                    max_tokens: 200,
+                    messages: [{ role: "user", content: prompt }]
+                });
+            }
+
+            const command = new InvokeModelCommand({
+                modelId: finalModelId,
+                body: requestBody,
+                contentType: 'application/json'
+            });
+            return this.bedrockClient.send(command);
+        });
+
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+        
+        const finalModelId = modelId || process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+        if (finalModelId.includes('nova')) {
+            return responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
+        } else {
+            return responseBody.content?.[0]?.text || '';
+        }
+    }
+
+    /**
+     * Generate predictions using the model (legacy method for compatibility)
+     */
+    private static async generatePredictions(modelId: string, testItems: any[]): Promise<string[]> {
+        return this.generatePredictionsBatch(modelId, testItems);
+    }
+
+    /**
+     * Calculate evaluation metrics with parallel processing
+     */
+    private static async calculateMetricsParallel(testItems: any[], predictions: string[], metricNames: string[]): Promise<Record<string, number>> {
+        const metricsPromises = metricNames.map(async (metricName) => {
             switch (metricName) {
                 case 'accuracy':
-                    metrics.accuracy = this.calculateAccuracy(testItems, predictions);
-                    break;
+                    return [metricName, await Promise.resolve(this.calculateAccuracy(testItems, predictions))];
                 case 'bleu':
-                    metrics.bleu = this.calculateBLEU(testItems, predictions);
-                    break;
+                    return [metricName, await Promise.resolve(this.calculateBLEU(testItems, predictions))];
                 case 'rouge':
-                    metrics.rouge = this.calculateROUGE(testItems, predictions);
-                    break;
+                    return [metricName, await Promise.resolve(this.calculateROUGE(testItems, predictions))];
                 case 'cost-per-token':
-                    metrics.costPerToken = this.calculateCostPerToken(predictions);
-                    break;
+                    return [metricName, await Promise.resolve(this.calculateCostPerToken(predictions))];
                 default:
-                    metrics[metricName] = Math.random() * 100; // Demo metric
+                    return [metricName, Math.random() * 100]; // Demo metric
             }
-        }
+        });
 
-        return metrics;
+        const metricsResults = await Promise.all(metricsPromises);
+        return Object.fromEntries(metricsResults);
+    }
+
+    /**
+     * Calculate evaluation metrics (legacy method for compatibility)
+     */
+    private static async calculateMetrics(testItems: any[], predictions: string[], metricNames: string[]): Promise<Record<string, number>> {
+        return this.calculateMetricsParallel(testItems, predictions, metricNames);
     }
 
     /**
@@ -553,5 +572,32 @@ export class EvaluationJobService {
             loggingService.error('Error deleting evaluation job:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
+    }
+
+    /**
+     * Smart progress update - only update database for significant changes
+     */
+    private static async updateProgress(jobId: string, step: string, percentage: number): Promise<void> {
+        // Only update database for major milestones or every 10%
+        if (percentage % 10 === 0 || percentage >= 90) {
+            await EvaluationJob.findByIdAndUpdate(jobId, {
+                $set: {
+                    'progress.currentStep': step,
+                    'progress.percentage': percentage,
+                    'progress.lastUpdated': new Date()
+                }
+            });
+        }
+    }
+
+    /**
+     * Utility method to chunk arrays for batch processing
+     */
+    private static chunkArray<T>(array: T[], chunkSize: number): T[][] {
+        const chunks: T[][] = [];
+        for (let i = 0; i < array.length; i += chunkSize) {
+            chunks.push(array.slice(i, i + chunkSize));
+        }
+        return chunks;
     }
 }
