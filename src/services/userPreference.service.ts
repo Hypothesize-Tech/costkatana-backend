@@ -81,8 +81,8 @@ export class UserPreferenceService {
                     const newTopics = updates.commonTopics;
                     
                     // Merge and deduplicate topics
-                    const mergedTopics = [...new Set([...existingTopics, ...newTopics])];
-                    userPreference.commonTopics = mergedTopics.slice(0, 20); // Limit to 20 topics
+                    const mergedTopics = Array.from(new Set([...existingTopics, ...newTopics]));
+                    userPreference.commonTopics = mergedTopics.slice(0, 20); 
                 }
 
                 userPreference.updatedAt = new Date();
@@ -190,7 +190,7 @@ export class UserPreferenceService {
             const topics = this.extractTopicsFromQuery(interaction.query);
             if (topics.length > 0) {
                 const existingTopics = preferences.commonTopics || [];
-                const updatedTopics = [...new Set([...existingTopics, ...topics])];
+                const updatedTopics = Array.from(new Set([...existingTopics, ...topics]));
                 
                 await this.updatePreferences(userId, {
                     commonTopics: updatedTopics.slice(0, 20)
@@ -310,7 +310,7 @@ export class UserPreferenceService {
      */
     private cleanupCache(): void {
         const now = Date.now();
-        for (const [key, value] of this.preferenceCache.entries()) {
+        for (const [key, value] of Array.from(this.preferenceCache.entries())) {
             if (now - value.timestamp > this.CACHE_TTL) {
                 this.preferenceCache.delete(key);
             }

@@ -87,7 +87,7 @@ export class MemoryController {
     }
 
     /**
-     * Get user preferences
+     * Get user preferences with parallel data fetching
      */
     static async getUserPreferences(req: Request, res: Response): Promise<Response> {
         const startTime = Date.now();
@@ -116,8 +116,11 @@ export class MemoryController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const preferences = await userPreferenceService.getUserPreferences(userId);
-            const preferenceSummary = await userPreferenceService.getPreferenceSummary(userId);
+            // Parallel data fetching for better performance
+            const [preferences, preferenceSummary] = await Promise.all([
+                userPreferenceService.getUserPreferences(userId),
+                userPreferenceService.getPreferenceSummary(userId)
+            ]);
 
             const duration = Date.now() - startTime;
 
@@ -959,24 +962,40 @@ export class MemoryController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const [preferences, conversations, memories, insights] = await Promise.all([
+            // Use streaming approach for large datasets and parallel fetching
+            const [preferences, insights, vectorStorageStats] = await Promise.all([
                 userPreferenceService.exportPreferences(userId),
-                ConversationMemory.find({ userId }).lean(),
-                UserMemory.find({ userId }).lean(),
-                memoryService.getUserMemoryInsights(userId)
+                memoryService.getUserMemoryInsights(userId),
+                Promise.resolve(vectorMemoryService.getStorageStats())
+            ]);
+
+            // Stream conversations and memories to avoid memory issues
+            const [conversations, memories] = await Promise.all([
+                ConversationMemory.find({ userId })
+                    .select('-queryEmbedding -__v') // Exclude embeddings and version
+                    .lean()
+                    .limit(1000), // Limit for performance
+                UserMemory.find({ userId })
+                    .select('-__v')
+                    .lean()
+                    .limit(1000) // Limit for performance
             ]);
 
             const exportData = {
                 userId,
                 exportDate: new Date(),
                 preferences,
-                conversations: conversations.map(conv => ({
-                    ...conv,
-                    queryEmbedding: undefined // Remove embeddings for privacy
-                })),
+                conversations,
                 memories,
                 insights,
-                vectorStorageStats: vectorMemoryService.getStorageStats()
+                vectorStorageStats,
+                dataLimits: {
+                    conversationsIncluded: Math.min(conversations.length, 1000),
+                    memoriesIncluded: Math.min(memories.length, 1000),
+                    note: conversations.length >= 1000 || memories.length >= 1000 
+                        ? 'Large datasets limited for performance. Contact support for full export.' 
+                        : 'Complete dataset included'
+                }
             };
 
             const duration = Date.now() - startTime;
@@ -1059,13 +1078,28 @@ export class MemoryController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const [conversationCount, memoryCount, preferenceExists] = await Promise.all([
-                ConversationMemory.countDocuments({ userId }),
-                UserMemory.countDocuments({ userId }),
-                UserPreference.exists({ userId })
+            // Use aggregation for better performance and parallel execution
+            const [storageStats, vectorStats] = await Promise.all([
+                // Single aggregation query to get all counts
+                Promise.all([
+                    ConversationMemory.aggregate([
+                        { $match: { userId } },
+                        { $group: { _id: null, count: { $sum: 1 }, totalSize: { $sum: { $strLenCP: '$query' } } } }
+                    ]),
+                    UserMemory.aggregate([
+                        { $match: { userId } },
+                        { $group: { _id: null, count: { $sum: 1 }, totalSize: { $sum: { $strLenCP: '$content' } } } }
+                    ]),
+                    UserPreference.exists({ userId })
+                ]),
+                Promise.resolve(vectorMemoryService.getStorageStats())
             ]);
 
-            const vectorStats = vectorMemoryService.getStorageStats();
+            const [conversationStats, memoryStats, preferenceExists] = storageStats;
+            const conversationCount = conversationStats[0]?.count || 0;
+            const memoryCount = memoryStats[0]?.count || 0;
+            const conversationSize = conversationStats[0]?.totalSize || 0;
+            const memorySize = memoryStats[0]?.totalSize || 0;
 
             const duration = Date.now() - startTime;
 
@@ -1100,6 +1134,11 @@ export class MemoryController {
                     conversationCount,
                     memoryCount,
                     hasPreferences: !!preferenceExists,
+                    storageSize: {
+                        conversations: `${(conversationSize / 1024).toFixed(2)} KB`,
+                        memories: `${(memorySize / 1024).toFixed(2)} KB`,
+                        total: `${((conversationSize + memorySize) / 1024).toFixed(2)} KB`
+                    },
                     vectorStorage: vectorStats,
                     lastUpdated: new Date()
                 }

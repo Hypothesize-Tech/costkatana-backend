@@ -154,16 +154,25 @@ export class MemoryService {
     }
 
     /**
-     * Get user memory insights (preferences, patterns, security)
+     * Get user memory insights with parallel execution
      */
     async getUserMemoryInsights(userId: string): Promise<MemoryInsight[]> {
         try {
             loggingService.info(`🧠 Getting memory insights for user: ${userId}`);
             
+            // Execute all data fetching operations in parallel
+            const [preferences, recentConversations, securityInsight] = await Promise.all([
+                this.userPreferenceService.getUserPreferences(userId),
+                ConversationMemory.find({ userId })
+                    .sort({ createdAt: -1 })
+                    .limit(10)
+                    .lean(), // Use lean for better performance
+                this.checkSecurityPatterns(userId)
+            ]);
+
             const insights: MemoryInsight[] = [];
             
-            // Get user preferences
-            const preferences = await this.userPreferenceService.getUserPreferences(userId);
+            // Process preferences insight
             if (preferences) {
                 const topics = preferences.commonTopics?.slice(0, 3).join(', ') || 'various topics';
                 insights.push({
@@ -175,24 +184,30 @@ export class MemoryService {
                 });
             }
             
-            // Get conversation patterns
-            const recentConversations = await ConversationMemory.find({ userId })
-                .sort({ createdAt: -1 })
-                .limit(10);
-                
+            // Process conversation patterns insight
             if (recentConversations.length > 0) {
-                const patterns = await this.analyzeConversationPatterns(recentConversations);
+                // Run pattern analysis in background for non-blocking response
+                this.analyzeConversationPatternsAsync(userId, recentConversations)
+                    .then(patterns => {
+                        // Store patterns for future use
+                        this.storePatternInsight(userId, patterns);
+                    })
+                    .catch(error => {
+                        loggingService.error('Background pattern analysis failed:', { error: error.message });
+                    });
+
+                // Return immediate pattern insight based on conversation count and recency
+                const patternContent = this.generateQuickPatternInsight(recentConversations);
                 insights.push({
                     type: 'pattern',
-                    content: patterns,
-                    confidence: 0.8,
+                    content: patternContent,
+                    confidence: 0.7,
                     timestamp: new Date(),
                     source: 'conversation_analysis'
                 });
             }
             
-            // Check for security patterns
-            const securityInsight = await this.checkSecurityPatterns(userId);
+            // Add security insight if found
             if (securityInsight) {
                 insights.push(securityInsight);
             }
@@ -327,33 +342,6 @@ export class MemoryService {
         });
     }
 
-    /**
-     * Analyze conversation patterns using AI
-     */
-    private async analyzeConversationPatterns(conversations: any[]): Promise<string> {
-        try {
-            const queries = conversations.map(conv => conv.query).slice(0, 10);
-            
-            const analysisPrompt = `Analyze these user conversation patterns:
-            
-            Recent Queries:
-            ${queries.map((q, i) => `${i + 1}. ${q}`).join('\n')}
-            
-            Identify:
-            1. Common topics or themes
-            2. Question types (technical, pricing, comparison, etc.)
-            3. Complexity level preferences
-            4. Time patterns or urgency indicators
-            
-            Provide a concise summary of the user's conversation patterns.`;
-            
-            const response = await this.memoryAgent.invoke([new HumanMessage(analysisPrompt)]);
-            return response.content.toString();
-        } catch (error) {
-            loggingService.error('❌ Failed to analyze conversation patterns:', { error: error instanceof Error ? error.message : String(error) });
-            return 'Unable to analyze conversation patterns';
-        }
-    }
 
     /**
      * Analyze and store user preferences from conversation
@@ -402,21 +390,21 @@ export class MemoryService {
         const now = Date.now();
         
         // Clean session cache
-        for (const [key, value] of this.userSessionCache.entries()) {
+        for (const [key, value] of Array.from(this.userSessionCache.entries())) {
             if (now - value.timestamp > this.SESSION_CACHE_TTL) {
                 this.userSessionCache.delete(key);
             }
         }
         
         // Clean conversation cache
-        for (const [key, value] of this.conversationCache.entries()) {
+        for (const [key, value] of Array.from(this.conversationCache.entries())) {
             if (now - value.timestamp > this.CONVERSATION_CACHE_TTL) {
                 this.conversationCache.delete(key);
             }
         }
         
         // Clean security cache
-        for (const [key, timestamp] of this.securityPatternCache.entries()) {
+        for (const [key, timestamp] of Array.from(this.securityPatternCache.entries())) {
             if (now - timestamp > this.SECURITY_CACHE_TTL) {
                 this.securityPatternCache.delete(key);
             }
@@ -455,12 +443,12 @@ export class MemoryService {
             
             // Clear from caches
             this.userSessionCache.delete(userId);
-            for (const key of this.conversationCache.keys()) {
+            for (const key of Array.from(this.conversationCache.keys())) {
                 if (key.startsWith(userId + ':')) {
                     this.conversationCache.delete(key);
                 }
             }
-            for (const key of this.securityPatternCache.keys()) {
+            for (const key of Array.from(this.securityPatternCache.keys())) {
                 if (key.includes(userId)) {
                     this.securityPatternCache.delete(key);
                 }
@@ -497,6 +485,119 @@ export class MemoryService {
             throw error;
         }
     }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Generate quick pattern insight without AI analysis
+     */
+    private generateQuickPatternInsight(conversations: any[]): string {
+        const totalConversations = conversations.length;
+        const recentDays = Math.ceil((Date.now() - new Date(conversations[conversations.length - 1].createdAt).getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Analyze query lengths and types
+        const avgQueryLength = conversations.reduce((sum, conv) => sum + conv.query.length, 0) / totalConversations;
+        const hasLongQueries = avgQueryLength > 100;
+        const hasShortQueries = avgQueryLength < 50;
+        
+        // Quick topic detection
+        const queries = conversations.map(conv => conv.query.toLowerCase());
+        const commonWords = this.extractCommonWords(queries);
+        
+        let insight = `User has ${totalConversations} conversations over ${recentDays} days. `;
+        
+        if (hasLongQueries) {
+            insight += "Tends to ask detailed, complex questions. ";
+        } else if (hasShortQueries) {
+            insight += "Prefers concise, direct questions. ";
+        }
+        
+        if (commonWords.length > 0) {
+            insight += `Common topics include: ${commonWords.slice(0, 3).join(', ')}.`;
+        }
+        
+        return insight;
+    }
+
+    /**
+     * Extract common words from queries for quick analysis
+     */
+    private extractCommonWords(queries: string[]): string[] {
+        const wordCount = new Map<string, number>();
+        const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'what', 'how', 'when', 'where', 'why', 'who']);
+        
+        queries.forEach(query => {
+            const words = query.split(/\s+/).filter(word => 
+                word.length > 3 && !stopWords.has(word.toLowerCase())
+            );
+            
+            words.forEach(word => {
+                const cleanWord = word.toLowerCase().replace(/[^\w]/g, '');
+                if (cleanWord.length > 3) {
+                    wordCount.set(cleanWord, (wordCount.get(cleanWord) || 0) + 1);
+                }
+            });
+        });
+        
+        return Array.from(wordCount.entries())
+            .filter(([, count]) => count > 1)
+            .sort((a, b) => b[1] - a[1])
+            .map(([word]) => word);
+    }
+
+    /**
+     * Async conversation pattern analysis for background processing
+     */
+    private async analyzeConversationPatternsAsync(userId: string, conversations: any[]): Promise<string> {
+        try {
+            // Use streaming approach for large conversation sets
+            const queries = conversations.map(conv => conv.query).slice(0, 10);
+            
+            const analysisPrompt = `Analyze these user conversation patterns:
+            
+            Recent Queries:
+            ${queries.map((q, i) => `${i + 1}. ${q}`).join('\n')}
+            
+            Identify:
+            1. Common topics or themes
+            2. Question types (technical, pricing, comparison, etc.)
+            3. Complexity level preferences
+            4. Time patterns or urgency indicators
+            
+            Provide a concise summary of the user's conversation patterns.`;
+            
+            const response = await this.memoryAgent.invoke([new HumanMessage(analysisPrompt)]);
+            return response.content.toString();
+        } catch (error) {
+            loggingService.error('❌ Failed to analyze conversation patterns async:', { error: error instanceof Error ? error.message : String(error) });
+            return 'Unable to analyze conversation patterns';
+        }
+    }
+
+    /**
+     * Store pattern insight for future use
+     */
+    private async storePatternInsight(userId: string, patterns: string): Promise<void> {
+        try {
+            // Store in UserMemory for future reference
+            const patternMemory = new UserMemory({
+                userId,
+                type: 'pattern_analysis',
+                content: patterns,
+                metadata: {
+                    generatedAt: new Date(),
+                    source: 'ai_analysis'
+                }
+            });
+            
+            await patternMemory.save();
+        } catch (error) {
+            loggingService.error('❌ Failed to store pattern insight:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
 }
 
 export const memoryService = new MemoryService();

@@ -229,7 +229,7 @@ export class VectorMemoryService {
     }
 
     /**
-     * Find similar conversations using vector similarity
+     * Find similar conversations using batch vector similarity
      */
     async findSimilarConversations(
         userId: string, 
@@ -250,32 +250,16 @@ export class VectorMemoryService {
                 return [];
             }
             
-            // Calculate similarities
-            const similarities: SimilarityResult[] = [];
+            // Batch similarity calculation with early termination
+            const similarities = this.calculateBatchSimilarities(
+                queryEmbedding, 
+                Array.from(userVectorIds), 
+                limit, 
+                minSimilarity
+            );
             
-            for (const vectorId of userVectorIds) {
-                const vectorItem = this.vectorStore.get(vectorId);
-                if (!vectorItem) continue;
-                
-                const similarity = this.cosineSimilarity(queryEmbedding, vectorItem.embedding);
-                
-                if (similarity >= minSimilarity) {
-                    similarities.push({
-                        id: vectorItem.id,
-                        query: vectorItem.query,
-                        response: vectorItem.response,
-                        similarity,
-                        metadata: vectorItem.metadata
-                    });
-                }
-            }
-            
-            // Sort by similarity and limit results
-            similarities.sort((a, b) => b.similarity - a.similarity);
-            const results = similarities.slice(0, limit);
-            
-            loggingService.info(`✅ Found ${results.length} similar conversations`);
-            return results;
+            loggingService.info(`✅ Found ${similarities.length} similar conversations`);
+            return similarities;
         } catch (error) {
             loggingService.error('❌ Failed to find similar conversations:', { error: error instanceof Error ? error.message : String(error) });
             return [];
@@ -299,7 +283,7 @@ export class VectorMemoryService {
             // Calculate similarities across all vectors
             const similarities: SimilarityResult[] = [];
             
-            for (const [, vectorItem] of this.vectorStore.entries()) {
+            for (const [, vectorItem] of Array.from(this.vectorStore.entries())) {
                 const similarity = this.cosineSimilarity(queryEmbedding, vectorItem.embedding);
                 
                 if (similarity >= minSimilarity) {
@@ -337,7 +321,7 @@ export class VectorMemoryService {
             
             const userVectorIds = this.userVectorIndex.get(userId);
             if (userVectorIds) {
-                for (const vectorId of userVectorIds) {
+                for (const vectorId of Array.from(userVectorIds)) {
                     this.vectorStore.delete(vectorId);
                 }
                 this.userVectorIndex.delete(userId);
@@ -387,6 +371,64 @@ export class VectorMemoryService {
             loggingService.info('🧹 Cleared embedding cache');
         }
     }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Calculate batch similarities with early termination and optimization
+     */
+    private calculateBatchSimilarities(
+        queryEmbedding: number[], 
+        vectorIds: string[], 
+        limit: number, 
+        minSimilarity: number
+    ): SimilarityResult[] {
+        let processedCount = 0;
+        
+        // Use a min-heap to keep track of top similarities
+        const topSimilarities: Array<{ similarity: number; result: SimilarityResult }> = [];
+        
+        for (const vectorId of vectorIds) {
+            const vectorItem = this.vectorStore.get(vectorId);
+            if (!vectorItem) continue;
+            
+            processedCount++;
+            
+            // Calculate similarity
+            const similarity = this.cosineSimilarity(queryEmbedding, vectorItem.embedding);
+            
+            // Early termination for very low similarities
+            if (similarity < minSimilarity) continue;
+            
+            const result: SimilarityResult = {
+                id: vectorItem.id,
+                query: vectorItem.query,
+                response: vectorItem.response,
+                similarity,
+                metadata: vectorItem.metadata
+            };
+            
+            // Maintain top similarities using insertion sort for small arrays
+            if (topSimilarities.length < limit) {
+                topSimilarities.push({ similarity, result });
+                topSimilarities.sort((a, b) => b.similarity - a.similarity);
+            } else if (similarity > topSimilarities[topSimilarities.length - 1].similarity) {
+                topSimilarities[topSimilarities.length - 1] = { similarity, result };
+                topSimilarities.sort((a, b) => b.similarity - a.similarity);
+            }
+            
+            // Early termination if we have enough high-quality results
+            if (topSimilarities.length >= limit && topSimilarities[limit - 1].similarity > 0.9) {
+                break;
+            }
+        }
+        
+        return topSimilarities.map(item => item.result);
+    }
+
+
 }
 
 export const vectorMemoryService = new VectorMemoryService();
