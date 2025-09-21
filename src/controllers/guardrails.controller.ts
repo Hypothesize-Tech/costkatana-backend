@@ -800,42 +800,65 @@ export class GuardrailsController {
 
             const Usage = require('../models/Usage').Usage;
             
-            const trend = [];
+            // Optimized: Single aggregation query for entire date range
             const today = new Date();
+            const startDate = new Date(today);
+            startDate.setDate(startDate.getDate() - (days - 1));
+            startDate.setHours(0, 0, 0, 0);
             
-            for (let i = days - 1; i >= 0; i--) {
-                const date = new Date(today);
-                date.setDate(date.getDate() - i);
-                date.setHours(0, 0, 0, 0);
-                
-                const nextDate = new Date(date);
-                nextDate.setDate(nextDate.getDate() + 1);
-                
-                // Get real usage data for the day from Usage collection
-                const usageData = await Usage.aggregate([
-                    {
-                        $match: {
-                            userId: new mongoose.Types.ObjectId(userId),
-                            createdAt: { $gte: date, $lt: nextDate }
-                        }
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            requests: { $sum: 1 },
-                            totalTokens: { $sum: '$totalTokens' },
-                            totalCost: { $sum: '$cost' }
-                        }
-                    }
-                ]);
-                
-                trend.push({
-                    date: date.toISOString().split('T')[0],
-                    requests: usageData[0]?.requests || 0,
-                    tokens: usageData[0]?.totalTokens || 0,
-                    cost: usageData[0]?.totalCost || 0
-                });
+            const endDate = new Date(today);
+            endDate.setHours(23, 59, 59, 999);
+
+            // Generate date boundaries for bucketing
+            const dateBoundaries = [];
+            for (let i = 0; i < days; i++) {
+                const date = new Date(startDate);
+                date.setDate(date.getDate() + i);
+                dateBoundaries.push(date.toISOString().split('T')[0]);
             }
+
+            // Single aggregation query with date bucketing
+            const trendData = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        createdAt: { $gte: startDate, $lte: endDate }
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                        },
+                        requests: { $sum: 1 },
+                        tokens: { $sum: '$totalTokens' },
+                        cost: { $sum: '$cost' }
+                    }
+                },
+                {
+                    $sort: { _id: 1 }
+                }
+            ]);
+
+            // Create lookup map for O(1) access
+            const dataMap = new Map(
+                trendData.map((item: any) => [item._id, {
+                    requests: item.requests,
+                    tokens: item.tokens,
+                    cost: item.cost
+                }])
+            );
+
+            // Build trend array with all dates (including zeros)
+            const trend = dateBoundaries.map(dateStr => {
+                const data = dataMap.get(dateStr) as { requests: number; tokens: number; cost: number } | undefined;
+                return {
+                    date: dateStr,
+                    requests: data?.requests || 0,
+                    tokens: data?.tokens || 0,
+                    cost: data?.cost || 0
+                };
+            });
 
             const duration = Date.now() - startTime;
 
@@ -961,60 +984,87 @@ export class GuardrailsController {
             const Activity = require('../models/Activity').Activity;
             const Usage = require('../models/Usage').Usage;
             
-            const trend = [];
-            const currentDate = new Date(start);
-            
-            while (currentDate <= end) {
-                const date = new Date(currentDate);
-                date.setHours(0, 0, 0, 0);
-                
-                const nextDate = new Date(date);
-                nextDate.setDate(nextDate.getDate() + 1);
-                
-                // Get activities for the day
-                const activities = await Activity.aggregate([
+            // Optimized: Single aggregation query for entire date range
+            const adjustedStart = new Date(start);
+            adjustedStart.setHours(0, 0, 0, 0);
+            const adjustedEnd = new Date(end);
+            adjustedEnd.setHours(23, 59, 59, 999);
+
+            // Generate all dates in range
+            const dateArray = [];
+            const currentDate = new Date(adjustedStart);
+            while (currentDate <= adjustedEnd) {
+                dateArray.push(currentDate.toISOString().split('T')[0]);
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+
+            // Parallel aggregation queries for activities and usage
+            const [activitiesData, usageData] = await Promise.all([
+                Activity.aggregate([
                     {
                         $match: {
                             userId: userId,
-                            createdAt: { $gte: date, $lt: nextDate }
+                            createdAt: { $gte: adjustedStart, $lte: adjustedEnd }
                         }
                     },
                     {
                         $group: {
-                            _id: null,
+                            _id: {
+                                $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                            },
                             requests: { $sum: 1 },
                             tokens: { $sum: '$metadata.tokens' },
                             cost: { $sum: '$metadata.cost' }
                         }
                     }
-                ]);
-                
-                // Get usage data for the day
-                const usageData = await Usage.aggregate([
+                ]),
+                Usage.aggregate([
                     {
                         $match: {
                             userId: userId,
-                            createdAt: { $gte: date, $lt: nextDate }
+                            createdAt: { $gte: adjustedStart, $lte: adjustedEnd }
                         }
                     },
                     {
                         $group: {
-                            _id: null,
+                            _id: {
+                                $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                            },
                             totalTokens: { $sum: '$totalTokens' },
-                            totalCost: { $sum: '$totalCost' }
+                            totalCost: { $sum: '$cost' }
                         }
                     }
-                ]);
+                ])
+            ]);
+
+            // Create lookup maps for O(1) access
+            const activitiesMap = new Map(
+                activitiesData.map((item: any) => [item._id, {
+                    requests: item.requests || 0,
+                    tokens: item.tokens || 0,
+                    cost: item.cost || 0
+                }])
+            );
+
+            const usageMap = new Map(
+                usageData.map((item: any) => [item._id, {
+                    tokens: item.totalTokens || 0,
+                    cost: item.totalCost || 0
+                }])
+            );
+
+            // Build trend array combining both data sources
+            const trend = dateArray.map(dateStr => {
+                const activityData = activitiesMap.get(dateStr) as { requests: number; tokens: number; cost: number } | undefined;
+                const usageDataForDate = usageMap.get(dateStr) as { tokens: number; cost: number } | undefined;
                 
-                trend.push({
-                    date: date.toISOString().split('T')[0],
-                    requests: activities[0]?.requests || 0,
-                    tokens: (activities[0]?.tokens || 0) + (usageData[0]?.totalTokens || 0),
-                    cost: (activities[0]?.cost || 0) + (usageData[0]?.totalCost || 0)
-                });
-                
-                currentDate.setDate(currentDate.getDate() + 1);
-            }
+                return {
+                    date: dateStr,
+                    requests: activityData?.requests || 0,
+                    tokens: (activityData?.tokens || 0) + (usageDataForDate?.tokens || 0),
+                    cost: (activityData?.cost || 0) + (usageDataForDate?.cost || 0)
+                };
+            });
 
             const duration = Date.now() - startTime;
 

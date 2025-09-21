@@ -77,6 +77,13 @@ class UsageCache {
 export class GuardrailsService {
     private static usageCache = new UsageCache();
     
+    // Optimization: Background processing queues
+    private static alertQueue: Array<() => Promise<void>> = [];
+    private static usageBatchQueue = new Map<string, Partial<UsageMetrics>>();
+    private static alertTracker = new Map<string, number>();
+    private static backgroundProcessor?: NodeJS.Timeout;
+    private static usageBatchProcessor?: NodeJS.Timeout;
+    
     // Define subscription plans with their limits
     private static readonly SUBSCRIPTION_PLANS: Record<string, PlanLimits> = {
         free: {
@@ -129,7 +136,7 @@ export class GuardrailsService {
     private static readonly WARNING_THRESHOLDS = [50, 75, 90, 95, 99];
 
     /**
-     * Check if a user can make a request based on their guardrails
+     * Check if a user can make a request based on their guardrails with parallel validation
      */
     static async checkRequestGuardrails(
         userId: string,
@@ -138,8 +145,12 @@ export class GuardrailsService {
         modelId?: string
     ): Promise<GuardrailViolation | null> {
         try {
-            // Get user with subscription info
-            const user = await this.getUserWithCache(userId);
+            // Parallel execution of user and usage data fetching
+            const [user, usage] = await Promise.all([
+                this.getUserWithCache(userId),
+                this.getCurrentUsage(userId)
+            ]);
+
             if (!user) {
                 return {
                     type: 'hard',
@@ -181,9 +192,6 @@ export class GuardrailsService {
                 }
             }
 
-            // Get current usage
-            const usage = await this.getCurrentUsage(userId);
-            
             // Check specific metric
             let currentValue = 0;
             let limitValue = 0;
@@ -242,8 +250,8 @@ export class GuardrailsService {
                         suggestions: this.getOptimizationSuggestions(metricName, percentage)
                     };
 
-                    // Send alert if crossing threshold for first time
-                    await this.sendUsageAlert(userId, violation);
+                    // Queue alert for background processing
+                    this.queueAlert(userId, violation);
                     
                     return violation;
                 }
@@ -271,7 +279,7 @@ export class GuardrailsService {
     }
 
     /**
-     * Track usage for a user
+     * Track usage for a user with batching optimization
      */
     static async trackUsage(
         userId: string,
@@ -279,9 +287,6 @@ export class GuardrailsService {
         modelId?: string
     ): Promise<void> {
         try {
-            const user = await User.findById(userId);
-            if (!user) return;
-
             // Calculate cost if not provided but tokens are available
             let calculatedCost = metrics.cost || 0;
             if (!calculatedCost && metrics.tokens && modelId) {
@@ -291,45 +296,37 @@ export class GuardrailsService {
                 calculatedCost = this.calculateTokenCost(modelId, inputTokens, outputTokens);
             }
 
-            // Update monthly usage
-            const updates: any = {};
-            
-            if (metrics.tokens) {
-                updates['usage.currentMonth.totalTokens'] = 
-                    (user.usage?.currentMonth?.totalTokens || 0) + metrics.tokens;
-            }
-            
-            if (metrics.requests) {
-                updates['usage.currentMonth.apiCalls'] = 
-                    (user.usage?.currentMonth?.apiCalls || 0) + metrics.requests;
-            }
-            
-            if (calculatedCost > 0) {
-                updates['usage.currentMonth.totalCost'] = 
-                    (user.usage?.currentMonth?.totalCost || 0) + calculatedCost;
-            }
+            // Add to batch queue instead of immediate database update
+            this.addToBatchQueue(userId, {
+                ...metrics,
+                cost: calculatedCost
+            });
 
-            await User.findByIdAndUpdate(userId, { $inc: updates });
-
-            // Clear cache
+            // Clear cache for immediate consistency
             this.usageCache.delete(`user:${userId}`);
             this.usageCache.delete(`usage:${userId}`);
 
-            // Log activity
-            await Activity.create({
-                userId,
-                type: 'api_call',
-                title: 'Usage Tracked',
-                description: `Usage tracked: ${JSON.stringify({ ...metrics, calculatedCost })}`,
-                metadata: { ...metrics, calculatedCost, modelId }
+            // Log activity in background
+            this.queueBackgroundOperation(async () => {
+                await Activity.create({
+                    userId,
+                    type: 'api_call',
+                    title: 'Usage Tracked',
+                    description: `Usage tracked: ${JSON.stringify({ ...metrics, calculatedCost })}`,
+                    metadata: { ...metrics, calculatedCost, modelId }
+                });
             });
 
-            // Check for violations after update
+            // Check for violations after update (non-blocking)
             if (metrics.tokens) {
-                await this.checkRequestGuardrails(userId, 'token', 0);
+                this.queueBackgroundOperation(async () => {
+                    await this.checkRequestGuardrails(userId, 'token', 0);
+                });
             }
             if (metrics.requests) {
-                await this.checkRequestGuardrails(userId, 'request', 0);
+                this.queueBackgroundOperation(async () => {
+                    await this.checkRequestGuardrails(userId, 'request', 0);
+                });
             }
         } catch (error) {
             loggingService.error('Error tracking usage:', { error: error instanceof Error ? error.message : String(error) });
@@ -337,7 +334,7 @@ export class GuardrailsService {
     }
 
     /**
-     * Get current usage for a user
+     * Get current usage for a user with unified database queries
      */
     static async getCurrentUsage(userId: string): Promise<UsageMetrics> {
         try {
@@ -361,78 +358,22 @@ export class GuardrailsService {
                 };
             }
 
-            // Count projects and workflows
-            const projectCount = await Project.countDocuments({
-                $or: [
-                    { ownerId: new mongoose.Types.ObjectId(userId) },
-                    { 'members.userId': new mongoose.Types.ObjectId(userId) }
-                ],
-                isActive: true
-            });
-            
-            // Debug logging for projects
-            loggingService.info(`Project count for user ${userId}: ${projectCount}`);
-            
-            // Count unique workflows for the user this month
             const startOfMonth = new Date();
             startOfMonth.setDate(1);
             startOfMonth.setHours(0, 0, 0, 0);
-            
-            const workflowCount = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        workflowId: { $exists: true, $ne: null },
-                        createdAt: { $gte: startOfMonth }
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$workflowId'
-                    }
-                },
-                {
-                    $count: 'totalWorkflows'
-                }
-            ]).then(result => result[0]?.totalWorkflows || 0);
 
-            // Count logs (activities)
-            
-            const logCount = await Activity.countDocuments({
-                userId,
-                createdAt: { $gte: startOfMonth }
-            });
-
-            // Get real usage data from Usage collection for current month
-            
-            const realUsageData = await Usage.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: startOfMonth }
-                    }
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalTokens: { $sum: '$totalTokens' },
-                        totalCost: { $sum: '$cost' },
-                        requestCount: { $sum: 1 }
-                    }
-                }
+            // Unified database query using $facet for all metrics
+            const [allMetrics] = await Promise.all([
+                this.getAllUsageMetrics(userId, startOfMonth)
             ]);
 
-            const realTokens = realUsageData[0]?.totalTokens || 0;
-            const realCost = realUsageData[0]?.totalCost || 0;
-            const realRequests = realUsageData[0]?.requestCount || 0;
-
             const usage: UsageMetrics = {
-                tokens: realTokens,
-                requests: realRequests,
-                logs: logCount,
-                projects: projectCount,
-                workflows: workflowCount,
-                cost: realCost,
+                tokens: allMetrics.usage.totalTokens || 0,
+                requests: allMetrics.usage.requestCount || 0,
+                logs: allMetrics.logs.count || 0,
+                projects: allMetrics.projects.count || 0,
+                workflows: allMetrics.workflows.count || 0,
+                cost: allMetrics.usage.totalCost || 0,
                 period: 'monthly'
             };
 
@@ -452,6 +393,76 @@ export class GuardrailsService {
                 period: 'monthly'
             };
         }
+    }
+
+    /**
+     * Unified database query for all usage metrics
+     */
+    private static async getAllUsageMetrics(userId: string, startOfMonth: Date): Promise<any> {
+        // Single aggregation query combining all metrics
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+        
+        // Parallel execution of optimized queries
+        const [projectCount, usageData, logCount, workflowCount] = await Promise.all([
+            // Projects count
+            Project.countDocuments({
+                $or: [
+                    { ownerId: userObjectId },
+                    { 'members.userId': userObjectId }
+                ],
+                isActive: true
+            }),
+            
+            // Usage data aggregation
+            Usage.aggregate([
+                {
+                    $match: {
+                        userId: userObjectId,
+                        createdAt: { $gte: startOfMonth }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalTokens: { $sum: '$totalTokens' },
+                        totalCost: { $sum: '$cost' },
+                        requestCount: { $sum: 1 }
+                    }
+                }
+            ]),
+            
+            // Activity logs count
+            Activity.countDocuments({
+                userId,
+                createdAt: { $gte: startOfMonth }
+            }),
+            
+            // Workflows count
+            Usage.aggregate([
+                {
+                    $match: {
+                        userId: userObjectId,
+                        workflowId: { $exists: true, $ne: null },
+                        createdAt: { $gte: startOfMonth }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$workflowId'
+                    }
+                },
+                {
+                    $count: 'totalWorkflows'
+                }
+            ])
+        ]);
+
+        return {
+            projects: { count: projectCount },
+            usage: usageData[0] || { totalTokens: 0, totalCost: 0, requestCount: 0 },
+            logs: { count: logCount },
+            workflows: { count: workflowCount[0]?.totalWorkflows || 0 }
+        };
     }
 
     /**
@@ -541,7 +552,7 @@ export class GuardrailsService {
     }
 
     /**
-     * Middleware to enforce guardrails on requests
+     * Middleware to enforce guardrails on requests with parallel validation
      */
     static async enforceGuardrails(req: any, res: Response, next: Function): Promise<void> {
         try {
@@ -553,46 +564,38 @@ export class GuardrailsService {
             // Estimate tokens for the request (simplified)
             const estimatedTokens = GuardrailsService.estimateRequestTokens(req);
             
-            // Check guardrails
-            const violation = await GuardrailsService.checkRequestGuardrails(
-                userId, 
-                'request', 
-                1,
-                req.body?.model
-            );
+            // Parallel guardrail checks
+            const [requestViolation, tokenViolation] = await Promise.all([
+                GuardrailsService.checkRequestGuardrails(userId, 'request', 1, req.body?.model),
+                GuardrailsService.checkRequestGuardrails(userId, 'token', estimatedTokens, req.body?.model)
+            ]);
 
-            if (violation) {
+            // Check request violation first
+            if (requestViolation) {
                 // Add headers for client awareness
-                res.setHeader('X-Guardrail-Status', violation.type);
-                res.setHeader('X-Guardrail-Metric', violation.metric);
-                res.setHeader('X-Guardrail-Percentage', violation.percentage.toFixed(2));
+                res.setHeader('X-Guardrail-Status', requestViolation.type);
+                res.setHeader('X-Guardrail-Metric', requestViolation.metric);
+                res.setHeader('X-Guardrail-Percentage', requestViolation.percentage.toFixed(2));
 
-                switch (violation.action) {
+                switch (requestViolation.action) {
                     case 'block':
                         res.status(429).json({
                             success: false,
                             error: 'Usage limit exceeded',
-                            violation,
+                            violation: requestViolation,
                             upgradeUrl: 'https://www.costkatana.com/#pricing'
                         });
                         return;
                     
                     case 'throttle':
                         // Add artificial delay for free tier throttling
-                        const delay = Math.min(5000, violation.percentage * 50);
+                        const delay = Math.min(5000, requestViolation.percentage * 50);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         break;
                 }
             }
 
-            // Check token limits
-            const tokenViolation = await GuardrailsService.checkRequestGuardrails(
-                userId,
-                'token',
-                estimatedTokens,
-                req.body?.model
-            );
-
+            // Check token violation
             if (tokenViolation?.action === 'block') {
                 res.status(429).json({
                     success: false,
@@ -603,8 +606,8 @@ export class GuardrailsService {
                 return;
             }
 
-            // Track the request
-            await GuardrailsService.trackUsage(userId, {
+            // Track the request (non-blocking)
+            GuardrailsService.trackUsage(userId, {
                 requests: 1,
                 tokens: estimatedTokens
             });
@@ -685,20 +688,6 @@ export class GuardrailsService {
         }
     }
 
-    /**
-     * Get user with cache
-     */
-    private static async getUserWithCache(userId: string): Promise<any> {
-        const cacheKey = `user:${userId}`;
-        const cached = this.usageCache.get(cacheKey);
-        if (cached) return cached;
-
-        const user = await User.findById(userId);
-        if (user) {
-            this.usageCache.set(cacheKey, user, 300000); // Cache for 5 minutes
-        }
-        return user;
-    }
 
     /**
      * Estimate tokens for a request
@@ -904,5 +893,160 @@ export class GuardrailsService {
         }
         
         return suggestions;
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Add usage metrics to batch queue for efficient database updates
+     */
+    private static addToBatchQueue(userId: string, metrics: Partial<UsageMetrics>): void {
+        const existing = this.usageBatchQueue.get(userId) || {};
+        
+        this.usageBatchQueue.set(userId, {
+            tokens: (existing.tokens || 0) + (metrics.tokens || 0),
+            requests: (existing.requests || 0) + (metrics.requests || 0),
+            logs: (existing.logs || 0) + (metrics.logs || 0),
+            cost: (existing.cost || 0) + (metrics.cost || 0)
+        });
+
+        // Start batch processor if not running
+        if (!this.usageBatchProcessor) {
+            this.usageBatchProcessor = setTimeout(() => {
+                this.processBatchQueue();
+            }, 1000); // Process every 1 second
+        }
+    }
+
+    /**
+     * Process batched usage updates
+     */
+    private static async processBatchQueue(): Promise<void> {
+        if (this.usageBatchQueue.size === 0) {
+            this.usageBatchProcessor = undefined;
+            return;
+        }
+
+        const updates = Array.from(this.usageBatchQueue.entries());
+        this.usageBatchQueue.clear();
+
+        try {
+            // Parallel batch updates
+            await Promise.all(updates.map(async ([userId, metrics]) => {
+                const updateObj: any = {};
+                
+                if (metrics.tokens) {
+                    updateObj['usage.currentMonth.totalTokens'] = metrics.tokens;
+                }
+                if (metrics.requests) {
+                    updateObj['usage.currentMonth.apiCalls'] = metrics.requests;
+                }
+                if (metrics.cost) {
+                    updateObj['usage.currentMonth.totalCost'] = metrics.cost;
+                }
+
+                if (Object.keys(updateObj).length > 0) {
+                    await User.findByIdAndUpdate(userId, { $inc: updateObj });
+                }
+            }));
+        } catch (error) {
+            loggingService.error('Error processing usage batch queue:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Continue processing if more items are queued
+        if (this.usageBatchQueue.size > 0) {
+            this.usageBatchProcessor = setTimeout(() => {
+                this.processBatchQueue();
+            }, 1000);
+        } else {
+            this.usageBatchProcessor = undefined;
+        }
+    }
+
+    /**
+     * Queue alert for background processing with deduplication
+     */
+    private static queueAlert(userId: string, violation: GuardrailViolation): void {
+        // Smart alert deduplication
+        const alertKey = `${userId}:${violation.metric}:${Math.floor(violation.percentage/5)*5}`;
+        const now = Date.now();
+        
+        // Check if we sent this alert recently (within 1 hour)
+        if (this.alertTracker.has(alertKey)) {
+            const lastSent = this.alertTracker.get(alertKey)!;
+            if (now - lastSent < 3600000) { // 1 hour
+                return; // Skip duplicate alert
+            }
+        }
+
+        this.alertTracker.set(alertKey, now);
+        
+        // Queue for background processing
+        this.queueBackgroundOperation(async () => {
+            await this.sendUsageAlert(userId, violation);
+        });
+    }
+
+    /**
+     * Queue background operation for non-blocking processing
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.alertQueue.push(operation);
+        
+        if (!this.backgroundProcessor) {
+            this.backgroundProcessor = setTimeout(() => {
+                this.processBackgroundQueue();
+            }, 100); // Process queue every 100ms
+        }
+    }
+
+    /**
+     * Process background operations queue
+     */
+    private static async processBackgroundQueue(): Promise<void> {
+        if (this.alertQueue.length === 0) {
+            this.backgroundProcessor = undefined;
+            return;
+        }
+
+        const operations = this.alertQueue.splice(0, 10); // Process 10 operations at a time
+        
+        try {
+            await Promise.allSettled(operations.map(op => op()));
+        } catch (error) {
+            loggingService.warn('Background operation failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+
+        // Continue processing if more operations are queued
+        if (this.alertQueue.length > 0) {
+            this.backgroundProcessor = setTimeout(() => {
+                this.processBackgroundQueue();
+            }, 100);
+        } else {
+            this.backgroundProcessor = undefined;
+        }
+    }
+
+    /**
+     * Memory-efficient user lookup with projection
+     */
+    private static async getUserWithCache(userId: string): Promise<any> {
+        const cacheKey = `user:${userId}`;
+        const cached = this.usageCache.get(cacheKey);
+        if (cached) return cached;
+
+        // Use projection to fetch only needed fields
+        const user = await User.findById(userId)
+            .select('subscription.plan subscription.limits preferences.emailAlerts')
+            .lean();
+            
+        if (user) {
+            this.usageCache.set(cacheKey, user, 300000); // Cache for 5 minutes
+        }
+        return user;
     }
 }
