@@ -45,6 +45,23 @@ interface ProjectSpendingUpdate {
 }
 
 export class ProjectService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // ObjectId memoization cache
+    private static objectIdCache = new Map<string, mongoose.Types.ObjectId>();
+    
+    // Date range cache for performance
+    private static dateRangeCache = new Map<string, Date>();
+
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
+
     /**
      * Create a new project
      */
@@ -105,21 +122,25 @@ export class ProjectService {
                 timeTaken: Date.now() - startTime + 'ms'
             });
 
-            loggingService.info('Step 4: Tracking activity');
-            try {
-                await ActivityService.trackActivity(ownerId, {
-                    type: 'settings_updated',
-                    title: 'Created Project',
-                    description: `Created project "${savedProject.name}" with budget ${savedProject.budget.amount} ${savedProject.budget.currency}`,
-                    metadata: {
-                        projectId: savedProject._id,
-                        budget: savedProject.budget.amount
-                    }
-                });
-                loggingService.info('Activity tracked successfully');
-            } catch (activityError) {
-                loggingService.warn('Activity tracking failed (non-critical):', { error: activityError instanceof Error ? activityError.message : String(activityError) });
-            }
+            loggingService.info('Step 4: Queuing activity tracking');
+            // Queue activity tracking for background processing
+            this.queueBackgroundOperation(async () => {
+                try {
+                    await ActivityService.trackActivity(ownerId, {
+                        type: 'settings_updated',
+                        title: 'Created Project',
+                        description: `Created project "${savedProject.name}" with budget ${savedProject.budget.amount} ${savedProject.budget.currency}`,
+                        metadata: {
+                            projectId: savedProject._id,
+                            budget: savedProject.budget.amount
+                        }
+                    });
+                } catch (activityError) {
+                    loggingService.warn('Background activity tracking failed:', { 
+                        error: activityError instanceof Error ? activityError.message : String(activityError) 
+                    });
+                }
+            });
 
             loggingService.info('=== ProjectService.createProject COMPLETED ===');
             loggingService.info(`Project created: ${savedProject.name} by user ${ownerId}`);
@@ -440,84 +461,116 @@ export class ProjectService {
     }
 
     /**
-     * Get project analytics
+     * Get project analytics with unified $facet aggregation
      */
     static async getProjectAnalytics(projectId: string, period?: string): Promise<any> {
         try {
-            const project = await Project.findById(projectId);
+            const project = await Project.findById(projectId).lean();
             if (!project) {
                 throw new Error('Project not found');
             }
 
             const startDate = this.getStartDateForPeriod(period || project.budget.period);
+            const projectObjectId = this.getMemoizedObjectId(projectId);
 
-            // Get usage statistics
-            const usageStats = await Usage.aggregate([
+            // Unified analytics query using $facet for all data in one call
+            const [analyticsResult] = await Usage.aggregate([
                 {
                     $match: {
-                        projectId: new mongoose.Types.ObjectId(projectId),
+                        projectId: projectObjectId,
                         createdAt: { $gte: startDate }
                     }
                 },
                 {
-                    $group: {
-                        _id: null,
-                        totalCost: { $sum: '$cost' },
-                        totalCalls: { $sum: 1 },
-                        totalTokens: { $sum: '$totalTokens' },
-                        avgCost: { $avg: '$cost' },
-                        byService: {
-                            $push: {
-                                service: '$service',
-                                cost: '$cost'
+                    $facet: {
+                        // Summary statistics
+                        summary: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalCost: { $sum: '$cost' },
+                                    totalCalls: { $sum: 1 },
+                                    totalTokens: { $sum: '$totalTokens' },
+                                    avgCost: { $avg: '$cost' }
+                                }
                             }
-                        },
-                        byModel: {
-                            $push: {
-                                model: '$model',
-                                cost: '$cost'
-                            }
-                        },
-                        byUser: {
-                            $push: {
-                                userId: '$userId',
-                                cost: '$cost'
-                            }
-                        }
+                        ],
+                        // Daily spending trend
+                        dailyTrend: [
+                            {
+                                $group: {
+                                    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                                    amount: { $sum: '$cost' },
+                                    calls: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { _id: 1 } }
+                        ],
+                        // Service breakdown
+                        serviceBreakdown: [
+                            {
+                                $group: {
+                                    _id: '$service',
+                                    cost: { $sum: '$cost' },
+                                    calls: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { cost: -1 } },
+                            { $limit: 10 }
+                        ],
+                        // Model breakdown
+                        modelBreakdown: [
+                            {
+                                $group: {
+                                    _id: '$model',
+                                    cost: { $sum: '$cost' },
+                                    calls: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { cost: -1 } },
+                            { $limit: 10 }
+                        ],
+                        // User breakdown
+                        userBreakdown: [
+                            {
+                                $group: {
+                                    _id: '$userId',
+                                    cost: { $sum: '$cost' },
+                                    calls: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { cost: -1 } },
+                            { $limit: 10 }
+                        ]
                     }
                 }
             ]);
 
-            // Process aggregated data
-            const stats = usageStats[0] || {
+            // Process results
+            const summary = analyticsResult.summary[0] || {
                 totalCost: 0,
                 totalCalls: 0,
                 totalTokens: 0,
                 avgCost: 0
             };
 
-            // Calculate spending by category
-            const spendingByService = this.aggregateSpending(stats.byService || [], 'service');
-            const spendingByModel = this.aggregateSpending(stats.byModel || [], 'model');
-            const spendingByUser = this.aggregateSpending(stats.byUser || [], 'userId');
+            const spendingByService = analyticsResult.serviceBreakdown.map((item: any) => ({
+                name: item._id,
+                cost: item.cost,
+                calls: item.calls
+            }));
 
-            // Get daily spending trend
-            const dailySpending = await Usage.aggregate([
-                {
-                    $match: {
-                        projectId: new mongoose.Types.ObjectId(projectId),
-                        createdAt: { $gte: startDate }
-                    }
-                },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-                        amount: { $sum: '$cost' },
-                        calls: { $sum: 1 }
-                    }
-                },
-                { $sort: { _id: 1 } }
-            ]);
+            const spendingByModel = analyticsResult.modelBreakdown.map((item: any) => ({
+                name: item._id,
+                cost: item.cost,
+                calls: item.calls
+            }));
+
+            const spendingByUser = analyticsResult.userBreakdown.map((item: any) => ({
+                name: item._id,
+                cost: item.cost,
+                calls: item.calls
+            }));
 
             return {
                 project: {
@@ -533,10 +586,10 @@ export class ProjectService {
                     end: new Date()
                 },
                 summary: {
-                    totalCost: stats.totalCost,
-                    totalCalls: stats.totalCalls,
-                    totalTokens: stats.totalTokens,
-                    avgCostPerCall: stats.avgCost,
+                    totalCost: summary.totalCost,
+                    totalCalls: summary.totalCalls,
+                    totalTokens: summary.totalTokens,
+                    avgCostPerCall: summary.avgCost,
                     remainingBudget: Math.max(0, project.budget.amount - project.spending.current),
                     daysRemaining: this.getDaysRemaining(project.budget)
                 },
@@ -546,8 +599,8 @@ export class ProjectService {
                     byUser: spendingByUser
                 },
                 trends: {
-                    daily: dailySpending,
-                    projectedMonthlySpend: this.projectMonthlySpend(dailySpending)
+                    daily: analyticsResult.dailyTrend,
+                    projectedMonthlySpend: this.projectMonthlySpend(analyticsResult.dailyTrend)
                 }
             };
         } catch (error) {
@@ -1144,5 +1197,121 @@ export class ProjectService {
         });
 
         return project;
+    }
+
+    /**
+     * Queue background operation
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    /**
+     * Start background processor
+     */
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 2000); // Process queue every 2 seconds
+    }
+
+    /**
+     * Get memoized ObjectId
+     */
+    private static getMemoizedObjectId(id: string): mongoose.Types.ObjectId {
+        if (!this.objectIdCache.has(id)) {
+            this.objectIdCache.set(id, new mongoose.Types.ObjectId(id));
+        }
+        return this.objectIdCache.get(id)!;
+    }
+
+    /**
+     * Get cached date for period
+     */
+    private static getCachedDateForPeriod(period: string): Date {
+        const cacheKey = `${period}_${new Date().toDateString()}`;
+        if (!this.dateRangeCache.has(cacheKey)) {
+            this.dateRangeCache.set(cacheKey, this.getStartDateForPeriod(period));
+        }
+        return this.dateRangeCache.get(cacheKey)!;
+    }
+
+    /**
+     * Stream large project data processing
+     */
+    private static async streamProjectData(
+        projectIds: mongoose.Types.ObjectId[],
+        batchSize: number = 50
+    ): Promise<Map<string, any>> {
+        const resultMap = new Map<string, any>();
+        
+        for (let i = 0; i < projectIds.length; i += batchSize) {
+            const batch = projectIds.slice(i, i + batchSize);
+            
+            const batchResults = await Usage.aggregate([
+                {
+                    $match: {
+                        projectId: { $in: batch },
+                        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$projectId',
+                        totalCost: { $sum: '$cost' },
+                        totalRequests: { $sum: 1 },
+                        totalTokens: { $sum: '$totalTokens' }
+                    }
+                }
+            ]);
+
+            batchResults.forEach(result => {
+                resultMap.set(result._id.toString(), {
+                    totalCost: result.totalCost,
+                    totalRequests: result.totalRequests,
+                    totalTokens: result.totalTokens
+                });
+            });
+        }
+
+        return resultMap;
+    }
+
+    /**
+     * Smart fallback for failed operations
+     */
+    private static async executeWithFallback<T>(
+        primaryOperation: () => Promise<T>,
+        fallbackOperation: () => Promise<T>,
+        operationName: string
+    ): Promise<T> {
+        try {
+            return await primaryOperation();
+        } catch (primaryError) {
+            loggingService.warn(`Primary ${operationName} failed, using fallback:`, {
+                error: primaryError instanceof Error ? primaryError.message : String(primaryError)
+            });
+            
+            try {
+                return await fallbackOperation();
+            } catch (fallbackError) {
+                loggingService.error(`Both primary and fallback ${operationName} failed:`, {
+                    primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
+                    fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+                });
+                throw primaryError; // Throw original error
+            }
+        }
     }
 } 

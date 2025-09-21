@@ -14,7 +14,6 @@
 import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 import { CortexConfig, DEFAULT_CORTEX_CONFIG } from '../types/cortex.types';
-import { CortexCacheService } from './cortexCache.service';
 
 // ============================================================================
 // INTERFACES AND TYPES

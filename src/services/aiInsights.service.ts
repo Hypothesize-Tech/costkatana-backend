@@ -64,11 +64,22 @@ export interface AIInsightsSummary {
 export class AIInsightsService {
   private static instance: AIInsightsService;
   private bedrockClient: BedrockRuntimeClient;
+  
+  // Circuit breaker for AI services
+  private aiFailureCount: number = 0;
+  private readonly MAX_AI_FAILURES = 3;
+  private readonly CIRCUIT_BREAKER_RESET_TIME = 60000; // 1 minute
+  private lastFailureTime: number = 0;
+  
+  // Background processing queue
+  private backgroundQueue: Array<() => Promise<void>> = [];
+  private backgroundProcessor?: NodeJS.Timeout;
 
   private constructor() {
     this.bedrockClient = new BedrockRuntimeClient({
       region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
     });
+    this.startBackgroundProcessor();
   }
 
   static getInstance(): AIInsightsService {
@@ -79,26 +90,35 @@ export class AIInsightsService {
   }
 
   /**
-   * Generate comprehensive AI insights
+   * Generate comprehensive AI insights with parallel processing
    */
   async generateInsights(timeframe: string = '24h'): Promise<AIInsightsSummary> {
     try {
+      // Execute all analysis operations in parallel with circuit breaker protection
       const [anomalies, optimizations, forecasts] = await Promise.all([
-        this.detectAnomalies(timeframe),
-        this.generateOptimizations(timeframe),
-        this.generateForecasts(timeframe)
+        this.executeWithCircuitBreaker(() => this.detectAnomalies(timeframe)),
+        this.executeWithCircuitBreaker(() => this.generateOptimizations(timeframe)),
+        this.executeWithCircuitBreaker(() => this.generateForecasts(timeframe))
       ]);
 
-      const healthScore = this.calculateHealthScore(anomalies, optimizations);
-      const keyInsights = await this.generateKeyInsights(anomalies, optimizations, forecasts);
-      const priorityActions = this.generatePriorityActions(anomalies, optimizations);
+      // Use fallback data if any operation failed
+      const safeAnomalies = anomalies || [];
+      const safeOptimizations = optimizations || [];
+      const safeForecasts = forecasts || [];
+
+      // Calculate health score and generate insights in parallel
+      const [healthScore, keyInsights, priorityActions] = await Promise.all([
+        Promise.resolve(this.calculateHealthScore(safeAnomalies, safeOptimizations)),
+        this.executeWithCircuitBreaker(() => this.generateKeyInsights(safeAnomalies, safeOptimizations, safeForecasts)),
+        Promise.resolve(this.generatePriorityActions(safeAnomalies, safeOptimizations))
+      ]);
 
       return {
-        anomalies,
-        optimizations,
-        forecasts,
+        anomalies: safeAnomalies,
+        optimizations: safeOptimizations,
+        forecasts: safeForecasts,
         overall_health_score: healthScore,
-        key_insights: keyInsights,
+        key_insights: keyInsights || ['System analysis completed', 'Review detected patterns for optimization opportunities'],
         priority_actions: priorityActions
       };
     } catch (error) {
@@ -108,33 +128,28 @@ export class AIInsightsService {
   }
 
   /**
-   * Detect anomalies in telemetry data
+   * Detect anomalies in telemetry data with parallel processing
    */
   async detectAnomalies(timeframe: string): Promise<AnomalyDetection[]> {
     try {
-      const anomalies: AnomalyDetection[] = [];
+      // Get unified data for better performance
+      const [currentData, historicalData] = await Promise.all([
+        this.getUnifiedTelemetryData(timeframe),
+        this.getHistoricalBaseline(timeframe)
+      ]);
 
-      // Get current and historical data
-      const currentData = await this.getTimeframeData(timeframe);
-      const historicalData = await this.getHistoricalBaseline(timeframe);
+      // Run all anomaly detection in parallel
+      const anomalyPromises = [
+        this.detectCostSpike(currentData, historicalData),
+        this.detectPerformanceDegradation(currentData, historicalData),
+        this.detectErrorSurge(currentData, historicalData),
+        this.detectUsageAnomaly(currentData, historicalData)
+      ];
 
-      // Cost spike detection
-      const costAnomaly = await this.detectCostSpike(currentData, historicalData);
-      if (costAnomaly) anomalies.push(costAnomaly);
-
-      // Performance degradation detection
-      const performanceAnomaly = await this.detectPerformanceDegradation(currentData, historicalData);
-      if (performanceAnomaly) anomalies.push(performanceAnomaly);
-
-      // Error surge detection
-      const errorAnomaly = await this.detectErrorSurge(currentData, historicalData);
-      if (errorAnomaly) anomalies.push(errorAnomaly);
-
-      // Usage anomaly detection
-      const usageAnomaly = await this.detectUsageAnomaly(currentData, historicalData);
-      if (usageAnomaly) anomalies.push(usageAnomaly);
-
-      return anomalies;
+      const anomalyResults = await Promise.all(anomalyPromises);
+      
+      // Filter out null results and return valid anomalies
+      return anomalyResults.filter((anomaly): anomaly is AnomalyDetection => anomaly !== null);
     } catch (error) {
       loggingService.error('Failed to detect anomalies:', { error: error instanceof Error ? error.message : String(error) });
       return [];
@@ -142,30 +157,24 @@ export class AIInsightsService {
   }
 
   /**
-   * Generate cost optimization recommendations
+   * Generate cost optimization recommendations with parallel processing
    */
   async generateOptimizations(timeframe: string): Promise<CostOptimization[]> {
     try {
-      const optimizations: CostOptimization[] = [];
-      const data = await this.getTimeframeData(timeframe);
+      // Get unified data for better performance
+      const data = await this.getUnifiedTelemetryData(timeframe);
 
-      // Model selection optimization
-      const modelOpt = await this.analyzeModelSelection(data);
-      if (modelOpt) optimizations.push(modelOpt);
+      // Run all optimization analysis in parallel
+      const optimizationPromises = [
+        this.analyzeModelSelection(data),
+        this.analyzeBatchingOpportunities(data),
+        this.analyzeRoutingOptimization(data)
+      ];
 
-      // Caching optimization
-      const cacheOpt = await this.analyzeCachingOpportunities(data);
-      if (cacheOpt) optimizations.push(cacheOpt);
-
-      // Batching optimization
-      const batchOpt = await this.analyzeBatchingOpportunities(data);
-      if (batchOpt) optimizations.push(batchOpt);
-
-      // Routing optimization
-      const routingOpt = await this.analyzeRoutingOptimization(data);
-      if (routingOpt) optimizations.push(routingOpt);
-
-      return optimizations;
+      const optimizationResults = await Promise.all(optimizationPromises);
+      
+      // Filter out null results and return valid optimizations
+      return optimizationResults.filter((opt): opt is CostOptimization => opt !== null);
     } catch (error) {
       loggingService.error('Failed to generate optimizations:', { error: error instanceof Error ? error.message : String(error) });
       return [];
@@ -173,26 +182,24 @@ export class AIInsightsService {
   }
 
   /**
-   * Generate predictive forecasts
+   * Generate predictive forecasts with parallel processing
    */
   async generateForecasts(_timeframe: string): Promise<PredictiveForecast[]> {
     try {
-      const forecasts: PredictiveForecast[] = [];
+      // Get historical data for forecasting
       const historicalData = await this.getHistoricalData('30d');
 
-      // Cost forecast
-      const costForecast = await this.generateCostForecast(historicalData);
-      if (costForecast) forecasts.push(costForecast);
+      // Run all forecast generation in parallel
+      const forecastPromises = [
+        this.generateCostForecast(historicalData),
+        this.generateUsageForecast(historicalData),
+        this.generatePerformanceForecast(historicalData)
+      ];
 
-      // Usage forecast
-      const usageForecast = await this.generateUsageForecast(historicalData);
-      if (usageForecast) forecasts.push(usageForecast);
-
-      // Performance forecast
-      const performanceForecast = await this.generatePerformanceForecast(historicalData);
-      if (performanceForecast) forecasts.push(performanceForecast);
-
-      return forecasts;
+      const forecastResults = await Promise.all(forecastPromises);
+      
+      // Filter out null results and return valid forecasts
+      return forecastResults.filter((forecast): forecast is PredictiveForecast => forecast !== null);
     } catch (error) {
       loggingService.error('Failed to generate forecasts:', { error: error instanceof Error ? error.message : String(error) });
       return [];
@@ -1026,6 +1033,155 @@ Provide concise, actionable insights.`;
         potentialSavings: 0,
         savingsPercentage: 0,
         affectedOperations: []
+      };
+    }
+  }
+
+  /**
+   * Execute with circuit breaker protection
+   */
+  private async executeWithCircuitBreaker<T>(operation: () => Promise<T>): Promise<T | null> {
+    // Check if circuit breaker is open
+    if (this.isCircuitBreakerOpen()) {
+      loggingService.warn('Circuit breaker is open, skipping AI operation');
+      return null;
+    }
+
+    try {
+      const result = await Promise.race([
+        operation(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Operation timeout')), 15000)
+        )
+      ]);
+      
+      // Reset failure count on success
+      this.aiFailureCount = 0;
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      loggingService.error('AI operation failed:', { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  /**
+   * Check if circuit breaker is open
+   */
+  private isCircuitBreakerOpen(): boolean {
+    if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastFailureTime;
+      if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.aiFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Record AI service failure
+   */
+  private recordFailure(): void {
+    this.aiFailureCount++;
+    this.lastFailureTime = Date.now();
+  }
+
+  /**
+   * Queue background operation
+   */
+  private queueBackgroundOperation(operation: () => Promise<void>): void {
+    this.backgroundQueue.push(operation);
+  }
+
+  /**
+   * Start background processor
+   */
+  private startBackgroundProcessor(): void {
+    this.backgroundProcessor = setInterval(async () => {
+      if (this.backgroundQueue.length > 0) {
+        const operation = this.backgroundQueue.shift();
+        if (operation) {
+          try {
+            await operation();
+          } catch (error) {
+            loggingService.error('Background operation failed:', { error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      }
+    }, 2000); // Process queue every 2 seconds
+  }
+
+  /**
+   * Process data in chunks to avoid memory spikes
+   */
+  private async processInChunks<T, R>(
+    data: T[], 
+    processor: (chunk: T[]) => Promise<R[]>, 
+    chunkSize: number = 1000
+  ): Promise<R[]> {
+    const results: R[] = [];
+    
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.slice(i, i + chunkSize);
+      const chunkResults = await processor(chunk);
+      results.push(...chunkResults);
+      
+      // Small delay to prevent overwhelming the system
+      if (i + chunkSize < data.length) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    
+    return results;
+  }
+
+  /**
+   * Get unified telemetry data using optimized aggregation
+   */
+  private async getUnifiedTelemetryData(timeframe: string): Promise<any> {
+    try {
+      const endTime = new Date();
+      const startTime = new Date();
+      
+      // Calculate start time based on timeframe
+      switch (timeframe) {
+        case '1h': startTime.setHours(startTime.getHours() - 1); break;
+        case '24h': startTime.setHours(startTime.getHours() - 24); break;
+        case '7d': startTime.setDate(startTime.getDate() - 7); break;
+        case '30d': startTime.setDate(startTime.getDate() - 30); break;
+        default: startTime.setHours(startTime.getHours() - 24);
+      }
+
+      // Use TelemetryService's optimized performance metrics
+      const metrics = await TelemetryService.getPerformanceMetrics({ timeframe });
+      
+      return {
+        totalCost: metrics.total_cost_usd || 0,
+        avgLatency: metrics.avg_duration_ms || 0,
+        errorRate: metrics.error_rate || 0,
+        totalRequests: metrics.total_requests || 0,
+        topOperations: metrics.top_operations?.map((op: any) => op.name) || [],
+        topCostOperations: metrics.top_operations?.slice(0, 3).map((op: any) => op.name) || [],
+        slowOperations: metrics.top_operations?.filter((op: any) => op.avg_duration_ms > 2000).map((op: any) => op.name) || [],
+        errorOperations: metrics.top_errors?.map((err: any) => err.type) || [],
+        costByModel: metrics.cost_by_model || []
+      };
+    } catch (error) {
+      loggingService.error('Failed to get unified telemetry data:', { error: error instanceof Error ? error.message : String(error) });
+      return {
+        totalCost: 0,
+        avgLatency: 0,
+        errorRate: 0,
+        totalRequests: 0,
+        topOperations: [],
+        topCostOperations: [],
+        slowOperations: [],
+        errorOperations: [],
+        costByModel: []
       };
     }
   }

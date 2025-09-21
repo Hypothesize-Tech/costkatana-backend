@@ -9,6 +9,27 @@ import mongoose from 'mongoose';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
 export class OnboardingController {
+    // Circuit breaker for external services
+    private static emailFailureCount: number = 0;
+    private static readonly MAX_EMAIL_FAILURES = 3;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 60000; // 1 minute
+    private static lastEmailFailureTime: number = 0;
+    
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor: NodeJS.Timeout | null = null;
+    
+    // Smart logging batch
+    private static logBatch: any[] = [];
+    private static logBatchTimer?: NodeJS.Timeout;
+
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
+
     static async generateMagicLink(req: Request, res: Response): Promise<void> {
         const startTime = Date.now();
         const { email, name, source = 'ChatGPT' } = req.body;
@@ -231,53 +252,47 @@ export class OnboardingController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // Find existing user and clean up any corrupted data
-            let user = await User.findOne({ email });
+            // Parallel database operations with optimized queries
+            const [user, existingChatGPTIntegration]: [any, any] = await Promise.all([
+                User.findOne({ email }).lean(),
+                User.findOne({ 
+                    email, 
+                    'dashboardApiKeys.name': { $regex: /chatgpt/i } 
+                }).select('_id').lean()
+            ]);
+            
             let isNewUser = false;
-
-            // Clean up any corrupted data for existing users
-            if (user && user.dashboardApiKeys && user.dashboardApiKeys.length > 0) {
-                const cleanApiKeys = user.dashboardApiKeys.filter(key => 
-                    key && key.keyId && key.keyId !== null && key.keyId !== undefined
-                );
-                
-                if (cleanApiKeys.length !== user.dashboardApiKeys.length) {
-                    loggingService.info('Cleaning corrupted API keys for user', { 
-                        email, 
-                        originalCount: user.dashboardApiKeys.length, 
-                        cleanCount: cleanApiKeys.length,
-                        requestId: req.headers['x-request-id'] as string
-                    });
-                    
-                    // Update user with cleaned data
-                    await User.updateOne(
-                        { email },
-                        { $set: { dashboardApiKeys: cleanApiKeys } }
-                    );
-                    
-                    // Refresh user data
-                    user = await User.findOne({ email });
-                }
-            }
+            let cleanedUser = user;
 
             if (!user) {
-                // Generate API key FIRST before creating user
-                const userId = new mongoose.Types.ObjectId().toString();
-                const keyId = crypto.randomBytes(16).toString('hex');
-                const keySecret = crypto.randomBytes(16).toString('hex');
+                // Check if already has ChatGPT integration to avoid duplicates
+                if (existingChatGPTIntegration) {
+                    this.queueSmartLog('info', 'User already has ChatGPT integration', { email });
+                    // Return early with existing integration response
+                    const alreadyConnectedHtml = this.generateAlreadyConnectedHtml(name || email.split('@')[0]);
+                    res.setHeader('Content-Type', 'text/html');
+                    res.send(alreadyConnectedHtml);
+                    return;
+                }
+
+                // Parallel generation of user data
+                const [userId, keyId, keySecret, tempPassword] = await Promise.all([
+                    Promise.resolve(new mongoose.Types.ObjectId().toString()),
+                    Promise.resolve(crypto.randomBytes(16).toString('hex')),
+                    Promise.resolve(crypto.randomBytes(16).toString('hex')),
+                    Promise.resolve(crypto.randomBytes(8).toString('hex').toUpperCase())
+                ]);
+
                 const apiKey = `ck_${userId}_${keyId}_${keySecret}`;
                 const maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
 
-                // Generate a readable temporary password that users can actually use
-                const tempPassword = crypto.randomBytes(8).toString('hex').toUpperCase(); // Shorter, readable password
-
-                // Create new user with API key already included
-                user = new User({
+                // Create new user with optimized structure
+                const newUser = new User({
                     _id: userId,
                     email,
-                    name: name || email.split('@')[0], // Use provided name or email prefix as default
+                    name: name || email.split('@')[0],
                     password: tempPassword,
-                    emailVerified: true, // Auto-verify via magic link
+                    emailVerified: true,
                     preferences: {
                         emailAlerts: true,
                         alertThreshold: 80,
@@ -287,125 +302,62 @@ export class OnboardingController {
                     dashboardApiKeys: [{
                         name: `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
                         keyId,
-                        encryptedKey: apiKey, // Store unencrypted for simplicity
+                        encryptedKey: apiKey,
                         maskedKey,
                         permissions: ['read', 'write'],
                         createdAt: new Date(),
                     }]
                 });
-                await user.save();
+
+                // Parallel operations: save user and create project
+                const [savedUser, defaultProject] = await Promise.all([
+                    newUser.save(),
+                    ProjectService.createProject(userId, {
+                        name: `My ${source.charAt(0).toUpperCase() + source.slice(1)} Project`,
+                        description: `Default project for ${source} cost tracking`,
+                        budget: {
+                            amount: 100,
+                            period: 'monthly' as const,
+                            currency: 'USD'
+                        },
+                        settings: {
+                            requireApprovalAbove: 100,
+                            enablePromptLibrary: true,
+                            enableCostAllocation: true
+                        }
+                    })
+                ]);
+
+                cleanedUser = savedUser.toObject();
                 isNewUser = true;
 
                 loggingService.info('New user created via magic link with API key', { 
                     email, 
-                    userId: user._id.toString(), 
+                    userId: savedUser._id.toString(), 
                     keyId,
                     hasTempPassword: !!tempPassword,
                     requestId: req.headers['x-request-id'] as string
                 });
                 
-                // Send welcome email with login credentials
-                try {
-                    const { EmailService } = await import('../services/email.service');
-                    const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
-                    const loginUrl = `${frontendUrl}/login`;
-                    
-                    await EmailService.sendEmail({
-                        to: email,
-                        subject: '🎉 Welcome to Cost Katana! Your Account is Ready',
-                        html: `
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                            <style>
-                                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
-                                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0; }
-                                .content { padding: 30px 20px; background: #f8fafc; }
-                                .credentials-box { background: white; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; }
-                                .password { font-family: Monaco, monospace; font-size: 18px; font-weight: bold; color: #059669; background: #f0f9ff; padding: 10px; border-radius: 4px; text-align: center; margin: 10px 0; letter-spacing: 2px; }
-                                .login-btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
-                                .important { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 15px; margin: 20px 0; }
-                                .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
-                            </style>
-                        </head>
-                        <body>
-                            <div class="header">
-                                <h1>🎉 Welcome to Cost Katana!</h1>
-                                <p>Your AI cost tracking account is ready</p>
-                            </div>
-                            <div class="content">
-                                <h2>Hi ${user.name}!</h2>
-                                <p>Great news! Your Cost Katana account has been successfully created via magic link from ${source}.</p>
-                                
-                                <div class="credentials-box">
-                                    <h3>🔐 Your Login Credentials</h3>
-                                    <p><strong>Email:</strong> ${email}</p>
-                                    <p><strong>Temporary Password:</strong></p>
-                                    <div class="password">${tempPassword}</div>
-                                    <p style="font-size: 14px; color: #6b7280;">You can change this password after logging in</p>
-                                </div>
-
-                                <div style="text-align: center;">
-                                    <a href="${loginUrl}" class="login-btn">Login to Cost Katana Dashboard</a>
-                                </div>
-
-                                <div class="important">
-                                    <strong>⚠️ Important:</strong>
-                                    <ul>
-                                        <li>Save this email - your temporary password is: <strong>${tempPassword}</strong></li>
-                                        <li>Your ${source} integration is already configured and ready to use</li>
-                                        <li>Change your password after first login for security</li>
-                                    </ul>
-                                </div>
-
-                                <h3>🚀 What's Next?</h3>
-                                <ol>
-                                    <li>Login to your dashboard using the credentials above</li>
-                                    <li>Go back to ${source} and start tracking your AI costs</li>
-                                    <li>Set up budget alerts and optimization preferences</li>
-                                    <li>View your detailed cost analytics and insights</li>
-                                </ol>
-
-                                <p>Need help? Just reply to this email and we'll assist you!</p>
-                                <p>Happy cost tracking! 📊</p>
-                            </div>
-                            <div class="footer">
-                                <p>© ${new Date().getFullYear()} Cost Katana. All rights reserved.</p>
-                                <p>This email was sent because you connected via magic link from ${source}</p>
-                            </div>
-                        </body>
-                        </html>
-                        `
-                    });
-
-                    loggingService.info('Welcome email sent with login credentials', { 
-                        email,
-                        requestId: req.headers['x-request-id'] as string
-                    });
-                } catch (emailError: any) {
-                    loggingService.error('Failed to send welcome email', {
-                        email,
-                        error: emailError.message || 'Unknown email error',
-                        stack: emailError.stack,
-                        requestId: req.headers['x-request-id'] as string
-                    });
-                    // Don't fail the onboarding if email fails
-                }
+                // Queue welcome email for background processing
+                this.queueBackgroundOperation(async () => {
+                    await this.sendWelcomeEmailWithCircuitBreaker(email, cleanedUser?.name || name || email.split('@')[0], tempPassword, source);
+                });
                 
                 // Store the temp password to show on success page
-                (user as any).tempPasswordForDisplay = tempPassword;
+                (cleanedUser as any).tempPasswordForDisplay = tempPassword;
                 
                 // API key variables are already set above, skip the generation below
-            } else {
+            } else if (cleanedUser) {
                 // User exists, check if they already have a ChatGPT integration API key
-                const existingChatGPTKey = user.dashboardApiKeys?.find(key => 
+                const existingChatGPTKey = cleanedUser.dashboardApiKeys?.find((key: any) => 
                     key && key.name && key.name.toLowerCase().includes('chatgpt')
                 );
                 
                 if (existingChatGPTKey) {
                     loggingService.info('User already has ChatGPT API key', { 
                         email, 
-                        userId: user._id.toString(),
+                        userId: cleanedUser._id.toString(),
                         requestId: req.headers['x-request-id'] as string
                     });
                     // Return existing setup instead of creating duplicate
@@ -432,7 +384,7 @@ export class OnboardingController {
                         <div class="success-card">
                             <div class="success-icon">✅</div>
                             <h1>Already Connected to Cost Katana!</h1>
-                            <p class="subtitle">Welcome back ${user.name}! Your ChatGPT integration is already active.</p>
+                            <p class="subtitle">Welcome back ${cleanedUser.name}! Your ChatGPT integration is already active.</p>
                             
                             <div class="auto-return">
                                 <strong>🔄 Returning to ChatGPT...</strong><br>
@@ -463,13 +415,19 @@ export class OnboardingController {
             let apiKey, keyId, maskedKey;
             
             // Only generate API key if user already exists (new users already have one)
-            if (!isNewUser) {
+            if (!isNewUser && cleanedUser) {
+                // Convert lean user to full user for API key generation
+                const fullUser = await User.findById(cleanedUser._id);
+                if (!fullUser) {
+                    throw new Error('User not found during API key generation');
+                }
+
                 // Generate unique keyId first to avoid conflicts
                 keyId = crypto.randomBytes(16).toString('hex');
                 loggingService.info('Generated initial keyId for existing user', { 
                     keyId,
                     email,
-                    userId: user._id.toString(),
+                    userId: fullUser._id.toString(),
                     requestId: req.headers['x-request-id'] as string
                 });
                 
@@ -478,19 +436,19 @@ export class OnboardingController {
                     const { AuthService } = await import('../services/auth.service');
                     loggingService.info('About to call AuthService.generateDashboardApiKey', {
                         email,
-                        userId: user._id.toString(),
+                        userId: fullUser._id.toString(),
                         requestId: req.headers['x-request-id'] as string
                     });
                     
                     const result = AuthService.generateDashboardApiKey(
-                        user as any, 
+                        fullUser as any, 
                         `${source.charAt(0).toUpperCase() + source.slice(1)} Integration`,
                         ['read', 'write']
                     );
                     
                     loggingService.info('AuthService result received', {
                         email,
-                            userId: user._id.toString() ,
+                        userId: fullUser._id.toString(),
                         hasResult: !!result,
                         hasKeyId: !!(result && result.keyId),
                         hasApiKey: !!(result && result.apiKey),
@@ -506,13 +464,13 @@ export class OnboardingController {
                         loggingService.info('Using AuthService generated keyId', { 
                             keyId,
                             email,
-                                userId: user._id.toString(),
+                            userId: fullUser._id.toString(),
                             requestId: req.headers['x-request-id'] as string
                         });
                     } else {
                         loggingService.error('AuthService returned invalid data', {
                             email,
-                            userId: user._id.toString(),
+                            userId: fullUser._id.toString(),
                             result,
                             requestId: req.headers['x-request-id'] as string
                         });
@@ -525,8 +483,8 @@ export class OnboardingController {
                     const encryptedKey = `${iv}:${authTag}:${encrypted}`;
 
                     // Initialize dashboardApiKeys array if it doesn't exist
-                    if (!user.dashboardApiKeys) {
-                        user.dashboardApiKeys = [];
+                    if (!fullUser.dashboardApiKeys) {
+                        fullUser.dashboardApiKeys = [];
                     }
 
                     const newApiKey = {
@@ -538,19 +496,19 @@ export class OnboardingController {
                         createdAt: new Date(),
                     };
 
-                    user.dashboardApiKeys.push(newApiKey);
+                    fullUser.dashboardApiKeys.push(newApiKey);
                     
                 } catch (keyGenError: any) {
                     loggingService.error('Error with AuthService, using fallback API key generation', {
                         email,
-                        userId: user._id.toString(),
+                        userId: fullUser._id.toString(),
                         error: keyGenError.message || 'Unknown key generation error',
                         stack: keyGenError.stack,
                         requestId: req.headers['x-request-id'] as string
                     });
                     
                     // Fallback to simple but robust API key generation
-                    const userId = user._id ? user._id.toString() : 'unknown';
+                    const userId = fullUser._id ? fullUser._id.toString() : 'unknown';
                     const keySecret = crypto.randomBytes(16).toString('hex');
                     apiKey = `ck_${userId}_${keyId}_${keySecret}`;
                     maskedKey = `ck_${keyId.substring(0, 4)}...${keyId.substring(-4)}`;
@@ -560,13 +518,13 @@ export class OnboardingController {
                         apiKey: apiKey.substring(0, 20) + '...', 
                         maskedKey,
                         email,
-                        userId: user._id.toString(),
+                        userId: fullUser._id.toString(),
                         requestId: req.headers['x-request-id'] as string
                     });
 
                     // Initialize dashboardApiKeys array if it doesn't exist
-                    if (!user.dashboardApiKeys) {
-                        user.dashboardApiKeys = [];
+                    if (!fullUser.dashboardApiKeys) {
+                        fullUser.dashboardApiKeys = [];
                     }
 
                     const newApiKey = {
@@ -582,49 +540,58 @@ export class OnboardingController {
                         keyId: newApiKey.keyId, 
                         name: newApiKey.name,
                         email,
-                            userId: user._id.toString(),
+                        userId: fullUser._id.toString(),
                         requestId: req.headers['x-request-id'] as string
                     });
-                    user.dashboardApiKeys.push(newApiKey);
+                    fullUser.dashboardApiKeys.push(newApiKey);
                     loggingService.info('API key pushed successfully', {
                         email,
-                        userId: user._id.toString(),
+                        userId: fullUser._id.toString(),
                         requestId: req.headers['x-request-id'] as string
                     });
                 }
+
+                // Save user (only if it's an existing user with new API key)
+                await fullUser.save();
+                cleanedUser = fullUser.toObject(); // Update cleanedUser with saved data
             }
 
-            // Create default project
-            const defaultProject = await ProjectService.createProject(user._id.toString(), {
-                name: `My ${source.charAt(0).toUpperCase() + source.slice(1)} Project`,
-                description: `Default project for ${source} cost tracking`,
-                budget: {
-                    amount: 100,
-                    period: 'monthly',
-                    currency: 'USD'
-                },
-                settings: {
-                    requireApprovalAbove: 100,
-                    enablePromptLibrary: true,
-                    enableCostAllocation: true
-                }
-            });
+            if (!cleanedUser) {
+                throw new Error('User data not available for project creation');
+            }
 
-            // Save user (only if it's an existing user with new API key)
-            if (!isNewUser) {
-                await user.save();
+            // Create default project (only if not already created for new users)
+            let defaultProject;
+            if (isNewUser) {
+                // Project already created in parallel for new users
+                defaultProject = { _id: 'already_created' };
+            } else {
+                defaultProject = await ProjectService.createProject(cleanedUser._id.toString(), {
+                    name: `My ${source.charAt(0).toUpperCase() + source.slice(1)} Project`,
+                    description: `Default project for ${source} cost tracking`,
+                    budget: {
+                        amount: 100,
+                        period: 'monthly' as const,
+                        currency: 'USD'
+                    },
+                    settings: {
+                        requireApprovalAbove: 100,
+                        enablePromptLibrary: true,
+                        enableCostAllocation: true
+                    }
+                });
             }
 
             const duration = Date.now() - startTime;
 
             loggingService.info('Magic link onboarding completed successfully', { 
                 email, 
-                userId: user._id.toString(), 
+                userId: cleanedUser._id.toString(), 
                 projectId: defaultProject._id,
                 isNewUser,
                 duration,
                 source,
-                hasApiKey: !!(apiKey || (user.dashboardApiKeys && user.dashboardApiKeys.length > 0)),
+                hasApiKey: !!(apiKey || (cleanedUser.dashboardApiKeys && cleanedUser.dashboardApiKeys.length > 0)),
                 requestId: req.headers['x-request-id'] as string
             });
 
@@ -635,19 +602,19 @@ export class OnboardingController {
                 value: duration,
                 metadata: {
                     email,
-                    userId: user._id.toString(),
+                    userId: cleanedUser._id.toString(),
                     projectId: defaultProject._id,
                     isNewUser,
                     source,
-                    hasApiKey: !!(apiKey || (user.dashboardApiKeys && user.dashboardApiKeys.length > 0))
+                    hasApiKey: !!(apiKey || (cleanedUser.dashboardApiKeys && cleanedUser.dashboardApiKeys.length > 0))
                 }
             });
 
             // Create JWT token for authentication
             const jwtToken = jwt.sign(
                 { 
-                    userId: user._id.toString(), 
-                    email: user.email,
+                    userId: cleanedUser._id.toString(), 
+                    email: cleanedUser.email,
                     sessionId: magicLinkData.sid || magicLinkData.sessionId
                 },
                 JWT_SECRET,
@@ -656,7 +623,7 @@ export class OnboardingController {
 
             // Success HTML response with CSP-compliant external script
             const scriptNonce = crypto.randomBytes(16).toString('base64');
-            const tempPasswordDisplay = (user as any).tempPasswordForDisplay;
+            const tempPasswordDisplay = (cleanedUser as any).tempPasswordForDisplay;
             const loginUrl = `${process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000'}/login`;
             
             const successHtml = `
@@ -689,12 +656,12 @@ export class OnboardingController {
                 <div class="success-card">
                     <div class="success-icon">🎉</div>
                     <h1>Successfully Connected to Cost Katana!</h1>
-                    <p class="subtitle">Welcome ${user.name}! Your account is now set up for AI cost tracking.</p>
+                    <p class="subtitle">Welcome ${cleanedUser.name}! Your account is now set up for AI cost tracking.</p>
                     
                     ${isNewUser && tempPasswordDisplay ? `
                     <div class="credentials-box">
                         <h3>🔐 Your Login Credentials</h3>
-                        <p><strong>Email:</strong> ${user.email}</p>
+                        <p><strong>Email:</strong> ${cleanedUser.email}</p>
                         <p><strong>Temporary Password:</strong></p>
                         <div class="password" id="password">${tempPasswordDisplay}</div>
                         <button class="copy-btn" id="copyPasswordBtn">Copy Password</button>
@@ -704,7 +671,7 @@ export class OnboardingController {
                     </div>
                     
                     <div class="warning">
-                        <strong>⚠️ Important:</strong> Save these credentials! We've also sent them to your email (${user.email}). You can change your password after logging in.
+                        <strong>⚠️ Important:</strong> Save these credentials! We've also sent them to your email (${cleanedUser.email}). You can change your password after logging in.
                     </div>
                     ` : ''}
                     
@@ -910,5 +877,268 @@ export class OnboardingController {
                 message: error instanceof Error ? error.message : 'Unknown error'
             });
         }
+    }
+
+    /**
+     * Queue background operation
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    /**
+     * Start background processor
+     */
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 1000); // Process queue every second
+    }
+
+    /**
+     * Send welcome email with circuit breaker protection
+     */
+    private static async sendWelcomeEmailWithCircuitBreaker(
+        email: string, 
+        name: string, 
+        tempPassword: string, 
+        source: string
+    ): Promise<void> {
+        // Check if circuit breaker is open
+        if (this.isEmailCircuitBreakerOpen()) {
+            loggingService.warn('Email circuit breaker is open, skipping email send');
+            return;
+        }
+
+        try {
+            const { EmailService } = await import('../services/email.service');
+            const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
+            const loginUrl = `${frontendUrl}/login`;
+            
+            await EmailService.sendEmail({
+                to: email,
+                subject: '🎉 Welcome to Cost Katana! Your Account is Ready',
+                html: this.generateWelcomeEmailHtml(name, email, tempPassword, source, loginUrl)
+            });
+
+            // Reset failure count on success
+            this.emailFailureCount = 0;
+            this.queueSmartLog('info', 'Welcome email sent successfully', { email });
+        } catch (error) {
+            this.recordEmailFailure();
+            this.queueSmartLog('error', 'Failed to send welcome email', { 
+                email, 
+                error: error instanceof Error ? error.message : String(error) 
+            });
+        }
+    }
+
+    /**
+     * Check if email circuit breaker is open
+     */
+    private static isEmailCircuitBreakerOpen(): boolean {
+        if (this.emailFailureCount >= this.MAX_EMAIL_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastEmailFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.emailFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Record email failure
+     */
+    private static recordEmailFailure(): void {
+        this.emailFailureCount++;
+        this.lastEmailFailureTime = Date.now();
+    }
+
+    /**
+     * Generate welcome email HTML
+     */
+    private static generateWelcomeEmailHtml(
+        name: string, 
+        email: string, 
+        tempPassword: string, 
+        source: string, 
+        loginUrl: string
+    ): string {
+        return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+                .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px 20px; text-align: center; border-radius: 8px 8px 0 0; }
+                .content { padding: 30px 20px; background: #f8fafc; }
+                .credentials-box { background: white; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; margin: 20px 0; }
+                .password { font-family: Monaco, monospace; font-size: 18px; font-weight: bold; color: #059669; background: #f0f9ff; padding: 10px; border-radius: 4px; text-align: center; margin: 10px 0; letter-spacing: 2px; }
+                .login-btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 20px 0; }
+                .important { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 15px; margin: 20px 0; }
+                .footer { text-align: center; padding: 20px; color: #666; font-size: 12px; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>🎉 Welcome to Cost Katana!</h1>
+                <p>Your AI cost tracking account is ready</p>
+            </div>
+            <div class="content">
+                <h2>Hi ${name}!</h2>
+                <p>Great news! Your Cost Katana account has been successfully created via magic link from ${source}.</p>
+                
+                <div class="credentials-box">
+                    <h3>🔐 Your Login Credentials</h3>
+                    <p><strong>Email:</strong> ${email}</p>
+                    <p><strong>Temporary Password:</strong></p>
+                    <div class="password">${tempPassword}</div>
+                    <p style="font-size: 14px; color: #6b7280;">You can change this password after logging in</p>
+                </div>
+
+                <div style="text-align: center;">
+                    <a href="${loginUrl}" class="login-btn">Login to Cost Katana Dashboard</a>
+                </div>
+
+                <div class="important">
+                    <strong>⚠️ Important:</strong>
+                    <ul>
+                        <li>Save this email - your temporary password is: <strong>${tempPassword}</strong></li>
+                        <li>Your ${source} integration is already configured and ready to use</li>
+                        <li>Change your password after first login for security</li>
+                    </ul>
+                </div>
+
+                <h3>🚀 What's Next?</h3>
+                <ol>
+                    <li>Login to your dashboard using the credentials above</li>
+                    <li>Go back to ${source} and start tracking your AI costs</li>
+                    <li>Set up budget alerts and optimization preferences</li>
+                    <li>View your detailed cost analytics and insights</li>
+                </ol>
+
+                <p>Need help? Just reply to this email and we'll assist you!</p>
+                <p>Happy cost tracking! 📊</p>
+            </div>
+            <div class="footer">
+                <p>© ${new Date().getFullYear()} Cost Katana. All rights reserved.</p>
+                <p>This email was sent because you connected via magic link from ${source}</p>
+            </div>
+        </body>
+        </html>
+        `;
+    }
+
+    /**
+     * Generate already connected HTML
+     */
+    private static generateAlreadyConnectedHtml(name: string): string {
+        const nonce = crypto.randomBytes(16).toString('base64');
+        return `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Cost Katana - Already Connected!</title>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-${nonce}'; object-src 'none';">
+            <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; background: #f8fafc; }
+                .success-card { background: white; border-radius: 12px; padding: 40px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; }
+                .success-icon { font-size: 48px; margin-bottom: 20px; }
+                h1 { color: #059669; margin: 0 0 10px 0; }
+                .subtitle { color: #6b7280; margin-bottom: 30px; }
+                .auto-return { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 15px; margin-top: 20px; font-size: 14px; }
+            </style>
+        </head>
+        <body>
+            <div class="success-card">
+                <div class="success-icon">✅</div>
+                <h1>Already Connected to Cost Katana!</h1>
+                <p class="subtitle">Welcome back ${name}! Your ChatGPT integration is already active.</p>
+                
+                <div class="auto-return">
+                    <strong>🔄 Returning to ChatGPT...</strong><br>
+                    Your account is ready to track AI costs! This window will close automatically.
+                </div>
+            </div>
+            
+            <script nonce="${nonce}">
+                document.addEventListener('DOMContentLoaded', function() {
+                    setTimeout(() => {
+                        if (window.opener) {
+                            window.close();
+                        }
+                    }, 3000);
+                });
+            </script>
+        </body>
+        </html>
+        `;
+    }
+
+    /**
+     * Queue smart log entry
+     */
+    private static queueSmartLog(level: string, message: string, data: any): void {
+        this.logBatch.push({ level, message, data, timestamp: Date.now() });
+        
+        // Process batch if it gets too large or set timer
+        if (this.logBatch.length >= 10) {
+            this.processLogBatch();
+        } else if (!this.logBatchTimer) {
+            this.logBatchTimer = setTimeout(() => {
+                this.processLogBatch();
+            }, 5000); // Process batch every 5 seconds
+        }
+    }
+
+    /**
+     * Process log batch
+     */
+    private static processLogBatch(): void {
+        if (this.logBatch.length === 0) return;
+
+        const batch = [...this.logBatch];
+        this.logBatch = [];
+        
+        if (this.logBatchTimer) {
+            clearTimeout(this.logBatchTimer);
+            this.logBatchTimer = undefined;
+        }
+
+        // Process logs in background
+        setImmediate(() => {
+            batch.forEach(log => {
+                switch (log.level) {
+                    case 'info':
+                        loggingService.info(log.message, log.data);
+                        break;
+                    case 'warn':
+                        loggingService.warn(log.message, log.data);
+                        break;
+                    case 'error':
+                        loggingService.error(log.message, log.data);
+                        break;
+                    default:
+                        loggingService.info(log.message, log.data);
+                }
+            });
+        });
     }
 } 

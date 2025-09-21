@@ -36,11 +36,22 @@ export interface NotebookExecution {
 export class NotebookService {
   private static instance: NotebookService;
   private bedrockClient: BedrockRuntimeClient;
+  
+  // Circuit breaker for AI services
+  private aiFailureCount: number = 0;
+  private readonly MAX_AI_FAILURES = 3;
+  private readonly CIRCUIT_BREAKER_RESET_TIME = 60000; // 1 minute
+  private lastFailureTime: number = 0;
+  
+  // Background processing queue
+  private backgroundQueue: Array<() => Promise<void>> = [];
+  private backgroundProcessor?: NodeJS.Timeout;
 
   private constructor() {
     this.bedrockClient = new BedrockRuntimeClient({
       region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
     });
+    this.startBackgroundProcessor();
   }
 
   static getInstance(): NotebookService {
@@ -281,16 +292,34 @@ Discover patterns in your API usage, peak times, and user behavior.
     await execution.save();
 
     try {
-      // Execute each cell
+      // Analyze cell dependencies and execute in parallel batches
+      const cellBatches = this.analyzeCellDependencies(notebook.cells);
       const results = [];
-      for (const cell of notebook.cells) {
-        const cellResult = await this.executeCell(cell);
-        results.push({
-          cell_id: cell.id,
-          output: cellResult,
-          execution_time_ms: 0, // Could be calculated per cell if needed
-          error: undefined
+      
+      for (const batch of cellBatches) {
+        // Execute cells in current batch in parallel
+        const batchPromises = batch.map(async (cell) => {
+          const cellStartTime = Date.now();
+          try {
+            const cellResult = await this.executeCell(cell);
+            return {
+              cell_id: cell.id,
+              output: cellResult,
+              execution_time_ms: Date.now() - cellStartTime,
+              error: undefined
+            };
+          } catch (cellError) {
+            return {
+              cell_id: cell.id,
+              output: null,
+              execution_time_ms: Date.now() - cellStartTime,
+              error: cellError instanceof Error ? cellError.message : 'Cell execution failed'
+            };
+          }
         });
+        
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
       }
 
       execution.results = results;
@@ -401,25 +430,234 @@ Discover patterns in your API usage, peak times, and user behavior.
   }
 
   /**
-   * Get visualization data
+   * Get visualization data with unified query strategy
    */
   private async getVisualizationData(vizType: string, metadata?: Record<string, any>): Promise<any> {
     const timeframe = metadata?.timeframe || '24h';
     
-    switch (vizType) {
-      case 'cost_timeline':
-        return await this.getCostTimelineData(timeframe);
-      case 'model_comparison':
-        return await this.getModelComparisonData(timeframe);
-      case 'usage_heatmap':
-        return await this.getUsageHeatmapData(timeframe);
-      case 'operation_distribution':
-        return await this.getOperationDistributionData(timeframe);
-      case 'cost_per_token':
-        return await this.getCostPerTokenData(timeframe);
-      default:
-        return { labels: [], datasets: [] };
+    try {
+      // Use unified query for multiple visualization types when possible
+      if (['cost_timeline', 'model_comparison', 'operation_distribution'].includes(vizType)) {
+        const unifiedData = await this.getUnifiedVisualizationData(timeframe);
+        
+        switch (vizType) {
+          case 'cost_timeline':
+            return this.formatCostTimelineData(unifiedData.timeline);
+          case 'model_comparison':
+            return this.formatModelComparisonData(unifiedData.models);
+          case 'operation_distribution':
+            return this.formatOperationDistributionData(unifiedData.operations);
+        }
+      }
+      
+      // Handle individual visualization types
+      switch (vizType) {
+        case 'usage_heatmap':
+          return await this.getUsageHeatmapData(timeframe);
+        case 'cost_per_token':
+          return await this.getCostPerTokenData(timeframe);
+        default:
+          return { labels: [], datasets: [] };
+      }
+    } catch (error) {
+      loggingService.error('Failed to get visualization data:', { error: error instanceof Error ? error.message : String(error), vizType });
+      return { labels: [], datasets: [] };
     }
+  }
+
+  /**
+   * Get unified visualization data using single aggregation
+   */
+  private async getUnifiedVisualizationData(timeframe: string): Promise<any> {
+    const endTime = new Date();
+    const startTime = new Date();
+    
+    // Calculate start time based on timeframe
+    switch (timeframe) {
+      case '1h': startTime.setHours(startTime.getHours() - 1); break;
+      case '24h': startTime.setHours(startTime.getHours() - 24); break;
+      case '7d': startTime.setDate(startTime.getDate() - 7); break;
+      case '30d': startTime.setDate(startTime.getDate() - 30); break;
+      default: startTime.setHours(startTime.getHours() - 24);
+    }
+
+    const telemetryData = await TelemetryService.queryTelemetry({
+      start_time: startTime,
+      end_time: endTime,
+      limit: 5000, // Increased limit for better data coverage
+      sort_by: 'timestamp',
+      sort_order: 'asc'
+    });
+
+    // Process data in chunks to avoid memory issues
+    return await this.processInChunks(
+      telemetryData.data,
+      async (chunk) => this.processVisualizationChunk(chunk, startTime, endTime, timeframe),
+      1000
+    ).then(results => this.mergeVisualizationResults(results));
+  }
+
+  /**
+   * Process visualization data chunk
+   */
+  private async processVisualizationChunk(
+    chunk: any[], 
+    startTime: Date, 
+    endTime: Date, 
+    timeframe: string
+  ): Promise<any> {
+    const intervals = this.createTimeIntervals(startTime, endTime, timeframe);
+    const modelStats = new Map();
+    const operationCounts = new Map();
+    const costByInterval = new Array(intervals.length).fill(0);
+
+    chunk.forEach((item: any) => {
+      // Timeline data
+      const itemTime = new Date(item.timestamp);
+      const intervalIndex = this.findIntervalIndex(itemTime, intervals);
+      if (intervalIndex >= 0) {
+        costByInterval[intervalIndex] += item.cost_usd || 0;
+      }
+
+      // Model data
+      if (item.gen_ai_model) {
+        const model = item.gen_ai_model;
+        if (!modelStats.has(model)) {
+          modelStats.set(model, { totalCost: 0, totalDuration: 0, count: 0 });
+        }
+        const stats = modelStats.get(model);
+        stats.totalCost += item.cost_usd || 0;
+        stats.totalDuration += item.duration_ms || 0;
+        stats.count += 1;
+      }
+
+      // Operation data
+      const operation = item.operation_name || 'Unknown';
+      operationCounts.set(operation, (operationCounts.get(operation) || 0) + 1);
+    });
+
+    return {
+      timeline: { intervals, costByInterval },
+      models: modelStats,
+      operations: operationCounts
+    };
+  }
+
+  /**
+   * Merge visualization results from multiple chunks
+   */
+  private mergeVisualizationResults(results: any[]): any {
+    const merged: any = {
+      timeline: { intervals: [], costByInterval: [] },
+      models: new Map(),
+      operations: new Map()
+    };
+
+    results.forEach(result => {
+      // Merge timeline data
+      if (result.timeline && result.timeline.intervals.length > 0) {
+        if (merged.timeline.intervals.length === 0) {
+          merged.timeline.intervals = result.timeline.intervals;
+          merged.timeline.costByInterval = [...result.timeline.costByInterval];
+        } else {
+          // Add costs to existing intervals
+          result.timeline.costByInterval.forEach((cost: number, index: number) => {
+            if (index < merged.timeline.costByInterval.length) {
+              merged.timeline.costByInterval[index] += cost;
+            }
+          });
+        }
+      }
+
+      // Merge model data
+      result.models.forEach((stats: any, model: string) => {
+        if (merged.models.has(model)) {
+          const existing = merged.models.get(model);
+          existing.totalCost += stats.totalCost;
+          existing.totalDuration += stats.totalDuration;
+          existing.count += stats.count;
+        } else {
+          merged.models.set(model, { ...stats });
+        }
+      });
+
+      // Merge operation data
+      result.operations.forEach((count: number, operation: string) => {
+        merged.operations.set(operation, (merged.operations.get(operation) || 0) + count);
+      });
+    });
+
+    return merged;
+  }
+
+  /**
+   * Find interval index for a given timestamp
+   */
+  private findIntervalIndex(timestamp: Date, intervals: any[]): number {
+    for (let i = 0; i < intervals.length; i++) {
+      if (timestamp >= intervals[i].start && timestamp < intervals[i].end) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
+   * Format cost timeline data
+   */
+  private formatCostTimelineData(timelineData: any): any {
+    return {
+      labels: timelineData.intervals?.map((interval: any) => interval.label) || [],
+      datasets: [{
+        label: 'Cost ($)',
+        data: timelineData.costByInterval || [],
+        borderColor: 'rgb(59, 130, 246)',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)'
+      }]
+    };
+  }
+
+  /**
+   * Format model comparison data
+   */
+  private formatModelComparisonData(modelStats: Map<string, any>): any {
+    const modelData = Array.from(modelStats.entries()).map(([model, stats]) => ({
+      x: stats.count > 0 ? stats.totalDuration / stats.count : 0, // Average duration
+      y: stats.count > 0 ? stats.totalCost / stats.count : 0, // Average cost
+      model
+    }));
+
+    const colors = this.generateDynamicColors(modelData.length);
+
+    return {
+      datasets: [{
+        label: 'Models',
+        data: modelData,
+        backgroundColor: colors
+      }]
+    };
+  }
+
+  /**
+   * Format operation distribution data
+   */
+  private formatOperationDistributionData(operationCounts: Map<string, number>): any {
+    // Sort by count and take top 10
+    const sortedOperations = Array.from(operationCounts.entries())
+      .sort(([,a], [,b]) => b - a)
+      .slice(0, 10);
+
+    const labels = sortedOperations.map(([name]) => name);
+    const data = sortedOperations.map(([,count]) => count);
+    const colors = this.generateDynamicColors(data.length);
+
+    return {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors
+      }]
+    };
   }
 
   /**
@@ -491,7 +729,14 @@ Discover patterns in your API usage, peak times, and user behavior.
         accept: 'application/json'
       });
 
-      const response = await this.executeWithRetry(command);
+      const response = await this.executeWithCircuitBreaker(() => this.executeWithRetry(command));
+      if (!response) {
+        // Circuit breaker is open or operation failed, return fallback insights
+        return {
+          insights: ['Unable to generate AI insights at this time'],
+          recommendations: ['Check system status and try again']
+        };
+      }
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
       
       let responseText;
@@ -1456,6 +1701,160 @@ Provide timing and scaling insights.`;
   async deleteNotebook(id: string): Promise<boolean> {
     const result = await Notebook.findByIdAndUpdate(id, { status: 'deleted' });
     return !!result;
+  }
+
+  /**
+   * Analyze cell dependencies for parallel execution
+   */
+  private analyzeCellDependencies(cells: NotebookCell[]): NotebookCell[][] {
+    // For now, we'll use a simple heuristic:
+    // - Markdown cells can run in parallel
+    // - Query cells that don't reference previous results can run in parallel
+    // - Visualization and insight cells depend on query results
+    
+    const batches: NotebookCell[][] = [];
+    const markdownCells: NotebookCell[] = [];
+    const independentCells: NotebookCell[] = [];
+    const dependentCells: NotebookCell[] = [];
+    
+    cells.forEach(cell => {
+      if (cell.type === 'markdown') {
+        markdownCells.push(cell);
+      } else if (cell.type === 'query' && !this.cellHasDependencies(cell)) {
+        independentCells.push(cell);
+      } else {
+        dependentCells.push(cell);
+      }
+    });
+    
+    // Batch 1: All markdown cells (can run in parallel)
+    if (markdownCells.length > 0) {
+      batches.push(markdownCells);
+    }
+    
+    // Batch 2: Independent query cells
+    if (independentCells.length > 0) {
+      batches.push(independentCells);
+    }
+    
+    // Batch 3+: Dependent cells (run sequentially for now, could be optimized further)
+    dependentCells.forEach(cell => {
+      batches.push([cell]);
+    });
+    
+    return batches;
+  }
+
+  /**
+   * Check if a cell has dependencies on previous cells
+   */
+  private cellHasDependencies(cell: NotebookCell): boolean {
+    // Simple heuristic: check if cell content references variables or results
+    const content = cell.content.toLowerCase();
+    const dependencyKeywords = ['previous', 'result', 'above', 'from cell', 'variable'];
+    return dependencyKeywords.some(keyword => content.includes(keyword));
+  }
+
+  /**
+   * Execute with circuit breaker protection
+   */
+  private async executeWithCircuitBreaker<T>(operation: () => Promise<T>): Promise<T | null> {
+    // Check if circuit breaker is open
+    if (this.isCircuitBreakerOpen()) {
+      loggingService.warn('Circuit breaker is open, skipping AI operation');
+      return null;
+    }
+
+    try {
+      const result = await Promise.race([
+        operation(),
+        new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Operation timeout')), 10000)
+        )
+      ]);
+      
+      // Reset failure count on success
+      this.aiFailureCount = 0;
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      loggingService.error('AI operation failed:', { error: error instanceof Error ? error.message : String(error) });
+      return null;
+    }
+  }
+
+  /**
+   * Check if circuit breaker is open
+   */
+  private isCircuitBreakerOpen(): boolean {
+    if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+      const timeSinceLastFailure = Date.now() - this.lastFailureTime;
+      if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+        return true;
+      } else {
+        // Reset circuit breaker
+        this.aiFailureCount = 0;
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Record AI service failure
+   */
+  private recordFailure(): void {
+    this.aiFailureCount++;
+    this.lastFailureTime = Date.now();
+  }
+
+  /**
+   * Queue background operation
+   */
+  private queueBackgroundOperation(operation: () => Promise<void>): void {
+    this.backgroundQueue.push(operation);
+  }
+
+  /**
+   * Start background processor
+   */
+  private startBackgroundProcessor(): void {
+    this.backgroundProcessor = setInterval(async () => {
+      if (this.backgroundQueue.length > 0) {
+        const operation = this.backgroundQueue.shift();
+        if (operation) {
+          try {
+            await operation();
+          } catch (error) {
+            loggingService.error('Background operation failed:', { error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      }
+    }, 1000); // Process queue every second
+  }
+
+  /**
+   * Process data in chunks to avoid memory spikes
+   */
+  private async processInChunks<T, R>(
+    data: T[], 
+    processor: (chunk: T[]) => Promise<R[]>, 
+    chunkSize: number = 1000
+  ): Promise<R[]> {
+    const results: R[] = [];
+    
+    for (let i = 0; i < data.length; i += chunkSize) {
+      const chunk = data.slice(i, i + chunkSize);
+      const chunkResults = await processor(chunk);
+      results.push(...chunkResults);
+      
+      // Small delay to prevent overwhelming the system
+      if (i + chunkSize < data.length) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+    }
+    
+    return results;
   }
 
   /**
