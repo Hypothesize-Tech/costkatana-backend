@@ -100,6 +100,36 @@ export class ExperimentationService {
     // Track active sessions for security validation
     private static activeSessions = new Map<string, { userId: string, createdAt: Date }>();
 
+    // Circuit breaker for AI service reliability
+    private static circuitBreaker = {
+        failures: new Map<string, number>(),
+        lastFailure: new Map<string, number>(),
+        isOpen: (service: string) => {
+            const failures = ExperimentationService.circuitBreaker.failures.get(service) || 0;
+            const lastFailure = ExperimentationService.circuitBreaker.lastFailure.get(service) || 0;
+            const now = Date.now();
+            
+            // Reset after 5 minutes
+            if (now - lastFailure > 5 * 60 * 1000) {
+                ExperimentationService.circuitBreaker.failures.set(service, 0);
+                return false;
+            }
+            
+            return failures >= 3; // Open circuit after 3 failures
+        },
+        recordFailure: (service: string) => {
+            const current = ExperimentationService.circuitBreaker.failures.get(service) || 0;
+            ExperimentationService.circuitBreaker.failures.set(service, current + 1);
+            ExperimentationService.circuitBreaker.lastFailure.set(service, Date.now());
+        }
+    };
+
+
+
+    // Pre-computed model pricing index for O(1) lookups
+    private static modelPricingIndex = new Map<string, any>();
+    private static pricingIndexInitialized = false;
+
     // ============================================================================
     // REAL-TIME BEDROCK MODEL COMPARISON
     // ============================================================================
@@ -125,71 +155,84 @@ export class ExperimentationService {
             const totalModels = models.length;
             let completedModels = 0;
 
-            // Execute each model
-            for (let i = 0; i < models.length; i++) {
-                const model = models[i];
-                const progressPercent = Math.round((i / totalModels) * 70); // 70% for execution
+            // Execute models in parallel batches for optimal performance
+            const BATCH_SIZE = 3; // Process 3 models concurrently to avoid rate limits
+            const batches = this.chunkArray(models, BATCH_SIZE);
+            
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+                const batch = batches[batchIndex];
                 
-                this.emitProgress(
-                    sessionId, 
-                    'executing', 
-                    progressPercent, 
-                    `Executing ${model.model} on ${executeOnBedrock ? 'Bedrock' : 'simulated environment'}...`,
-                    model.model
-                );
-
-                try {
-                    const result = await this.executeModelComparison(
-                        userId, 
-                        model, 
-                        prompt, 
-                        executeOnBedrock,
-                        comparisonMode
-                    );
-                    results.push(result);
-                    completedModels++;
-
-                    // Update progress after each model
-                    const newProgress = Math.round((completedModels / totalModels) * 70);
-                    this.emitProgress(sessionId, 'executing', newProgress, `Completed ${model.model}`);
-
-                } catch (modelError: any) {
-                    loggingService.error(`Error executing model ${model.model}:`, { error: modelError instanceof Error ? modelError.message : String(modelError) });
+                // Execute batch in parallel
+                const batchPromises = batch.map(async (model, modelIndex) => {
+                    const globalIndex = batchIndex * BATCH_SIZE + modelIndex;
+                    const progressPercent = Math.round((globalIndex / totalModels) * 70);
                     
-                    // Handle specific error types
-                    let errorMessage = modelError.message || 'Unknown error';
-                    if (modelError.name === 'AccessDeniedException') {
-                        errorMessage = `Model ${model.model} requires agreement in AWS console`;
-                    } else if (modelError.name === 'ThrottlingException') {
-                        errorMessage = `Rate limited - too many requests to ${model.model}`;
-                    }
-                    
-                    // Continue with other models, but report the error
                     this.emitProgress(
                         sessionId, 
                         'executing', 
                         progressPercent, 
-                        `⚠️ Skipped ${model.model}: ${errorMessage}`
+                        `Executing ${model.model} on ${executeOnBedrock ? 'Bedrock' : 'simulated environment'}...`,
+                        model.model
                     );
+
+                    try {
+                        const result = await this.executeModelComparison(
+                            userId, 
+                            model, 
+                            prompt, 
+                            executeOnBedrock,
+                            comparisonMode
+                        );
+                        
+                        completedModels++;
+                        const newProgress = Math.round((completedModels / totalModels) * 70);
+                        this.emitProgress(sessionId, 'executing', newProgress, `Completed ${model.model}`);
+                        
+                        return result;
+                    } catch (modelError: any) {
+                        loggingService.error(`Error executing model ${model.model}:`, { error: modelError instanceof Error ? modelError.message : String(modelError) });
+                        
+                        // Handle specific error types
+                        let errorMessage = modelError.message || 'Unknown error';
+                        if (modelError.name === 'AccessDeniedException') {
+                            errorMessage = `Model ${model.model} requires agreement in AWS console`;
+                        } else if (modelError.name === 'ThrottlingException') {
+                            errorMessage = `Rate limited - too many requests to ${model.model}`;
+                        }
+                        
+                        // Continue with other models, but report the error
+                        this.emitProgress(
+                            sessionId, 
+                            'executing', 
+                            progressPercent, 
+                            `⚠️ Skipped ${model.model}: ${errorMessage}`
+                        );
+                        
+                        return null; // Return null for failed models
+                    }
+                });
+                
+                // Wait for batch to complete and add successful results
+                const batchResults = await Promise.all(batchPromises);
+                const successfulResults = batchResults.filter(result => result !== null);
+                results.push(...successfulResults);
+                
+                // Small delay between batches to prevent overwhelming the service
+                if (batchIndex < batches.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
                 }
             }
 
-            // AI-based evaluation phase (optional - skip if throttled)
+            // AI-based evaluation phase with circuit breaker protection
             this.emitProgress(sessionId, 'evaluating', 75, 'Running AI evaluation and scoring...');
 
-            let evaluatedResults = results;
-            try {
-                evaluatedResults = await this.performAIEvaluation(
-                    results, 
-                    prompt, 
-                    evaluationCriteria,
-                    request.evaluationPrompt
-                );
-            } catch (evaluationError: any) {
-                loggingService.warn('AI evaluation skipped due to error:', { error: evaluationError instanceof Error ? evaluationError.message : String(evaluationError) });
-                this.emitProgress(sessionId, 'evaluating', 85, '⚠️ AI evaluation skipped due to rate limiting - using basic scores');
-                // Continue with basic scoring
-                evaluatedResults = results.map(result => ({
+            const evaluatedResults = await this.executeWithCircuitBreaker(
+                () => this.performAIEvaluation(results, prompt, evaluationCriteria, request.evaluationPrompt),
+                'ai_evaluation',
+                () => {
+                    // Fallback: return results with basic scoring
+                    this.emitProgress(sessionId, 'evaluating', 85, '⚠️ AI evaluation unavailable - using basic scores');
+                    return results.map(result => ({
                     ...result,
                     aiEvaluation: {
                         overallScore: 75,
@@ -198,7 +241,9 @@ export class ExperimentationService {
                         recommendation: 'Manual review recommended'
                     }
                 }));
-            }
+                },
+                15000 // 15 second timeout for AI evaluation
+            );
 
             // Final analysis and recommendations (optional)
             this.emitProgress(sessionId, 'evaluating', 90, 'Generating intelligent recommendations...');
@@ -1333,42 +1378,53 @@ export class ExperimentationService {
             const results = [];
             let totalConfidence = 0;
 
-            for (const modelRequest of request.models) {
-                // Get actual usage data for this model (exact match first, then fuzzy match)
-                const modelUsage = await Usage.aggregate([
-                    {
-                        $match: {
-                            userId: new mongoose.Types.ObjectId(userId),
-                            $or: [
-                                { model: modelRequest.model }, // Exact match first
-                                { model: { $regex: modelRequest.model, $options: 'i' } } // Fallback to regex
-                            ],
-                            createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-                        }
-                    },
-                    {
-                        $group: {
-                            _id: "$model",
-                            avgCost: { $avg: "$cost" },
-                            avgTokens: { $avg: "$totalTokens" },
-                            avgResponseTime: { $avg: "$responseTime" },
-                            totalCalls: { $sum: 1 },
-                            totalCost: { $sum: "$cost" },
-                            errorCount: {
-                                $sum: {
-                                    $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0]
-                                }
+            // Unified database query to fetch all model usage data at once
+            const modelNames = request.models.map(m => m.model);
+            const allModelUsage = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: new mongoose.Types.ObjectId(userId),
+                        $or: modelNames.flatMap(modelName => [
+                            { model: modelName }, // Exact match
+                            { model: { $regex: modelName, $options: 'i' } } // Fuzzy match
+                        ]),
+                        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
+                    }
+                },
+                {
+                    $group: {
+                        _id: "$model",
+                        avgCost: { $avg: "$cost" },
+                        avgTokens: { $avg: "$totalTokens" },
+                        avgResponseTime: { $avg: "$responseTime" },
+                        totalCalls: { $sum: 1 },
+                        totalCost: { $sum: "$cost" },
+                        errorCount: {
+                            $sum: {
+                                $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0]
                             }
                         }
-                    },
-                    { $limit: 1 } // Take the first match (exact match will be prioritized)
-                ]);
+                    }
+                }
+            ]);
 
-                const usage = modelUsage[0];
-                const pricing = MODEL_PRICING.find(p => 
-                    p.modelId === modelRequest.model || 
-                    p.modelName.toLowerCase().includes(modelRequest.model.toLowerCase())
+            // Create a map for quick lookup
+            const usageMap = new Map();
+            allModelUsage.forEach(usage => {
+                // Find which requested model this usage data matches
+                const matchingModel = modelNames.find(modelName => 
+                    usage._id === modelName || 
+                    usage._id.toLowerCase().includes(modelName.toLowerCase()) ||
+                    modelName.toLowerCase().includes(usage._id.toLowerCase())
                 );
+                if (matchingModel && !usageMap.has(matchingModel)) {
+                    usageMap.set(matchingModel, usage);
+                }
+            });
+
+            for (const modelRequest of request.models) {
+                const usage = usageMap.get(modelRequest.model);
+                const pricing = this.getModelPricing(modelRequest.model);
 
                 if (usage) {
                     // Real data from actual usage - but use requested model name for consistency
@@ -2995,54 +3051,65 @@ Base your analysis on real-world AI cost optimization patterns and industry best
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
 
-        // Current period analysis
-        const currentUsage = await Usage.aggregate([
+        // Unified database query using $facet for both current and previous periods
+        const [usageAnalysis] = await Usage.aggregate([
             {
                 $match: {
                     userId: new mongoose.Types.ObjectId(userId),
-                    createdAt: { $gte: thirtyDaysAgo }
+                    createdAt: { $gte: sixtyDaysAgo } // Get data for both periods
                 }
             },
             {
-                $group: {
-                    _id: null,
-                    totalCost: { $sum: "$cost" },
-                    totalCalls: { $sum: 1 },
-                    totalTokens: { $sum: "$totalTokens" },
-                    avgResponseTime: { $avg: "$responseTime" },
-                    models: { $addToSet: "$modelName" },
-                    providers: { $addToSet: "$provider" },
-                    modelUsage: {
-                        $push: {
-                            model: "$modelName",
-                            cost: "$cost",
-                            tokens: "$totalTokens",
-                            responseTime: "$responseTime"
+                $facet: {
+                    currentPeriod: [
+                        {
+                            $match: {
+                                createdAt: { $gte: thirtyDaysAgo }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCost: { $sum: "$cost" },
+                                totalCalls: { $sum: 1 },
+                                totalTokens: { $sum: "$totalTokens" },
+                                avgResponseTime: { $avg: "$responseTime" },
+                                models: { $addToSet: "$modelName" },
+                                providers: { $addToSet: "$provider" },
+                                modelUsage: {
+                                    $push: {
+                                        model: "$modelName",
+                                        cost: "$cost",
+                                        tokens: "$totalTokens",
+                                        responseTime: "$responseTime"
+                                    }
+                                },
+                                errorCount: {
+                                    $sum: { $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0] }
+                                }
+                            }
                         }
-                    },
-                    errorCount: {
-                        $sum: { $cond: [{ $eq: ["$errorOccurred", true] }, 1, 0] }
-                    }
+                    ],
+                    previousPeriod: [
+                        {
+                            $match: {
+                                createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCost: { $sum: "$cost" },
+                                totalCalls: { $sum: 1 }
+                            }
+                        }
+                    ]
                 }
             }
         ]);
 
-        // Previous period for trend analysis
-        const previousUsage = await Usage.aggregate([
-            {
-                $match: {
-                    userId: new mongoose.Types.ObjectId(userId),
-                    createdAt: { $gte: sixtyDaysAgo, $lt: thirtyDaysAgo }
-                }
-            },
-            {
-                $group: {
-                    _id: null,
-                    totalCost: { $sum: "$cost" },
-                    totalCalls: { $sum: 1 }
-                }
-            }
-        ]);
+        const currentUsage = usageAnalysis.currentPeriod;
+        const previousUsage = usageAnalysis.previousPeriod;
 
         if (!currentUsage.length) {
             return { hasData: false };
@@ -3648,4 +3715,114 @@ Base your analysis on real-world AI cost optimization patterns and industry best
             }
         ];
     }
+
+    /**
+     * Utility method to chunk array into smaller batches
+     */
+    private static chunkArray<T>(array: T[], size: number): T[][] {
+        const chunks: T[][] = [];
+        for (let i = 0; i < array.length; i += size) {
+            chunks.push(array.slice(i, i + size));
+        }
+        return chunks;
+    }
+
+    /**
+     * Execute operation with circuit breaker and timeout
+     */
+    private static async executeWithCircuitBreaker<T>(
+        operation: () => Promise<T>,
+        serviceName: string,
+        fallback: () => T,
+        timeout: number = 10000
+    ): Promise<T> {
+        if (this.circuitBreaker.isOpen(serviceName)) {
+            loggingService.warn(`Circuit breaker open for ${serviceName}, using fallback`);
+            return fallback();
+        }
+
+        try {
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`Operation timeout after ${timeout}ms`)), timeout);
+            });
+
+            const result = await Promise.race([operation(), timeoutPromise]);
+            return result;
+        } catch (error) {
+            this.circuitBreaker.recordFailure(serviceName);
+            loggingService.error(`Operation failed for ${serviceName}:`, { error: error instanceof Error ? error.message : String(error) });
+            return fallback();
+        }
+    }
+
+
+    /**
+     * Initialize model pricing index for fast O(1) lookups
+     */
+    private static initializeModelPricingIndex(): void {
+        if (this.pricingIndexInitialized) return;
+
+        // Build index from MODEL_PRICING array
+        MODEL_PRICING.forEach(pricing => {
+            // Add exact model ID
+            this.modelPricingIndex.set(pricing.modelId.toLowerCase(), pricing);
+            
+            // Add model name variations
+            if (pricing.modelName) {
+                this.modelPricingIndex.set(pricing.modelName.toLowerCase(), pricing);
+                // Add without special characters
+                const cleanName = pricing.modelName.toLowerCase().replace(/[-_\s]/g, '');
+                this.modelPricingIndex.set(cleanName, pricing);
+            }
+            
+            // Add provider-specific variations
+            if (pricing.provider) {
+                const providerKey = `${pricing.provider.toLowerCase()}-${pricing.modelId.toLowerCase()}`;
+                this.modelPricingIndex.set(providerKey, pricing);
+            }
+        });
+
+        // Add AWS Bedrock pricing
+        Object.entries(AWS_BEDROCK_PRICING).forEach(([modelId, pricing]) => {
+            const key = modelId.toLowerCase();
+            this.modelPricingIndex.set(key, {
+                ...pricing,
+                modelId,
+                modelName: modelId,
+                provider: 'aws-bedrock'
+            });
+        });
+
+        this.pricingIndexInitialized = true;
+        loggingService.info(`Initialized model pricing index with ${this.modelPricingIndex.size} entries`);
+    }
+
+    /**
+     * Fast O(1) model pricing lookup
+     */
+    private static getModelPricing(modelId: string): any {
+        this.initializeModelPricingIndex();
+        
+        const key = modelId.toLowerCase();
+        
+        // Try exact match first
+        let pricing = this.modelPricingIndex.get(key);
+        if (pricing) return pricing;
+        
+        // Try without special characters
+        const cleanKey = key.replace(/[-_\s]/g, '');
+        pricing = this.modelPricingIndex.get(cleanKey);
+        if (pricing) return pricing;
+        
+        // Try partial matches
+        for (const [indexKey, indexPricing] of Array.from(this.modelPricingIndex.entries())) {
+            if (indexKey.includes(cleanKey) || cleanKey.includes(indexKey)) {
+                return indexPricing;
+            }
+        }
+        
+        return null;
+    }
+
+
 } 
