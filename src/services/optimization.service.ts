@@ -141,6 +141,27 @@ export class OptimizationService {
     private static cortexCoreService: CortexCoreService;
     private static cortexDecoderService: CortexDecoderService;
     private static cortexInitialized = false;
+    
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Token estimation memoization
+    private static tokenEstimationCache = new Map<string, number>();
+    private static readonly TOKEN_CACHE_SIZE = 1000;
+    
+    // Performance optimization flags
+    private static readonly ENABLE_PARALLEL_PROCESSING = true;
+    private static readonly ENABLE_BACKGROUND_PROCESSING = true;
+
+    /**
+     * Initialize background processor
+     */
+    static {
+        if (this.ENABLE_BACKGROUND_PROCESSING) {
+            this.startBackgroundProcessor();
+        }
+    }
 
     // Helper to map string to AIProvider enum
     private static getAIProviderFromString(provider: string): AIProvider {
@@ -174,8 +195,14 @@ export class OptimizationService {
         }
     }
 
+    // Circuit breaker for Cortex services
+    private static cortexFailureCount: number = 0;
+    private static readonly MAX_CORTEX_FAILURES = 3;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastCortexFailureTime: number = 0;
+
     /**
-     * 🚀 Initialize Cortex services for meta-language processing
+     * 🚀 Initialize Cortex services for meta-language processing with parallel initialization
      */
     private static async initializeCortexServices(): Promise<void> {
         if (this.cortexInitialized) return;
@@ -183,25 +210,59 @@ export class OptimizationService {
         try {
             loggingService.info('🚀 Initializing Cortex meta-language services...');
             
-            this.cortexEncoderService = CortexEncoderService.getInstance();
-            this.cortexCoreService = CortexCoreService.getInstance();
-            this.cortexDecoderService = CortexDecoderService.getInstance();
+            // Initialize services in parallel
+            const [encoder, core, decoder] = await Promise.all([
+                Promise.resolve(CortexEncoderService.getInstance()),
+                Promise.resolve(CortexCoreService.getInstance()),
+                Promise.resolve(CortexDecoderService.getInstance())
+            ]);
             
-            // Initialize all services that require it
+            this.cortexEncoderService = encoder;
+            this.cortexCoreService = core;
+            this.cortexDecoderService = decoder;
+            
+            // Initialize dependent services in parallel
             await Promise.all([
-                CortexCoreService.getInstance().initialize(),
+                this.cortexCoreService.initialize(),
                 CortexVocabularyService.getInstance().initialize(),
             ]);
             
             this.cortexInitialized = true;
+            this.cortexFailureCount = 0; // Reset failure count on successful init
             loggingService.info('✅ Cortex services initialized successfully');
             
         } catch (error) {
+            this.recordCortexFailure();
             loggingService.error('❌ Failed to initialize Cortex services', {
                 error: error instanceof Error ? error.message : String(error)
             });
             // Continue without Cortex - graceful degradation
         }
+    }
+
+    /**
+     * Check if Cortex circuit breaker is open
+     */
+    private static isCortexCircuitBreakerOpen(): boolean {
+        if (this.cortexFailureCount >= this.MAX_CORTEX_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastCortexFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.cortexFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Record Cortex failure for circuit breaker
+     */
+    private static recordCortexFailure(): void {
+        this.cortexFailureCount++;
+        this.lastCortexFailureTime = Date.now();
     }
 
     /**
@@ -1119,13 +1180,11 @@ REPLY FORMAT (JSON only):
             // 🚀 CORTEX PROCESSING: Check if Cortex is enabled and process accordingly
             let cortexResult: any = null;
             
-            // DEBUG: Log the request options
-                            console.log('🔍 CORTEX DEBUG - Options check:', {
+            // Conditional debug logging only in development
+                loggingService.debug('Cortex options check', {
                     userId: request.userId,
-                    hasOptions: !!request.options,
                     enableCortex: request.options?.enableCortex,
-                    hasCortexConfig: !!request.options?.cortexConfig,
-                    willTriggerCortex: !!request.options?.enableCortex
+                    hasCortexConfig: !!request.options?.cortexConfig
                 });
                 
                 loggingService.info('🔍 DEBUG: Cortex options check', {
@@ -1137,27 +1196,45 @@ REPLY FORMAT (JSON only):
                 });
             
                             if (request.options?.enableCortex) {
-                    console.log('🚀 CORTEX TRIGGERED - Processing requested for userId:', request.userId);
-                    loggingService.info('🚀 Cortex processing requested', { userId: request.userId });
+                loggingService.debug('Cortex processing triggered', { userId: request.userId });
                 
                 try {
+                    // Check circuit breaker before attempting Cortex processing
+                    if (this.isCortexCircuitBreakerOpen()) {
+                        loggingService.warn('⚠️ Cortex circuit breaker is open, using fallback', {
+                            userId: request.userId,
+                            failureCount: this.cortexFailureCount
+                        });
+                        throw new Error('Cortex circuit breaker is open');
+                    }
+
                     // Initialize Cortex services if not already done
                     await this.initializeCortexServices();
                     
-                    loggingService.info('🔍 Cortex initialization status', { 
-                        userId: request.userId, 
-                        cortexInitialized: this.cortexInitialized 
-                    });
+                        loggingService.debug('Cortex initialization status', { 
+                            userId: request.userId, 
+                            cortexInitialized: this.cortexInitialized 
+                        });
                     
                     if (this.cortexInitialized) {
                         loggingService.info('⚡ Starting Cortex processing pipeline', { userId: request.userId });
                         
-                        cortexResult = await this.processCortexOptimization(
+                        // Add timeout to Cortex processing
+                        const cortexPromise = this.processCortexOptimization(
                             request.prompt,
                             request.options.cortexConfig || {},
                             request.userId,
                             request.model
                         );
+                        
+                        const timeoutPromise = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('Cortex processing timeout')), 45000);
+                        });
+                        
+                        cortexResult = await Promise.race([cortexPromise, timeoutPromise]);
+                        
+                        // Reset failure count on success
+                        this.cortexFailureCount = 0;
                         
                         loggingService.info('✅ Cortex processing completed', { 
                             userId: request.userId,
@@ -1170,10 +1247,11 @@ REPLY FORMAT (JSON only):
                         });
                     }
                 } catch (error) {
+                    this.recordCortexFailure();
                     loggingService.error('❌ Cortex processing failed with error', {
                         userId: request.userId,
                         error: error instanceof Error ? error.message : String(error),
-                        stack: error instanceof Error ? error.stack : undefined
+                        failureCount: this.cortexFailureCount
                     });
 
                     // Return a detailed error result instead of null
@@ -1183,15 +1261,11 @@ REPLY FORMAT (JSON only):
                             error: `Cortex processing failed: ${error instanceof Error ? error.message : String(error)}`,
                             fallbackUsed: true,
                             processingTime: Date.now() - Date.now(),
+                            circuitBreakerTriggered: this.isCortexCircuitBreakerOpen(),
                             cortexModel: {
                                 encoder: DEFAULT_CORTEX_CONFIG.encoding.model,
                                 core: DEFAULT_CORTEX_CONFIG.coreProcessing.model,
                                 decoder: DEFAULT_CORTEX_CONFIG.decoding.model
-                            },
-                            detailsForDebugging: {
-                                errorType: error instanceof Error ? error.constructor.name : 'Unknown',
-                                errorMessage: error instanceof Error ? error.message : String(error),
-                                initStatus: this.cortexInitialized
                             }
                         }
                     };
@@ -1236,14 +1310,8 @@ REPLY FORMAT (JSON only):
             }
 
 
-            // Get token count and cost for ORIGINAL prompt (not the processed one!)
-            let originalTokens;
-            try {
-                originalTokens = await estimateTokensAsync(request.prompt, provider, request.model); // Use async for high accuracy
-            } catch (error) {
-                loggingService.warn(`Failed to estimate tokens for original prompt, using fallback: ${error}`);
-                originalTokens = estimateTokens(request.prompt, provider, request.model); // Sync fallback with model info
-            }
+            // Get token count and cost for ORIGINAL prompt with memoization
+            const originalTokens = await this.getTokensWithMemoization(request.prompt, provider, request.model);
             
             let originalSimpleEstimate;
             try {
@@ -1358,14 +1426,8 @@ REPLY FORMAT (JSON only):
                 }
             }
 
-            // Get token count and cost for optimized prompt
-            let optimizedTokens;
-            try {
-                optimizedTokens = await estimateTokensAsync(optimizedPrompt, provider, request.model);
-            } catch (error) {
-                loggingService.warn(`Failed to estimate tokens for optimized prompt, using fallback: ${error}`);
-                optimizedTokens = estimateTokens(optimizedPrompt, provider, request.model); // Sync fallback with model info
-            }
+            // Get token count and cost for optimized prompt with memoization
+            const optimizedTokens = await this.getTokensWithMemoization(optimizedPrompt, provider, request.model);
             
             let optimizedSimpleEstimate;
             try {
@@ -1496,44 +1558,53 @@ REPLY FORMAT (JSON only):
                 ) : undefined,
             });
 
-            // Update user's optimization count
-            await User.findByIdAndUpdate(request.userId, {
-                $inc: {
-                    'usage.currentMonth.optimizationsSaved': costSaved,
-                },
-            });
+            // Queue background operations for better performance
+            this.queueBackgroundOperation(async () => {
+                try {
+                    // Update user's optimization count
+                    await User.findByIdAndUpdate(request.userId, {
+                        $inc: {
+                            'usage.currentMonth.optimizationsSaved': costSaved,
+                        },
+                    });
 
-            // Track activity
-            await ActivityService.trackActivity(request.userId, {
-                type: 'optimization_created',
-                title: 'Created Optimization',
-                description: `Saved $${costSaved.toFixed(4)} (${improvementPercentage.toFixed(1)}% improvement)`,
-                metadata: {
-                    optimizationId: optimization._id,
-                    service: request.service,
-                    model: request.model,
-                    cost: unifiedCalc.originalCost,
-                    saved: costSaved,
-                    techniques: optimizationResult?.appliedOptimizations || appliedOptimizations
+                    // Track activity
+                    await ActivityService.trackActivity(request.userId, {
+                        type: 'optimization_created',
+                        title: 'Created Optimization',
+                        description: `Saved $${costSaved.toFixed(4)} (${improvementPercentage.toFixed(1)}% improvement)`,
+                        metadata: {
+                            optimizationId: optimization._id,
+                            service: request.service,
+                            model: request.model,
+                            cost: unifiedCalc.originalCost,
+                            saved: costSaved,
+                            techniques: optimizationResult?.appliedOptimizations || appliedOptimizations
+                        }
+                    });
+
+                    // Create alert if significant savings
+                    if (improvementPercentage > 30) {
+                        await Alert.create({
+                            userId: request.userId,
+                            type: 'optimization_available',
+                            title: 'Significant Optimization Available',
+                            message: `You can save ${improvementPercentage.toFixed(1)}% on tokens using ${optimizationType} optimization.`,
+                            severity: 'medium',
+                            data: {
+                                optimizationId: optimization._id,
+                                savings: costSaved,
+                                percentage: improvementPercentage,
+                                optimizationType: optimizationType,
+                            },
+                        });
+                    }
+                } catch (error) {
+                    loggingService.error('Background operation failed:', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
                 }
             });
-
-            // Create alert if significant savings
-            if (improvementPercentage > 30) {
-                await Alert.create({
-                    userId: request.userId,
-                    type: 'optimization_available',
-                    title: 'Significant Optimization Available',
-                    message: `You can save ${improvementPercentage.toFixed(1)}% on tokens using ${optimizationType} optimization.`,
-                    severity: 'medium',
-                    data: {
-                        optimizationId: optimization._id,
-                        savings: costSaved,
-                        percentage: improvementPercentage,
-                        optimizationType: optimizationType,
-                    },
-                });
-            }
 
             loggingService.info('Optimization created', { value:  { 
                 userId: request.userId,
@@ -1726,15 +1797,44 @@ REPLY FORMAT (JSON only):
                 sort.createdAt = -1; // Default to most recent first
             }
 
-            const [data, total] = await Promise.all([
-                Optimization.find(query)
-                    .sort(sort)
-                    .skip(skip)
-                    .limit(limit)
-                    .populate('userId', 'name email')
-                    .lean(),
-                Optimization.countDocuments(query),
+            // Use unified aggregation pipeline for better performance
+            const [result] = await Optimization.aggregate([
+                { $match: query },
+                {
+                    $facet: {
+                        data: [
+                            { $sort: sort },
+                            { $skip: skip },
+                            { $limit: limit },
+                            {
+                                $lookup: {
+                                    from: 'users',
+                                    localField: 'userId',
+                                    foreignField: '_id',
+                                    as: 'user',
+                                    pipeline: [
+                                        { $project: { name: 1, email: 1 } }
+                                    ]
+                                }
+                            },
+                            {
+                                $addFields: {
+                                    userId: { $arrayElemAt: ['$user', 0] }
+                                }
+                            },
+                            {
+                                $project: { user: 0 }
+                            }
+                        ],
+                        total: [
+                            { $count: 'count' }
+                        ]
+                    }
+                }
             ]);
+
+            const data = result.data || [];
+            const total = result.total[0]?.count || 0;
 
             return paginate(data, total, options);
         } catch (error) {
@@ -1872,22 +1972,33 @@ REPLY FORMAT (JSON only):
                 _id: { $in: promptIds },
             }).select('prompt service model');
 
+            // Process optimizations in parallel batches for better performance
+            const BATCH_SIZE = 5; // Limit concurrent operations
             const optimizations: IOptimization[] = [];
-
-            for (const promptData of prompts) {
-                try {
-                    const optimization = await this.createOptimization({
-                        userId,
-                        prompt: promptData.prompt,
-                        service: promptData.service,
-                        model: promptData.model,
-                        cortexEnabled: options?.cortexEnabled,
-                        cortexConfig: options?.cortexConfig,
-                    });
-                    optimizations.push(optimization);
-                } catch (error) {
-                    loggingService.error(`Error optimizing prompt ${promptData._id}:`, { error: error instanceof Error ? error.message : String(error) });
-                }
+            
+            for (let i = 0; i < prompts.length; i += BATCH_SIZE) {
+                const batch = prompts.slice(i, i + BATCH_SIZE);
+                
+                const batchOperations = batch.map(promptData => async () => {
+                    try {
+                        return await this.createOptimization({
+                            userId,
+                            prompt: promptData.prompt,
+                            service: promptData.service,
+                            model: promptData.model,
+                            cortexEnabled: options?.cortexEnabled,
+                            cortexConfig: options?.cortexConfig,
+                        });
+                    } catch (error) {
+                        loggingService.error(`Error optimizing prompt ${promptData._id}:`, { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                        return null;
+                    }
+                });
+                
+                const batchResults = await this.executeInParallel(batchOperations, true);
+                optimizations.push(...batchResults.filter((opt): opt is IOptimization => opt !== null));
             }
 
             return {
@@ -2110,5 +2221,141 @@ REPLY FORMAT (JSON only):
             loggingService.error('Revert optimization error:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to revert optimization');
         }
+    }
+
+    /**
+     * Get tokens with memoization for better performance
+     */
+    private static async getTokensWithMemoization(
+        text: string, 
+        provider: AIProvider, 
+        model: string
+    ): Promise<number> {
+        const cacheKey = `${text.substring(0, 100)}_${provider}_${model}`;
+        
+        // Check cache first
+        if (this.tokenEstimationCache.has(cacheKey)) {
+            return this.tokenEstimationCache.get(cacheKey)!;
+        }
+        
+        // Estimate tokens
+        let tokens: number;
+        try {
+            tokens = await estimateTokensAsync(text, provider, model);
+        } catch (error) {
+            loggingService.warn(`Failed to estimate tokens async, using fallback: ${error}`);
+            tokens = estimateTokens(text, provider, model);
+        }
+        
+        // Cache the result with size limit
+        if (this.tokenEstimationCache.size >= this.TOKEN_CACHE_SIZE) {
+            const firstKey = this.tokenEstimationCache.keys().next().value as string;
+            this.tokenEstimationCache.delete(firstKey);
+        }
+        
+        this.tokenEstimationCache.set(cacheKey, tokens);
+        return tokens;
+    }
+
+    /**
+     * Queue background operation
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        if (!this.ENABLE_BACKGROUND_PROCESSING) {
+            // Execute immediately if background processing is disabled
+            operation().catch(error => {
+                loggingService.error('Immediate operation failed:', { 
+                    error: error instanceof Error ? error.message : String(error) 
+                });
+            });
+            return;
+        }
+        
+        this.backgroundQueue.push(operation);
+    }
+
+    /**
+     * Start background processor
+     */
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                    }
+                }
+            }
+        }, 1000); // Process queue every second
+    }
+
+    /**
+     * Process operations in parallel when enabled
+     */
+    private static async executeInParallel<T>(
+        operations: Array<() => Promise<T>>,
+        fallbackSequential: boolean = true
+    ): Promise<T[]> {
+        if (!this.ENABLE_PARALLEL_PROCESSING || operations.length <= 1) {
+            // Execute sequentially
+            const results: T[] = [];
+            for (const operation of operations) {
+                try {
+                    results.push(await operation());
+                } catch (error) {
+                    if (fallbackSequential) {
+                        loggingService.warn('Operation failed in sequential execution:', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+            return results;
+        }
+        
+        // Execute in parallel
+        try {
+            return await Promise.all(operations.map(op => op()));
+        } catch (error) {
+            if (fallbackSequential) {
+                loggingService.warn('Parallel execution failed, falling back to sequential:', { 
+                    error: error instanceof Error ? error.message : String(error) 
+                });
+                return this.executeInParallel(operations, false);
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.tokenEstimationCache.clear();
     }
 }

@@ -64,17 +64,12 @@ export class OptimizationController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // 🔍 CONTROLLER DEBUG: Check if enableCortex is being received
-            console.log('🔍 CONTROLLER DEBUG - enableCortex check:', {
-                'req.body.enableCortex': req.body.enableCortex,
-                'validatedData.enableCortex': validatedData.enableCortex,
-                'typeof enableCortex': typeof req.body.enableCortex,
-                'typeof validated enableCortex': typeof validatedData.enableCortex,
-                'strict equality': req.body.enableCortex === true,
-                'validated strict equality': validatedData.enableCortex === true,
-                'loose equality': req.body.enableCortex == true,
-                'truthy check': !!req.body.enableCortex
-            });
+            // Conditional debug logging only in development
+                loggingService.debug('Cortex enablement check', {
+                    enableCortex: req.body.enableCortex,
+                    validatedEnableCortex: validatedData.enableCortex,
+                    requestId: req.headers['x-request-id'] as string
+                });
 
             const optimization = await OptimizationService.createOptimization({
                 userId,
@@ -305,7 +300,7 @@ export class OptimizationController {
                 { page: 1, limit: 1 }
             );
 
-            const optimization = result.data.find(o => o._id.toString() === id);
+            const optimization = result.data.find((o: any) => o._id.toString() === id);
 
             if (!optimization) {
                 const duration = Date.now() - startTime;
@@ -333,11 +328,11 @@ export class OptimizationController {
                 optimizationId: id,
                 duration,
                 hasOptimization: !!optimization,
-                hasUserQuery: !!optimization.userQuery,
-                hasGeneratedAnswer: !!optimization.generatedAnswer,
-                improvementPercentage: optimization.improvementPercentage,
-                costSaved: optimization.costSaved,
-                tokensSaved: optimization.tokensSaved,
+                hasUserQuery: !!(optimization as any)?.userQuery,
+                hasGeneratedAnswer: !!(optimization as any)?.generatedAnswer,
+                improvementPercentage: (optimization as any)?.improvementPercentage,
+                costSaved: (optimization as any)?.costSaved,
+                tokensSaved: (optimization as any)?.tokensSaved,
                 requestId: req.headers['x-request-id'] as string
             });
 
@@ -350,11 +345,11 @@ export class OptimizationController {
                     userId,
                     optimizationId: id,
                     hasOptimization: !!optimization,
-                    hasUserQuery: !!optimization.userQuery,
-                    hasGeneratedAnswer: !!optimization.generatedAnswer,
-                    improvementPercentage: optimization.improvementPercentage,
-                    costSaved: optimization.costSaved,
-                    tokensSaved: optimization.tokensSaved
+                    hasUserQuery: !!(optimization as any)?.userQuery,
+                    hasGeneratedAnswer: !!(optimization as any)?.generatedAnswer,
+                    improvementPercentage: (optimization as any)?.improvementPercentage,
+                    costSaved: (optimization as any)?.costSaved,
+                    tokensSaved: (optimization as any)?.tokensSaved
                 }
             });
 
@@ -862,8 +857,8 @@ export class OptimizationController {
                     startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
             }
 
-            // Calculate summary from database directly for accurate totals
-            const [summaryStats] = await Optimization.aggregate([
+            // Use unified aggregation pipeline for all summary data
+            const [summaryResult] = await Optimization.aggregate([
                 {
                     $match: {
                         userId: new mongoose.Types.ObjectId(userId),
@@ -871,18 +866,51 @@ export class OptimizationController {
                     }
                 },
                 {
-                    $group: {
-                        _id: null,
-                        total: { $sum: 1 },
-                        totalSaved: { $sum: '$costSaved' },
-                        totalTokensSaved: { $sum: '$tokensSaved' },
-                        avgImprovement: { $avg: '$improvementPercentage' },
-                        applied: {
-                            $sum: { $cond: [{ $eq: ['$applied', true] }, 1, 0] }
-                        }
+                    $facet: {
+                        summary: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    total: { $sum: 1 },
+                                    totalSaved: { $sum: '$costSaved' },
+                                    totalTokensSaved: { $sum: '$tokensSaved' },
+                                    avgImprovement: { $avg: '$improvementPercentage' },
+                                    applied: {
+                                        $sum: { $cond: [{ $eq: ['$applied', true] }, 1, 0] }
+                                    }
+                                }
+                            }
+                        ],
+                        categories: [
+                            {
+                                $group: {
+                                    _id: '$category',
+                                    count: { $sum: 1 },
+                                    avgSavings: { $avg: '$costSaved' }
+                                }
+                            }
+                        ],
+                        topOptimizations: [
+                            { $sort: { costSaved: -1 } },
+                            { $limit: 5 },
+                            {
+                                $project: {
+                                    userQuery: 1,
+                                    generatedAnswer: 1,
+                                    costSaved: 1,
+                                    tokensSaved: 1,
+                                    improvementPercentage: 1,
+                                    category: 1
+                                }
+                            }
+                        ]
                     }
                 }
             ]);
+
+            const summaryStats = summaryResult.summary[0];
+            const categoryStats = summaryResult.categories || [];
+            const topOptimizations = summaryResult.topOptimizations || [];
 
             if (!summaryStats) {
                 res.json({
@@ -900,33 +928,6 @@ export class OptimizationController {
                 });
                 return;
             }
-
-            // Get category breakdown
-            const categoryStats = await Optimization.aggregate([
-                {
-                    $match: {
-                        userId: new mongoose.Types.ObjectId(userId),
-                        createdAt: { $gte: startDate, $lte: endDate }
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$category',
-                        count: { $sum: 1 },
-                        avgSavings: { $avg: '$costSaved' }
-                    }
-                }
-            ]);
-
-            // Get top optimizations
-            const topOptimizations = await Optimization.find({
-                userId: new mongoose.Types.ObjectId(userId),
-                createdAt: { $gte: startDate, $lte: endDate }
-            })
-            .sort({ costSaved: -1 })
-            .limit(5)
-            .select('originalPrompt optimizedPrompt costSaved tokensSaved improvementPercentage category')
-            .lean();
 
             const summary = {
                 total: summaryStats.total,
