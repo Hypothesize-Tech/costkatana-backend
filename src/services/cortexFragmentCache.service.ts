@@ -6,17 +6,9 @@
  * and caching semantic fragments that can be composed into larger queries.
  */
 
-import { CortexFrame, CortexValue, CortexFrameType } from '../types/cortex.types';
+import { CortexFrame, CortexValue } from '../types/cortex.types';
 import { loggingService } from './logging.service';
 import * as crypto from 'crypto';
-
-// LRU Cache type definitions
-interface LRUCacheOptions<K, V> {
-    max: number;
-    ttl?: number;
-    updateAgeOnGet?: boolean;
-    allowStale?: boolean;
-}
 
 interface LRUCacheInstance<K, V> {
     get(key: K): V | undefined;

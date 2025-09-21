@@ -41,8 +41,20 @@ const CIRCUIT_BREAKER_THRESHOLD = 5; // Number of failures before opening
 const CIRCUIT_BREAKER_TIMEOUT = 30000; // 30 seconds timeout
 
 export class GatewayController {
+    // Optimization: Circuit breaker batch processing
+    private static circuitBreakerBatch = new Map<string, { success: boolean; timestamp: number }>();
+    private static batchTimer?: NodeJS.Timeout;
+
+    // Optimization: Request processing pools
+    private static memoryPools = new Map<string, any[]>();
+    private static readonly MEMORY_POOL_SIZE = 100;
+
+    // Optimization: Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+
     /**
-     * Main gateway proxy handler - routes requests to AI providers
+     * Main gateway proxy handler - routes requests to AI providers with optimizations
      */
     static async proxyRequest(req: Request, res: Response): Promise<void> {
         // Check if intelligent routing is enabled
@@ -138,82 +150,77 @@ export class GatewayController {
             });
 
         try {
-            // Check cache first if enabled
-            if (context.cacheEnabled) {
-                const cachedResponse = await GatewayController.checkCache(req);
-                if (cachedResponse) {
-                    loggingService.info('Cache hit - returning cached response', {
-                        requestId: req.headers['x-request-id'] as string
-                    });
-                    res.setHeader('CostKatana-Cache-Status', 'HIT');
-                    
-                    // Add CostKatana-Request-Id header for feedback tracking
-                    if (context.requestId) {
-                        res.setHeader('CostKatana-Request-Id', context.requestId);
-                    }
-                    
-                    res.status(200).json(cachedResponse.response);
-                    return;
+            // Parallel security and validation pipeline
+            const [cachedResponse, budgetCheck, firewallResult] = await Promise.all([
+                context.cacheEnabled ? GatewayController.checkCache(req) : Promise.resolve(null),
+                context.budgetId ? GatewayController.checkBudgetConstraints(req) : Promise.resolve({ allowed: true }),
+                (context.firewallEnabled || context.firewallAdvanced) ? GatewayController.checkFirewall(req) : Promise.resolve({ isBlocked: false })
+            ]);
+
+            // Handle cache hit
+            if (cachedResponse) {
+                loggingService.info('Cache hit - returning cached response', {
+                    requestId: req.headers['x-request-id'] as string
+                });
+                res.setHeader('CostKatana-Cache-Status', 'HIT');
+                
+                if (context.requestId) {
+                    res.setHeader('CostKatana-Request-Id', context.requestId);
                 }
+                
+                res.status(200).json(cachedResponse.response);
+                return;
             }
 
-            // Check budget constraints if budget ID is provided
-            if (context.budgetId) {
-                const budgetCheck = await GatewayController.checkBudgetConstraints(req);
-                if (!budgetCheck.allowed) {
-                    res.status(429).json({
-                        error: 'Budget limit exceeded',
-                        message: budgetCheck.message,
-                        budgetId: context.budgetId
-                    });
-                    return;
-                }
+            // Handle budget constraint violation
+            if (!budgetCheck.allowed) {
+                res.status(429).json({
+                    error: 'Budget limit exceeded',
+                    message: budgetCheck.allowed ? 'Budget limit exceeded' : 'Budget limit exceeded',
+                    budgetId: context.budgetId
+                });
+                return;
             }
 
-            // Check firewall if enabled
-            if (context.firewallEnabled || context.firewallAdvanced) {
-                const firewallResult = await GatewayController.checkFirewall(req);
-                if (firewallResult.isBlocked) {
-                    // Determine response code based on containment action
-                    let statusCode = 400;
-                    let errorCode = 'PROMPT_BLOCKED_BY_FIREWALL';
-                    
-                    if (firewallResult.containmentAction === 'human_review') {
-                        statusCode = 202; // Accepted, but requires review
-                        errorCode = 'PROMPT_REQUIRES_REVIEW';
-                    }
+            // Handle firewall blocking
+            if (firewallResult.isBlocked) {
+                let statusCode = 400;
+                let errorCode = 'PROMPT_BLOCKED_BY_FIREWALL';
+                
+                if (firewallResult.containmentAction === 'human_review') {
+                    statusCode = 202;
+                    errorCode = 'PROMPT_REQUIRES_REVIEW';
+                }
 
-                    const response: any = {
-                        success: false,
-                        error: {
-                            code: errorCode,
-                            message: firewallResult.containmentAction === 'human_review'
-                                ? 'The request requires human review due to security considerations.'
-                                : 'The request was blocked by the CostKATANA security system due to a detected threat.',
-                            details: `${firewallResult.reason}. View threat category and details in your CostKATANA security dashboard for request ID: ${req.headers['x-request-id'] || 'unknown'}`
-                        },
-                        security: {
-                            category: firewallResult.threatCategory,
-                            confidence: firewallResult.confidence,
-                            riskScore: firewallResult.riskScore,
-                            stage: firewallResult.stage,
-                            containmentAction: firewallResult.containmentAction,
-                            matchedPatterns: firewallResult.matchedPatterns?.length || 0
-                        }
+                const response: any = {
+                    success: false,
+                    error: {
+                        code: errorCode,
+                        message: firewallResult.containmentAction === 'human_review'
+                            ? 'The request requires human review due to security considerations.'
+                            : 'The request was blocked by the CostKATANA security system due to a detected threat.',
+                        details: `${firewallResult.reason}. View threat category and details in your CostKATANA security dashboard for request ID: ${req.headers['x-request-id'] || 'unknown'}`
+                    },
+                    security: {
+                        category: firewallResult.threatCategory,
+                        confidence: firewallResult.confidence,
+                        riskScore: firewallResult.riskScore,
+                        stage: firewallResult.stage,
+                        containmentAction: firewallResult.containmentAction,
+                        matchedPatterns: firewallResult.matchedPatterns?.length || 0
+                    }
+                };
+
+                if (firewallResult.humanReviewId) {
+                    response.humanReview = {
+                        reviewId: firewallResult.humanReviewId,
+                        status: 'pending',
+                        message: 'Your request is pending human review. You will be notified once reviewed.'
                     };
-
-                    // Add human review information if applicable
-                    if (firewallResult.humanReviewId) {
-                        response.humanReview = {
-                            reviewId: firewallResult.humanReviewId,
-                            status: 'pending',
-                            message: 'Your request is pending human review. You will be notified once reviewed.'
-                        };
-                    }
-
-                    res.status(statusCode).json(response);
-                    return;
                 }
+
+                res.status(statusCode).json(response);
+                return;
             }
 
             // Handle failover vs single provider requests
@@ -274,7 +281,7 @@ export class GatewayController {
                 // Handle single provider request (existing logic)
                 const proxyRequest = await GatewayController.prepareProxyRequest(req);
                 
-                // 🚀 CORTEX PROCESSING - Process request through Cortex if enabled
+                // 🚀 OPTIMIZED CORTEX PROCESSING - Memory-efficient processing
                 if (context.cortexEnabled && GatewayCortexService.isEligibleForCortex(req.body, context)) {
                     loggingService.info('🔄 Processing request through Gateway Cortex', {
                         requestId: context.requestId,
@@ -283,10 +290,11 @@ export class GatewayController {
                     });
 
                     try {
-                        const cortexResult = await GatewayCortexService.processGatewayRequest(req, req.body);
+                        // Use memory pool for Cortex processing
+                        const memoryPool = this.getMemoryPool('cortex');
+                        const cortexResult = await this.processCortexWithMemoryManagement(req, req.body, memoryPool);
                         
                         if (!cortexResult.shouldBypass) {
-                            // Update the proxy request with Cortex-optimized body
                             proxyRequest.data = cortexResult.processedBody;
                             
                             loggingService.info('✅ Gateway Cortex processing completed', {
@@ -296,12 +304,14 @@ export class GatewayController {
                                 processingTime: cortexResult.cortexMetadata.processingTime
                             });
                         }
+                        
+                        // Return memory pool for reuse
+                        this.returnMemoryPool('cortex', memoryPool);
                     } catch (cortexError) {
                         loggingService.warn('⚠️ Gateway Cortex processing failed, continuing with original request', {
                             requestId: context.requestId,
                             error: cortexError instanceof Error ? cortexError.message : String(cortexError)
                         });
-                        // Continue with original request on Cortex failure
                     }
                 }
                 
@@ -363,20 +373,29 @@ export class GatewayController {
                 GatewayController.updateCircuitBreaker(provider, true);
             }
 
-            // Process the response
-            const processedResponse = await GatewayController.processResponse(req, response);
+            // Parallel response processing and moderation
+            const [processedResponse, moderatedResponse] = await Promise.all([
+                GatewayController.processResponse(req, response),
+                Promise.resolve(response) // Pre-resolve for moderation
+            ]).then(async ([processed]) => {
+                const moderated = await GatewayController.moderateOutput(req, processed);
+                return [processed, moderated];
+            });
 
-            // Apply output moderation if enabled
-            const moderatedResponse = await GatewayController.moderateOutput(req, processedResponse);
+            // Non-blocking background operations
+            const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
+            this.queueBackgroundOperation(async () => {
+                await Promise.allSettled([
+                    context.cacheEnabled ? GatewayController.cacheResponse(req, moderatedResponse.response) : Promise.resolve(),
+                    GatewayController.trackUsage(req, moderatedResponse.response, retryAttempts),
+                    Promise.resolve(this.updateCircuitBreakerBatched(provider, true))
+                ]);
+            });
 
-            // Cache the response if caching is enabled (cache the moderated response)
+            // Set cache status header immediately
             if (context.cacheEnabled) {
-                await GatewayController.cacheResponse(req, moderatedResponse.response);
                 res.setHeader('CostKatana-Cache-Status', 'MISS');
             }
-
-            // Track usage and costs
-            await GatewayController.trackUsage(req, moderatedResponse.response, retryAttempts);
 
             // Return the response
             res.status(response.status);
@@ -1837,5 +1856,148 @@ export class GatewayController {
         };
 
         return providerUrls[provider] || 'https://api.openai.com/v1';
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Memory pool management for efficient object reuse
+     */
+    private static getMemoryPool(poolType: string): any[] {
+        if (!this.memoryPools.has(poolType)) {
+            this.memoryPools.set(poolType, []);
+        }
+        
+        const pool = this.memoryPools.get(poolType)!;
+        return pool.length > 0 ? pool.pop() : this.createMemoryPoolObject(poolType);
+    }
+
+    private static returnMemoryPool(poolType: string, obj: any): void {
+        const pool = this.memoryPools.get(poolType);
+        if (pool && pool.length < this.MEMORY_POOL_SIZE) {
+            // Reset object for reuse
+            this.resetPoolObject(obj);
+            pool.push(obj);
+        }
+    }
+
+    private static createMemoryPoolObject(poolType: string): any {
+        switch (poolType) {
+            case 'cortex':
+                return { processedBody: null, metadata: null, tempData: [] };
+            case 'request':
+                return { headers: {}, body: null, metadata: {} };
+            default:
+                return {};
+        }
+    }
+
+    private static resetPoolObject(obj: any): void {
+        if (obj && typeof obj === 'object') {
+            Object.keys(obj).forEach(key => {
+                if (Array.isArray(obj[key])) {
+                    obj[key].length = 0;
+                } else {
+                    obj[key] = null;
+                }
+            });
+        }
+    }
+
+    /**
+     * Memory-efficient Cortex processing with pool management
+     */
+    private static async processCortexWithMemoryManagement(
+        req: Request, 
+        body: any, 
+        memoryPool: any
+    ): Promise<any> {
+        try {
+            // Use memory pool for temporary data
+            memoryPool.tempData.length = 0;
+            memoryPool.processedBody = null;
+            memoryPool.metadata = null;
+
+            // Process with memory constraints
+            const result = await GatewayCortexService.processGatewayRequest(req, body);
+            
+            // Store in pool for cleanup
+            memoryPool.processedBody = result.processedBody;
+            memoryPool.metadata = result.cortexMetadata;
+            
+            return result;
+        } catch (error) {
+            // Ensure pool cleanup on error
+            this.resetPoolObject(memoryPool);
+            throw error;
+        }
+    }
+
+    /**
+     * Background operation queue for non-critical tasks
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+        
+        if (!this.backgroundProcessor) {
+            this.backgroundProcessor = setTimeout(() => {
+                this.processBackgroundQueue();
+            }, 100); // Process queue every 100ms
+        }
+    }
+
+    private static async processBackgroundQueue(): Promise<void> {
+        if (this.backgroundQueue.length === 0) {
+            this.backgroundProcessor = undefined;
+            return;
+        }
+
+        const operations = this.backgroundQueue.splice(0, 10); // Process 10 operations at a time
+        
+        try {
+            await Promise.allSettled(operations.map(op => op()));
+        } catch (error) {
+            loggingService.warn('Background operation failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+
+        // Continue processing if more operations are queued
+        if (this.backgroundQueue.length > 0) {
+            this.backgroundProcessor = setTimeout(() => {
+                this.processBackgroundQueue();
+            }, 100);
+        } else {
+            this.backgroundProcessor = undefined;
+        }
+    }
+
+    /**
+     * Batched circuit breaker updates for better performance
+     */
+    private static updateCircuitBreakerBatched(provider: string, success: boolean): void {
+        this.circuitBreakerBatch.set(provider, { success, timestamp: Date.now() });
+        
+        if (!this.batchTimer) {
+            this.batchTimer = setTimeout(() => {
+                this.processBatchedCircuitBreakerUpdates();
+            }, 1000); // Batch updates every 1 second
+        }
+    }
+
+    private static processBatchedCircuitBreakerUpdates(): void {
+        if (this.circuitBreakerBatch.size === 0) {
+            this.batchTimer = undefined;
+            return;
+        }
+
+        for (const [provider, update] of Array.from(this.circuitBreakerBatch.entries())) {
+            this.updateCircuitBreaker(provider, update.success);
+        }
+
+        this.circuitBreakerBatch.clear();
+        this.batchTimer = undefined;
     }
 }

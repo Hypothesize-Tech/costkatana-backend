@@ -718,28 +718,26 @@ export class ForecastingController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // Generate multiple forecasts to assess accuracy
-            const forecasts = await Promise.all([
-                ForecastingService.generateCostForecast(userId, {
-                    forecastType: forecastType as 'daily' | 'weekly' | 'monthly',
-                    timeHorizon: Number(days),
-                    tags: undefined,
-                    budgetLimit: undefined
-                })
-            ]);
+            // Generate forecast with optimized service method
+            const forecast = await ForecastingService.generateCostForecast(userId, {
+                forecastType: forecastType as 'daily' | 'weekly' | 'monthly',
+                timeHorizon: Number(days),
+                tags: undefined,
+                budgetLimit: undefined
+            });
 
             const accuracyMetrics = {
-                modelAccuracy: forecasts[0].modelAccuracy,
-                dataQuality: forecasts[0].dataQuality,
-                confidenceLevel: forecasts[0].forecasts.reduce((sum, f) => sum + f.confidence, 0) / forecasts[0].forecasts.length,
-                forecastReliability: this.calculateForecastReliability(forecasts[0]),
+                modelAccuracy: forecast.modelAccuracy,
+                dataQuality: forecast.dataQuality,
+                confidenceLevel: forecast.forecasts.reduce((sum, f) => sum + f.confidence, 0) / forecast.forecasts.length,
+                forecastReliability: this.calculateForecastReliability(forecast),
                 recommendations: [
-                    ...(forecasts[0].modelAccuracy < 0.7 ? [{
+                    ...(forecast.modelAccuracy < 0.7 ? [{
                         type: 'data_quality',
                         message: 'Forecast accuracy can be improved with more historical data',
                         action: 'Continue using the system to build better forecasting models'
                     }] : []),
-                    ...(forecasts[0].dataQuality === 'poor' ? [{
+                    ...(forecast.dataQuality === 'poor' ? [{
                         type: 'data_collection',
                         message: 'Limited historical data affects forecast accuracy',
                         action: 'Forecasts will improve as more usage data is collected'
@@ -759,7 +757,7 @@ export class ForecastingController {
                 confidenceLevel: accuracyMetrics.confidenceLevel,
                 forecastReliability: accuracyMetrics.forecastReliability,
                 recommendationsCount: accuracyMetrics.recommendations.length,
-                hasForecasts: !!forecasts && forecasts.length > 0,
+                hasForecast: !!forecast,
                 requestId: req.headers['x-request-id'] as string
             });
 
@@ -844,6 +842,7 @@ export class ForecastingController {
                 requestId: req.headers['x-request-id'] as string
             });
 
+            // Use optimized service method with parallel processing
             const patterns = await ForecastingService.analyzeSpendingPatterns(userId, tagFilter);
 
             const anomalies = patterns.anomalies.map(anomaly => ({

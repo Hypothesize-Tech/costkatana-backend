@@ -15,13 +15,7 @@ import { SemanticPrimitivesService } from './semanticPrimitives.service';
 import { CortexSastEncoderService } from './cortexSastEncoder.service';
 import { CortexSastIntegrationService } from './cortexSastIntegration.service';
 import { 
-    CortexFrame,
-    CortexConfig,
-    CortexError,
-    CortexErrorCode,
     CortexProcessingRequest,
-    CortexEncodingResult,
-    DEFAULT_CORTEX_CONFIG,
     CortexEncodingRequest,
     CortexDecodingRequest
 } from '../types/cortex.types';

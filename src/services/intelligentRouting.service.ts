@@ -16,8 +16,12 @@ import { estimateTokens } from '../utils/tokenCounter';
 
 export class IntelligentRoutingService {
 
+    // Optimization: Provider model discovery with timeout
+    private static readonly PROVIDER_DISCOVERY_TIMEOUT = 200; // 200ms timeout per provider
+    private static readonly MAX_CONCURRENT_PROVIDERS = 5;
+
     /**
-     * Get intelligent routing decision for a request
+     * Get intelligent routing decision for a request with optimizations
      */
     static async getRoutingDecision(
         request: any,
@@ -99,48 +103,104 @@ export class IntelligentRoutingService {
             'openai', 'anthropic', 'aws-bedrock', 'google-ai', 'cohere'
         ];
 
-        // Parallel provider processing
-        const providerPromises = defaultProviders.map(async (provider) => {
-            try {
-                const providerModels = await this.getProviderModels(provider);
-                
-                // Parallel model processing within provider
-                const modelPromises = providerModels.map(async (model) => {
-                    const pricing = getModelPricing(provider, model.modelId);
-                    return pricing ? {
-                        provider,
-                        modelId: model.modelId,
-                        modelName: model.modelName,
-                        pricing
-                    } : null;
-                });
-                
-                const models = await Promise.all(modelPromises);
-                return models.filter(Boolean) as Array<{
-                    provider: string;
-                    modelId: string;
-                    modelName: string;
-                    pricing: any;
-                }>;
-            } catch (error) {
-                loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
-                return [];
-            }
-        });
+        // Optimized parallel provider processing with timeout and batching
+        const providerBatches = this.chunkArray(defaultProviders, this.MAX_CONCURRENT_PROVIDERS);
+        const allProviderModels: Array<{
+            provider: string;
+            modelId: string;
+            modelName: string;
+            pricing: any;
+        }> = [];
 
-        const allProviderModels = await Promise.all(providerPromises);
-        return allProviderModels.flat();
+        for (const batch of providerBatches) {
+            const batchPromises = batch.map(async (provider) => {
+                try {
+                    // Add timeout to provider discovery
+                    const timeoutPromise = new Promise<any[]>((_, reject) => {
+                        setTimeout(() => reject(new Error(`Provider ${provider} discovery timeout`)), this.PROVIDER_DISCOVERY_TIMEOUT);
+                    });
+
+                    const discoveryPromise = this.getProviderModelsOptimized(provider);
+                    const providerModels = await Promise.race([discoveryPromise, timeoutPromise]);
+                    
+                    // Parallel model processing within provider with batching
+                    const modelBatches = this.chunkArray(providerModels, 10);
+                    const providerResults: Array<{
+                        provider: string;
+                        modelId: string;
+                        modelName: string;
+                        pricing: any;
+                    }> = [];
+
+                    for (const modelBatch of modelBatches) {
+                        const modelPromises = modelBatch.map(async (model) => {
+                            const pricing = getModelPricing(provider, model.modelId);
+                            return pricing ? {
+                                provider,
+                                modelId: model.modelId,
+                                modelName: model.modelName,
+                                pricing
+                            } : null;
+                        });
+                        
+                        const batchResults = await Promise.all(modelPromises);
+                        providerResults.push(...batchResults.filter(Boolean) as Array<{
+                            provider: string;
+                            modelId: string;
+                            modelName: string;
+                            pricing: any;
+                        }>);
+                    }
+
+                    return providerResults;
+                } catch (error) {
+                    loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
+                    return [];
+                }
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            allProviderModels.push(...batchResults.flat());
+        }
+
+        return allProviderModels;
     }
 
     /**
-     * Get models for a specific provider
+     * Optimized provider model discovery with timeout and fallback
      */
-    private static async getProviderModels(provider: string): Promise<Array<{
+    private static async getProviderModelsOptimized(provider: string): Promise<Array<{
         modelId: string;
         modelName: string;
     }>> {
-                    try {
-                // Import all pricing modules to get available models
+        try {
+            // Static model definitions for fast fallback
+            const staticModels: Record<string, Array<{modelId: string; modelName: string}>> = {
+                'openai': [
+                    { modelId: 'gpt-4o', modelName: 'GPT-4o' },
+                    { modelId: 'gpt-4o-mini', modelName: 'GPT-4o Mini' },
+                    { modelId: 'gpt-3.5-turbo', modelName: 'GPT-3.5 Turbo' }
+                ],
+                'anthropic': [
+                    { modelId: 'claude-3-5-sonnet-20240620', modelName: 'Claude 3.5 Sonnet' },
+                    { modelId: 'claude-3-5-haiku-20241022', modelName: 'Claude 3.5 Haiku' }
+                ],
+                'aws-bedrock': [
+                    { modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0', modelName: 'Claude 3.5 Sonnet' },
+                    { modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0', modelName: 'Claude 3.5 Haiku' }
+                ],
+                'google-ai': [
+                    { modelId: 'gemini-pro', modelName: 'Gemini Pro' },
+                    { modelId: 'gemini-pro-vision', modelName: 'Gemini Pro Vision' }
+                ],
+                'cohere': [
+                    { modelId: 'command-r-plus', modelName: 'Command R+' },
+                    { modelId: 'command-r', modelName: 'Command R' }
+                ]
+            };
+
+            // Try dynamic import with fallback to static models
+            try {
                 const pricingModules: Record<string, () => Promise<any[]>> = {
                     'openai': () => import('../utils/pricing/openai').then(m => m.OPENAI_PRICING),
                     'anthropic': () => import('../utils/pricing/anthropic').then(m => m.ANTHROPIC_PRICING),
@@ -151,7 +211,7 @@ export class IntelligentRoutingService {
 
                 const getPricing = pricingModules[provider];
                 if (!getPricing) {
-                    return [];
+                    return staticModels[provider] || [];
                 }
 
                 const pricing = await getPricing();
@@ -160,9 +220,25 @@ export class IntelligentRoutingService {
                     modelName: model.modelName
                 }));
             } catch (error) {
-                loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
-                return [];
+                // Fallback to static models on import failure
+                loggingService.warn(`Dynamic pricing import failed for ${provider}, using static models:`, { error: error instanceof Error ? error.message : String(error) });
+                return staticModels[provider] || [];
             }
+        } catch (error) {
+            loggingService.warn(`Failed to get models for provider ${provider}:`, { error: error instanceof Error ? error.message : String(error) });
+            return [];
+        }
+    }
+
+    /**
+     * Utility method for chunking arrays for batch processing
+     */
+    private static chunkArray<T>(array: T[], chunkSize: number): T[][] {
+        const chunks: T[][] = [];
+        for (let i = 0; i < array.length; i += chunkSize) {
+            chunks.push(array.slice(i, i + chunkSize));
+        }
+        return chunks;
     }
 
     /**

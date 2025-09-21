@@ -327,15 +327,18 @@ export class ProjectService {
     }
 
     /**
-     * Check if an operation requires approval
+     * Optimized approval check with projection
      */
     static async checkApprovalRequired(
         projectId: string,
         estimatedCost: number
     ): Promise<boolean> {
         try {
-            const project = await Project.findById(projectId);
-            if (!project || !project.settings.requireApprovalAbove) {
+            const project = await Project.findById(projectId)
+                .select('settings.requireApprovalAbove')
+                .lean();
+            
+            if (!project || !project.settings?.requireApprovalAbove) {
                 return false;
             }
 
@@ -641,53 +644,53 @@ export class ProjectService {
         .populate('ownerId', 'name email')
         .sort({ createdAt: -1 });
 
-        // Enhance with usage statistics
-        const enhancedProjects = await Promise.all(projects.map(async (project) => {
-            try {
-                // Get usage statistics for the last 30 days
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-
-                const usageStats = await Usage.aggregate([
-                    {
-                        $match: {
-                            projectId: project._id,
-                            createdAt: { $gte: thirtyDaysAgo }
-                        }
-                    },
-                    {
-                        $group: {
-                            _id: null,
-                            totalCost: { $sum: '$cost' },
-                            totalRequests: { $sum: 1 },
-                            totalTokens: { $sum: '$totalTokens' }
-                        }
-                    }
-                ]);
-
-                const stats = usageStats[0] || { totalCost: 0, totalRequests: 0, totalTokens: 0 };
-
-                // Convert to plain object and add usage stats
-                const projectObj = project.toObject() as any;
-                projectObj.usage = {
-                    totalCost: stats.totalCost,
-                    totalRequests: stats.totalRequests,
-                    totalTokens: stats.totalTokens
-                };
-
-                return projectObj;
-            } catch (error) {
-                loggingService.error(`Error getting usage stats for project ${project._id}:`, { error: error instanceof Error ? error.message : String(error) });
-                // Return project without usage stats on error
-                const projectObj = project.toObject() as any;
-                projectObj.usage = {
-                    totalCost: 0,
-                    totalRequests: 0,
-                    totalTokens: 0
-                };
-                return projectObj;
+        // Optimized: Single aggregation query for all projects' usage statistics
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        
+        const projectIds = projects.map(p => p._id);
+        const allUsageStats = await Usage.aggregate([
+            {
+                $match: {
+                    projectId: { $in: projectIds },
+                    createdAt: { $gte: thirtyDaysAgo }
+                }
+            },
+            {
+                $group: {
+                    _id: '$projectId',
+                    totalCost: { $sum: '$cost' },
+                    totalRequests: { $sum: 1 },
+                    totalTokens: { $sum: '$totalTokens' }
+                }
             }
-        }));
+        ]);
+
+        // Create usage stats lookup map
+        const usageStatsMap = new Map(
+            allUsageStats.map(stat => [
+                stat._id.toString(),
+                {
+                    totalCost: stat.totalCost,
+                    totalRequests: stat.totalRequests,
+                    totalTokens: stat.totalTokens
+                }
+            ])
+        );
+
+        // Enhance projects with usage statistics
+        const enhancedProjects = projects.map(project => {
+            const projectObj = project.toObject() as any;
+            const projectIdStr = project._id.toString();
+            
+            projectObj.usage = usageStatsMap.get(projectIdStr) || {
+                totalCost: 0,
+                totalRequests: 0,
+                totalTokens: 0
+            };
+
+            return projectObj;
+        });
 
         return enhancedProjects;
     }
