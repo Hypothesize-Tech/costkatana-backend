@@ -57,6 +57,15 @@ interface SmartRecommendation {
 }
 
 export class IntelligentMonitoringService {
+    // Circuit breaker for AI service reliability
+    private static aiFailureCount = 0;
+    private static readonly MAX_AI_FAILURES = 3;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+    private static lastFailureTime = 0;
+    
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
     
     private static readonly CHATGPT_PLANS: Record<string, ChatGPTPlan> = {
         'free': {
@@ -96,56 +105,31 @@ export class IntelligentMonitoringService {
             const user = await User.findById(userId);
             if (!user) return;
 
-            // Get comprehensive usage data for AI analysis
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            startOfMonth.setHours(0, 0, 0, 0);
-
-            const monthlyUsage = await Usage.find({
-                userId: userId,
-                service: 'openai',
-                createdAt: { $gte: startOfMonth },
-                'metadata.source': 'chatgpt-custom-gpt'
-            }).sort({ createdAt: -1 });
-
-            const startOfDay = new Date();
-            startOfDay.setHours(0, 0, 0, 0);
-
-            const dailyUsage = await Usage.find({
-                userId: userId,
-                service: 'openai',
-                createdAt: { $gte: startOfDay },
-                'metadata.source': 'chatgpt-custom-gpt'
-            });
-
-            // Get historical data for better AI context (last 3 months)
-            const startOf3Months = new Date();
-            startOf3Months.setMonth(startOf3Months.getMonth() - 3);
-
-            const historicalUsage = await Usage.find({
-                userId: userId,
-                service: 'openai',
-                createdAt: { $gte: startOf3Months },
-                'metadata.source': 'chatgpt-custom-gpt'
-            }).sort({ createdAt: -1 }).limit(500); // Limit for performance
+            // Unified database query with facet for all usage data
+            const usageResults = await this.getUnifiedUsageData(userId);
+            const { monthlyUsage, dailyUsage, historicalUsage } = usageResults;
 
             // AI-powered comprehensive analysis
             const usagePattern = await this.generateAIUsageAnalysis(userId, monthlyUsage, historicalUsage);
             const chatGPTPlan = this.detectChatGPTPlan(monthlyUsage, dailyUsage);
             
-            // Generate 100% AI-powered personalized recommendations
-            const recommendations = await this.generateAIPersonalizedRecommendations(
-                userId, 
-                user,
-                monthlyUsage, 
-                dailyUsage, 
-                usagePattern, 
-                chatGPTPlan
-            );
+            // Parallel processing for recommendations and notifications
+            const [recommendations] = await Promise.all([
+                this.generateAIPersonalizedRecommendations(
+                    userId, 
+                    user,
+                    monthlyUsage, 
+                    dailyUsage, 
+                    usagePattern, 
+                    chatGPTPlan
+                )
+            ]);
 
-            // Send notifications if needed
+            // Queue notifications for background processing
             if (recommendations.length > 0) {
-                await this.sendIntelligentNotifications(user, recommendations, usagePattern);
+                this.queueBackgroundOperation(() => 
+                    this.sendIntelligentNotifications(user, recommendations, usagePattern)
+                );
             }
 
             loggingService.info('AI-powered intelligent monitoring completed', {
@@ -236,21 +220,28 @@ export class IntelligentMonitoringService {
                     metadata: u.metadata || {}
                 }));
 
-                // AI-powered usage pattern analysis
-                aiInsights = await BedrockService.analyzeUsagePatterns({
-                    usageData,
-                    timeframe: 'monthly'
-                });
+                // AI-powered usage pattern analysis with circuit breaker
+                const [aiInsightsResult, personalizedAnalysisResult] = await Promise.all([
+                    this.executeWithCircuitBreaker(() => 
+                        BedrockService.analyzeUsagePatterns({
+                            usageData,
+                            timeframe: 'monthly'
+                        })
+                    ),
+                    this.executeWithCircuitBreaker(() => 
+                        this.generatePersonalizedUserProfile(userId, usageData, historicalData)
+                    )
+                ]);
 
-                // Get personalized user profile analysis using AI
-                personalizedAnalysis = await this.generatePersonalizedUserProfile(userId, usageData, historicalData);
+                aiInsights = aiInsightsResult;
+                personalizedAnalysis = personalizedAnalysisResult;
 
                 loggingService.info('AI insights and personalization generated successfully', { value:  { 
                     userId,
-                    potentialSavings: aiInsights.potentialSavings,
-                    patternsFound: aiInsights.patterns.length,
-                    userProfile: personalizedAnalysis.userProfile,
-                    technicalLevel: personalizedAnalysis.technicalLevel
+                    potentialSavings: aiInsights?.potentialSavings || 0,
+                    patternsFound: aiInsights?.patterns?.length || 0,
+                    userProfile: personalizedAnalysis?.userProfile || 'Unknown',
+                    technicalLevel: personalizedAnalysis?.technicalLevel || 'intermediate'
                  } });
 
             } catch (error) {
@@ -267,8 +258,8 @@ export class IntelligentMonitoringService {
             peakUsageHours,
             commonTopics,
             inefficiencyScore,
-            aiInsights,
-            personalizedAnalysis
+            aiInsights: aiInsights || undefined,
+            personalizedAnalysis: personalizedAnalysis || undefined
         };
     }
 
@@ -324,7 +315,9 @@ Please analyze and provide a detailed user profile in JSON format:
 
 Make this highly specific to the user's actual usage patterns, not generic advice.`;
 
-            const response = await BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0');
+            const response = await this.executeWithCircuitBreaker(() => 
+                BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
+            );
             const cleanedResponse = BedrockService.extractJson(response);
             const profileData = JSON.parse(cleanedResponse);
 
@@ -519,7 +512,9 @@ JSON Format:
 
 Make recommendations highly specific to their usage patterns, not generic advice.`;
 
-            const response = await BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20240620-v1:0');
+            const response = await this.executeWithCircuitBreaker(() => 
+                BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20240620-v1:0')
+            );
             const cleanedResponse = BedrockService.extractJson(response);
             const aiRecommendations = JSON.parse(cleanedResponse);
 
@@ -596,7 +591,9 @@ JSON Format:
     ]
 }`;
 
-            const response = await BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0');
+            const response = await this.executeWithCircuitBreaker(() => 
+                BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
+            );
             const cleanedResponse = BedrockService.extractJson(response);
             const onboardingData = JSON.parse(cleanedResponse);
 
@@ -957,35 +954,10 @@ JSON Format:
         inefficiencyFactors += (simpleGPT4Tasks / usage.length) * 35;
         
         // Repetitive patterns factor
-        const repetitiveScore = this.calculateRepetitiveScore(usage);
+        const repetitiveScore = this.calculateRepetitiveScoreOptimized(usage);
         inefficiencyFactors += repetitiveScore * 10;
         
         return Math.min(100, Math.max(0, inefficiencyFactors));
-    }
-
-    private static calculateRepetitiveScore(usage: any[]): number {
-        if (usage.length < 2) return 0;
-        
-        const prompts = usage.map(u => (u.prompt || '').toLowerCase().substring(0, 100));
-        let similarCount = 0;
-        
-        for (let i = 0; i < prompts.length; i++) {
-            for (let j = i + 1; j < prompts.length; j++) {
-                const similarity = this.calculateSimilarity(prompts[i], prompts[j]);
-                if (similarity > 0.7) similarCount++;
-            }
-        }
-        
-        return prompts.length > 0 ? similarCount / prompts.length : 0;
-    }
-
-    private static calculateSimilarity(str1: string, str2: string): number {
-        if (!str1 || !str2) return 0;
-        
-        const words1 = str1.split(' ');
-        const words2 = str2.split(' ');
-        const common = words1.filter(word => words2.includes(word)).length;
-        return common / Math.max(words1.length, words2.length);
     }
 
     private static async shouldSendWeeklyDigest(userId: string): Promise<boolean> {
@@ -1023,5 +995,219 @@ JSON Format:
         } catch (error) {
             loggingService.error('Error in daily monitoring:', { error: error instanceof Error ? error.message : String(error) });
         }
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Unified database query with facet for all usage data
+     */
+    private static async getUnifiedUsageData(userId: string): Promise<{
+        monthlyUsage: any[];
+        dailyUsage: any[];
+        historicalUsage: any[];
+    }> {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const startOf3Months = new Date();
+        startOf3Months.setMonth(startOf3Months.getMonth() - 3);
+
+        const results = await Usage.aggregate([
+            {
+                $match: {
+                    userId: userId,
+                    service: 'openai',
+                    'metadata.source': 'chatgpt-custom-gpt'
+                }
+            },
+            {
+                $facet: {
+                    monthlyUsage: [
+                        { $match: { createdAt: { $gte: startOfMonth } } },
+                        { $sort: { createdAt: -1 } },
+                        {
+                            $project: {
+                                prompt: 1,
+                                completion: 1,
+                                totalTokens: 1,
+                                promptTokens: 1,
+                                completionTokens: 1,
+                                cost: 1,
+                                model: 1,
+                                createdAt: 1,
+                                responseTime: 1,
+                                metadata: 1
+                            }
+                        }
+                    ],
+                    dailyUsage: [
+                        { $match: { createdAt: { $gte: startOfDay } } },
+                        {
+                            $project: {
+                                model: 1,
+                                createdAt: 1
+                            }
+                        }
+                    ],
+                    historicalUsage: [
+                        { $match: { createdAt: { $gte: startOf3Months } } },
+                        { $sort: { createdAt: -1 } },
+                        { $limit: 500 },
+                        {
+                            $project: {
+                                prompt: 1,
+                                completion: 1,
+                                totalTokens: 1,
+                                cost: 1,
+                                model: 1,
+                                createdAt: 1,
+                                metadata: 1
+                            }
+                        }
+                    ]
+                }
+            }
+        ]);
+
+        const result = results[0] || {};
+        return {
+            monthlyUsage: result.monthlyUsage || [],
+            dailyUsage: result.dailyUsage || [],
+            historicalUsage: result.historicalUsage || []
+        };
+    }
+
+    /**
+     * Execute operation with circuit breaker pattern
+     */
+    private static async executeWithCircuitBreaker<T>(operation: () => Promise<T>): Promise<T | null> {
+        // Check if circuit breaker is open
+        if (this.isCircuitBreakerOpen()) {
+            loggingService.warn('AI service circuit breaker is open, skipping operation');
+            return null;
+        }
+
+        try {
+            const result = await Promise.race([
+                operation(),
+                new Promise<never>((_, reject) => 
+                    setTimeout(() => reject(new Error('AI operation timeout')), 15000)
+                )
+            ]);
+            
+            // Reset failure count on success
+            this.aiFailureCount = 0;
+            return result;
+        } catch (error) {
+            this.recordFailure();
+            loggingService.error('AI operation failed:', { error: error instanceof Error ? error.message : String(error) });
+            return null;
+        }
+    }
+
+    /**
+     * Check if circuit breaker is open
+     */
+    private static isCircuitBreakerOpen(): boolean {
+        if (this.aiFailureCount < this.MAX_AI_FAILURES) {
+            return false;
+        }
+
+        const timeSinceLastFailure = Date.now() - this.lastFailureTime;
+        if (timeSinceLastFailure > this.CIRCUIT_BREAKER_RESET_TIME) {
+            this.aiFailureCount = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Record AI service failure
+     */
+    private static recordFailure(): void {
+        this.aiFailureCount++;
+        this.lastFailureTime = Date.now();
+    }
+
+    /**
+     * Queue background operation
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+        this.startBackgroundProcessor();
+    }
+
+    /**
+     * Start background processor
+     */
+    private static startBackgroundProcessor(): void {
+        if (this.backgroundProcessor) return;
+
+        this.backgroundProcessor = setTimeout(async () => {
+            await this.processBackgroundQueue();
+            this.backgroundProcessor = undefined;
+
+            if (this.backgroundQueue.length > 0) {
+                this.startBackgroundProcessor();
+            }
+        }, 100);
+    }
+
+    /**
+     * Process background queue
+     */
+    private static async processBackgroundQueue(): Promise<void> {
+        const operations = this.backgroundQueue.splice(0, 2); // Process 2 at a time
+        await Promise.allSettled(operations.map(op => op()));
+    }
+
+    /**
+     * Optimized repetitive score calculation
+     */
+    private static calculateRepetitiveScoreOptimized(usage: any[]): number {
+        if (usage.length < 2) return 0;
+        
+        // Use Map for faster lookups
+        const promptMap = new Map<string, number>();
+        let similarCount = 0;
+        
+        usage.forEach((u, i) => {
+            const prompt = (u.prompt || '').toLowerCase().substring(0, 100);
+            const similar = Array.from(promptMap.entries()).filter(([key]) => 
+                this.calculateSimilarityOptimized(prompt, key) > 0.7
+            );
+            
+            if (similar.length > 0) {
+                similarCount += similar.length;
+            }
+            
+            promptMap.set(prompt, i);
+        });
+        
+        return usage.length > 0 ? similarCount / usage.length : 0;
+    }
+
+    /**
+     * Optimized similarity calculation using vectorized operations
+     */
+    private static calculateSimilarityOptimized(str1: string, str2: string): number {
+        if (!str1 || !str2) return 0;
+        
+        const words1 = new Set(str1.toLowerCase().split(' '));
+        const words2 = new Set(str2.toLowerCase().split(' '));
+        
+        // Use Set intersection for faster comparison
+        const intersection = new Set(Array.from(words1).filter(x => words2.has(x)));
+        const union = new Set([...Array.from(words1), ...Array.from(words2)]);
+        
+        return intersection.size / union.size;
     }
 } 

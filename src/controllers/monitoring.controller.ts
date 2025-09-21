@@ -4,6 +4,12 @@ import { Usage } from '../models/Usage';
 import { loggingService } from '../services/logging.service';
 
 export class MonitoringController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Date range utilities
+    private static dateRanges = new Map<string, { start: Date; end: Date }>();
     /**
      * Trigger intelligent monitoring for a specific user
      */
@@ -90,35 +96,53 @@ export class MonitoringController {
                 requestId: req.headers['x-request-id'] as string
             });
             
-            // Get current month usage
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            startOfMonth.setHours(0, 0, 0, 0);
+            // Get optimized date ranges
+            const { startOfMonth, startOfDay } = this.getOptimizedDateRanges();
 
-            const monthlyUsage = await Usage.find({
-                userId: userId,
-                service: 'openai',
-                createdAt: { $gte: startOfMonth },
-                'metadata.source': 'chatgpt-custom-gpt'
-            });
+            // Unified query with facet for all usage data
+            const usageResults = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: userId,
+                        service: 'openai',
+                        'metadata.source': 'chatgpt-custom-gpt'
+                    }
+                },
+                {
+                    $facet: {
+                        monthlyUsage: [
+                            { $match: { createdAt: { $gte: startOfMonth } } },
+                            {
+                                $project: {
+                                    model: 1,
+                                    cost: 1,
+                                    totalTokens: 1,
+                                    createdAt: 1
+                                }
+                            }
+                        ],
+                        dailyUsage: [
+                            { $match: { createdAt: { $gte: startOfDay } } },
+                            {
+                                $project: {
+                                    model: 1,
+                                    createdAt: 1
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
 
-            // Get today's usage
-            const startOfDay = new Date();
-            startOfDay.setHours(0, 0, 0, 0);
-
-            const dailyUsage = await Usage.find({
-                userId: userId,
-                service: 'openai',
-                createdAt: { $gte: startOfDay },
-                'metadata.source': 'chatgpt-custom-gpt'
-            });
+            const monthlyUsage = usageResults[0]?.monthlyUsage || [];
+            const dailyUsage = usageResults[0]?.dailyUsage || [];
 
             // Calculate statistics
-            const monthlyGPT4Count = monthlyUsage.filter(u => u.model.includes('gpt-4')).length;
-            const monthlyGPT35Count = monthlyUsage.filter(u => u.model.includes('gpt-3.5')).length;
-            const totalMonthlyCost = monthlyUsage.reduce((sum, u) => sum + u.cost, 0);
+            const monthlyGPT4Count = monthlyUsage.filter((u: any) => u.model.includes('gpt-4')).length;
+            const monthlyGPT35Count = monthlyUsage.filter((u: any) => u.model.includes('gpt-3.5')).length;
+            const totalMonthlyCost = monthlyUsage.reduce((sum: number, u: any) => sum + u.cost, 0);
             const averageTokensPerRequest = monthlyUsage.length > 0 
-                ? monthlyUsage.reduce((sum, u) => sum + u.totalTokens, 0) / monthlyUsage.length 
+                ? monthlyUsage.reduce((sum: number, u: any) => sum + u.totalTokens, 0) / monthlyUsage.length 
                 : 0;
 
             // Detect likely ChatGPT plan
@@ -311,19 +335,20 @@ export class MonitoringController {
                 requestId: req.headers['x-request-id'] as string
             });
             
-            // This would normally come from a cache or recent analysis
-            // For now, we'll trigger a quick analysis
-            
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            startOfMonth.setHours(0, 0, 0, 0);
+            // Get optimized date ranges
+            const { startOfMonth } = this.getOptimizedDateRanges();
 
+            // Memory-efficient usage query with projection
             const recentUsage = await Usage.find({
                 userId: userId,
                 service: 'openai',
                 createdAt: { $gte: startOfMonth },
                 'metadata.source': 'chatgpt-custom-gpt'
-            }).limit(50).sort({ createdAt: -1 });
+            })
+            .select('model totalTokens promptTokens createdAt')
+            .limit(50)
+            .sort({ createdAt: -1 })
+            .lean();
 
             const recommendations = [];
 
@@ -570,5 +595,68 @@ export class MonitoringController {
                 message: error.message
             });
         }
+    }
+
+    // ============================================================================
+    // OPTIMIZATION UTILITY METHODS
+    // ============================================================================
+
+    /**
+     * Get optimized date ranges with memoization
+     */
+    private static getOptimizedDateRanges(): { startOfMonth: Date; startOfDay: Date } {
+        const today = new Date().toDateString();
+        
+        if (!this.dateRanges.has(today)) {
+            const startOfMonth = new Date();
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+
+            const startOfDay = new Date();
+            startOfDay.setHours(0, 0, 0, 0);
+
+            this.dateRanges.set(today, { start: startOfMonth, end: startOfDay });
+            
+            // Clean old entries (keep only today)
+            if (this.dateRanges.size > 1) {
+                const keysToDelete = Array.from(this.dateRanges.keys()).filter(key => key !== today);
+                keysToDelete.forEach(key => this.dateRanges.delete(key));
+            }
+        }
+
+        const ranges = this.dateRanges.get(today)!;
+        return { startOfMonth: ranges.start, startOfDay: ranges.end };
+    }
+
+    /**
+     * Queue background operation
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+        this.startBackgroundProcessor();
+    }
+
+    /**
+     * Start background processor
+     */
+    private static startBackgroundProcessor(): void {
+        if (this.backgroundProcessor) return;
+
+        this.backgroundProcessor = setTimeout(async () => {
+            await this.processBackgroundQueue();
+            this.backgroundProcessor = undefined;
+
+            if (this.backgroundQueue.length > 0) {
+                this.startBackgroundProcessor();
+            }
+        }, 50);
+    }
+
+    /**
+     * Process background queue
+     */
+    private static async processBackgroundQueue(): Promise<void> {
+        const operations = this.backgroundQueue.splice(0, 3); // Process 3 at a time
+        await Promise.allSettled(operations.map(op => op()));
     }
 } 
