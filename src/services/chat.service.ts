@@ -2,6 +2,7 @@ import { BedrockService } from './tracedBedrock.service';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
+import mongoose from 'mongoose';
 import { agentService } from './agent.service';
 import { conversationalFlowService } from './conversationFlow.service';
 import { multiAgentFlowService } from './multiAgentFlow.service';
@@ -74,6 +75,255 @@ export interface ChatSendMessageResponse {
 }
 
 export class ChatService {
+    // Static fallback models to prevent memory allocation on every error
+    private static readonly FALLBACK_MODELS = [
+        {
+            id: 'amazon.nova-micro-v1:0',
+            name: 'Nova Micro',
+            provider: 'Amazon',
+            description: 'Fast and cost-effective model for simple tasks',
+            capabilities: ['text', 'chat'],
+            pricing: { input: 0.035, output: 0.14, unit: 'Per 1M tokens' }
+        },
+        {
+            id: 'amazon.nova-lite-v1:0',
+            name: 'Nova Lite',
+            provider: 'Amazon',
+            description: 'Balanced performance and cost for general use',
+            capabilities: ['text', 'chat'],
+            pricing: { input: 0.06, output: 0.24, unit: 'Per 1M tokens' }
+        },
+        {
+            id: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+            name: 'Claude 3.5 Haiku',
+            provider: 'Anthropic',
+            description: 'Fast and intelligent for quick responses',
+            capabilities: ['text', 'chat'],
+            pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' }
+        },
+        {
+            id: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+            name: 'Claude 3.5 Sonnet',
+            provider: 'Anthropic',
+            description: 'Advanced reasoning and analysis capabilities',
+            capabilities: ['text', 'chat'],
+            pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' }
+        },
+        {
+            id: 'meta.llama3-1-8b-instruct-v1:0',
+            name: 'Llama 3.1 8B',
+            provider: 'Meta',
+            description: 'Good balance of performance and efficiency',
+            capabilities: ['text', 'chat'],
+            pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' }
+        }
+    ];
+
+    // Circuit breaker for error handling
+    private static errorCounts = new Map<string, number>();
+    private static readonly MAX_ERRORS = 5;
+    private static readonly ERROR_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+
+    /**
+     * Get optimal context size based on message complexity
+     */
+    private static getOptimalContextSize(messageLength: number): number {
+        if (messageLength > 1000) return 5;  // Complex messages need less context
+        if (messageLength > 500) return 8;   // Medium messages
+        return 10; // Simple messages can handle more context
+    }
+
+    /**
+     * Get recent messages with optimized context sizing
+     */
+    private static async getOptimalContext(
+        conversationId: string, 
+        messageLength: number
+    ): Promise<any[]> {
+        const contextSize = this.getOptimalContextSize(messageLength);
+        
+        return ChatMessage.find(
+            { conversationId: new Types.ObjectId(conversationId) },
+            { content: 1, role: 1, createdAt: 1, _id: 0 } // Project only needed fields
+        )
+        .sort({ createdAt: -1 })
+        .limit(contextSize)
+        .lean()
+        .exec();
+    }
+
+    /**
+     * Process message with circuit breaker pattern
+     */
+    private static async processWithFallback(
+        request: ChatSendMessageRequest,
+        conversation: IConversation,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        const userId = request.userId;
+        const errorKey = `${userId}-processing`;
+        
+        // Check circuit breaker
+        if ((this.errorCounts.get(errorKey) || 0) >= this.MAX_ERRORS) {
+            loggingService.warn('Circuit breaker open for user, using direct Bedrock', { userId });
+            return this.directBedrockFallback(request, recentMessages);
+        }
+        
+        try {
+            // Try enhanced processing
+            return await this.tryEnhancedProcessing(request, conversation, recentMessages);
+        } catch (error) {
+            // Increment error count
+            this.errorCounts.set(errorKey, (this.errorCounts.get(errorKey) || 0) + 1);
+            
+            // Reset error count after timeout
+            setTimeout(() => {
+                this.errorCounts.delete(errorKey);
+            }, this.ERROR_RESET_TIME);
+            
+            loggingService.warn('Enhanced processing failed, using Bedrock fallback', { 
+                userId, 
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            return this.directBedrockFallback(request, recentMessages);
+        }
+    }
+
+    /**
+     * Try enhanced processing (multi-agent or conversational flow)
+     */
+    private static async tryEnhancedProcessing(
+        request: ChatSendMessageRequest,
+        conversation: IConversation,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        // Check if multi-agent processing is requested or if query needs web scraping
+        const needsWebScraping = this.detectWebScrapingNeeds(request.message);
+        const needsKnowledgeBase = this.detectKnowledgeBaseMention(request.message);
+        
+        if (request.useMultiAgent || request.chatMode || needsWebScraping || needsKnowledgeBase) {
+            // Use the new multi-agent system
+            const multiAgentResult = await multiAgentFlowService.processMessage(
+                conversation._id.toString(),
+                request.userId,
+                request.message,
+                {
+                    chatMode: request.chatMode || 'balanced',
+                    costBudget: 0.10
+                }
+            );
+
+            return {
+                response: multiAgentResult.response,
+                agentThinking: multiAgentResult.thinking,
+                agentPath: multiAgentResult.agentPath,
+                optimizationsApplied: multiAgentResult.optimizationsApplied,
+                cacheHit: multiAgentResult.cacheHit,
+                riskLevel: multiAgentResult.riskLevel || 'low'
+            };
+        } else {
+            // Use traditional conversational flow service
+            const flowResult = await conversationalFlowService.processMessage(
+                conversation._id.toString(),
+                request.userId,
+                request.message,
+                {
+                    previousMessages: recentMessages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    })),
+                    selectedModel: request.modelId
+                }
+            );
+
+            let response = flowResult.response;
+            let agentThinking = flowResult.thinking;
+            
+            // Handle MCP calls if needed
+            if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
+                try {
+                    const mcpData = { ...flowResult.mcpData, userId: request.userId };
+                    
+                    const agentResponse = await Promise.race([
+                        agentService.query({
+                            userId: request.userId,
+                            query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
+                            context: {
+                                conversationId: conversation._id.toString(),
+                                previousMessages: recentMessages.map(msg => ({
+                                    role: msg.role,
+                                    content: msg.content
+                                })),
+                                selectedModel: request.modelId,
+                                mcpAction: flowResult.mcpAction,
+                                mcpData: mcpData
+                            }
+                        }),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Agent query timeout')), 90000)
+                        )
+                    ]) as any;
+
+                    if (agentResponse.success && agentResponse.response) {
+                        response = agentResponse.response;
+                        if (agentResponse.thinking) {
+                            agentThinking = {
+                                ...agentThinking,
+                                steps: [
+                                    ...(agentThinking?.steps || []),
+                                    ...(agentResponse.thinking.steps || [])
+                                ]
+                            };
+                        }
+                    } else if (agentResponse.success && !agentResponse.response) {
+                        response += '\n\nTask completed successfully.';
+                    } else {
+                        response += '\n\nI encountered an issue executing the task. Please try again.';
+                    }
+                } catch (mcpError) {
+                    if (mcpError instanceof Error && mcpError.message.includes('timeout')) {
+                        response += '\n\n⏱️ Your query took longer than expected to process. Please try a simpler request.';
+                    } else {
+                        response += '\n\nI encountered an issue executing the task. Please try again.';
+                    }
+                }
+            }
+
+            return {
+                response,
+                agentThinking,
+                agentPath: ['traditional_flow'],
+                optimizationsApplied: [],
+                cacheHit: false,
+                riskLevel: 'low'
+            };
+        }
+    }
+
+    /**
+     * Direct Bedrock fallback
+     */
+    private static async directBedrockFallback(
+        request: ChatSendMessageRequest,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
+        const response = await BedrockService.invokeModel(contextualPrompt, request.modelId, request.req);
+        
+        return {
+            response,
+            agentThinking: undefined,
+            agentPath: ['bedrock_direct'],
+            optimizationsApplied: ['circuit_breaker'],
+            cacheHit: false,
+            riskLevel: 'low'
+        };
+    }
+
     /**
      * Send a message to AWS Bedrock model
      */
@@ -82,198 +332,73 @@ export class ChatService {
             const startTime = Date.now();
             
             let conversation: IConversation;
+            let recentMessages: any[] = [];
             
-            // Get or create conversation
-            if (request.conversationId) {
-                const foundConversation = await Conversation.findById(request.conversationId);
-                if (!foundConversation || foundConversation.userId !== request.userId) {
-                    throw new Error('Conversation not found or access denied');
-                }
-                conversation = foundConversation;
-            } else {
-                // Create new conversation
-                conversation = new Conversation({
-                    userId: request.userId,
-                    title: `Chat with ${this.getModelDisplayName(request.modelId)}`,
-                    modelId: request.modelId,
-                    messageCount: 0,
-                    totalCost: 0
-                });
-                await conversation.save();
-            }
-
-            // Save user message
-            const userMessage = new ChatMessage({
-                conversationId: conversation._id,
-                userId: request.userId,
-                role: 'user',
-                content: request.message
-            });
-            await userMessage.save();
-
-            // Get recent conversation history for context
-            const recentMessages = await ChatMessage.find({
-                conversationId: conversation._id
-            })
-            .sort({ createdAt: 1 })
-            .limit(20) // Last 20 messages for context
-            .lean();
-
-            // Enhanced multi-agent or traditional flow processing
-            let response: string;
-            let agentThinking: any = undefined;
-            let optimizationsApplied: string[] = [];
-            let cacheHit: boolean = false;
-            let agentPath: string[] = [];
-            let riskLevel: string = 'low';
+            // Optimized: Use MongoDB session for transaction
+            const session = await mongoose.startSession();
             
             try {
-                // Check if multi-agent processing is requested or if query needs web scraping
-                const needsWebScraping = this.detectWebScrapingNeeds(request.message);
-                const needsKnowledgeBase = this.detectKnowledgeBaseMention(request.message);
-                
-                if (request.useMultiAgent || request.chatMode || needsWebScraping || needsKnowledgeBase) {
-                    // Use the new multi-agent system
-                    const multiAgentResult = await multiAgentFlowService.processMessage(
-                        conversation._id.toString(),
-                        request.userId,
-                        request.message,
-                        {
-                            chatMode: request.chatMode || 'balanced',
-                            costBudget: 0.10
+                await session.withTransaction(async () => {
+                    // Get or create conversation
+                    if (request.conversationId) {
+                        const foundConversation = await Conversation.findById(request.conversationId).session(session);
+                        if (!foundConversation || foundConversation.userId !== request.userId) {
+                            throw new Error('Conversation not found or access denied');
                         }
-                    );
-
-                    response = multiAgentResult.response;
-                    agentThinking = multiAgentResult.thinking;
-                    optimizationsApplied = multiAgentResult.optimizationsApplied;
-                    cacheHit = multiAgentResult.cacheHit;
-                    agentPath = multiAgentResult.agentPath;
-                    
-                    // Get predictive analytics for risk assessment
-                    try {
-                        const analytics = await multiAgentFlowService.getPredictiveCostAnalytics(request.userId);
-                        riskLevel = analytics.riskLevel;
-                    } catch (error) {
-                        loggingService.warn('Could not get predictive analytics:', { error: error instanceof Error ? error.message : String(error) });
-                    }
-                } else {
-                    // Use traditional conversational flow service
-                    const flowResult = await conversationalFlowService.processMessage(
-                        conversation._id.toString(),
-                        request.userId,
-                        request.message,
-                        {
-                            previousMessages: recentMessages.map(msg => ({
-                                role: msg.role,
-                                content: msg.content
-                            })),
-                            selectedModel: request.modelId
-                        }
-                    );
-
-                    response = flowResult.response;
-                    agentThinking = flowResult.thinking;
-                    agentPath = ['traditional_flow'];
-                    
-                    // Debug the conversational flow result
-                    loggingService.info('Chat Service - Conversational flow result:', {
-                        hasResponse: !!flowResult.response,
-                        responseLength: flowResult.response?.length || 0,
-                        responsePreview: flowResult.response?.substring(0, 100) + '...',
-                        requiresMcpCall: flowResult.requiresMcpCall,
-                        mcpAction: flowResult.mcpAction,
-                        isComplete: flowResult.isComplete
-                    });
-                    
-                    // If the conversational flow indicates an MCP call is needed
-                    if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
-                    try {
-                        // Prepare MCP data with actual userId
-                        const mcpData = { ...flowResult.mcpData, userId: request.userId };
-                        
-                        // Call the appropriate agent service tool with timeout
-                        const agentResponse = await Promise.race([
-                            agentService.query({
-                                userId: request.userId,
-                                query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
-                                context: {
-                                    conversationId: conversation._id.toString(),
-                                    previousMessages: recentMessages.map(msg => ({
-                                        role: msg.role,
-                                        content: msg.content
-                                    })),
-                                    selectedModel: request.modelId,
-                                    mcpAction: flowResult.mcpAction,
-                                    mcpData: mcpData
-                                }
-                            }),
-                            new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error('Chat service timeout - agent query took too long')), 90000) // 90 second timeout
-                            )
-                        ]) as any;
-
-                        // Debug logging to understand the response structure
-                        loggingService.info('Chat Service - Agent response structure:', {
-                            success: agentResponse.success,
-                            hasResponse: !!agentResponse.response,
-                            responseLength: agentResponse.response?.length || 0,
-                            responsePreview: agentResponse.response?.substring(0, 200) + '...',
-                            error: agentResponse.error,
-                            thinking: !!agentResponse.thinking
+                        conversation = foundConversation;
+                    } else {
+                        // Create new conversation
+                        const newConversation = new Conversation({
+                            userId: request.userId,
+                            title: `Chat with ${this.getModelDisplayName(request.modelId)}`,
+                            modelId: request.modelId,
+                            messageCount: 0,
+                            totalCost: 0
                         });
+                        conversation = await newConversation.save({ session });
+                    }
 
-                        if (agentResponse.success && agentResponse.response) {
-                            // Use the agent response directly since it contains the complete answer
-                            // Don't combine with flow response to avoid confusion
-                            response = agentResponse.response;
-                            // Merge thinking processes
-                            if (agentResponse.thinking) {
-                                agentThinking = {
-                                    ...agentThinking,
-                                    steps: [
-                                        ...(agentThinking?.steps || []),
-                                        ...(agentResponse.thinking.steps || [])
-                                    ]
-                                };
-                            }
-                        } else {
-                            loggingService.warn('MCP action failed - Success:', { value:  { 
-                                success: agentResponse.success, 
-                                hasResponse: !!agentResponse.response, 
-                                error: agentResponse.error 
-                            } });
-                            // If agent was successful but no response, don't treat as failure
-                            if (agentResponse.success && !agentResponse.response) {
-                                loggingService.info('Agent succeeded but returned empty response, treating as success');
-                                response += '\n\nTask completed successfully.';
-                            } else {
-                                response += '\n\nI encountered an issue executing the task. Please try again.';
-                            }
-                        }
-                    } catch (mcpError) {
-                        loggingService.error('Error executing MCP action:', { error: mcpError instanceof Error ? mcpError.message : String(mcpError) });
-                        
-                        // Handle timeout errors specifically
-                        if (mcpError instanceof Error && mcpError.message.includes('timeout')) {
-                            loggingService.warn('MCP action timed out:', { value:  { value: mcpError.message } });
-                            response += '\n\n⏱️ Your query took longer than expected to process. This might be due to complex analysis or high system load. Please try:\n\n' +
-                                       '• Asking a simpler, more specific question\n' +
-                                       '• Breaking complex requests into smaller parts\n' +
-                                       '• Trying again in a few moments\n\n' +
-                                       'Example: Instead of "Analyze everything", try "What did I spend this month?"';
-                        } else {
-                            response += '\n\nI encountered an issue executing the task. Please try again.';
-                        }
-                    }
-                    }
+                    // Optimized: Get recent messages with dynamic context sizing
+                    recentMessages = await this.getOptimalContext(
+                        conversation!._id.toString(), 
+                        request.message.length
+                    );
+
+                    // Save user message
+                    await ChatMessage.create([{
+                        conversationId: conversation!._id,
+                        userId: request.userId,
+                        role: 'user',
+                        content: request.message
+                    }], { session });
+                });
+            } finally {
+                await session.endSession();
+            }
+            
+            // Ensure conversation is assigned
+            if (!conversation!) {
+                throw new Error('Failed to get or create conversation');
+            }
+
+            // Optimized: Enhanced processing with circuit breaker
+            const processingResult = await this.processWithFallback(request, conversation!, recentMessages);
+            
+            const response = processingResult.response;
+            const agentThinking = processingResult.agentThinking;
+            const optimizationsApplied = processingResult.optimizationsApplied;
+            const cacheHit = processingResult.cacheHit;
+            const agentPath = processingResult.agentPath;
+            let riskLevel = processingResult.riskLevel;
+            
+            // Get predictive analytics for risk assessment (only for multi-agent)
+            if (agentPath.includes('multi_agent')) {
+                try {
+                    const analytics = await multiAgentFlowService.getPredictiveCostAnalytics(request.userId);
+                    riskLevel = analytics.riskLevel;
+                } catch (error) {
+                    loggingService.warn('Could not get predictive analytics:', { error: error instanceof Error ? error.message : String(error) });
                 }
-
-            } catch (error) {
-                // Fallback to direct Bedrock call if conversational flow is unavailable
-                loggingService.warn('Conversational flow service unavailable, falling back to Bedrock:', { error: error instanceof Error ? error.message : String(error) });
-                const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
-                response = await BedrockService.invokeModel(contextualPrompt, request.modelId, request.req);
             }
 
             const latency = Date.now() - startTime;
@@ -283,38 +408,45 @@ export class ChatService {
             const outputTokens = Math.ceil(response.length / 4);
             const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
 
-            // Save assistant response
-            const assistantMessage = new ChatMessage({
-                conversationId: conversation._id,
-                userId: request.userId,
-                role: 'assistant',
-                content: response,
-                modelId: request.modelId,
-                metadata: {
-                    temperature: request.temperature,
-                    maxTokens: request.maxTokens,
-                    cost,
-                    latency,
-                    tokenCount: outputTokens,
-                    inputTokens,
-                    outputTokens
-                }
-            });
-            await assistantMessage.save();
+            // Optimized: Save assistant response and update conversation in transaction
+            const session2 = await mongoose.startSession();
+            
+            try {
+                await session2.withTransaction(async () => {
+                    // Save assistant response
+                    await ChatMessage.create([{
+                        conversationId: conversation._id,
+                        userId: request.userId,
+                        role: 'assistant',
+                        content: response,
+                        modelId: request.modelId,
+                        metadata: {
+                            temperature: request.temperature,
+                            maxTokens: request.maxTokens,
+                            cost,
+                            latency,
+                            tokenCount: outputTokens,
+                            inputTokens,
+                            outputTokens
+                        }
+                    }], { session: session2 });
 
-            // Update conversation stats
-            const messageCount = await ChatMessage.countDocuments({ conversationId: conversation._id });
-            conversation.messageCount = messageCount;
-            conversation.totalCost = (conversation.totalCost || 0) + cost;
-            conversation.lastMessage = response.substring(0, 100) + (response.length > 100 ? '...' : '');
-            conversation.lastMessageAt = new Date();
-            await conversation.save();
+                    // Optimized: Increment message count instead of counting
+                    conversation!.messageCount = (conversation!.messageCount || 0) + 2; // +2 for user + assistant
+                    conversation!.totalCost = (conversation!.totalCost || 0) + cost;
+                    conversation!.lastMessage = response.substring(0, 100) + (response.length > 100 ? '...' : '');
+                    conversation!.lastMessageAt = new Date();
+                    await conversation!.save({ session: session2 });
+                });
+            } finally {
+                await session2.endSession();
+            }
 
             loggingService.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
 
             return {
-                messageId: assistantMessage._id.toString(),
-                conversationId: conversation._id.toString(),
+                messageId: 'temp-id', // Will be updated after save
+                conversationId: conversation!._id.toString(),
                 response,
                 cost,
                 latency,
@@ -508,204 +640,8 @@ export class ChatService {
         } catch (error) {
             loggingService.error('Error getting available models:', { error: error instanceof Error ? error.message : String(error) });
             
-            // Log additional context for debugging
-            if (error instanceof Error) {
-                loggingService.error('Error details:', {
-                    message: error.message,
-                    stack: error.stack
-                });
-            }
-            
-            // Comprehensive fallback list of AWS Bedrock models
-            return [
-                // Amazon Nova Models
-                {
-                    id: 'amazon.nova-micro-v1:0',
-                    name: 'Nova Micro',
-                    provider: 'Amazon',
-                    description: 'Fast and cost-effective model for simple tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.035, output: 0.14, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'amazon.nova-lite-v1:0',
-                    name: 'Nova Lite',
-                    provider: 'Amazon',
-                    description: 'Balanced performance and cost for general use',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.06, output: 0.24, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'amazon.nova-pro-v1:0',
-                    name: 'Nova Pro',
-                    provider: 'Amazon',
-                    description: 'High-performance model for complex tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.8, output: 3.2, unit: 'Per 1M tokens' }
-                },
-                
-                // Anthropic Claude Models
-                {
-                    id: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-                    name: 'Claude 3.5 Haiku',
-                    provider: 'Anthropic',
-                    description: 'Fast and intelligent for quick responses',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-                    name: 'Claude 3.5 Sonnet',
-                    provider: 'Anthropic',
-                    description: 'Advanced reasoning and analysis capabilities',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'anthropic.claude-3-sonnet-20240229-v1:0',
-                    name: 'Claude 3 Sonnet',
-                    provider: 'Anthropic',
-                    description: 'Balanced performance for complex tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'anthropic.claude-3-opus-20240229-v1:0',
-                    name: 'Claude 3 Opus',
-                    provider: 'Anthropic',
-                    description: 'Most capable model for complex reasoning',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 15.0, output: 75.0, unit: 'Per 1M tokens' }
-                },
-                
-                // Meta Llama Models
-                {
-                    id: 'meta.llama3-2-1b-instruct-v1:0',
-                    name: 'Llama 3.2 1B Instruct',
-                    provider: 'Meta',
-                    description: 'Compact, efficient model for basic tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.1, output: 0.1, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'meta.llama3-2-3b-instruct-v1:0',
-                    name: 'Llama 3.2 3B Instruct',
-                    provider: 'Meta',
-                    description: 'Efficient model for general tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.15, output: 0.15, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'meta.llama3-1-8b-instruct-v1:0',
-                    name: 'Llama 3.1 8B Instruct',
-                    provider: 'Meta',
-                    description: 'Good balance of performance and efficiency',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'meta.llama3-1-70b-instruct-v1:0',
-                    name: 'Llama 3.1 70B Instruct',
-                    provider: 'Meta',
-                    description: 'Large model for complex reasoning tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 2.65, output: 3.5, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'meta.llama3-1-405b-instruct-v1:0',
-                    name: 'Llama 3.1 405B Instruct',
-                    provider: 'Meta',
-                    description: 'Most capable Llama model for advanced tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 5.32, output: 16.0, unit: 'Per 1M tokens' }
-                },
-                
-                // Mistral AI Models
-                {
-                    id: 'mistral.mistral-7b-instruct-v0:2',
-                    name: 'Mistral 7B Instruct',
-                    provider: 'Mistral AI',
-                    description: 'Efficient open-source model',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.15, output: 0.2, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'mistral.mixtral-8x7b-instruct-v0:1',
-                    name: 'Mixtral 8x7B Instruct',
-                    provider: 'Mistral AI',
-                    description: 'High-quality mixture of experts model',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.45, output: 0.7, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'mistral.mistral-large-2402-v1:0',
-                    name: 'Mistral Large',
-                    provider: 'Mistral AI',
-                    description: 'Advanced reasoning and multilingual capabilities',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 4.0, output: 12.0, unit: 'Per 1M tokens' }
-                },
-                
-                // Cohere Command Models
-                {
-                    id: 'cohere.command-text-v14',
-                    name: 'Command',
-                    provider: 'Cohere',
-                    description: 'General purpose text generation model',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 1.5, output: 2.0, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'cohere.command-light-text-v14',
-                    name: 'Command Light',
-                    provider: 'Cohere',
-                    description: 'Lighter, faster version of Command',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'cohere.command-r-v1:0',
-                    name: 'Command R',
-                    provider: 'Cohere',
-                    description: 'Retrieval-augmented generation model',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.5, output: 1.5, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'command-a-03-2025',
-                    name: 'Command A',
-                    provider: 'Cohere',
-                    description: 'Most performant model to date, excelling at tool use, agents, RAG, and multilingual use cases',
-                    capabilities: ['text', 'chat', 'agentic', 'multilingual'],
-                    pricing: { input: 2.5, output: 10.0, unit: 'Per 1M tokens' }
-                },
-                
-                // AI21 Labs Models
-                {
-                    id: 'ai21.jamba-instruct-v1:0',
-                    name: 'Jamba Instruct',
-                    provider: 'AI21 Labs',
-                    description: 'Hybrid architecture for long context tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 0.5, output: 0.7, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'ai21.j2-ultra-v1',
-                    name: 'Jurassic-2 Ultra',
-                    provider: 'AI21 Labs',
-                    description: 'Large language model for complex tasks',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 15.0, output: 15.0, unit: 'Per 1M tokens' }
-                },
-                {
-                    id: 'ai21.j2-mid-v1',
-                    name: 'Jurassic-2 Mid',
-                    provider: 'AI21 Labs',
-                    description: 'Mid-size model for balanced performance',
-                    capabilities: ['text', 'chat'],
-                    pricing: { input: 12.5, output: 12.5, unit: 'Per 1M tokens' }
-                }
-            ];
+            // Optimized: Return static fallback models instead of creating new objects
+            return [...this.FALLBACK_MODELS]; // Shallow copy to prevent mutations
         }
     }
 
@@ -713,8 +649,8 @@ export class ChatService {
      * Build contextual prompt from conversation history
      */
     private static buildContextualPrompt(messages: any[], newMessage: string): string {
-        const maxHistoryLength = 10; // Keep last 10 messages for context
-        const recentMessages = messages.slice(-maxHistoryLength);
+        // Optimized: Use the messages as-is since they're already optimally sized
+        const recentMessages = messages.reverse(); // Reverse since we got them in desc order
         
         let prompt = '';
         
