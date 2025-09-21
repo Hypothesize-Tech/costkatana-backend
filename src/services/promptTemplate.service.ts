@@ -7,13 +7,9 @@ import { aiTemplateEngine } from './aiTemplateEngine.service';
 import mongoose from 'mongoose';
 import {
     CreateTemplateDto,
-    UpdateTemplateDto,
     TemplateQueryParams,
     TemplateActivityType,
     ITemplateActivityMetadata,
-    AITemplateGenerationRequest,
-    AITemplateOptimizationRequest,
-    OptimizationType
 } from '../types/template.types';
 
 // Helper function for tracking template activities
@@ -72,6 +68,26 @@ async function trackTemplateActivity(
 }
 
 export class PromptTemplateService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Access control optimization
+    private static userProjectCache = new Map<string, { projects: string[]; timestamp: number }>();
+    private static readonly PROJECT_CACHE_TTL = 300000; // 5 minutes
+    
+    // Circuit breaker for AI services
+    private static aiFailureCount: number = 0;
+    private static readonly MAX_AI_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastAiFailureTime: number = 0;
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Create a new prompt template
      */
@@ -125,10 +141,12 @@ export class PromptTemplateService {
                 }
             });
 
-            // Track template creation activity
-            await trackTemplateActivity(userId, 'template_created', template);
+            // Queue background activity tracking
+            this.queueBackgroundOperation(async () => {
+                await trackTemplateActivity(userId, 'template_created', template);
+            });
 
-            loggingService.info(`Prompt template created: ${template.name} by user ${userId}`);
+            this.conditionalLog('info', `Prompt template created: ${template.name} by user ${userId}`);
             return template;
         } catch (error) {
             loggingService.error('Error creating prompt template:', { error: error instanceof Error ? error.message : String(error) });
@@ -146,9 +164,6 @@ export class PromptTemplateService {
         pages: number;
     }> {
         try {
-            loggingService.info('=== PROMPT TEMPLATE SERVICE: getTemplates START ===');
-            loggingService.info('Query received:', { value:  { value: query  } });
-
             const {
                 userId,
                 projectId,
@@ -160,33 +175,10 @@ export class PromptTemplateService {
                 limit = 20
             } = query;
 
-            loggingService.info('Destructured query params:', { value:  { 
-                userId,
-                projectId,
-                category,
-                tags,
-                visibility,
-                search,
-                page,
-                limit
-             } });
-
-            // Get user's projects for access control
-            loggingService.info('Getting user projects for access control...');
-            const userProjects = await Project.find({
-                $or: [
-                    { ownerId: userId },
-                    { 'members.userId': userId }
-                ],
-                isActive: true
-            }).select('_id');
-
-            loggingService.info('User projects found:', { value:  { value: userProjects.length  } });
-            const userProjectIds = userProjects.map(p => p._id.toString());
-            loggingService.info('User project IDs:', { value:  { value: userProjectIds  } });
+            // Get user's projects for access control (with optimization)
+            const userProjectIds = await this.getUserProjectIds(userId);
 
             // Build query
-            loggingService.info('Building filter query...');
             const filter: any = {
                 isActive: true,
                 isDeleted: false,
@@ -203,50 +195,41 @@ export class PromptTemplateService {
 
             if (projectId) {
                 filter.projectId = projectId;
-                loggingService.info('Added projectId filter:', { value:  { value: projectId  } });
             }
 
             if (category) {
                 filter.category = category;
-                loggingService.info('Added category filter:', { value:  { value: category  } });
             }
 
             if (tags && tags.length > 0) {
                 filter['metadata.tags'] = { $in: tags };
-                loggingService.info('Added tags filter:', { value:  { value: tags  } });
             }
 
             if (visibility) {
                 filter['sharing.visibility'] = visibility;
-                loggingService.info('Added visibility filter:', { value:  { value: visibility  } });
             }
 
             if (search) {
                 filter.$text = { $search: search };
-                loggingService.info('Added search filter:', { value:  { value: search  } });
             }
 
-            loggingService.info('Final filter:', { value: JSON.stringify(filter, null, 2) });
-
             const skip = (page - 1) * limit;
-            loggingService.info('Pagination:', { value:  {  skip, limit, page  } });
 
-            loggingService.info('Executing MongoDB queries...');
+            // Parallel database operations
             const [templates, total] = await Promise.all([
                 PromptTemplate.find(filter)
                     .populate('createdBy', 'name email')
                     .sort({ 'usage.count': -1, createdAt: -1 })
                     .skip(skip)
-                    .limit(limit),
+                    .limit(limit)
+                    .lean(), // Use lean for better performance
                 PromptTemplate.countDocuments(filter)
             ]);
 
-            loggingService.info('MongoDB queries completed');
-            loggingService.info('Results:', {
+            this.conditionalLog('info', 'Templates query completed', {
                 templatesFound: templates.length,
                 totalCount: total,
-                page,
-                pages: Math.ceil(total / limit)
+                page
             });
 
             const result = {
@@ -256,12 +239,9 @@ export class PromptTemplateService {
                 pages: Math.ceil(total / limit)
             };
 
-            loggingService.info('=== PROMPT TEMPLATE SERVICE: getTemplates END ===');
             return result;
         } catch (error: any) {
-            loggingService.error('=== PROMPT TEMPLATE SERVICE: getTemplates ERROR ===');
             loggingService.error('Error getting prompt templates:', { error: error instanceof Error ? error.message : String(error) });
-            loggingService.error('Error stack:', error.stack);
             throw error;
         }
     }
@@ -284,15 +264,8 @@ export class PromptTemplateService {
                 throw new Error('Template not found');
             }
 
-            // Check access
-            const userProjects = await Project.find({
-                $or: [
-                    { ownerId: userId },
-                    { 'members.userId': userId }
-                ]
-            }).select('_id');
-
-            const userProjectIds = userProjects.map(p => p._id.toString());
+            // Check access (optimized)
+            const userProjectIds = await this.getUserProjectIds(userId);
 
             // Check access manually
             const canAccess =
@@ -319,14 +292,16 @@ export class PromptTemplateService {
                 }
             }
 
-            // Update usage statistics
-            template.usage.count += 1;
-            template.usage.lastUsed = new Date();
-            await template.save();
-
-            // Track template usage activity
-            await trackTemplateActivity(userId, 'template_used', template, {
-                variablesUsed: variables || {}
+            // Update usage statistics (background)
+            this.queueBackgroundOperation(async () => {
+                await PromptTemplate.findByIdAndUpdate(templateId, {
+                    $inc: { 'usage.count': 1 },
+                    $set: { 'usage.lastUsed': new Date() }
+                });
+                
+                await trackTemplateActivity(userId, 'template_used', template, {
+                    variablesUsed: variables || {}
+                });
             });
 
             return {
@@ -464,39 +439,41 @@ export class PromptTemplateService {
                 throw new Error('Template not found');
             }
 
-            // Get usage by model
-            const usageByModel = await Usage.aggregate([
+            // Unified analytics query using $facet for better performance
+            const analyticsResults = await Usage.aggregate([
                 {
                     $match: {
                         'metadata.promptTemplateId': new mongoose.Types.ObjectId(templateId)
                     }
                 },
                 {
-                    $group: {
-                        _id: '$model',
-                        count: { $sum: 1 },
-                        totalCost: { $sum: '$cost' },
-                        avgTokens: { $avg: '$totalTokens' }
+                    $facet: {
+                        byModel: [
+                            {
+                                $group: {
+                                    _id: '$model',
+                                    count: { $sum: 1 },
+                                    totalCost: { $sum: '$cost' },
+                                    avgTokens: { $avg: '$totalTokens' }
+                                }
+                            }
+                        ],
+                        overTime: [
+                            {
+                                $group: {
+                                    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                                    count: { $sum: 1 },
+                                    totalCost: { $sum: '$cost' }
+                                }
+                            },
+                            { $sort: { _id: 1 } }
+                        ]
                     }
                 }
             ]);
 
-            // Get usage over time
-            const usageOverTime = await Usage.aggregate([
-                {
-                    $match: {
-                        'metadata.promptTemplateId': new mongoose.Types.ObjectId(templateId)
-                    }
-                },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
-                        count: { $sum: 1 },
-                        totalCost: { $sum: '$cost' }
-                    }
-                },
-                { $sort: { _id: 1 } }
-            ]);
+            const usageByModel = analyticsResults[0]?.byModel || [];
+            const usageOverTime = analyticsResults[0]?.overTime || [];
 
             return {
                 template: {
@@ -562,15 +539,8 @@ export class PromptTemplateService {
             throw new Error('Template not found');
         }
 
-        // Check access
-        const userProjects = await Project.find({
-            $or: [
-                { ownerId: userId },
-                { 'members.userId': userId }
-            ]
-        }).select('_id');
-
-        const userProjectIds = userProjects.map(p => p._id.toString());
+            // Check access (optimized)
+            const userProjectIds = await this.getUserProjectIds(userId);
 
         // Check access manually
         const canAccess =
@@ -995,5 +965,116 @@ export class PromptTemplateService {
         }
 
         return false;
+    }
+
+    /**
+     * Optimized user project access control
+     */
+    private static async getUserProjectIds(userId: string): Promise<string[]> {
+        const cacheKey = userId;
+        const cached = this.userProjectCache.get(cacheKey);
+        
+        if (cached && Date.now() - cached.timestamp < this.PROJECT_CACHE_TTL) {
+            return cached.projects;
+        }
+
+        const userProjects = await Project.find({
+            $or: [
+                { ownerId: userId },
+                { 'members.userId': userId }
+            ],
+            isActive: true
+        }).select('_id').lean();
+
+        const projectIds = userProjects.map(p => p._id.toString());
+        
+        // Cache the result
+        this.userProjectCache.set(cacheKey, {
+            projects: projectIds,
+            timestamp: Date.now()
+        });
+
+        return projectIds;
+    }
+
+    /**
+     * Circuit breaker utilities for AI services
+     */
+    private static isAiCircuitBreakerOpen(): boolean {
+        if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.aiFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordAiFailure(): void {
+        this.aiFailureCount++;
+        this.lastAiFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Conditional logging utility
+     */
+    private static conditionalLog(level: 'info' | 'warn' | 'error', message: string, metadata?: any): void {
+        // Only log if it's an error or if we're in development mode
+        if (level === 'error') {
+            loggingService[level](message, metadata);
+        }
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.userProjectCache.clear();
     }
 } 

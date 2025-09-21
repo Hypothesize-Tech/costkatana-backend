@@ -3,6 +3,26 @@ import { PromptTemplateService } from '../services/promptTemplate.service';
 import { loggingService } from '../services/logging.service';
 
 export class PromptTemplateController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for AI services
+    private static aiFailureCount: number = 0;
+    private static readonly MAX_AI_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastAiFailureTime: number = 0;
+    
+    // Access control optimization
+    private static userProjectCache = new Map<string, { projects: string[]; timestamp: number }>();
+    private static readonly PROJECT_CACHE_TTL = 300000; // 5 minutes
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Create a new prompt template
      */
@@ -12,22 +32,15 @@ export class PromptTemplateController {
         const requestId = req.headers['x-request-id'] as string;
 
         try {
-            loggingService.info('Prompt template creation initiated', {
+            this.conditionalLog('info', 'Prompt template creation initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 templateName: req.body?.name,
-                hasTemplateName: !!req.body?.name,
-                templateCategory: req.body?.category,
-                hasTemplateCategory: !!req.body?.category,
-                templateTags: req.body?.tags,
-                hasTemplateTags: !!req.body?.tags,
-                templateVisibility: req.body?.visibility,
-                hasTemplateVisibility: !!req.body?.visibility
+                templateCategory: req.body?.category
             });
 
             if (!userId) {
-                loggingService.warn('Prompt template creation failed - user not authenticated', {
+                this.conditionalLog('warn', 'Prompt template creation failed - user not authenticated', {
                     requestId
                 });
                 res.status(401).json({
@@ -41,27 +54,27 @@ export class PromptTemplateController {
             const template = await PromptTemplateService.createTemplate(userId, templateData);
             const duration = Date.now() - startTime;
 
-            loggingService.info('Prompt template created successfully', {
+            this.conditionalLog('info', 'Prompt template created successfully', {
                 userId,
                 duration,
                 templateId: template._id,
-                hasTemplateId: !!template._id,
                 templateName: template.name,
-                hasTemplateName: !!template.name,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'prompt_template_created',
-                category: 'prompt_template',
-                value: duration,
-                metadata: {
-                    userId,
-                    templateId: template._id,
-                    templateName: template.name,
-                    templateCategory: template.category
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'prompt_template_created',
+                    category: 'prompt_template',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        templateId: template._id,
+                        templateName: template.name,
+                        templateCategory: template.category
+                    }
+                });
             });
 
             res.status(201).json({
@@ -72,12 +85,10 @@ export class PromptTemplateController {
         } catch (error: any) {
             const duration = Date.now() - startTime;
             
-            loggingService.error('Prompt template creation failed', {
+            this.conditionalLog('error', 'Prompt template creation failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
 
@@ -93,13 +104,8 @@ export class PromptTemplateController {
      */
     static async getTemplates(req: any, res: Response): Promise<void> {
         try {
-            loggingService.info('=== GET PROMPT TEMPLATES START ===');
-            loggingService.info('Request headers:', req.headers);
-            loggingService.info('Request query:', req.query);
-            loggingService.info('User from auth middleware:', req.user);
-
             const userId = req.user!.id;
-            loggingService.info('Extracted userId:', userId);
+            this.conditionalLog('info', 'GET prompt templates request', { userId });
 
             const {
                 projectId,
@@ -122,17 +128,12 @@ export class PromptTemplateController {
                 limit: limit ? parseInt(limit as string) : 20
             };
 
-            loggingService.info('Filters prepared:', filters);
-            loggingService.info('Calling PromptTemplateService.getTemplates...');
-
             const result = await PromptTemplateService.getTemplates(filters);
 
-            loggingService.info('Service call completed successfully');
-            loggingService.info('Result:', {
+            this.conditionalLog('info', 'Templates retrieved successfully', {
                 templatesCount: result.templates?.length || 0,
                 total: result.total,
-                page: result.page,
-                pages: result.pages
+                page: result.page
             });
 
             const response = {
@@ -145,13 +146,11 @@ export class PromptTemplateController {
                 }
             };
 
-            loggingService.info('Sending response...');
             res.json(response);
-            loggingService.info('=== GET PROMPT TEMPLATES END ===');
         } catch (error: any) {
-            loggingService.error('=== GET PROMPT TEMPLATES ERROR ===');
-            loggingService.error('Error getting prompt templates:', error);
-            loggingService.error('Error stack:', error.stack);
+            this.conditionalLog('error', 'Error getting prompt templates', {
+                error: error.message || 'Unknown error'
+            });
             res.status(500).json({
                 success: false,
                 error: error.message || 'Failed to get templates'
@@ -375,13 +374,27 @@ export class PromptTemplateController {
             const userId = req.user!.id;
             const { intent, category, context, constraints } = req.body;
 
-            loggingService.info('🤖 AI template generation requested', {
+            // Check AI circuit breaker
+            if (this.isAiCircuitBreakerOpen()) {
+                res.status(503).json({
+                    success: false,
+                    message: 'AI service temporarily unavailable. Please try again later.'
+                });
+                return;
+            }
+
+            this.conditionalLog('info', 'AI template generation requested', {
                 userId,
                 intent,
                 category
             });
 
-            const result = await PromptTemplateService.generateTemplateFromIntent(
+            // Add timeout handling (30 seconds)
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('AI generation timeout')), 30000);
+            });
+
+            const generationPromise = PromptTemplateService.generateTemplateFromIntent(
                 userId,
                 intent,
                 {
@@ -391,12 +404,29 @@ export class PromptTemplateController {
                 }
             );
 
+            const result = await Promise.race([generationPromise, timeoutPromise]);
+
+            // Reset failure count on success
+            this.aiFailureCount = 0;
+
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            loggingService.error('Error generating template from intent:', error);
+            this.recordAiFailure();
+            this.conditionalLog('error', 'Error generating template from intent', {
+                error: error.message || 'Unknown error'
+            });
+            
+            if (error.message === 'AI generation timeout') {
+                res.status(408).json({
+                    success: false,
+                    message: 'AI generation took too long. Please try again with a simpler request.'
+                });
+                return;
+            }
+            
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to generate template'
@@ -619,11 +649,95 @@ export class PromptTemplateController {
                 data: updated
             });
         } catch (error: any) {
-            loggingService.error('Error applying optimization:', error);
+            this.recordAiFailure();
+            this.conditionalLog('error', 'Error applying optimization', {
+                error: error.message || 'Unknown error'
+            });
             res.status(400).json({
                 success: false,
                 error: error.message || 'Failed to apply optimization'
             });
         }
+    }
+
+    /**
+     * Circuit breaker utilities for AI services
+     */
+    private static isAiCircuitBreakerOpen(): boolean {
+        if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.aiFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordAiFailure(): void {
+        this.aiFailureCount++;
+        this.lastAiFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Conditional logging utility
+     */
+    private static conditionalLog(level: 'info' | 'warn' | 'error', message: string, metadata?: any): void {
+        // Only log if it's an error or if we're in development mode
+        if (level === 'error') {
+            loggingService[level](message, metadata);
+        }
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.userProjectCache.clear();
     }
 } 
