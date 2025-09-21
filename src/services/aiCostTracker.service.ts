@@ -16,9 +16,143 @@ import { estimateTokens } from '../utils/tokenCounter';
 import { generateOptimizationSuggestions, applyOptimizations } from '../utils/optimizationUtils';
 import { loggingService } from './logging.service';
 
+// Circuit breaker for resilience
+class CircuitBreaker {
+    private failures = 0;
+    private lastFailureTime = 0;
+    private state: 'CLOSED' | 'OPEN' | 'HALF_OPEN' = 'CLOSED';
+    private readonly failureThreshold = 5;
+    private readonly timeout = 60000; // 1 minute
+
+    async execute<T>(operation: () => Promise<T>): Promise<T> {
+        if (this.state === 'OPEN') {
+            if (Date.now() - this.lastFailureTime > this.timeout) {
+                this.state = 'HALF_OPEN';
+            } else {
+                throw new Error('Circuit breaker is OPEN');
+            }
+        }
+
+        try {
+            const result = await operation();
+            this.onSuccess();
+            return result;
+        } catch (error) {
+            this.onFailure();
+            throw error;
+        }
+    }
+
+    private onSuccess(): void {
+        this.failures = 0;
+        this.state = 'CLOSED';
+    }
+
+    private onFailure(): void {
+        this.failures++;
+        this.lastFailureTime = Date.now();
+        if (this.failures >= this.failureThreshold) {
+            this.state = 'OPEN';
+        }
+    }
+}
+
+// Dead letter queue for failed operations
+class DeadLetterQueue {
+    private queue: Array<{
+        request: any;
+        response: any;
+        userId: string;
+        metadata?: any;
+        timestamp: number;
+        retryCount: number;
+    }> = [];
+    private processing = false;
+
+    add(item: { request: any; response: any; userId: string; metadata?: any }): void {
+        this.queue.push({
+            ...item,
+            timestamp: Date.now(),
+            retryCount: 0
+        });
+        
+        if (!this.processing) {
+            this.processQueue();
+        }
+    }
+
+    private async processQueue(): Promise<void> {
+        this.processing = true;
+        
+        while (this.queue.length > 0) {
+            const item = this.queue.shift()!;
+            
+            try {
+                // Retry with exponential backoff
+                const delay = Math.min(1000 * Math.pow(2, item.retryCount), 30000);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                
+                await AICostTrackerService.trackRequestInternal(
+                    item.request,
+                    item.response,
+                    item.userId,
+                    item.metadata
+                );
+                
+                loggingService.info('Successfully processed dead letter queue item', {
+                    userId: item.userId,
+                    retryCount: item.retryCount
+                });
+            } catch (error) {
+                item.retryCount++;
+                
+                if (item.retryCount < 3 && Date.now() - item.timestamp < 300000) { // 5 minutes
+                    this.queue.push(item);
+                } else {
+                    loggingService.error('Dead letter queue item permanently failed', {
+                        userId: item.userId,
+                        retryCount: item.retryCount,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+        }
+        
+        this.processing = false;
+    }
+}
+
 export class AICostTrackerService {
     private static config: TrackerConfig | null = null;
     private static initialized = false;
+    private static configPromise: Promise<TrackerConfig> | null = null;
+    private static circuitBreaker = new CircuitBreaker();
+    private static deadLetterQueue = new DeadLetterQueue();
+    
+    // Pre-computed provider mappings for performance
+    private static readonly PROVIDER_MAP = new Map<string, AIProvider>([
+        ['openai', AIProvider.OpenAI],
+        ['aws-bedrock', AIProvider.AWSBedrock],
+        ['bedrock', AIProvider.AWSBedrock],
+        ['anthropic', AIProvider.Anthropic],
+        ['google', AIProvider.Google],
+        ['cohere', AIProvider.Cohere],
+        ['gemini', AIProvider.Gemini],
+        ['deepseek', AIProvider.DeepSeek],
+        ['groq', AIProvider.Groq],
+        ['huggingface', AIProvider.HuggingFace],
+        ['ollama', AIProvider.Ollama],
+        ['replicate', AIProvider.Replicate],
+        ['azure', AIProvider.Azure]
+    ]);
+    
+    // Performance metrics
+    private static performanceMetrics = {
+        totalRequests: 0,
+        totalDuration: 0,
+        slowRequests: 0,
+        failedRequests: 0
+    };
 
     /**
      * Initializes the internal cost tracker configuration
@@ -124,15 +258,29 @@ export class AICostTrackerService {
     }
 
     /**
-     * Returns the tracker configuration
+     * Returns the tracker configuration with caching
      */
     static async getConfig(): Promise<TrackerConfig> {
-        await this.initialize();
+        if (!this.configPromise) {
+            this.configPromise = this.initializeConfig();
+        }
+        return this.configPromise;
+    }
+    
+    /**
+     * Internal configuration initialization
+     */
+    private static async initializeConfig(): Promise<TrackerConfig> {
+        if (this.config && this.initialized) {
+            return this.config;
+        }
+        
+        await this.getConfig();
         return this.config!;
     }
 
     /**
-     * Track a request and response
+     * Track a request and response with enhanced error handling and performance monitoring
      */
     static async trackRequest(
         request: any,
@@ -161,35 +309,111 @@ export class AICostTrackerService {
             };
         }
     ): Promise<void> {
+        const startTime = process.hrtime.bigint();
+        this.performanceMetrics.totalRequests++;
+        
         try {
-            await this.initialize();
+            // Use circuit breaker pattern for resilience
+            await this.circuitBreaker.execute(() => 
+                this.trackRequestInternal(request, response, userId, metadata)
+            );
+        } catch (error) {
+            this.performanceMetrics.failedRequests++;
+            
+            // Async error logging and dead letter queue
+            setImmediate(() => {
+                loggingService.error('Usage tracking failed', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    model: request?.model,
+                    metadata
+                });
+                
+                // Add to dead letter queue for retry
+                this.deadLetterQueue.add({ request, response, userId, metadata });
+            });
+            
+            // Don't throw - allow request to continue
+            return;
+        } finally {
+            // Performance monitoring
+            const duration = Number(process.hrtime.bigint() - startTime) / 1_000_000; // Convert to ms
+            this.performanceMetrics.totalDuration += duration;
+            
+            if (duration > 100) { // Log slow operations
+                this.performanceMetrics.slowRequests++;
+                loggingService.warn('Slow usage tracking detected', {
+                    duration: `${duration.toFixed(2)}ms`,
+                    userId,
+                    model: request?.model,
+                    service: metadata?.service
+                });
+            }
+        }
+    }
+    
+    /**
+     * Internal tracking implementation with optimized async operations
+     */
+    static async trackRequestInternal(
+        request: any,
+        response: any,
+        userId: string,
+        metadata?: {
+            service?: string;
+            endpoint?: string;
+            historicalSync?: boolean;
+            originalCreatedAt?: Date;
+            projectId?: string;
+            tags?: string[];
+            costAllocation?: Record<string, any>;
+            promptTemplateId?: string;
+            workflowId?: string;
+            workflowName?: string;
+            workflowStep?: string;
+            metadata?: {
+                workspace?: any;
+                codeContext?: any;
+                requestType?: string;
+                executionTime?: number;
+                contextFiles?: string[];
+                generatedFiles?: string[];
+            };
+        }
+    ): Promise<void> {
+        try {
+            await this.getConfig(); // Use cached config
 
             // Extract usage data
             const promptTokens = response.usage?.promptTokens || request.promptTokens || 0;
             const completionTokens = response.usage?.completionTokens || request.completionTokens || 0;
-            const totalTokens = response.usage?.totalTokens || (promptTokens + completionTokens);
+            // Always use totalTokens if available, otherwise sum prompt+completion
+            const totalTokens = response.usage?.totalTokens !== undefined
+                ? response.usage.totalTokens
+                : (promptTokens + completionTokens);
 
-            // If tokens are not provided, estimate them
+            // Parallel token estimation if needed
+            const provider = this.mapServiceToProvider(metadata?.service || 'openai');
+            const providerString = this.providerEnumToString(provider);
+
+            // If totalTokens is provided, use it directly; otherwise, estimate as before
             let finalPromptTokens = promptTokens;
             let finalCompletionTokens = completionTokens;
             let finalTotalTokens = totalTokens;
 
-            if (finalPromptTokens === 0 && request.prompt) {
-                const provider = this.mapServiceToProvider(metadata?.service || 'openai');
-                finalPromptTokens = estimateTokens(request.prompt, provider);
+            if (response.usage?.totalTokens === undefined) {
+                // Estimate prompt and completion tokens if needed
+                [finalPromptTokens, finalCompletionTokens] = await Promise.all([
+                    promptTokens === 0 && request.prompt
+                        ? Promise.resolve(estimateTokens(request.prompt, provider))
+                        : Promise.resolve(promptTokens),
+                    completionTokens === 0 && (response.content || response.choices?.[0]?.message?.content)
+                        ? Promise.resolve(estimateTokens(response.content || response.choices?.[0]?.message?.content || '', provider))
+                        : Promise.resolve(completionTokens)
+                ]);
+                finalTotalTokens = finalPromptTokens + finalCompletionTokens;
             }
 
-            if (finalCompletionTokens === 0 && (response.content || response.choices?.[0]?.message?.content)) {
-                const provider = this.mapServiceToProvider(metadata?.service || 'openai');
-                const completion = response.content || response.choices?.[0]?.message?.content || '';
-                finalCompletionTokens = estimateTokens(completion, provider);
-            }
-
-            finalTotalTokens = finalPromptTokens + finalCompletionTokens;
-
-            // Calculate cost
-            const provider = this.mapServiceToProvider(metadata?.service || 'openai');
-            const providerString = this.providerEnumToString(provider);
             const estimatedCost = calculateCost(
                 finalPromptTokens,
                 finalCompletionTokens,
@@ -197,48 +421,18 @@ export class AICostTrackerService {
                 request.model
             );
 
-            // Check if approval is required for project
-            if (metadata?.projectId && !metadata?.historicalSync) {
-                const requiresApproval = await ProjectService.checkApprovalRequired(
-                    metadata.projectId,
-                    estimatedCost,
-                );
+            // Parallel operations for approval check and workflow sequence
+            const [approvalResult, workflowSequence] = await Promise.all([
+                this.checkProjectApproval(metadata, estimatedCost, finalTotalTokens, userId, request),
+                this.getWorkflowSequence(metadata?.workflowId)
+            ]);
 
-                if (requiresApproval) {
-                    const approvalRequest = await ProjectService.createApprovalRequest(
-                        userId,
-                        metadata.projectId,
-                        {
-                            operation: 'API Call',
-                            estimatedCost: estimatedCost,
-                            estimatedTokens: finalTotalTokens,
-                            model: request.model,
-                            prompt: request.prompt, 
-                            reason: 'Exceeds project approval threshold'
-                        }
-                    );
-
-                    throw new Error(`Approval required. Request ID: ${approvalRequest._id}`);
-                }
+            if (approvalResult?.requiresApproval) {
+                throw new Error(`Approval required. Request ID: ${approvalResult.requestId}`);
             }
 
-            // Calculate workflow sequence if workflow ID is provided
-            let workflowSequence: number | undefined;
-            if (metadata?.workflowId) {
-                try {
-                    // Get the current count of requests in this workflow to determine sequence
-                    const existingCount = await Usage.countDocuments({ 
-                        workflowId: metadata.workflowId 
-                    });
-                    workflowSequence = existingCount + 1;
-                } catch (error) {
-                    loggingService.warn('Could not calculate workflow sequence:', { error: error instanceof Error ? error.message : String(error) });
-                    workflowSequence = 1; // Default to 1 if count fails
-                }
-            }
-
-            // Save to database
-            await Usage.create({
+            // Prepare usage record
+            const usageRecord = {
                 userId,
                 projectId: metadata?.projectId,
                 service: metadata?.service || 'openai',
@@ -256,7 +450,6 @@ export class AICostTrackerService {
                 },
                 tags: metadata?.tags || [],
                 costAllocation: metadata?.costAllocation,
-                // Add workflow tracking fields
                 workflowId: metadata?.workflowId,
                 workflowName: metadata?.workflowName,
                 workflowStep: metadata?.workflowStep,
@@ -264,20 +457,20 @@ export class AICostTrackerService {
                 optimizationApplied: false,
                 errorOccurred: false,
                 createdAt: metadata?.originalCreatedAt || new Date()
-            });
+            };
 
-            // Update user monthly usage
-            await User.findByIdAndUpdate(userId, {
-                $inc: {
-                    'monthlyUsage.totalCost': estimatedCost,
-                    'monthlyUsage.totalTokens': finalTotalTokens,
-                    'monthlyUsage.requestCount': 1
-                }
-            });
+            // Parallel database operations
+            await Promise.all([
+                Usage.create(usageRecord),
+                this.updateUserUsage(userId, estimatedCost, finalTotalTokens)
+            ]);
 
-            // Log activity if not historical sync
+            // Non-blocking activity tracking and real-time updates
             if (!metadata?.historicalSync) {
-                await ActivityService.trackActivity(userId, {
+                setImmediate(async () => {
+                    try {
+                        await Promise.all([
+                            ActivityService.trackActivity(userId, {
                     type: 'api_call',
                     title: `Made AI request using ${request.model}`,
                     description: `AI request with ${finalTotalTokens} tokens and cost $${estimatedCost.toFixed(6)}`,
@@ -287,30 +480,41 @@ export class AICostTrackerService {
                         cost: estimatedCost,
                         projectId: metadata?.projectId
                     }
-                });
-
-                // Emit real-time update for usage
-                RealtimeUpdateService.emitUsageUpdate(userId, {
-                    type: 'usage_tracked',
-                    data: {
-                        model: request.model,
-                        cost: estimatedCost,
-                        tokens: finalTotalTokens,
-                        service: metadata?.service || 'openai',
-                        timestamp: new Date().toISOString()
+                            }),
+                            Promise.resolve(RealtimeUpdateService.emitUsageUpdate(userId, {
+                                type: 'usage_tracked',
+                                data: {
+                                    model: request.model,
+                                    cost: estimatedCost,
+                                    tokens: finalTotalTokens,
+                                    service: metadata?.service || 'openai',
+                                    timestamp: new Date().toISOString()
+                                }
+                            }))
+                        ]);
+                    } catch (error) {
+                        loggingService.warn('Non-critical post-tracking operations failed', {
+                            error: error instanceof Error ? error.message : String(error),
+                            userId
+                        });
                     }
                 });
             }
 
-            loggingService.debug('Usage tracked successfully', { value:  { userId,
+            loggingService.debug('Usage tracked successfully', {
+                userId,
                 model: request.model,
                 tokens: finalTotalTokens,
                 cost: estimatedCost,
                 projectId: metadata?.projectId
-             } });
+            });
 
         } catch (error) {
-            loggingService.error('Error tracking usage:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error tracking usage:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                model: request?.model
+            });
             throw error;
         }
     }
@@ -324,7 +528,7 @@ export class AICostTrackerService {
         model: string,
         conversationHistory?: any[]
     ): Promise<OptimizationResult> {
-        await this.initialize();
+        await this.getConfig();
 
         return generateOptimizationSuggestions(
             prompt,
@@ -346,7 +550,7 @@ export class AICostTrackerService {
         optimizedHistory?: any[];
         appliedOptimizations: string[];
     }> {
-        await this.initialize();
+        await this.getConfig();
 
         return applyOptimizations(prompt, optimizations, conversationHistory);
     }
@@ -371,7 +575,7 @@ export class AICostTrackerService {
             pricePerCompletionToken: number;
         };
     }> {
-        await this.initialize();
+        await this.getConfig();
 
         const promptTokens = estimateTokens(prompt, provider);
         const providerString = this.providerEnumToString(provider);
@@ -397,26 +601,145 @@ export class AICostTrackerService {
     }
 
     /**
-     * Map service string to AIProvider enum
+     * Map service string to AIProvider enum using pre-computed Map
      */
     private static mapServiceToProvider(service: string): AIProvider {
-        const serviceMap: Record<string, AIProvider> = {
-            'openai': AIProvider.OpenAI,
-            'aws-bedrock': AIProvider.AWSBedrock,
-            'bedrock': AIProvider.AWSBedrock,
-            'anthropic': AIProvider.Anthropic,
-            'google': AIProvider.Google,
-            'cohere': AIProvider.Cohere,
-            'gemini': AIProvider.Gemini,
-            'deepseek': AIProvider.DeepSeek,
-            'groq': AIProvider.Groq,
-            'huggingface': AIProvider.HuggingFace,
-            'ollama': AIProvider.Ollama,
-            'replicate': AIProvider.Replicate,
-            'azure': AIProvider.Azure
-        };
+        return this.PROVIDER_MAP.get(service.toLowerCase()) || AIProvider.OpenAI;
+    }
+    
+    /**
+     * Optimized project approval check
+     */
+    private static async checkProjectApproval(
+        metadata: any,
+        estimatedCost: number,
+        finalTotalTokens: number,
+        userId: string,
+        request: any
+    ): Promise<{ requiresApproval: boolean; requestId?: string } | null> {
+        if (!metadata?.projectId || metadata?.historicalSync) {
+            return null;
+        }
+        
+        try {
+            const requiresApproval = await ProjectService.checkApprovalRequired(
+                metadata.projectId,
+                estimatedCost
+            );
 
-        return serviceMap[service.toLowerCase()] || AIProvider.OpenAI;
+            if (requiresApproval) {
+                const approvalRequest = await ProjectService.createApprovalRequest(
+                    userId,
+                    metadata.projectId,
+                    {
+                        operation: 'API Call',
+                        estimatedCost: estimatedCost,
+                        estimatedTokens: finalTotalTokens,
+                        model: request.model,
+                        prompt: request.prompt,
+                        reason: 'Exceeds project approval threshold'
+                    }
+                );
+                
+                return { requiresApproval: true, requestId: approvalRequest._id };
+            }
+            
+            return { requiresApproval: false };
+        } catch (error) {
+            loggingService.warn('Project approval check failed', {
+                error: error instanceof Error ? error.message : String(error),
+                projectId: metadata.projectId
+            });
+            return null;
+        }
+    }
+    
+    /**
+     * Optimized workflow sequence calculation
+     */
+    private static async getWorkflowSequence(workflowId?: string): Promise<number | undefined> {
+        if (!workflowId) {
+            return undefined;
+        }
+        
+        try {
+            const existingCount = await Usage.countDocuments({ workflowId });
+            return existingCount + 1;
+        } catch (error) {
+            loggingService.warn('Could not calculate workflow sequence', {
+                error: error instanceof Error ? error.message : String(error),
+                workflowId
+            });
+            return 1; // Default to 1 if count fails
+        }
+    }
+    
+    /**
+     * Optimized user usage update
+     */
+    private static async updateUserUsage(
+        userId: string,
+        estimatedCost: number,
+        finalTotalTokens: number
+    ): Promise<void> {
+        try {
+            await User.findByIdAndUpdate(userId, {
+                $inc: {
+                    'monthlyUsage.totalCost': estimatedCost,
+                    'monthlyUsage.totalTokens': finalTotalTokens,
+                    'monthlyUsage.requestCount': 1
+                }
+            });
+        } catch (error) {
+            loggingService.error('Failed to update user usage', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            throw error;
+        }
+    }
+    
+    /**
+     * Get performance metrics
+     */
+    static getPerformanceMetrics(): {
+        totalRequests: number;
+        averageDuration: number;
+        slowRequestPercentage: number;
+        failureRate: number;
+        circuitBreakerState: string;
+    } {
+        const avgDuration = this.performanceMetrics.totalRequests > 0 
+            ? this.performanceMetrics.totalDuration / this.performanceMetrics.totalRequests 
+            : 0;
+            
+        const slowRequestPercentage = this.performanceMetrics.totalRequests > 0
+            ? (this.performanceMetrics.slowRequests / this.performanceMetrics.totalRequests) * 100
+            : 0;
+            
+        const failureRate = this.performanceMetrics.totalRequests > 0
+            ? (this.performanceMetrics.failedRequests / this.performanceMetrics.totalRequests) * 100
+            : 0;
+        
+        return {
+            totalRequests: this.performanceMetrics.totalRequests,
+            averageDuration: Number(avgDuration.toFixed(2)),
+            slowRequestPercentage: Number(slowRequestPercentage.toFixed(2)),
+            failureRate: Number(failureRate.toFixed(2)),
+            circuitBreakerState: this.circuitBreaker['state']
+        };
+    }
+    
+    /**
+     * Reset performance metrics (useful for testing)
+     */
+    static resetPerformanceMetrics(): void {
+        this.performanceMetrics = {
+            totalRequests: 0,
+            totalDuration: 0,
+            slowRequests: 0,
+            failedRequests: 0
+        };
     }
 
     /**
@@ -477,7 +800,7 @@ export class AICostTrackerService {
         startDate?: Date,
         endDate?: Date
     ): Promise<any> {
-        await this.initialize();
+        await this.getConfig();
 
         const query: any = { userId };
 

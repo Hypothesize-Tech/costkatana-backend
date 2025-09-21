@@ -145,31 +145,70 @@ export class AutoSimulationService {
      */
     static async shouldTriggerSimulation(usageId: string): Promise<boolean> {
         try {
-            const usage = await Usage.findById(usageId).lean();
-            if (!usage) return false;
+            // Single aggregation pipeline to get all needed data
+            const [result] = await Usage.aggregate([
+                { $match: { _id: new mongoose.Types.ObjectId(usageId) } },
+                {
+                    $lookup: {
+                        from: 'auto_simulation_settings',
+                        localField: 'userId',
+                        foreignField: 'userId',
+                        as: 'settings',
+                        pipeline: [
+                            { $project: { enabled: 1, triggers: 1 } } // Only select needed fields
+                        ]
+                    }
+                },
+                {
+                    $lookup: {
+                        from: 'auto_simulation_queue',
+                        let: { userId: '$userId', usageId: '$_id' },
+                        pipeline: [
+                            {
+                                $match: {
+                                    $expr: {
+                                        $and: [
+                                            { $eq: ['$userId', '$$userId'] },
+                                            { $eq: ['$usageId', '$$usageId'] },
+                                            { $in: ['$status', ['pending', 'processing']] }
+                                        ]
+                                    }
+                                }
+                            },
+                            { $project: { _id: 1 } } // Only need to know if exists
+                        ],
+                        as: 'existing'
+                    }
+                },
+                {
+                    $project: {
+                        cost: 1,
+                        totalTokens: 1,
+                        model: 1,
+                        settings: { $arrayElemAt: ['$settings', 0] },
+                        hasExisting: { $gt: [{ $size: '$existing' }, 0] }
+                    }
+                }
+            ]);
 
-            const settings = await AutoSimulationSettings.findOne({ 
-                userId: usage.userId 
-            }).lean();
+            if (!result) return false;
 
+            const { settings, hasExisting, cost, totalTokens, model } = result;
+            
+            // Check if settings exist and enabled
             if (!settings || !settings.enabled) return false;
-
-            const triggers = settings.triggers;
             
             // Check if already queued
-            const existing = await AutoSimulationQueue.findOne({
-                userId: usage.userId,
-                usageId: new mongoose.Types.ObjectId(usageId),
-                status: { $in: ['pending', 'processing'] }
-            });
+            if (hasExisting) return false;
 
-            if (existing) return false;
+            const triggers = settings.triggers;
+            if (!triggers) return false;
 
             // Check trigger conditions
-            if (triggers?.allCalls) return true;
-            if (triggers && usage.cost > triggers.costThreshold) return true;
-            if (triggers && usage.totalTokens > triggers.tokenThreshold) return true;
-            if (triggers?.expensiveModels.includes(usage.model)) return true;
+            if (triggers.allCalls) return true;
+            if (cost > triggers.costThreshold) return true;
+            if (totalTokens > triggers.tokenThreshold) return true;
+            if (triggers.expensiveModels && triggers.expensiveModels.includes(model)) return true;
 
             return false;
         } catch (error) {
@@ -215,11 +254,38 @@ export class AutoSimulationService {
             })
             .sort({ createdAt: 1 })
             .limit(5) // Process 5 at a time
-            .populate('usageId');
+            .populate('usageId')
+            .lean();
 
-            for (const item of pendingItems) {
-                await this.processQueueItem(item);
-            }
+            if (pendingItems.length === 0) return;
+
+            // Mark all items as processing in bulk operation
+            const bulkOps = pendingItems.map(item => ({
+                updateOne: {
+                    filter: { _id: item._id },
+                    update: { 
+                        status: 'processing',
+                        processedAt: new Date()
+                    }
+                }
+            }));
+
+            await AutoSimulationQueue.bulkWrite(bulkOps);
+
+            // Process items in parallel using Promise.all
+            const results = await Promise.allSettled(
+                pendingItems.map(item => this.processQueueItem(item))
+            );
+
+            // Log any failed processing
+            results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                    loggingService.error(`Failed to process queue item ${pendingItems[index]._id}:`, {
+                        error: result.reason
+                    });
+                }
+            });
+
         } catch (error) {
             loggingService.error('Error processing auto-simulation queue:', { error: error instanceof Error ? error.message : String(error) });
         }
@@ -230,18 +296,12 @@ export class AutoSimulationService {
      */
     private static async processQueueItem(queueItem: any): Promise<void> {
         try {
-            // Mark as processing
-            await AutoSimulationQueue.findByIdAndUpdate(queueItem._id, {
-                status: 'processing',
-                processedAt: new Date()
-            });
-
             const usage = queueItem.usageId;
             if (!usage) {
                 throw new Error('Usage not found');
             }
 
-            // Run simulation
+            // Run simulation and get settings in parallel
             const simulationRequest = {
                 prompt: usage.prompt,
                 currentModel: usage.model,
@@ -251,9 +311,14 @@ export class AutoSimulationService {
                 }
             };
 
-            const result = await ExperimentationService.runRealTimeWhatIfSimulation(simulationRequest);
+            const [result, settings] = await Promise.all([
+                ExperimentationService.runRealTimeWhatIfSimulation(simulationRequest),
+                AutoSimulationSettings.findOne({ 
+                    userId: queueItem.userId 
+                }).select('autoOptimize').lean()
+            ]);
 
-            // Track the simulation
+            // Track simulation first
             const trackingId = await SimulationTrackingService.trackSimulation({
                 userId: queueItem.userId.toString(),
                 sessionId: `auto-${queueItem._id}`,
@@ -269,7 +334,7 @@ export class AutoSimulationService {
                 confidence: result.confidence || 0
             });
 
-            // Update queue item with results
+            // Update queue item with tracking ID
             await AutoSimulationQueue.findByIdAndUpdate(queueItem._id, {
                 status: 'completed',
                 simulationId: trackingId,
@@ -281,15 +346,24 @@ export class AutoSimulationService {
             });
 
             // Check if auto-optimization should be applied
-            const settings = await AutoSimulationSettings.findOne({ 
-                userId: queueItem.userId 
-            });
-
             if (settings?.autoOptimize?.enabled) {
-                await this.considerAutoOptimization(queueItem._id.toString(), result, settings);
+                // Run auto-optimization in parallel with logging
+                await Promise.all([
+                    this.considerAutoOptimization(queueItem._id.toString(), result, settings),
+                    Promise.resolve(loggingService.info(`Completed auto-simulation for queue item: ${queueItem._id}`, {
+                        trackingId,
+                        potentialSavings: result.potentialSavings,
+                        confidence: result.confidence
+                    }))
+                ]);
+            } else {
+                loggingService.info(`Completed auto-simulation for queue item: ${queueItem._id}`, {
+                    trackingId,
+                    potentialSavings: result.potentialSavings,
+                    confidence: result.confidence
+                });
             }
 
-            loggingService.info(`Completed auto-simulation for queue item: ${queueItem._id}`);
         } catch (error) {
             loggingService.error(`Error processing queue item ${queueItem._id}:`, { error: error instanceof Error ? error.message : String(error) });
             
@@ -448,19 +522,55 @@ export class AutoSimulationService {
         limit: number = 20
     ): Promise<AutoSimulationQueueItem[]> {
         try {
-            const query: any = { userId: new mongoose.Types.ObjectId(userId) };
-            if (status) query.status = status;
+            // Use aggregation pipeline for better performance
+            const pipeline: any[] = [
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } }
+            ];
 
-            const items = await AutoSimulationQueue.find(query)
-                .sort({ createdAt: -1 })
-                .limit(limit)
-                .populate('usageId', 'prompt model cost totalTokens')
-                .lean();
+            if (status) {
+                pipeline[0].$match.status = status;
+            }
+
+            pipeline.push(
+                { $sort: { createdAt: -1 } },
+                { $limit: limit },
+                {
+                    $lookup: {
+                        from: 'usages',
+                        localField: 'usageId',
+                        foreignField: '_id',
+                        as: 'usage',
+                        pipeline: [
+                            { $project: { prompt: 1, model: 1, cost: 1, totalTokens: 1 } } // Only needed fields
+                        ]
+                    }
+                },
+                {
+                    $project: {
+                        _id: 1,
+                        userId: 1,
+                        status: 1,
+                        simulationId: 1,
+                        optimizationOptions: 1,
+                        recommendations: 1,
+                        potentialSavings: 1,
+                        confidence: 1,
+                        autoApplied: 1,
+                        appliedOptimizations: 1,
+                        errorMessage: 1,
+                        createdAt: 1,
+                        updatedAt: 1,
+                        usage: { $arrayElemAt: ['$usage', 0] }
+                    }
+                }
+            );
+
+            const items = await AutoSimulationQueue.aggregate(pipeline);
 
             return items.map(item => ({
                 id: item._id.toString(),
                 userId: item.userId.toString(),
-                usageId: item.usageId._id.toString(),
+                usageId: item.usage?._id.toString() || '',
                 status: item.status,
                 simulationId: item.simulationId || undefined,
                 optimizationOptions: item.optimizationOptions,

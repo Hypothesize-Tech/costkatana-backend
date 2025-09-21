@@ -23,6 +23,8 @@ interface TimeSeriesData {
 
 export class AnalyticsService {
     static async getAnalytics(filters: any, options: { groupBy?: string; includeProjectBreakdown?: boolean } = {}) {
+        const startTime = Date.now();
+        
         try {
             loggingService.debug('Getting analytics with filters:', { value:  { value: filters } });
 
@@ -42,17 +44,46 @@ export class AnalyticsService {
                 match.projectId = new mongoose.Types.ObjectId(filters.projectId);
             }
 
-            const [summary, timeline, breakdown] = await Promise.all([
+            // Build all operations array for Promise.all
+            const operations = [
                 this.getSummary(match),
                 this.getTimeline(match, options.groupBy || 'date'),
                 this.getBreakdown(match)
-            ]);
+            ];
 
-            let projectBreakdown = null;
+            // Add project breakdown operation if needed
             if (options.includeProjectBreakdown && !filters.projectId) {
-                // Only include project breakdown when not filtering by a specific project
-                projectBreakdown = await this.calculateProjectBreakdown(filters.userId);
+                operations.push(this.calculateProjectBreakdown(filters.userId));
             }
+
+            // Add mixpanel tracking operation (non-blocking)
+            if (filters.userId) {
+                operations.push(
+                    Promise.resolve().then(() => 
+                        mixpanelService.trackAnalyticsEvent('dashboard_viewed', {
+                            userId: filters.userId,
+                            projectId: filters.projectId,
+                            reportType: options.groupBy,
+                            dateRange: filters.startDate && filters.endDate 
+                                ? `${filters.startDate.toISOString()}-${filters.endDate.toISOString()}` 
+                                : undefined,
+                            filters: {
+                                service: filters.service,
+                                model: filters.model,
+                                groupBy: options.groupBy
+                            },
+                            page: '/analytics',
+                            component: 'analytics_service'
+                        })
+                    ).catch((err: any) => loggingService.warn('Mixpanel tracking failed:', { error: err.message }))
+                );
+            }
+
+            // Execute all operations in parallel
+            const results = await Promise.all(operations);
+            
+            const [summary, timeline, breakdown] = results;
+            const projectBreakdown = options.includeProjectBreakdown && !filters.projectId ? results[3] : null;
 
             const result = {
                 summary,
@@ -66,35 +97,28 @@ export class AnalyticsService {
                 projectBreakdown
             };
 
-            loggingService.debug('Analytics result:', { value:  { value: result } });
-            
-            // Track analytics access
-            if (filters.userId) {
-                mixpanelService.trackAnalyticsEvent('dashboard_viewed', {
-                    userId: filters.userId,
-                    projectId: filters.projectId,
-                    reportType: options.groupBy,
-                    dateRange: filters.startDate && filters.endDate 
-                        ? `${filters.startDate.toISOString()}-${filters.endDate.toISOString()}` 
-                        : undefined,
-                    filters: {
-                        service: filters.service,
-                        model: filters.model,
-                        groupBy: options.groupBy
-                    },
-                    page: '/analytics',
-                    component: 'analytics_service'
-                });
-            }
+            const executionTime = Date.now() - startTime;
+            loggingService.debug('Analytics result:', { 
+                executionTime,
+                operationsCount: operations.length,
+                hasProjectBreakdown: !!projectBreakdown
+            });
             
             return result;
         } catch (error) {
-            loggingService.error('Error getting analytics:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error getting analytics:', { 
+                error: error instanceof Error ? error.message : String(error),
+                executionTime,
+                userId: filters.userId
+            });
             throw error;
         }
     }
 
     static async getProjectAnalytics(projectId: string, filters: any, options: { groupBy?: string } = {}) {
+        const startTime = Date.now();
+        
         try {
             loggingService.debug('Getting project analytics for:', { value:  { value: projectId } });
 
@@ -103,11 +127,19 @@ export class AnalyticsService {
                 projectId: new mongoose.Types.ObjectId(projectId)
             };
 
+            // Execute all operations in parallel with Promise.all
             const [summary, timeline, breakdown] = await Promise.all([
                 this.getSummary(match),
                 this.getTimeline(match, options.groupBy || 'date'),
                 this.getBreakdown(match)
             ]);
+
+            const executionTime = Date.now() - startTime;
+            loggingService.debug('Project analytics completed:', { 
+                projectId,
+                executionTime,
+                operationsCount: 3
+            });
 
             return {
                 summary,
@@ -120,12 +152,19 @@ export class AnalyticsService {
                 }
             };
         } catch (error) {
-            loggingService.error('Error getting project analytics:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error getting project analytics:', { 
+                error: error instanceof Error ? error.message : String(error),
+                projectId,
+                executionTime
+            });
             throw error;
         }
     }
 
     static async compareProjects(projectIds: string[], options: { startDate?: Date; endDate?: Date; metric?: string } = {}) {
+        const startTime = Date.now();
+        
         try {
             loggingService.debug('Comparing projects:', { value:  { value: projectIds } });
 
@@ -139,46 +178,61 @@ export class AnalyticsService {
                 if (options.endDate) match.createdAt.$lte = options.endDate;
             }
 
-            const comparison = await Usage.aggregate([
-                { $match: match },
-                {
-                    $group: {
-                        _id: '$projectId',
-                        totalCost: { $sum: '$cost' },
-                        totalTokens: { $sum: '$totalTokens' },
-                        totalRequests: { $sum: 1 },
-                        avgCost: { $avg: '$cost' }
+            // Use Promise.all for parallel aggregation operations
+            const [comparison, projectDetails]: any = await Promise.all([
+                Usage.aggregate([
+                    { $match: match },
+                    {
+                        $group: {
+                            _id: '$projectId',
+                            totalCost: { $sum: '$cost' },
+                            totalTokens: { $sum: '$totalTokens' },
+                            totalRequests: { $sum: 1 },
+                            avgCost: { $avg: '$cost' }
+                        }
+                    },
+                    {
+                        $project: {
+                            projectId: '$_id',
+                            totalCost: { $round: ['$totalCost', 4] },
+                            totalTokens: 1,
+                            totalRequests: 1,
+                            avgCost: { $round: ['$avgCost', 4] }
+                        }
                     }
-                },
-                {
-                    $lookup: {
-                        from: 'projects',
-                        localField: '_id',
-                        foreignField: '_id',
-                        as: 'project'
-                    }
-                },
-                {
-                    $unwind: '$project'
-                },
-                {
-                    $project: {
-                        projectId: '$_id',
-                        projectName: '$project.name',
-                        totalCost: { $round: ['$totalCost', 4] },
-                        totalTokens: 1,
-                        totalRequests: 1,
-                        avgCost: { $round: ['$avgCost', 4] }
-                    }
-                }
+                ]),
+                // Separate project lookup for better performance
+                mongoose.connection?.db?.collection('projects').find(
+                    { _id: { $in: projectIds.map(id => new mongoose.Types.ObjectId(id)) } },
+                    { projection: { name: 1 } }
+                ).toArray() || Promise.resolve([])
             ]);
 
+            // Merge project details with comparison data
+            const projectMap = new Map(projectDetails.map((p: any) => [p._id.toString(), p.name]));
+            const enrichedComparison = comparison.map((item: any) => ({
+                ...item,
+                projectName: projectMap.get(item.projectId.toString()) || 'Unknown'
+            }));
+
+            const executionTime = Date.now() - startTime;
+            loggingService.debug('Project comparison completed:', { 
+                projectCount: projectIds.length,
+                executionTime,
+                operationsCount: 2
+            });
+
             return {
-                projects: comparison,
+                projects: enrichedComparison,
                 metric: options.metric || 'cost'
             };
         } catch (error) {
-            loggingService.error('Error comparing projects:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error comparing projects:', { 
+                error: error instanceof Error ? error.message : String(error),
+                projectCount: projectIds.length,
+                executionTime
+            });
             throw error;
         }
     }
@@ -309,16 +363,20 @@ export class AnalyticsService {
         period1: { startDate: Date; endDate: Date },
         period2: { startDate: Date; endDate: Date }
     ) {
+        const startTime = Date.now();
+        
         try {
             loggingService.debug('Getting comparative analytics for user:', { value:  { value: userId } });
 
+            // Execute both period analytics in parallel with Promise.all
             const [data1, data2] = await Promise.all([
                 this.getAnalytics({ userId, startDate: period1.startDate, endDate: period1.endDate }),
                 this.getAnalytics({ userId, startDate: period2.startDate, endDate: period2.endDate })
             ]);
 
-            const comparison = {
-                cost: {
+            // Calculate all comparisons in parallel using Promise.all
+            const [costComparison, tokensComparison, callsComparison, avgCostComparison] = await Promise.all([
+                Promise.resolve({
                     period1: data1.summary.totalCost,
                     period2: data2.summary.totalCost,
                     change: data2.summary.totalCost - data1.summary.totalCost,
@@ -326,8 +384,8 @@ export class AnalyticsService {
                         data1.summary.totalCost,
                         data2.summary.totalCost
                     ),
-                },
-                tokens: {
+                }),
+                Promise.resolve({
                     period1: data1.summary.totalTokens,
                     period2: data2.summary.totalTokens,
                     change: data2.summary.totalTokens - data1.summary.totalTokens,
@@ -335,8 +393,8 @@ export class AnalyticsService {
                         data1.summary.totalTokens,
                         data2.summary.totalTokens
                     ),
-                },
-                calls: {
+                }),
+                Promise.resolve({
                     period1: data1.summary.totalRequests,
                     period2: data2.summary.totalRequests,
                     change: data2.summary.totalRequests - data1.summary.totalRequests,
@@ -344,8 +402,8 @@ export class AnalyticsService {
                         data1.summary.totalRequests,
                         data2.summary.totalRequests
                     ),
-                },
-                avgCostPerCall: {
+                }),
+                Promise.resolve({
                     period1: data1.summary.averageCostPerRequest,
                     period2: data2.summary.averageCostPerRequest,
                     change: data2.summary.averageCostPerRequest - data1.summary.averageCostPerRequest,
@@ -353,8 +411,22 @@ export class AnalyticsService {
                         data1.summary.averageCostPerRequest,
                         data2.summary.averageCostPerRequest
                     ),
-                },
+                })
+            ]);
+
+            const comparison = {
+                cost: costComparison,
+                tokens: tokensComparison,
+                calls: callsComparison,
+                avgCostPerCall: avgCostComparison,
             };
+
+            const executionTime = Date.now() - startTime;
+            loggingService.debug('Comparative analytics completed:', { 
+                userId,
+                executionTime,
+                operationsCount: 6 // 2 analytics + 4 comparisons
+            });
 
             return {
                 period1: data1,
@@ -362,7 +434,12 @@ export class AnalyticsService {
                 comparison,
             };
         } catch (error) {
-            loggingService.error('Error getting comparative analytics:', { error: error instanceof Error ? error.message : String(error) });
+            const executionTime = Date.now() - startTime;
+            loggingService.error('Error getting comparative analytics:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                executionTime
+            });
             throw error;
         }
     }
