@@ -42,6 +42,24 @@ export class RealtimePricingService {
     private static lastUpdateTime = new Map<string, Date>();
     private static updateInterval = 30 * 60 * 1000; // 30 minutes
     private static isUpdating = false;
+    
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Content preprocessing optimization
+    private static contentCache = new Map<string, string>();
+    
+    // Provider-specific optimization strategies
+    private static providerStrategies = new Map<string, any>();
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+        this.initializeProviderStrategies();
+    }
 
     static async initialize() {
         loggingService.info('Initializing RealtimePricingService');
@@ -451,5 +469,97 @@ export class RealtimePricingService {
             lastUpdate: this.lastUpdateTime.get(provider) || null,
             cached: this.pricingCache.has(provider)
         }));
+    }
+
+    /**
+     * Initialize provider-specific optimization strategies
+     */
+    private static initializeProviderStrategies(): void {
+        const strategies = [
+            {
+                provider: 'OpenAI',
+                contentSelectors: ['pricing', 'models', 'gpt', 'api'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/gpt-[\w.-]+/gi, /text-[\w.-]+/gi, /code-[\w.-]+/gi]
+            },
+            {
+                provider: 'Anthropic',
+                contentSelectors: ['pricing', 'claude', 'models', 'api'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/claude-[\w.-]+/gi]
+            },
+            {
+                provider: 'Google AI',
+                contentSelectors: ['pricing', 'gemini', 'models', 'api'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/gemini-[\w.-]+/gi, /palm-[\w.-]+/gi]
+            },
+            {
+                provider: 'AWS Bedrock',
+                contentSelectors: ['pricing', 'bedrock', 'models', 'inference'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/amazon\.[\w.-]+/gi, /anthropic\.[\w.-]+/gi, /cohere\.[\w.-]+/gi]
+            },
+            {
+                provider: 'Cohere',
+                contentSelectors: ['pricing', 'models', 'api', 'command'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/command-[\w.-]+/gi, /embed-[\w.-]+/gi]
+            },
+            {
+                provider: 'Mistral',
+                contentSelectors: ['pricing', 'models', 'api', 'mistral'],
+                pricePatterns: [/\$[\d.]+\s*per\s*1[kK]\s*tokens?/gi, /\$[\d.]+\/1[kK]/gi],
+                modelPatterns: [/mistral-[\w.-]+/gi, /mixtral-[\w.-]+/gi]
+            }
+        ];
+
+        strategies.forEach(strategy => {
+            this.providerStrategies.set(strategy.provider, strategy);
+        });
+    }
+
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.contentCache.clear();
+        this.providerStrategies.clear();
     }
 } 
