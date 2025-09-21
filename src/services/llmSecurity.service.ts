@@ -2,7 +2,6 @@ import { loggingService } from './logging.service';
 import { PromptFirewallService, ThreatDetectionResult } from './promptFirewall.service';
 import { ThreatLog } from '../models/ThreatLog';
 import { Types } from 'mongoose';
-// TraceEvent model would need to be created - using generic logging for now
 import { v4 as uuidv4 } from 'uuid';
 
 export interface SecurityAnalytics {
@@ -44,6 +43,12 @@ export interface HumanReviewRequest {
 
 export class LLMSecurityService {
     private static humanReviewQueue = new Map<string, HumanReviewRequest>();
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
 
     /**
      * Comprehensive security check for LLM requests
@@ -291,13 +296,18 @@ export class LLMSecurityService {
     }
 
     /**
-     * Get security analytics
+     * Get security analytics (optimized with aggregation pipeline)
      */
     static async getSecurityAnalytics(
         userId?: string,
         timeRange?: { start: Date; end: Date }
     ): Promise<SecurityAnalytics> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const defaultTimeRange = {
                 start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
                 end: new Date()
@@ -316,83 +326,119 @@ export class LLMSecurityService {
                 try {
                     matchQuery.userId = new Types.ObjectId(userId);
                 } catch (idError) {
-                    loggingService.warn('Invalid userId format, skipping user filter:', { value:  { value: userId } });
+                    loggingService.warn('Invalid userId format, skipping user filter:', { value: userId });
                     // Continue without user filter if userId is invalid
                 }
             }
 
-            // Get threat logs for analysis with error handling
-            let threatLogs: any[] = [];
-            try {
-                threatLogs = await ThreatLog.find(matchQuery).sort({ timestamp: -1 });
-            } catch (dbError) {
-                loggingService.error('Error fetching threat logs from database:', { error: dbError instanceof Error ? dbError.message : String(dbError) });
-                threatLogs = []; // Default to empty array if database query fails
-            }
-
-            // Calculate detection rate (threats detected vs total requests)
-            // This is a simplified calculation - in production you'd track total requests separately
-            const detectionRate = threatLogs.length > 0 ? 1.0 : 0.0;
-
-            // Analyze risky patterns
-            const patternCounts = new Map<string, { count: number; totalRiskScore: number }>();
-            const sourceCounts = new Map<string, { count: number; totalRiskScore: number }>();
-            const threatDistribution: Record<string, number> = {};
-            const containmentActions: Record<string, number> = {};
-            let totalCostSaved = 0;
-
-            for (const log of threatLogs) {
-                // Threat distribution
-                threatDistribution[log.threatCategory] = (threatDistribution[log.threatCategory] || 0) + 1;
-
-                // Cost saved
-                totalCostSaved += log.costSaved;
-
-                // Pattern analysis from details
-                if (log.details?.matchedPatterns) {
-                    for (const pattern of log.details.matchedPatterns) {
-                        const current = patternCounts.get(pattern) || { count: 0, totalRiskScore: 0 };
-                        current.count += 1;
-                        current.totalRiskScore += log.confidence;
-                        patternCounts.set(pattern, current);
+            // Use MongoDB aggregation pipeline for efficient analytics calculation
+            const analyticsResults = await ThreatLog.aggregate([
+                { $match: matchQuery },
+                {
+                    $facet: {
+                        // Basic statistics
+                        basicStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalThreats: { $sum: 1 },
+                                    totalCostSaved: { $sum: '$costSaved' },
+                                    avgConfidence: { $avg: '$confidence' }
+                                }
+                            }
+                        ],
+                        // Threat distribution
+                        threatDistribution: [
+                            {
+                                $group: {
+                                    _id: '$threatCategory',
+                                    count: { $sum: 1 }
+                                }
+                            }
+                        ],
+                        // Containment actions
+                        containmentActions: [
+                            {
+                                $match: { 'details.containmentAction': { $exists: true } }
+                            },
+                            {
+                                $group: {
+                                    _id: '$details.containmentAction',
+                                    count: { $sum: 1 }
+                                }
+                            }
+                        ],
+                        // Pattern analysis
+                        patternAnalysis: [
+                            {
+                                $match: { 'details.matchedPatterns': { $exists: true, $ne: [] } }
+                            },
+                            { $unwind: '$details.matchedPatterns' },
+                            {
+                                $group: {
+                                    _id: '$details.matchedPatterns',
+                                    count: { $sum: 1 },
+                                    totalRiskScore: { $sum: '$confidence' },
+                                    avgRiskScore: { $avg: '$confidence' }
+                                }
+                            },
+                            { $sort: { avgRiskScore: -1 } },
+                            { $limit: 10 }
+                        ],
+                        // Source analysis
+                        sourceAnalysis: [
+                            {
+                                $match: { 'details.provenanceSource': { $exists: true } }
+                            },
+                            {
+                                $group: {
+                                    _id: '$details.provenanceSource',
+                                    count: { $sum: 1 },
+                                    totalRiskScore: { $sum: '$confidence' },
+                                    avgRiskScore: { $avg: '$confidence' }
+                                }
+                            },
+                            { $sort: { avgRiskScore: -1 } },
+                            { $limit: 10 }
+                        ]
                     }
                 }
+            ]);
 
-                // Source analysis
-                if (log.details?.provenanceSource) {
-                    const source = log.details.provenanceSource;
-                    const current = sourceCounts.get(source) || { count: 0, totalRiskScore: 0 };
-                    current.count += 1;
-                    current.totalRiskScore += log.confidence;
-                    sourceCounts.set(source, current);
-                }
+            const result = analyticsResults[0];
+            const basicStats = result.basicStats[0] || { totalThreats: 0, totalCostSaved: 0, avgConfidence: 0 };
+            
+            // Transform threat distribution
+            const threatDistribution: Record<string, number> = {};
+            result.threatDistribution.forEach((item: any) => {
+                threatDistribution[item._id] = item.count;
+            });
 
-                // Containment actions
-                if (log.details?.containmentAction) {
-                    const action = log.details.containmentAction;
-                    containmentActions[action] = (containmentActions[action] || 0) + 1;
-                }
-            }
+            // Transform containment actions
+            const containmentActions: Record<string, number> = {};
+            result.containmentActions.forEach((item: any) => {
+                containmentActions[item._id] = item.count;
+            });
 
-            // Top risky patterns
-            const topRiskyPatterns = Array.from(patternCounts.entries())
-                .map(([pattern, data]) => ({
-                    pattern,
-                    count: data.count,
-                    averageRiskScore: data.totalRiskScore / data.count
-                }))
-                .sort((a, b) => b.averageRiskScore - a.averageRiskScore)
-                .slice(0, 10);
+            // Transform pattern analysis
+            const topRiskyPatterns = result.patternAnalysis.map((item: any) => ({
+                pattern: item._id,
+                count: item.count,
+                averageRiskScore: item.avgRiskScore
+            }));
 
-            // Top risky sources
-            const topRiskySources = Array.from(sourceCounts.entries())
-                .map(([source, data]) => ({
-                    source,
-                    count: data.count,
-                    averageRiskScore: data.totalRiskScore / data.count
-                }))
-                .sort((a, b) => b.averageRiskScore - a.averageRiskScore)
-                .slice(0, 10);
+            // Transform source analysis
+            const topRiskySources = result.sourceAnalysis.map((item: any) => ({
+                source: item._id,
+                count: item.count,
+                averageRiskScore: item.avgRiskScore
+            }));
+
+            // Calculate detection rate (simplified)
+            const detectionRate = basicStats.totalThreats > 0 ? 1.0 : 0.0;
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             return {
                 detectionRate,
@@ -400,11 +446,12 @@ export class LLMSecurityService {
                 topRiskySources,
                 threatDistribution,
                 containmentActions,
-                costSaved: totalCostSaved,
+                costSaved: basicStats.totalCostSaved,
                 timeRange: queryTimeRange
             };
 
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Failed to get security analytics', {
                 error: error instanceof Error ? error.message : String(error),
                 userId
@@ -473,7 +520,7 @@ export class LLMSecurityService {
     }
 
     /**
-     * Get security metrics summary
+     * Get security metrics summary (optimized with aggregation pipeline)
      */
     static async getSecurityMetricsSummary(userId?: string): Promise<{
         totalThreatsDetected: number;
@@ -483,6 +530,11 @@ export class LLMSecurityService {
         detectionTrend: 'increasing' | 'decreasing' | 'stable';
     }> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
             const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
             
@@ -491,65 +543,98 @@ export class LLMSecurityService {
                 try {
                     matchQuery.userId = new Types.ObjectId(userId);
                 } catch (idError) {
-                    loggingService.warn('Invalid userId format in metrics, skipping user filter:', { value:  { value: userId } });
+                    loggingService.warn('Invalid userId format in metrics, skipping user filter:', { value: userId });
                     // Continue without user filter if userId is invalid
                 }
             }
 
-            let allThreats: any[] = [];
-            let recentThreats: any[] = [];
+            // Use MongoDB aggregation pipeline for efficient metrics calculation
+            const metricsResults = await ThreatLog.aggregate([
+                { $match: matchQuery },
+                {
+                    $facet: {
+                        // Overall statistics
+                        overallStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalThreatsDetected: { $sum: 1 },
+                                    totalCostSaved: { $sum: '$costSaved' },
+                                    averageRiskScore: { $avg: '$confidence' }
+                                }
+                            }
+                        ],
+                        // Most common threat
+                        threatCounts: [
+                            {
+                                $group: {
+                                    _id: '$threatCategory',
+                                    count: { $sum: 1 }
+                                }
+                            },
+                            { $sort: { count: -1 } },
+                            { $limit: 1 }
+                        ],
+                        // Recent threats for trend analysis
+                        recentThreats: [
+                            {
+                                $match: { timestamp: { $gte: fifteenDaysAgo } }
+                            },
+                            {
+                                $group: {
+                                    _id: null,
+                                    recentCount: { $sum: 1 }
+                                }
+                            }
+                        ],
+                        // Old threats for trend analysis
+                        oldThreats: [
+                            {
+                                $match: { timestamp: { $lt: fifteenDaysAgo } }
+                            },
+                            {
+                                $group: {
+                                    _id: null,
+                                    oldCount: { $sum: 1 }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]);
+
+            const result = metricsResults[0];
+            const overallStats = result.overallStats[0] || { 
+                totalThreatsDetected: 0, 
+                totalCostSaved: 0, 
+                averageRiskScore: 0 
+            };
             
-            try {
-                allThreats = await ThreatLog.find(matchQuery);
-                recentThreats = await ThreatLog.find({
-                    ...matchQuery,
-                    timestamp: { $gte: fifteenDaysAgo }
-                });
-            } catch (dbError) {
-                loggingService.error('Error fetching threat logs for metrics:', { error: dbError instanceof Error ? dbError.message : String(dbError) });
-                // Return default values if database query fails
-                return {
-                    totalThreatsDetected: 0,
-                    totalCostSaved: 0,
-                    averageRiskScore: 0,
-                    mostCommonThreat: 'None',
-                    detectionTrend: 'stable' as 'stable'
-                };
-            }
+            const mostCommonThreat = result.threatCounts[0]?._id || 'none';
+            const recentCount = result.recentThreats[0]?.recentCount || 0;
+            const oldCount = result.oldThreats[0]?.oldCount || 0;
 
-            const totalThreatsDetected = allThreats.length;
-            const totalCostSaved = allThreats.reduce((sum, threat) => sum + threat.costSaved, 0);
-            const averageRiskScore = allThreats.length > 0 
-                ? allThreats.reduce((sum, threat) => sum + threat.confidence, 0) / allThreats.length 
-                : 0;
-
-            // Most common threat
-            const threatCounts: Record<string, number> = {};
-            allThreats.forEach(threat => {
-                threatCounts[threat.threatCategory] = (threatCounts[threat.threatCategory] || 0) + 1;
-            });
-            const mostCommonThreat = Object.entries(threatCounts)
-                .sort(([,a], [,b]) => b - a)[0]?.[0] || 'none';
-
-            // Detection trend
-            const oldThreats = allThreats.filter(t => t.timestamp < fifteenDaysAgo);
+            // Calculate detection trend
             let detectionTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
-            
-            if (recentThreats.length > oldThreats.length * 1.2) {
+            if (recentCount > oldCount * 1.2) {
                 detectionTrend = 'increasing';
-            } else if (recentThreats.length < oldThreats.length * 0.8) {
+            } else if (recentCount < oldCount * 0.8) {
                 detectionTrend = 'decreasing';
             }
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return {
-                totalThreatsDetected,
-                totalCostSaved,
-                averageRiskScore,
+                totalThreatsDetected: overallStats.totalThreatsDetected,
+                totalCostSaved: overallStats.totalCostSaved,
+                averageRiskScore: overallStats.averageRiskScore,
                 mostCommonThreat,
                 detectionTrend
             };
 
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Failed to get security metrics summary', {
                 error: error instanceof Error ? error.message : String(error),
                 userId
@@ -562,6 +647,28 @@ export class LLMSecurityService {
                 detectionTrend: 'stable'
             };
         }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
     }
 }
 

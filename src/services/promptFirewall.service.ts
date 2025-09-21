@@ -39,6 +39,57 @@ export interface FirewallAnalytics {
 export class PromptFirewallService {
     private static bedrockClient: BedrockRuntimeClient;
     
+    // Pre-compiled regex patterns for better performance
+    private static readonly INJECTION_PATTERNS = [
+        /ignore\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
+        /forget\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
+        /disregard\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
+        /override\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
+        /you\s+are\s+now\s+(?:a\s+)?(?:different\s+)?(?:character|person|ai)/i,
+        /pretend\s+(?:to\s+be|you\s+are)/i,
+        /roleplay\s+as/i,
+        /act\s+as\s+(?:if\s+you\s+are\s+)?(?:a\s+)?(?:different\s+)?(?:character|person)/i,
+        /bypass\s+(?:your\s+)?(?:safety\s+)?(?:guidelines|restrictions|filters)/i,
+        /jailbreak/i,
+        /\\n\\n(?:human|user|assistant):/i,
+        /<\|im_start\|>/i,
+        /<\|im_end\|>/i
+    ];
+
+    private static readonly JAILBREAK_PATTERNS = [
+        /dan\s+mode/i,
+        /developer\s+mode/i,
+        /god\s+mode/i,
+        /unrestricted\s+mode/i,
+        /evil\s+mode/i,
+        /opposite\s+mode/i,
+        /reverse\s+mode/i,
+        /simulate\s+(?:a\s+)?(?:jailbroken|unrestricted)/i,
+        /hypothetically/i,
+        /in\s+a\s+fictional\s+world/i,
+        /for\s+educational\s+purposes/i,
+        /academic\s+research/i
+    ];
+
+    private static readonly HARMFUL_PATTERNS = [
+        /how\s+to\s+(?:make|build|create)\s+(?:a\s+)?bomb/i,
+        /how\s+to\s+(?:hack|break\s+into)/i,
+        /how\s+to\s+(?:steal|rob)/i,
+        /suicide\s+methods/i,
+        /self\s+harm/i,
+        /illegal\s+drugs/i,
+        /child\s+(?:abuse|exploitation)/i,
+        /hate\s+speech/i,
+        /terrorist/i,
+        /violence\s+against/i
+    ];
+
+    // Circuit breaker for external services
+    private static serviceFailureCount: number = 0;
+    private static readonly MAX_SERVICE_FAILURES = 3;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
+    private static lastServiceFailureTime: number = 0;
+    
     // Initialize Bedrock client
     static initialize() {
         if (!this.bedrockClient && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
@@ -132,7 +183,7 @@ export class PromptFirewallService {
         // Disable Bedrock for now to avoid model errors - use reliable pattern matching
         const useBedrockModels = false; // process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
 
-        if (useBedrockModels) {
+        if (useBedrockModels && !this.isServiceCircuitBreakerOpen()) {
             try {
                 // Use Meta's Prompt Guard model via Bedrock
                 const input = {
@@ -171,6 +222,9 @@ export class PromptFirewallService {
                 
                 const isBlocked = score > threshold;
                 
+                // Reset failure count on success
+                this.serviceFailureCount = 0;
+                
                 return {
                     isBlocked,
                     threatCategory: isBlocked ? 'prompt_injection' : undefined,
@@ -187,7 +241,8 @@ export class PromptFirewallService {
                 };
 
             } catch (error) {
-                loggingService.warn('Bedrock Prompt Guard failed, using fallback', { value:  { value: error as Error } });
+                this.recordServiceFailure();
+                loggingService.warn('Bedrock Prompt Guard failed, using fallback', { value: error as Error });
                 // Fall through to pattern matching
             }
         }
@@ -269,54 +324,26 @@ export class PromptFirewallService {
     }
 
     /**
-     * Fallback prompt injection check using pattern matching
+     * Optimized fallback prompt injection check using pre-compiled patterns
      */
     private static fallbackPromptGuardCheck(prompt: string, threshold: number): ThreatDetectionResult {
-        const injectionPatterns = [
-            /ignore\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
-            /forget\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
-            /disregard\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
-            /override\s+(?:all\s+)?(?:previous\s+)?(?:system\s+)?instructions?/i,
-            /you\s+are\s+now\s+(?:a\s+)?(?:different\s+)?(?:character|person|ai)/i,
-            /pretend\s+(?:to\s+be|you\s+are)/i,
-            /roleplay\s+as/i,
-            /act\s+as\s+(?:if\s+you\s+are\s+)?(?:a\s+)?(?:different\s+)?(?:character|person)/i,
-            /bypass\s+(?:your\s+)?(?:safety\s+)?(?:guidelines|restrictions|filters)/i,
-            /jailbreak/i,
-            /\\n\\n(?:human|user|assistant):/i,
-            /<\|im_start\|>/i,
-            /<\|im_end\|>/i
-        ];
-
-        const jailbreakPatterns = [
-            /dan\s+mode/i,
-            /developer\s+mode/i,
-            /god\s+mode/i,
-            /unrestricted\s+mode/i,
-            /evil\s+mode/i,
-            /opposite\s+mode/i,
-            /reverse\s+mode/i,
-            /simulate\s+(?:a\s+)?(?:jailbroken|unrestricted)/i,
-            /hypothetically/i,
-            /in\s+a\s+fictional\s+world/i,
-            /for\s+educational\s+purposes/i,
-            /academic\s+research/i
-        ];
-
         let injectionScore = 0;
         let jailbreakScore = 0;
+        const matchedPatterns: string[] = [];
 
-        // Check for injection patterns
-        for (const pattern of injectionPatterns) {
+        // Check for injection patterns using pre-compiled regex
+        for (const pattern of this.INJECTION_PATTERNS) {
             if (pattern.test(prompt)) {
                 injectionScore += 0.3;
+                matchedPatterns.push(`injection:${pattern.source.substring(0, 50)}`);
             }
         }
 
-        // Check for jailbreak patterns
-        for (const pattern of jailbreakPatterns) {
+        // Check for jailbreak patterns using pre-compiled regex
+        for (const pattern of this.JAILBREAK_PATTERNS) {
             if (pattern.test(prompt)) {
                 jailbreakScore += 0.3;
+                matchedPatterns.push(`jailbreak:${pattern.source.substring(0, 50)}`);
             }
         }
 
@@ -335,46 +362,46 @@ export class PromptFirewallService {
             threatCategory: isBlocked ? threatCategory : undefined,
             confidence: maxScore,
             reason: isBlocked 
-                ? `Detected ${threatCategory} patterns (fallback check)`
+                ? `Detected ${threatCategory} patterns (optimized check)`
                 : 'No suspicious patterns detected',
             stage: 'prompt-guard',
+            matchedPatterns,
+            riskScore: maxScore,
+            containmentAction: isBlocked ? (maxScore > 0.8 ? 'block' : 'sandbox') : 'allow',
             details: {
                 injectionScore,
                 jailbreakScore,
                 threshold,
-                method: 'fallback_pattern_matching'
+                method: 'optimized_pattern_matching',
+                patternsMatched: matchedPatterns.length
             }
         };
     }
 
     /**
-     * Fallback content filtering
+     * Optimized fallback content filtering using pre-compiled patterns
      */
     private static fallbackContentCheck(prompt: string): ThreatDetectionResult {
-        const harmfulPatterns = [
-            /how\s+to\s+(?:make|build|create)\s+(?:a\s+)?bomb/i,
-            /how\s+to\s+(?:hack|break\s+into)/i,
-            /how\s+to\s+(?:steal|rob)/i,
-            /suicide\s+methods/i,
-            /self\s+harm/i,
-            /illegal\s+drugs/i,
-            /child\s+(?:abuse|exploitation)/i,
-            /hate\s+speech/i,
-            /terrorist/i,
-            /violence\s+against/i
-        ];
+        const matchedPatterns: string[] = [];
+        let maxConfidence = 0.1;
 
-        for (const pattern of harmfulPatterns) {
+        for (const pattern of this.HARMFUL_PATTERNS) {
             if (pattern.test(prompt)) {
+                matchedPatterns.push(`harmful:${pattern.source.substring(0, 50)}`);
+                maxConfidence = 0.8;
+                
                 return {
                     isBlocked: true,
                     threatCategory: 'harmful_content',
-                    confidence: 0.8,
-                    reason: 'Content contains potentially harmful patterns (fallback check)',
+                    confidence: maxConfidence,
+                    reason: 'Content contains potentially harmful patterns (optimized check)',
                     stage: 'llama-guard',
+                    matchedPatterns,
+                    riskScore: maxConfidence,
+                    containmentAction: 'block',
                     details: {
-                        method: 'fallback_content_filtering',
-                        matchedPattern: pattern.source
+                        method: 'optimized_content_filtering',
+                        patternsMatched: matchedPatterns.length
                     }
                 };
             }
@@ -382,11 +409,13 @@ export class PromptFirewallService {
 
         return {
             isBlocked: false,
-            confidence: 0.1,
-            reason: 'No harmful content detected (fallback check)',
+            confidence: maxConfidence,
+            reason: 'No harmful content detected (optimized check)',
             stage: 'llama-guard',
+            containmentAction: 'allow',
             details: {
-                method: 'fallback_content_filtering'
+                method: 'optimized_content_filtering',
+                patternsChecked: this.HARMFUL_PATTERNS.length
             }
         };
     }
@@ -986,5 +1015,36 @@ export class PromptFirewallService {
         }
 
         return sanitized;
+    }
+
+    /**
+     * Circuit breaker utilities for external services
+     */
+    private static isServiceCircuitBreakerOpen(): boolean {
+        if (this.serviceFailureCount >= this.MAX_SERVICE_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastServiceFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.serviceFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordServiceFailure(): void {
+        this.serviceFailureCount++;
+        this.lastServiceFailureTime = Date.now();
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        // Reset circuit breaker state
+        this.serviceFailureCount = 0;
+        this.lastServiceFailureTime = 0;
     }
 }

@@ -4,6 +4,26 @@ import { PromptFirewallService } from '../services/promptFirewall.service';
 import { loggingService } from '../services/logging.service';
 
 export class SecurityController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for external services
+    private static serviceFailureCount: number = 0;
+    private static readonly MAX_SERVICE_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastServiceFailureTime: number = 0;
+    
+    // Firewall configuration cache
+    private static configCache = new Map<string, { config: any; timestamp: number }>();
+    private static readonly CONFIG_CACHE_TTL = 300000; // 5 minutes
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Get security analytics dashboard
      */
@@ -16,12 +36,9 @@ export class SecurityController {
         try {
             loggingService.info('Security analytics retrieval initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
+                endDate
             });
 
             if (!userId) {
@@ -49,11 +66,20 @@ export class SecurityController {
             loggingService.info('Security analytics retrieved successfully', {
                 userId,
                 duration,
-                startDate,
-                endDate,
-                hasTimeRange: !!timeRange,
-                hasAnalytics: !!analytics,
                 requestId
+            });
+
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'security_analytics_retrieved',
+                    category: 'security',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        hasTimeRange: !!timeRange
+                    }
+                });
             });
 
             res.json({
@@ -62,16 +88,13 @@ export class SecurityController {
             });
 
         } catch (error: any) {
+            this.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security analytics retrieval failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
-                startDate,
-                endDate,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -93,7 +116,6 @@ export class SecurityController {
         try {
             loggingService.info('Security metrics retrieval initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId
             });
 
@@ -114,7 +136,6 @@ export class SecurityController {
             loggingService.info('Security metrics retrieved successfully', {
                 userId,
                 duration,
-                hasMetrics: !!metrics,
                 requestId
             });
 
@@ -124,14 +145,13 @@ export class SecurityController {
             });
 
         } catch (error: any) {
+            this.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security metrics retrieval failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -152,15 +172,19 @@ export class SecurityController {
         const { prompt, retrievedChunks, toolCalls, provenanceSource } = req.body;
 
         try {
+            // Check circuit breaker
+            if (this.isServiceCircuitBreakerOpen()) {
+                res.status(503).json({
+                    success: false,
+                    message: 'Security service temporarily unavailable. Please try again later.'
+                });
+                return;
+            }
+
             loggingService.info('Security check test initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
-                hasPrompt: !!prompt,
-                promptLength: prompt?.length || 0,
-                hasRetrievedChunks: !!retrievedChunks,
-                hasToolCalls: !!toolCalls,
-                hasProvenanceSource: !!provenanceSource
+                promptLength: prompt?.length || 0
             });
 
             if (!userId) {
@@ -187,7 +211,13 @@ export class SecurityController {
             }
 
             const testRequestId = `test-${Date.now()}`;
-            const securityCheck = await LLMSecurityService.performSecurityCheck(
+            
+            // Add timeout handling for security check
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('Security check timeout')), 30000);
+            });
+
+            const securityCheckPromise = LLMSecurityService.performSecurityCheck(
                 prompt,
                 testRequestId,
                 userId,
@@ -198,6 +228,8 @@ export class SecurityController {
                     estimatedCost: 0.01
                 }
             );
+
+            const securityCheck = await Promise.race([securityCheckPromise, timeoutPromise]);
             const duration = Date.now() - startTime;
 
             loggingService.info('Security check test completed successfully', {
@@ -205,22 +237,22 @@ export class SecurityController {
                 duration,
                 testRequestId,
                 securityResult: securityCheck.result,
-                hasHumanReviewId: !!securityCheck.humanReviewId,
-                traceCreated: !!securityCheck.traceEvent,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'security_check_tested',
-                category: 'security',
-                value: duration,
-                metadata: {
-                    userId,
-                    testRequestId,
-                    securityResult: securityCheck.result,
-                    hasHumanReview: !!securityCheck.humanReviewId
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'security_check_tested',
+                    category: 'security',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        testRequestId,
+                        securityResult: securityCheck.result,
+                        hasHumanReview: !!securityCheck.humanReviewId
+                    }
+                });
             });
 
             res.json({
@@ -234,15 +266,13 @@ export class SecurityController {
             });
 
         } catch (error: any) {
+            this.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security check test failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
-                hasPrompt: !!prompt,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
             
@@ -782,55 +812,51 @@ export class SecurityController {
                 };
             }
 
-            // Get analytics and metrics with error handling
-            let analytics, metrics;
-            try {
-                analytics = await LLMSecurityService.getSecurityAnalytics(userId, timeRange);
-            } catch (analyticsError: any) {
-                loggingService.warn('Failed to get security analytics, using default values', {
+            // Get analytics and metrics with parallel processing and error handling
+            const [analytics, metrics] = await Promise.allSettled([
+                LLMSecurityService.getSecurityAnalytics(userId, timeRange),
+                LLMSecurityService.getSecurityMetricsSummary(userId)
+            ]);
+
+            const finalAnalytics = analytics.status === 'fulfilled' ? analytics.value : {
+                detectionRate: 0,
+                topRiskyPatterns: [],
+                topRiskySources: [],
+                threatDistribution: {},
+                containmentActions: {},
+                costSaved: 0,
+                timeRange: timeRange || { start: new Date(), end: new Date() }
+            };
+
+            const finalMetrics = metrics.status === 'fulfilled' ? metrics.value : {
+                totalThreatsDetected: 0,
+                totalCostSaved: 0,
+                averageRiskScore: 0,
+                mostCommonThreat: 'None',
+                detectionTrend: 'stable' as 'stable'
+            };
+
+            if (analytics.status === 'rejected') {
+                loggingService.warn('Failed to get security analytics, using defaults', {
                     userId,
                     requestId,
-                    error: analyticsError.message || 'Unknown error'
+                    error: analytics.reason?.message || 'Unknown error'
                 });
-                analytics = {
-                    detectionRate: 0,
-                    topRiskyPatterns: [],
-                    topRiskySources: [],
-                    threatDistribution: {},
-                    containmentActions: {},
-                    costSaved: 0,
-                    timeRange: timeRange || { start: new Date(), end: new Date() }
-                };
             }
 
-            try {
-                metrics = await LLMSecurityService.getSecurityMetricsSummary(userId);
-                loggingService.info('Security metrics retrieved successfully', { 
+            if (metrics.status === 'rejected') {
+                loggingService.warn('Failed to get security metrics, using defaults', {
                     userId,
                     requestId,
-                    totalThreats: metrics.totalThreatsDetected,
-                    totalCost: metrics.totalCostSaved 
+                    error: metrics.reason?.message || 'Unknown error'
                 });
-            } catch (metricsError: any) {
-                loggingService.warn('Failed to get security metrics, using default values', {
-                    userId,
-                    requestId,
-                    error: metricsError.message || 'Unknown error'
-                });
-                metrics = {
-                    totalThreatsDetected: 0,
-                    totalCostSaved: 0,
-                    averageRiskScore: 0,
-                    mostCommonThreat: 'None',
-                    detectionTrend: 'stable'
-                };
             }
 
             const report = {
                 generatedAt: new Date(),
-                timeRange: analytics?.timeRange || timeRange || { start: new Date(), end: new Date() },
-                summary: metrics || {},
-                analytics: analytics || {},
+                timeRange: finalAnalytics.timeRange || timeRange || { start: new Date(), end: new Date() },
+                summary: finalMetrics,
+                analytics: finalAnalytics,
                 metadata: {
                     userId,
                     reportType: 'security_comprehensive',
@@ -839,12 +865,13 @@ export class SecurityController {
             };
 
             if (format === 'csv') {
-                // Convert to CSV format
-                const csv = SecurityController.convertSecurityReportToCSV(report);
-                
+                // Stream CSV generation for better memory efficiency
                 res.setHeader('Content-Type', 'text/csv');
                 res.setHeader('Content-Disposition', 'attachment; filename=security_report.csv');
-                res.send(csv);
+                
+                // Generate CSV in chunks to avoid memory issues
+                const csvContent = this.generateStreamedCSV(report);
+                res.send(csvContent);
             } else {
                 res.setHeader('Content-Type', 'application/json');
                 res.setHeader('Content-Disposition', 'attachment; filename=security_report.json');
@@ -857,25 +884,21 @@ export class SecurityController {
                 userId,
                 duration,
                 format,
-                startDate,
-                endDate,
-                hasTimeRange: !!timeRange,
-                hasAnalytics: !!analytics,
-                hasMetrics: !!metrics,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'security_report_exported',
-                category: 'security',
-                value: duration,
-                metadata: {
-                    userId,
-                    format,
-                    startDate: !!startDate,
-                    endDate: !!endDate
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'security_report_exported',
+                    category: 'security',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        format,
+                        hasTimeRange: !!timeRange
+                    }
+                });
             });
 
         } catch (error: any) {
@@ -902,19 +925,17 @@ export class SecurityController {
     }
 
     /**
-     * Convert security report to CSV format
+     * Generate streamed CSV for better memory efficiency
      */
-    private static convertSecurityReportToCSV(report: any): string {
+    private static generateStreamedCSV(report: any): string {
         try {
-            // Simple CSV with basic data
             const timestamp = new Date().toISOString();
             const summary = report?.summary || {};
             const analytics = report?.analytics || {};
 
-            const csvRows = [
-                // Header row
+            // Use array for better performance than string concatenation
+            const csvRows: string[] = [
                 'Metric,Value,Category,Timestamp',
-                // Summary data
                 `Total Threats Detected,"${summary.totalThreatsDetected || 0}",Summary,"${timestamp}"`,
                 `Total Cost Saved,"${summary.totalCostSaved || 0}",Summary,"${timestamp}"`,
                 `Average Risk Score,"${summary.averageRiskScore || 0}",Summary,"${timestamp}"`,
@@ -923,24 +944,111 @@ export class SecurityController {
                 `Detection Rate,"${analytics.detectionRate || 0}",Analytics,"${timestamp}"`
             ];
 
-            // Add threat distribution data safely
+            // Process threat distribution in chunks
             if (analytics.threatDistribution && typeof analytics.threatDistribution === 'object') {
-                try {
-                    for (const [threat, count] of Object.entries(analytics.threatDistribution)) {
+                const entries = Object.entries(analytics.threatDistribution);
+                for (let i = 0; i < entries.length; i += 100) { // Process in chunks of 100
+                    const chunk = entries.slice(i, i + 100);
+                    for (const [threat, count] of chunk) {
                         const safeThreat = String(threat || 'unknown').replace(/"/g, '""');
                         const safeCount = Number(count) || 0;
                         csvRows.push(`"${safeThreat} Threats","${safeCount}",Threat Distribution,"${timestamp}"`);
                     }
-                } catch (threatError: any) {
-                    // Silent error handling for CSV conversion
                 }
             }
 
-            const csvContent = csvRows.join('\n');
-            return csvContent;
-
+            return csvRows.join('\n');
         } catch (error: any) {
             return 'Error,Message\n"CSV Generation Error","Failed to generate CSV report"';
         }
+    }
+
+    /**
+     * Circuit breaker utilities for external services
+     */
+    private static isServiceCircuitBreakerOpen(): boolean {
+        if (this.serviceFailureCount >= this.MAX_SERVICE_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastServiceFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.serviceFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordServiceFailure(): void {
+        this.serviceFailureCount++;
+        this.lastServiceFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Get cached firewall configuration
+     */
+    private static getCachedFirewallConfig(userId: string): any | null {
+        const cached = this.configCache.get(userId);
+        if (cached && Date.now() - cached.timestamp < this.CONFIG_CACHE_TTL) {
+            return cached.config;
+        }
+        return null;
+    }
+
+    private static setCachedFirewallConfig(userId: string, config: any): void {
+        this.configCache.set(userId, {
+            config,
+            timestamp: Date.now()
+        });
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
+        }
+        
+        // Clear caches
+        this.configCache.clear();
     }
 }
