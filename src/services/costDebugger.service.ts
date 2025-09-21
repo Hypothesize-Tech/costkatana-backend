@@ -65,6 +65,16 @@ export interface DeadWeightAnalysis {
 }
 
 export class CostDebuggerService {
+  // Circuit breaker for AI service calls
+  private aiFailureCount = 0;
+  private readonly MAX_AI_FAILURES = 3;
+  private readonly CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+  private lastFailureTime = 0;
+
+  // Memory optimization: Content chunking configuration
+  private readonly MAX_CONTENT_CHUNK_SIZE = 1000;
+  private readonly MAX_SECTION_PREVIEW_SIZE = 300;
+
   async analyzePrompt(
     prompt: string,
     provider: AIProvider,
@@ -93,34 +103,36 @@ export class CostDebuggerService {
       const sections = await this.parsePromptSections(prompt, provider, options);
       loggingService.info('✅ Prompt sections parsed successfully', { value:  {  sectionsCount: sections.length  } });
       
-      // Calculate token attribution with dynamic pricing
-      loggingService.info('🔍 Calculating token attribution...');
-      const tokenAttribution = await this.calculateTokenAttribution(sections, provider, model, modelPricing);
-      loggingService.info('✅ Token attribution calculated successfully', { value:  {  tokenAttribution  } });
+      // Solution 1 & 3: Parallel processing of token attribution and AI analyses
+      loggingService.info('🔍 Starting parallel analysis processing...');
       
-      // Analyze optimization opportunities
-      loggingService.info('🔍 About to call analyzeOptimizationOpportunities', { value:  {  sectionsCount: sections.length, provider, model  } });
-      const optimizationOpportunities = await this.analyzeOptimizationOpportunities(sections, provider, model);
-      loggingService.info('✅ analyzeOptimizationOpportunities completed successfully', { value:  {  optimizationOpportunities  } });
+      const [tokenAttribution, optimizationOpportunities, qualityMetrics] = await Promise.all([
+        // Calculate token attribution with batch processing
+        this.calculateTokenAttributionOptimized(sections, provider, model, modelPricing),
+        // Analyze optimization opportunities with circuit breaker
+        this.performAnalysisWithFallback(
+          () => this.analyzeOptimizationOpportunities(sections, provider, model),
+          () => this.fallbackOptimizationAnalysis(sections, provider, model)
+        ),
+        // Assess quality metrics with circuit breaker
+        this.performAnalysisWithFallback(
+          () => this.assessPromptQuality(sections, provider, model),
+          () => ({
+            instructionClarity: 70,
+            contextRelevance: 70,
+            exampleEfficiency: 70,
+            overallScore: 70
+          })
+        )
+      ]);
       
-      // Assess quality metrics
-      loggingService.info('🔍 About to call assessPromptQuality', { value:  {  sectionsCount: sections.length, provider, model  } });
-      let qualityMetrics;
-      try {
-        loggingService.info('🚀 Calling assessPromptQuality method...');
-        qualityMetrics = await this.assessPromptQuality(sections, provider, model);
-        loggingService.info('✅ assessPromptQuality completed successfully', { value:  {  qualityMetrics  } });
-      } catch (error) {
-        loggingService.error('❌ assessPromptQuality failed:', { error: error instanceof Error ? error.message : String(error) });
-        // Provide fallback quality metrics
-        qualityMetrics = {
-          instructionClarity: 70,
-          contextRelevance: 70,
-          exampleEfficiency: 70,
-          overallScore: 70
-        };
-        loggingService.info('🔄 Using fallback quality metrics', { value:  {  qualityMetrics  } });
-      }
+      loggingService.info('✅ Parallel analysis completed successfully', { 
+        value: { 
+          totalTokens: tokenAttribution.total.tokens,
+          optimizationCount: optimizationOpportunities.highImpact.length + optimizationOpportunities.mediumImpact.length,
+          qualityScore: qualityMetrics.overallScore
+        } 
+      });
 
       const analysis: CostDebuggerAnalysis = {
         promptId: this.generatePromptId(),
@@ -150,6 +162,7 @@ export class CostDebuggerService {
     }
   }
 
+  // Solution 4: Memory-efficient prompt section parsing
   private async parsePromptSections(
     prompt: string,
     provider: AIProvider,
@@ -163,13 +176,14 @@ export class CostDebuggerService {
     const sections: PromptSection[] = [];
     let currentIndex = 0;
 
-    // System prompt section
+    // System prompt section with memory optimization
     if (options.systemMessage) {
+      const systemContent = this.optimizeContentForMemory(options.systemMessage);
       const systemSection: PromptSection = {
         id: 'system-prompt',
         type: 'system',
-        content: options.systemMessage,
-        tokens: estimateTokens(options.systemMessage, provider),
+        content: systemContent,
+        tokens: estimateTokens(options.systemMessage, provider), // Use original for accurate token count
         cost: 0, // Will be calculated later
         impact: 'high',
         startIndex: currentIndex,
@@ -180,12 +194,13 @@ export class CostDebuggerService {
       currentIndex += options.systemMessage.length;
     }
 
-    // User message section
+    // User message section with memory optimization
+    const userContent = this.optimizeContentForMemory(prompt);
     const userSection: PromptSection = {
       id: 'user-message',
       type: 'user',
-      content: prompt,
-      tokens: estimateTokens(prompt, provider),
+      content: userContent,
+      tokens: estimateTokens(prompt, provider), // Use original for accurate token count
       cost: 0, // Will be calculated later
       impact: 'high',
       startIndex: currentIndex,
@@ -195,15 +210,18 @@ export class CostDebuggerService {
     sections.push(userSection);
     currentIndex += prompt.length;
 
-    // Conversation history sections
+    // Conversation history sections with memory optimization
     if (options.conversationHistory && options.conversationHistory.length > 0) {
       for (let i = 0; i < options.conversationHistory.length; i++) {
         const msg = options.conversationHistory[i];
+        const fullContent = `${msg.role}: ${msg.content}`;
+        const optimizedContent = this.optimizeContentForMemory(fullContent);
+        
         const historySection: PromptSection = {
           id: `history-${i}`,
           type: 'history',
-          content: `${msg.role}: ${msg.content}`,
-          tokens: estimateTokens(`${msg.role}: ${msg.content}`, provider),
+          content: optimizedContent,
+          tokens: estimateTokens(fullContent, provider), // Use original for accurate token count
           cost: 0, // Will be calculated later
           impact: i < 2 ? 'medium' : 'low', // Recent messages have higher impact
           startIndex: currentIndex,
@@ -215,15 +233,18 @@ export class CostDebuggerService {
       }
     }
 
-    // Tool call sections
+    // Tool call sections with memory optimization
     if (options.toolCalls && options.toolCalls.length > 0) {
       for (let i = 0; i < options.toolCalls.length; i++) {
         const tool = options.toolCalls[i];
+        const fullContent = `Tool: ${tool.name}\nArguments: ${tool.arguments}`;
+        const optimizedContent = this.optimizeContentForMemory(fullContent);
+        
         const toolSection: PromptSection = {
           id: `tool-${i}`,
           type: 'tool',
-          content: `Tool: ${tool.name}\nArguments: ${tool.arguments}`,
-          tokens: estimateTokens(`Tool: ${tool.name}\nArguments: ${tool.arguments}`, provider),
+          content: optimizedContent,
+          tokens: estimateTokens(fullContent, provider), // Use original for accurate token count
           cost: 0, // Will be calculated later
           impact: 'medium',
           startIndex: currentIndex,
@@ -235,14 +256,16 @@ export class CostDebuggerService {
       }
     }
 
-    // Metadata section
+    // Metadata section with memory optimization
     if (options.metadata && Object.keys(options.metadata).length > 0) {
       const metadataStr = JSON.stringify(options.metadata);
+      const optimizedContent = this.optimizeContentForMemory(metadataStr);
+      
       const metadataSection: PromptSection = {
         id: 'metadata',
         type: 'metadata',
-        content: metadataStr,
-        tokens: estimateTokens(metadataStr, provider),
+        content: optimizedContent,
+        tokens: estimateTokens(metadataStr, provider), // Use original for accurate token count
         cost: 0, // Will be calculated later
         impact: 'low',
         startIndex: currentIndex,
@@ -255,7 +278,8 @@ export class CostDebuggerService {
     return sections;
   }
 
-  private async calculateTokenAttribution(
+  // Solution 3: Optimized batch token attribution calculation
+  private async calculateTokenAttributionOptimized(
     sections: PromptSection[],
     provider: AIProvider,
     model: string,
@@ -270,8 +294,16 @@ export class CostDebuggerService {
       total: { tokens: 0, cost: 0, impact: 'high' }
     };
 
-    for (const section of sections) {
-      const cost = await this.calculateSectionCost(section.tokens, provider, model, modelPricing);
+    // Batch process all section costs in parallel
+    const sectionCosts = await Promise.all(
+      sections.map(section => 
+        this.calculateSectionCost(section.tokens, provider, model, modelPricing)
+      )
+    );
+
+    // Apply costs and calculate attribution in a single pass
+    sections.forEach((section, index) => {
+      const cost = sectionCosts[index];
       section.cost = cost;
 
       switch (section.type) {
@@ -299,9 +331,19 @@ export class CostDebuggerService {
 
       attribution.total.tokens += section.tokens;
       attribution.total.cost += cost;
-    }
+    });
 
     return attribution;
+  }
+
+  // Keep original method for backward compatibility
+  private async calculateTokenAttribution(
+    sections: PromptSection[],
+    provider: AIProvider,
+    model: string,
+    modelPricing: any
+  ): Promise<TokenAttribution> {
+    return this.calculateTokenAttributionOptimized(sections, provider, model, modelPricing);
   }
 
   private async calculateSectionCost(
@@ -391,7 +433,7 @@ Model: ${model}
 
 Prompt Sections:
 ${sections.map(section => `
-**${section.id} (${section.type})**: ${section.content.substring(0, 300)}${section.content.length > 300 ? '...' : ''}
+**${section.id} (${section.type})**: ${section.content}
 Tokens: ${section.tokens}
 Cost: $${section.cost.toFixed(6)}
 `).join('\n')}
@@ -698,7 +740,7 @@ Please evaluate the following prompt sections and provide scores for:
 
 Prompt Sections:
 ${sections.map(section => `
-**${section.type.toUpperCase()}**: ${section.content.substring(0, 200)}${section.content.length > 200 ? '...' : ''}
+**${section.type.toUpperCase()}**: ${section.content}
 `).join('\n')}
 
 Provide your response as a valid JSON object with this exact format:
@@ -860,6 +902,98 @@ Focus on clarity, conciseness, and effectiveness.`;
     return `prompt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  // Solution 5: Smart Fallback Strategy with Circuit Breaker
+  private async performAnalysisWithFallback<T>(
+    aiAnalysis: () => Promise<T>,
+    fallback: () => T | Promise<T>
+  ): Promise<T> {
+    // Check if circuit breaker is open
+    if (this.isCircuitBreakerOpen()) {
+      loggingService.info('🔴 Circuit breaker is open, using fallback analysis');
+      return await fallback();
+    }
+
+    try {
+      const result = await aiAnalysis();
+      this.resetCircuitBreaker(); // Reset on success
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      loggingService.warn('⚠️ AI analysis failed, using fallback', { 
+        error: error instanceof Error ? error.message : String(error),
+        failureCount: this.aiFailureCount
+      });
+      return await fallback();
+    }
+  }
+
+  private isCircuitBreakerOpen(): boolean {
+    if (this.aiFailureCount < this.MAX_AI_FAILURES) {
+      return false;
+    }
+    
+    // Check if enough time has passed to reset the circuit breaker
+    if (Date.now() - this.lastFailureTime > this.CIRCUIT_BREAKER_RESET_TIME) {
+      this.resetCircuitBreaker();
+      return false;
+    }
+    
+    return true;
+  }
+
+  private recordFailure(): void {
+    this.aiFailureCount++;
+    this.lastFailureTime = Date.now();
+    
+    if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+      loggingService.warn('🔴 Circuit breaker opened due to repeated AI failures', {
+        failureCount: this.aiFailureCount,
+        resetTime: new Date(Date.now() + this.CIRCUIT_BREAKER_RESET_TIME).toISOString()
+      });
+    }
+  }
+
+  private resetCircuitBreaker(): void {
+    if (this.aiFailureCount > 0) {
+      loggingService.info('🟢 Circuit breaker reset - AI service recovered', {
+        previousFailures: this.aiFailureCount
+      });
+    }
+    this.aiFailureCount = 0;
+    this.lastFailureTime = 0;
+  }
+
+  // Solution 4: Memory-efficient content processing
+  private optimizeContentForMemory(content: string): string {
+    // For very large content, truncate but preserve structure
+    if (content.length <= this.MAX_SECTION_PREVIEW_SIZE) {
+      return content;
+    }
+
+    // For large content, create a meaningful preview
+    const preview = content.substring(0, this.MAX_SECTION_PREVIEW_SIZE);
+    const lastSpaceIndex = preview.lastIndexOf(' ');
+    
+    // Try to break at word boundary if possible
+    if (lastSpaceIndex > this.MAX_SECTION_PREVIEW_SIZE * 0.8) {
+      return preview.substring(0, lastSpaceIndex) + '...';
+    }
+    
+    return preview + '...';
+  }
+
+  private processLargeContent(content: string): string[] {
+    if (content.length <= this.MAX_CONTENT_CHUNK_SIZE) {
+      return [content];
+    }
+
+    const chunks: string[] = [];
+    for (let i = 0; i < content.length; i += this.MAX_CONTENT_CHUNK_SIZE) {
+      chunks.push(content.slice(i, i + this.MAX_CONTENT_CHUNK_SIZE));
+    }
+    return chunks;
+  }
+
   async detectDeadWeight(prompt: string, provider: AIProvider, model: string): Promise<DeadWeightAnalysis> {
     try {
       const analysis = await this.analyzePrompt(prompt, provider, model);
@@ -913,7 +1047,7 @@ Total Cost: $${analysis.totalCost.toFixed(6)}
 
 Prompt Sections:
 ${analysis.sections.map(section => `
-**${section.id} (${section.type})**: ${section.content.substring(0, 400)}${section.content.length > 400 ? '...' : ''}
+**${section.id} (${section.type})**: ${section.content}
 Tokens: ${section.tokens}
 Cost: $${section.cost.toFixed(6)}
 `).join('\n')}

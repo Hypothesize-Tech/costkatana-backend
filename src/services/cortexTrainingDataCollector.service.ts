@@ -207,7 +207,6 @@ export class CortexTrainingDataCollectorService {
     private collectionQueue: Map<string, Partial<CortexTrainingDataEntry>> = new Map();
     private batchQueue: CortexTrainingDataEntry[] = [];
     
-    // Optimized: Bounded queue configuration
     private readonly MAX_QUEUE_SIZE = 1000;
     private readonly BATCH_SIZE = 50;
     private readonly BATCH_INTERVAL = 30000; // 30 seconds
@@ -221,7 +220,6 @@ export class CortexTrainingDataCollectorService {
     };
 
     private constructor() {
-        // Optimized: Batch processing instead of individual saves
         setInterval(() => this.processBatch(), this.BATCH_INTERVAL);
         // More frequent cleanup to prevent memory leaks
         setInterval(() => this.cleanupStaleEntries(), 60000); // 1 minute
