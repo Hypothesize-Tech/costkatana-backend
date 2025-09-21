@@ -58,14 +58,14 @@ export class ModerationController {
             } : undefined;
 
             // Get memoized ObjectId for user
-            const userObjectId = this.getMemoizedObjectId(userId);
+            const userObjectId = ModerationController.getMemoizedObjectId(userId);
 
             // Execute analytics in parallel for better performance
             const [trendAnalytics, routeAnalytics, categoryAnalytics, unifiedAnalytics] = await Promise.all([
-                this.getThreatTrends(userId, dateRange),
-                this.getBlockRateByRoute(userId, dateRange),
-                this.getTopViolationCategories(userId, dateRange),
-                this.getUnifiedAnalytics(userObjectId, dateRange)
+                ModerationController.getThreatTrends(userId, dateRange),
+                ModerationController.getBlockRateByRoute(userId, dateRange),
+                ModerationController.getTopViolationCategories(userId, dateRange),
+                ModerationController.getUnifiedAnalytics(userObjectId, dateRange)
             ]);
 
             // Extract results from unified analytics
@@ -243,7 +243,7 @@ export class ModerationController {
             const skip = (pageNum - 1) * limitNum;
 
             // Get memoized ObjectId for user
-            const userObjectId = this.getMemoizedObjectId(userId);
+            const userObjectId = ModerationController.getMemoizedObjectId(userId);
 
             // Build optimized filter query
             const matchQuery: any = { userId: userObjectId };
@@ -305,7 +305,7 @@ export class ModerationController {
             const totalPages = Math.ceil(totalCount / limitNum);
 
             // Sanitize sensitive data for frontend display (optimized processing)
-            const sanitizedThreats = this.sanitizeThreatsData(threats);
+            const sanitizedThreats = ModerationController.sanitizeThreatsData(threats);
 
             const duration = Date.now() - startTime;
 
@@ -784,7 +784,7 @@ export class ModerationController {
         dateRange?: { start: Date; end: Date }
     ): Promise<any> {
         try {
-            const userObjectId = this.getMemoizedObjectId(userId);
+            const userObjectId = ModerationController.getMemoizedObjectId(userId);
             const matchQuery: any = { userId: userObjectId };
             
             if (dateRange) {
@@ -847,7 +847,7 @@ export class ModerationController {
         dateRange?: { start: Date; end: Date }
     ): Promise<any> {
         try {
-            const userObjectId = this.getMemoizedObjectId(userId);
+            const userObjectId = ModerationController.getMemoizedObjectId(userId);
             const matchQuery: any = { userId: userObjectId };
             
             if (dateRange) {
@@ -905,7 +905,7 @@ export class ModerationController {
         dateRange?: { start: Date; end: Date }
     ): Promise<any> {
         try {
-            const userObjectId = this.getMemoizedObjectId(userId);
+            const userObjectId = ModerationController.getMemoizedObjectId(userId);
             const matchQuery: any = { userId: userObjectId };
             
             if (dateRange) {
@@ -1216,11 +1216,11 @@ export class ModerationController {
         if (this.analyticsProcessor) return;
 
         this.analyticsProcessor = setTimeout(async () => {
-            await this.processAnalyticsQueue();
+            await ModerationController.processAnalyticsQueue();
             this.analyticsProcessor = undefined;
 
             if (this.analyticsQueue.length > 0) {
-                this.startAnalyticsProcessor();
+                ModerationController.startAnalyticsProcessor();
             }
         }, 100);
     }

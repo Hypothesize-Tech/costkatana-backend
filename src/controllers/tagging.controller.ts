@@ -68,13 +68,13 @@ export class TaggingController {
             };
 
             // Check circuit breaker before proceeding
-            if (this.isDbCircuitBreakerOpen()) {
+            if (TaggingController.isDbCircuitBreakerOpen()) {
                 throw new Error('Service temporarily unavailable');
             }
 
             // Add timeout handling with configurable timeout
             const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout')), this.ANALYTICS_TIMEOUT);
+                setTimeout(() => reject(new Error('Request timeout')), TaggingController.ANALYTICS_TIMEOUT);
             });
 
             const analyticsPromise = TaggingService.getTagAnalytics(userId, options);
@@ -95,7 +95,7 @@ export class TaggingController {
             });
 
             // Queue background business event logging
-            this.queueBackgroundOperation(async () => {
+            TaggingController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'tag_analytics_retrieved',
                     category: 'tagging',
@@ -121,7 +121,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            TaggingController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             if (error.message === 'Request timeout') {
@@ -188,7 +188,7 @@ export class TaggingController {
             }
 
             // Check circuit breaker before proceeding
-            if (this.isDbCircuitBreakerOpen()) {
+            if (TaggingController.isDbCircuitBreakerOpen()) {
                 throw new Error('Service temporarily unavailable');
             }
 
@@ -196,7 +196,7 @@ export class TaggingController {
 
             // Add timeout handling for real-time metrics
             const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Request timeout')), this.DEFAULT_TIMEOUT);
+                setTimeout(() => reject(new Error('Request timeout')), TaggingController.DEFAULT_TIMEOUT);
             });
 
             const metricsPromise = TaggingService.getRealTimeTagMetrics(userId, tagFilter);

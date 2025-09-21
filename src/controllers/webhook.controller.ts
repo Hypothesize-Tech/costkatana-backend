@@ -16,9 +16,7 @@ export class WebhookController {
     private static lastDbFailureTime: number = 0;
     
     // Request timeout configuration
-    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
     private static readonly STATS_TIMEOUT = 30000; // 30 seconds for stats
-    private static readonly DELIVERY_TIMEOUT = 25000; // 25 seconds for deliveries
     
     // Pre-computed valid events for validation
     private static readonly VALID_EVENTS = Object.values(WEBHOOK_EVENTS);
@@ -91,7 +89,7 @@ export class WebhookController {
                 }
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            WebhookController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Webhook creation failed', {
@@ -598,7 +596,7 @@ export class WebhookController {
                 stats
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            WebhookController.recordDbFailure();
             loggingService.error('Get webhook stats failed', {
                 requestId,
                 userId,

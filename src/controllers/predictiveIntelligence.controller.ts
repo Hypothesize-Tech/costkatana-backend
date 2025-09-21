@@ -67,7 +67,7 @@ export class PredictiveIntelligenceController {
             }
 
             // Check circuit breaker
-            if (this.isServiceCircuitBreakerOpen()) {
+            if (PredictiveIntelligenceController.isServiceCircuitBreakerOpen()) {
                 return res.status(503).json({
                     success: false,
                     message: 'Service temporarily unavailable. Please try again later.'
@@ -93,7 +93,7 @@ export class PredictiveIntelligenceController {
             const intelligenceData = await Promise.race([intelligencePromise, timeoutPromise]);
 
             // Reset failure count on success
-            this.serviceFailureCount = 0;
+            PredictiveIntelligenceController.serviceFailureCount = 0;
 
             return res.json({
                 success: true,
@@ -102,11 +102,11 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            this.recordServiceFailure();
+            PredictiveIntelligenceController.recordServiceFailure();
             loggingService.error('Error getting predictive intelligence:', { 
                 error: error.message,
                 userId: req.user?.id,
-                failureCount: this.serviceFailureCount
+                failureCount: PredictiveIntelligenceController.serviceFailureCount
             });
             
             if (error.message === 'Request timeout') {
@@ -940,13 +940,13 @@ export class PredictiveIntelligenceController {
      * Circuit breaker utilities
      */
     private static isServiceCircuitBreakerOpen(): boolean {
-        if (this.serviceFailureCount >= this.MAX_SERVICE_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastServiceFailureTime;
-            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+        if (PredictiveIntelligenceController.serviceFailureCount >= PredictiveIntelligenceController.MAX_SERVICE_FAILURES) {
+            const timeSinceLastFailure = Date.now() - PredictiveIntelligenceController.lastServiceFailureTime;
+            if (timeSinceLastFailure < PredictiveIntelligenceController.CIRCUIT_BREAKER_RESET_TIME) {
                 return true;
             } else {
                 // Reset circuit breaker
-                this.serviceFailureCount = 0;
+                PredictiveIntelligenceController.serviceFailureCount = 0;
                 return false;
             }
         }
@@ -954,8 +954,8 @@ export class PredictiveIntelligenceController {
     }
 
     private static recordServiceFailure(): void {
-        this.serviceFailureCount++;
-        this.lastServiceFailureTime = Date.now();
+        PredictiveIntelligenceController.serviceFailureCount++;
+        PredictiveIntelligenceController.lastServiceFailureTime = Date.now();
     }
 
     /**

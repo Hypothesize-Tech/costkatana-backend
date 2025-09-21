@@ -118,7 +118,7 @@ export class RequestFeedbackController {
             });
 
         } catch (error: any) {
-            this.recordDbFailure();
+            RequestFeedbackController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             this.conditionalLog('error', 'Feedback submission failed', {

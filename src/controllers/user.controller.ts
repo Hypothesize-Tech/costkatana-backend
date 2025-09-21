@@ -97,16 +97,16 @@ export class UserController {
      * Initialize background processor
      */
     static {
-        this.startBackgroundProcessor();
+        UserController.startBackgroundProcessor();
     }
     static async getProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { requestId, userId } = this.validateAuthentication(req, res);
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
         try {
             // Check circuit breaker
-            if (this.isDbCircuitBreakerOpen()) {
+            if (UserController.isDbCircuitBreakerOpen()) {
                 throw new Error('Database circuit breaker is open');
             }
 
@@ -124,7 +124,7 @@ export class UserController {
             const duration = Date.now() - startTime;
 
             // Queue business event logging to background
-            this.queueBackgroundOperation(async () => {
+            UserController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'user_profile_retrieved',
                     category: 'user_management',
@@ -138,14 +138,14 @@ export class UserController {
             });
 
             // Reset failure count on success
-            this.dbFailureCount = 0;
+            UserController.dbFailureCount = 0;
 
             res.json({
                 success: true,
                 data: user,
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            UserController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('User profile retrieval failed', {
@@ -162,12 +162,12 @@ export class UserController {
 
     static async updateProfile(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { requestId, userId } = this.validateAuthentication(req, res);
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
         try {
             // Check circuit breaker
-            if (this.isDbCircuitBreakerOpen()) {
+            if (UserController.isDbCircuitBreakerOpen()) {
                 throw new Error('Database circuit breaker is open');
             }
 
@@ -199,7 +199,7 @@ export class UserController {
             const duration = Date.now() - startTime;
 
             // Queue business event logging to background
-            this.queueBackgroundOperation(async () => {
+            UserController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'user_profile_updated',
                     category: 'user_management',
@@ -214,7 +214,7 @@ export class UserController {
             });
 
             // Reset failure count on success
-            this.dbFailureCount = 0;
+            UserController.dbFailureCount = 0;
 
             res.json({
                 success: true,
@@ -222,7 +222,7 @@ export class UserController {
                 data: user,
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            UserController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('User profile update failed', {
@@ -238,12 +238,12 @@ export class UserController {
 
     static async getPresignedAvatarUrl(req: any, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { requestId, userId } = this.validateAuthentication(req, res);
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
         try {
             // Check S3 circuit breaker
-            if (this.isS3CircuitBreakerOpen()) {
+            if (UserController.isS3CircuitBreakerOpen()) {
                 throw new Error('S3 service circuit breaker is open');
             }
 
@@ -255,7 +255,7 @@ export class UserController {
             const duration = Date.now() - startTime;
 
             // Queue business event logging to background
-            this.queueBackgroundOperation(async () => {
+            UserController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'presigned_avatar_url_generated',
                     category: 'user_management',
@@ -269,7 +269,7 @@ export class UserController {
             });
 
             // Reset failure count on success
-            this.s3FailureCount = 0;
+            UserController.s3FailureCount = 0;
 
             res.json({
                 success: true,
@@ -280,7 +280,7 @@ export class UserController {
                 },
             });
         } catch (error: any) {
-            this.recordS3Failure();
+            UserController.recordS3Failure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Get presigned avatar URL failed', {
@@ -851,12 +851,12 @@ export class UserController {
     }
 
     static async updateSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
-        const { requestId, userId } = this.validateAuthentication(req, res);
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
         try {
             // Check circuit breaker
-            if (this.isDbCircuitBreakerOpen()) {
+            if (UserController.isDbCircuitBreakerOpen()) {
                 throw new Error('Database circuit breaker is open');
             }
 
@@ -892,7 +892,7 @@ export class UserController {
             }
 
             // Reset failure count on success
-            this.dbFailureCount = 0;
+            UserController.dbFailureCount = 0;
 
             res.json({
                 success: true,
@@ -900,7 +900,7 @@ export class UserController {
                 data: user.subscription,
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            UserController.recordDbFailure();
             loggingService.error('Update subscription failed', {
                 requestId,
                 userId,
@@ -913,33 +913,33 @@ export class UserController {
     }
 
     static async getUserStats(req: any, res: Response, next: NextFunction): Promise<void> {
-        const { requestId, userId } = this.validateAuthentication(req, res);
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
         try {
             // Check circuit breaker
-            if (this.isDbCircuitBreakerOpen()) {
+            if (UserController.isDbCircuitBreakerOpen()) {
                 throw new Error('Database circuit breaker is open');
             }
 
             // Add timeout handling
-            const statsPromise = this.getUserStatsWithTimeout(userId);
+            const statsPromise = UserController.getUserStatsWithTimeout(userId);
             const result = await Promise.race([
                 statsPromise,
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Stats operation timeout')), this.STATS_TIMEOUT)
+                    setTimeout(() => reject(new Error('Stats operation timeout')), UserController.STATS_TIMEOUT)
                 )
             ]);
 
             // Reset failure count on success
-            this.dbFailureCount = 0;
+            UserController.dbFailureCount = 0;
 
             res.json({
                 success: true,
                 data: result,
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            UserController.recordDbFailure();
             loggingService.error('Get user stats failed', {
                 requestId,
                 userId,
@@ -1291,7 +1291,7 @@ export class UserController {
         currentMonthStart.setDate(1);
         currentMonthStart.setHours(0, 0, 0, 0);
 
-        const userObjectId = this.validateAndConvertObjectId(userId);
+        const userObjectId = UserController.validateAndConvertObjectId(userId);
 
         // Use $facet to combine all Usage aggregations
         const [usageResults] = await Usage.aggregate([
@@ -1441,13 +1441,13 @@ export class UserController {
      * Circuit breaker utilities for database operations
      */
     private static isDbCircuitBreakerOpen(): boolean {
-        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
-            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+        if (UserController.dbFailureCount >= UserController.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - UserController.lastDbFailureTime;
+            if (timeSinceLastFailure < UserController.DB_CIRCUIT_BREAKER_RESET_TIME) {
                 return true;
             } else {
                 // Reset circuit breaker
-                this.dbFailureCount = 0;
+                UserController.dbFailureCount = 0;
                 return false;
             }
         }
@@ -1455,7 +1455,7 @@ export class UserController {
     }
 
     private static recordDbFailure(): void {
-        this.dbFailureCount++;
+        UserController.dbFailureCount++;
         this.lastDbFailureTime = Date.now();
     }
 
@@ -1463,13 +1463,13 @@ export class UserController {
      * Circuit breaker utilities for S3 operations
      */
     private static isS3CircuitBreakerOpen(): boolean {
-        if (this.s3FailureCount >= this.MAX_S3_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastS3FailureTime;
-            if (timeSinceLastFailure < this.S3_CIRCUIT_BREAKER_RESET_TIME) {
+        if (UserController.s3FailureCount >= UserController.MAX_S3_FAILURES) {
+            const timeSinceLastFailure = Date.now() - UserController.lastS3FailureTime;
+            if (timeSinceLastFailure < UserController.S3_CIRCUIT_BREAKER_RESET_TIME) {
                 return true;
             } else {
                 // Reset circuit breaker
-                this.s3FailureCount = 0;
+                UserController.s3FailureCount = 0;
                 return false;
             }
         }
@@ -1522,7 +1522,7 @@ export class UserController {
         this.backgroundQueue.length = 0;
         
         // Reset circuit breaker state
-        this.dbFailureCount = 0;
+        UserController.dbFailureCount = 0;
         this.lastDbFailureTime = 0;
         this.s3FailureCount = 0;
         this.lastS3FailureTime = 0;

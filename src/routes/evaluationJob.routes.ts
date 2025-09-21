@@ -9,10 +9,10 @@ const router = Router();
 router.use(authenticate);
 
 // Evaluation job routes
-router.post('/', asyncHandler(EvaluationJobController.createEvaluationJob));
-router.get('/', asyncHandler(EvaluationJobController.getUserEvaluationJobs));
-router.get('/fine-tune/:fineTuneJobId', asyncHandler(EvaluationJobController.getEvaluationsByFineTuneJob));
-router.get('/:jobId', asyncHandler(EvaluationJobController.getEvaluationJob));
-router.delete('/:jobId', asyncHandler(EvaluationJobController.deleteEvaluationJob));
+router.post('/jobs', asyncHandler(EvaluationJobController.createEvaluationJob));
+router.get('/jobs', asyncHandler(EvaluationJobController.getUserEvaluationJobs));
+router.get('/jobs/fine-tune/:fineTuneJobId', asyncHandler(EvaluationJobController.getEvaluationsByFineTuneJob));
+router.get('/jobs/:jobId', asyncHandler(EvaluationJobController.getEvaluationJob));
+router.delete('/jobs/:jobId', asyncHandler(EvaluationJobController.deleteEvaluationJob));
 
 export default router;

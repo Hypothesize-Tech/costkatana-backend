@@ -144,7 +144,7 @@ export class SimulationTrackingController {
                 data: { trackingId }
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            SimulationTrackingController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Simulation tracking failed', {

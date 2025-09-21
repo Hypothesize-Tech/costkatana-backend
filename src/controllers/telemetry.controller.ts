@@ -71,7 +71,7 @@ export class TelemetryController {
       });
 
       // Check circuit breaker before proceeding
-      if (this.isDbCircuitBreakerOpen()) {
+      if (TelemetryController.isDbCircuitBreakerOpen()) {
         throw new Error('Service temporarily unavailable');
       }
 
@@ -111,7 +111,7 @@ export class TelemetryController {
       });
 
       // Queue background business event logging
-      this.queueBackgroundOperation(async () => {
+      TelemetryController.queueBackgroundOperation(async () => {
         loggingService.logBusiness({
           event: 'telemetry_queried',
           category: 'telemetry',
@@ -138,7 +138,7 @@ export class TelemetryController {
         ...results
       });
     } catch (error: any) {
-      this.recordDbFailure();
+      TelemetryController.recordDbFailure();
       const duration = Date.now() - startTime;
       
       if (error.message === 'Service temporarily unavailable') {
@@ -540,13 +540,13 @@ export class TelemetryController {
       });
 
       // Check circuit breaker before proceeding
-      if (this.isDbCircuitBreakerOpen()) {
+      if (TelemetryController.isDbCircuitBreakerOpen()) {
         throw new Error('Service temporarily unavailable');
       }
 
       // Get unified dashboard data with timeout handling
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Dashboard query timeout')), this.AGGREGATION_TIMEOUT);
+        setTimeout(() => reject(new Error('Dashboard query timeout')), TelemetryController.AGGREGATION_TIMEOUT);
       });
 
       const dashboardPromise = TelemetryService.getUnifiedDashboardData({

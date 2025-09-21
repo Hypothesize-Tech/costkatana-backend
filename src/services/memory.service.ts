@@ -585,11 +585,14 @@ export class MemoryService {
             // Store in UserMemory for future reference
             const patternMemory = new UserMemory({
                 userId,
-                type: 'pattern_analysis',
+                memoryType: 'pattern',
                 content: patterns,
+                confidence: 0.8,
+                source: 'ai_analysis',
+                tags: ['conversation_patterns', 'ai_generated'],
                 metadata: {
                     generatedAt: new Date(),
-                    source: 'ai_analysis'
+                    analysisType: 'conversation_patterns'
                 }
             });
             

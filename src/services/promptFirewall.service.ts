@@ -243,7 +243,6 @@ export class PromptFirewallService {
             } catch (error) {
                 this.recordServiceFailure();
                 loggingService.warn('Bedrock Prompt Guard failed, using fallback', { value: error as Error });
-                // Fall through to pattern matching
             }
         }
 

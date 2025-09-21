@@ -291,6 +291,82 @@ export class PredictiveCostIntelligenceService {
             return intelligenceData;
         } catch (error) {
             loggingService.error('Error generating predictive intelligence:', { error: error instanceof Error ? error.message : String(error) });
+            
+            // Check if it's a database connection error
+            if (error instanceof Error && (
+                error.message.includes('MongooseServerSelectionError') ||
+                error.message.includes('Could not connect to any servers') ||
+                error.message.includes('ETIMEDOUT') ||
+                error.message.includes('connection') ||
+                error.message.includes('network')
+            )) {
+                // Return a fallback response with limited data when database is unavailable
+                loggingService.warn('Database unavailable, returning fallback predictive intelligence data');
+                return {
+                    projectId: undefined,
+                    teamId: undefined,
+                    userId,
+                    timeHorizon: options.timeHorizon || 30,
+                    forecasts: [],
+                    historicalTokenTrends: {
+                        averagePromptLength: 0,
+                        promptLengthGrowthRate: 0,
+                        tokenEfficiencyTrend: 'stable' as const,
+                        peakUsageHours: [],
+                        seasonalityFactors: {
+                            hourly: [],
+                            daily: [],
+                            weekly: []
+                        },
+                        projectedTokensNextMonth: 0,
+                        confidenceLevel: 0.1
+                    },
+                    promptLengthGrowth: {
+                        currentAverageLength: 0,
+                        growthRatePerWeek: 0,
+                        projectedLengthIn30Days: 0,
+                        lengthDistribution: [],
+                        complexityTrend: 'stable' as const,
+                        impactOnCosts: {
+                            currentMonthly: 0,
+                            projectedMonthly: 0,
+                            potentialSavings: 0
+                        }
+                    },
+                    modelSwitchPatterns: {
+                        switchFrequency: 0,
+                        commonSwitchPatterns: [],
+                        modelPreferences: [],
+                        predictedSwitches: []
+                    },
+                    proactiveAlerts: [{
+                        id: 'fallback-alert',
+                        type: 'optimization_opportunity',
+                        severity: 'medium',
+                        title: 'System Maintenance',
+                        message: 'Predictive intelligence temporarily limited due to system maintenance',
+                        projectedDate: new Date(),
+                        daysUntilImpact: 0,
+                        estimatedImpact: 0,
+                        actionableInsights: [{
+                            action: 'Please try again later for full analysis',
+                            expectedSaving: 0,
+                            difficulty: 'easy',
+                            timeToImplement: 'immediate'
+                        }],
+                        affectedResources: [],
+                        autoOptimizationAvailable: false,
+                        createdAt: new Date()
+                    }],
+                    budgetExceedanceProjections: [],
+                    optimizationRecommendations: [],
+                    scenarioSimulations: [],
+                    crossPlatformInsights: [],
+                    confidenceScore: 0.1,
+                    lastUpdated: new Date()
+                };
+            }
+            
             throw error;
         }
     }

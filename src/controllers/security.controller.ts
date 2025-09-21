@@ -22,7 +22,7 @@ export class SecurityController {
      * Initialize background processor
      */
     static {
-        this.startBackgroundProcessor();
+        SecurityController.startBackgroundProcessor();
     }
     /**
      * Get security analytics dashboard
@@ -70,7 +70,7 @@ export class SecurityController {
             });
 
             // Queue background business event logging
-            this.queueBackgroundOperation(async () => {
+            SecurityController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'security_analytics_retrieved',
                     category: 'security',
@@ -88,7 +88,7 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            this.recordServiceFailure();
+            SecurityController.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security analytics retrieval failed', {
@@ -145,7 +145,7 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            this.recordServiceFailure();
+            SecurityController.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security metrics retrieval failed', {
@@ -173,7 +173,7 @@ export class SecurityController {
 
         try {
             // Check circuit breaker
-            if (this.isServiceCircuitBreakerOpen()) {
+            if (SecurityController.isServiceCircuitBreakerOpen()) {
                 res.status(503).json({
                     success: false,
                     message: 'Security service temporarily unavailable. Please try again later.'
@@ -241,7 +241,7 @@ export class SecurityController {
             });
 
             // Queue background business event logging
-            this.queueBackgroundOperation(async () => {
+            SecurityController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'security_check_tested',
                     category: 'security',
@@ -266,7 +266,7 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            this.recordServiceFailure();
+            SecurityController.recordServiceFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Security check test failed', {
@@ -870,7 +870,7 @@ export class SecurityController {
                 res.setHeader('Content-Disposition', 'attachment; filename=security_report.csv');
                 
                 // Generate CSV in chunks to avoid memory issues
-                const csvContent = this.generateStreamedCSV(report);
+                const csvContent = SecurityController.generateStreamedCSV(report);
                 res.send(csvContent);
             } else {
                 res.setHeader('Content-Type', 'application/json');
@@ -888,7 +888,7 @@ export class SecurityController {
             });
 
             // Queue background business event logging
-            this.queueBackgroundOperation(async () => {
+            SecurityController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'security_report_exported',
                     category: 'security',

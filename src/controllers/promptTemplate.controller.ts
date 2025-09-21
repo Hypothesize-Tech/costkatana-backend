@@ -21,7 +21,7 @@ export class PromptTemplateController {
      * Initialize background processor
      */
     static {
-        this.startBackgroundProcessor();
+        PromptTemplateController.startBackgroundProcessor();
     }
     /**
      * Create a new prompt template
@@ -32,7 +32,7 @@ export class PromptTemplateController {
         const requestId = req.headers['x-request-id'] as string;
 
         try {
-            this.conditionalLog('info', 'Prompt template creation initiated', {
+            PromptTemplateController.conditionalLog('info', 'Prompt template creation initiated', {
                 userId,
                 requestId,
                 templateName: req.body?.name,
@@ -40,7 +40,7 @@ export class PromptTemplateController {
             });
 
             if (!userId) {
-                this.conditionalLog('warn', 'Prompt template creation failed - user not authenticated', {
+                PromptTemplateController.conditionalLog('warn', 'Prompt template creation failed - user not authenticated', {
                     requestId
                 });
                 res.status(401).json({
@@ -54,7 +54,7 @@ export class PromptTemplateController {
             const template = await PromptTemplateService.createTemplate(userId, templateData);
             const duration = Date.now() - startTime;
 
-            this.conditionalLog('info', 'Prompt template created successfully', {
+            PromptTemplateController.conditionalLog('info', 'Prompt template created successfully', {
                 userId,
                 duration,
                 templateId: template._id,
@@ -63,7 +63,7 @@ export class PromptTemplateController {
             });
 
             // Queue background business event logging
-            this.queueBackgroundOperation(async () => {
+            PromptTemplateController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'prompt_template_created',
                     category: 'prompt_template',
@@ -85,7 +85,7 @@ export class PromptTemplateController {
         } catch (error: any) {
             const duration = Date.now() - startTime;
             
-            this.conditionalLog('error', 'Prompt template creation failed', {
+            PromptTemplateController.conditionalLog('error', 'Prompt template creation failed', {
                 userId,
                 requestId,
                 error: error.message || 'Unknown error',
@@ -105,7 +105,7 @@ export class PromptTemplateController {
     static async getTemplates(req: any, res: Response): Promise<void> {
         try {
             const userId = req.user!.id;
-            this.conditionalLog('info', 'GET prompt templates request', { userId });
+            PromptTemplateController.conditionalLog('info', 'GET prompt templates request', { userId });
 
             const {
                 projectId,
@@ -130,7 +130,7 @@ export class PromptTemplateController {
 
             const result = await PromptTemplateService.getTemplates(filters);
 
-            this.conditionalLog('info', 'Templates retrieved successfully', {
+            PromptTemplateController.conditionalLog('info', 'Templates retrieved successfully', {
                 templatesCount: result.templates?.length || 0,
                 total: result.total,
                 page: result.page
@@ -148,7 +148,7 @@ export class PromptTemplateController {
 
             res.json(response);
         } catch (error: any) {
-            this.conditionalLog('error', 'Error getting prompt templates', {
+            PromptTemplateController.conditionalLog('error', 'Error getting prompt templates', {
                 error: error.message || 'Unknown error'
             });
             res.status(500).json({
@@ -375,7 +375,7 @@ export class PromptTemplateController {
             const { intent, category, context, constraints } = req.body;
 
             // Check AI circuit breaker
-            if (this.isAiCircuitBreakerOpen()) {
+            if (PromptTemplateController.isAiCircuitBreakerOpen()) {
                 res.status(503).json({
                     success: false,
                     message: 'AI service temporarily unavailable. Please try again later.'
@@ -383,7 +383,7 @@ export class PromptTemplateController {
                 return;
             }
 
-            this.conditionalLog('info', 'AI template generation requested', {
+            PromptTemplateController.conditionalLog('info', 'AI template generation requested', {
                 userId,
                 intent,
                 category
@@ -414,8 +414,8 @@ export class PromptTemplateController {
                 data: result
             });
         } catch (error: any) {
-            this.recordAiFailure();
-            this.conditionalLog('error', 'Error generating template from intent', {
+            PromptTemplateController.recordAiFailure(); 
+            PromptTemplateController.conditionalLog('error', 'Error generating template from intent', {
                 error: error.message || 'Unknown error'
             });
             
@@ -649,8 +649,8 @@ export class PromptTemplateController {
                 data: updated
             });
         } catch (error: any) {
-            this.recordAiFailure();
-            this.conditionalLog('error', 'Error applying optimization', {
+            PromptTemplateController.recordAiFailure();
+            PromptTemplateController.conditionalLog('error', 'Error applying optimization', {
                 error: error.message || 'Unknown error'
             });
             res.status(400).json({
@@ -664,13 +664,13 @@ export class PromptTemplateController {
      * Circuit breaker utilities for AI services
      */
     private static isAiCircuitBreakerOpen(): boolean {
-        if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
+        if (PromptTemplateController.aiFailureCount >= PromptTemplateController.MAX_AI_FAILURES) {
+            const timeSinceLastFailure = Date.now() - PromptTemplateController.lastAiFailureTime;
             if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
                 return true;
             } else {
                 // Reset circuit breaker
-                this.aiFailureCount = 0;
+                PromptTemplateController.aiFailureCount = 0;
                 return false;
             }
         }
@@ -678,7 +678,7 @@ export class PromptTemplateController {
     }
 
     private static recordAiFailure(): void {
-        this.aiFailureCount++;
+        PromptTemplateController.aiFailureCount++;
         this.lastAiFailureTime = Date.now();
     }
 
@@ -686,11 +686,11 @@ export class PromptTemplateController {
      * Background processing utilities
      */
     private static queueBackgroundOperation(operation: () => Promise<void>): void {
-        this.backgroundQueue.push(operation);
+        PromptTemplateController.backgroundQueue.push(operation);
     }
 
     private static startBackgroundProcessor(): void {
-        this.backgroundProcessor = setInterval(async () => {
+        PromptTemplateController.backgroundProcessor = setInterval(async () => {
             if (this.backgroundQueue.length > 0) {
                 const operation = this.backgroundQueue.shift();
                 if (operation) {

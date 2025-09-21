@@ -9,8 +9,6 @@ export class RequestScoringController {
     
     // Circuit breaker for database operations
     private static dbFailureCount: number = 0;
-    private static readonly MAX_DB_FAILURES = 5;
-    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
     private static lastDbFailureTime: number = 0;
     
     /**
@@ -106,7 +104,7 @@ export class RequestScoringController {
                 message: 'Request scored successfully'
             });
         } catch (error: any) {
-            this.recordDbFailure();
+            RequestScoringController.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Request scoring failed', {
