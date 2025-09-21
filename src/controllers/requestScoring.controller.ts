@@ -3,6 +3,22 @@ import { RequestScoringService, ScoreRequestData } from '../services/requestScor
 import { loggingService } from '../services/logging.service';
 
 export class RequestScoringController {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Score a request for training quality
      * POST /api/training/score
@@ -15,13 +31,9 @@ export class RequestScoringController {
         try {
             loggingService.info('Request scoring initiated', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 scoreRequestId: req.body?.requestId,
-                hasScoreRequestId: !!req.body?.requestId,
-                score: req.body?.score,
-                hasScore: typeof req.body?.score === 'number',
-                scoreValid: req.body?.score >= 1 && req.body?.score <= 5
+                score: req.body?.score
             });
 
             if (!userId) {
@@ -71,20 +83,21 @@ export class RequestScoringController {
                 duration,
                 scoreRequestId: scoreData.requestId,
                 score: scoreData.score,
-                hasRequestScore: !!requestScore,
                 requestId
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'request_scored',
-                category: 'request_scoring',
-                value: duration,
-                metadata: {
-                    userId,
-                    scoreRequestId: scoreData.requestId,
-                    score: scoreData.score
-                }
+            // Queue background business event logging
+            this.queueBackgroundOperation(async () => {
+                loggingService.logBusiness({
+                    event: 'request_scored',
+                    category: 'request_scoring',
+                    value: duration,
+                    metadata: {
+                        userId,
+                        scoreRequestId: scoreData.requestId,
+                        score: scoreData.score
+                    }
+                });
             });
 
             res.json({
@@ -93,16 +106,15 @@ export class RequestScoringController {
                 message: 'Request scored successfully'
             });
         } catch (error: any) {
+            this.recordDbFailure();
             const duration = Date.now() - startTime;
             
             loggingService.error('Request scoring failed', {
                 userId,
-                hasUserId: !!userId,
                 requestId,
                 scoreRequestId: req.body?.requestId,
                 score: req.body?.score,
                 error: error.message || 'Unknown error',
-                stack: error.stack,
                 duration
             });
 
@@ -598,6 +610,57 @@ export class RequestScoringController {
             });
 
             next(error);
+        }
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }

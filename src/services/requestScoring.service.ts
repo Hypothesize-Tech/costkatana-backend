@@ -24,6 +24,22 @@ export interface ScoringAnalytics {
 }
 
 export class RequestScoringService {
+    // Background processing queue
+    private static backgroundQueue: Array<() => Promise<void>> = [];
+    private static backgroundProcessor?: NodeJS.Timeout;
+    
+    // Circuit breaker for database operations
+    private static dbFailureCount: number = 0;
+    private static readonly MAX_DB_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
+    private static lastDbFailureTime: number = 0;
+    
+    /**
+     * Initialize background processor
+     */
+    static {
+        this.startBackgroundProcessor();
+    }
     /**
      * Score a request for training quality
      */
@@ -239,56 +255,112 @@ export class RequestScoringService {
     }
 
     /**
-     * Get scoring analytics for a user
+     * Get scoring analytics for a user (optimized with aggregation pipeline)
      */
     static async getScoringAnalytics(userId: string): Promise<ScoringAnalytics> {
         try {
-            const scores = await RequestScore.find({
-                userId: new mongoose.Types.ObjectId(userId)
-            });
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
 
-            const totalScored = scores.length;
-            const averageScore = totalScored > 0 
-                ? scores.reduce((sum, score) => sum + score.score, 0) / totalScored 
-                : 0;
-
-            // Score distribution
-            const scoreDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-            scores.forEach(score => {
-                scoreDistribution[score.score] = (scoreDistribution[score.score] || 0) + 1;
-            });
-
-            const trainingCandidates = scores.filter(score => score.isTrainingCandidate).length;
-
-            // Top scored requests with meaningful information
-            const topScored = scores
-                .filter(score => score.tokenEfficiency && score.costEfficiency)
-                .sort((a, b) => {
-                    // Sort by score first, then by efficiency
-                    if (a.score !== b.score) return b.score - a.score;
-                    return (b.tokenEfficiency! + b.costEfficiency!) - (a.tokenEfficiency! + a.costEfficiency!);
-                })
-                .slice(0, 10);
-
-            // Enrich with usage data to get meaningful titles/descriptions
-            const topScoredRequests = [];
-            for (const score of topScored) {
-                try {
-                    // Try to find usage record by metadata.requestId first, then by _id
-                    let usageRecord = await Usage.findOne({ 
-                        'metadata.requestId': score.requestId,
-                        userId: new mongoose.Types.ObjectId(userId)
-                    });
-
-                    if (!usageRecord && mongoose.Types.ObjectId.isValid(score.requestId)) {
-                        usageRecord = await Usage.findOne({
-                            _id: new mongoose.Types.ObjectId(score.requestId),
-                            userId: new mongoose.Types.ObjectId(userId)
-                        });
+            // Use MongoDB aggregation pipeline for efficient analytics calculation
+            const analyticsResults = await RequestScore.aggregate([
+                { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+                {
+                    $facet: {
+                        // Basic statistics
+                        basicStats: [
+                            {
+                                $group: {
+                                    _id: null,
+                                    totalScored: { $sum: 1 },
+                                    averageScore: { $avg: '$score' },
+                                    trainingCandidates: { $sum: { $cond: ['$isTrainingCandidate', 1, 0] } }
+                                }
+                            }
+                        ],
+                        // Score distribution
+                        scoreDistribution: [
+                            {
+                                $group: {
+                                    _id: '$score',
+                                    count: { $sum: 1 }
+                                }
+                            }
+                        ],
+                        // Top scored requests
+                        topScored: [
+                            {
+                                $match: {
+                                    tokenEfficiency: { $exists: true, $ne: null },
+                                    costEfficiency: { $exists: true, $ne: null }
+                                }
+                            },
+                            {
+                                $addFields: {
+                                    combinedEfficiency: { $add: ['$tokenEfficiency', '$costEfficiency'] }
+                                }
+                            },
+                            { $sort: { score: -1, combinedEfficiency: -1 } },
+                            { $limit: 10 },
+                            {
+                                $project: {
+                                    requestId: 1,
+                                    score: 1,
+                                    tokenEfficiency: 1,
+                                    costEfficiency: 1,
+                                    trainingTags: 1,
+                                    notes: 1
+                                }
+                            }
+                        ]
                     }
+                }
+            ]);
 
+            const result = analyticsResults[0];
+            const basicStats = result.basicStats[0] || { totalScored: 0, averageScore: 0, trainingCandidates: 0 };
+            
+            // Transform score distribution
+            const scoreDistribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+            result.scoreDistribution.forEach((item: any) => {
+                scoreDistribution[item._id] = item.count;
+            });
+
+            // Get top scored requests with usage data enrichment (parallel processing)
+            const topScoredRequests = [];
+            if (result.topScored && result.topScored.length > 0) {
+                const requestIds = result.topScored.map((score: any) => score.requestId);
+                
+                // Parallel query for usage data
+                const [usageByRequestId, usageByObjectId] = await Promise.all([
+                    Usage.find({
+                        'metadata.requestId': { $in: requestIds },
+                        userId: new mongoose.Types.ObjectId(userId)
+                    }).lean(),
+                    Usage.find({
+                        _id: { $in: requestIds.filter((id: string) => mongoose.Types.ObjectId.isValid(id)).map((id: string) => new mongoose.Types.ObjectId(id)) },
+                        userId: new mongoose.Types.ObjectId(userId)
+                    }).lean()
+                ]);
+
+                // Create usage lookup map
+                const usageLookup = new Map();
+                usageByRequestId.forEach(usage => {
+                    if (usage.metadata?.requestId) {
+                        usageLookup.set(usage.metadata.requestId, usage);
+                    }
+                });
+                usageByObjectId.forEach(usage => {
+                    usageLookup.set(usage._id.toString(), usage);
+                });
+
+                // Enrich top scored requests
+                for (const score of result.topScored) {
+                    const usageRecord = usageLookup.get(score.requestId);
+                    
                     if (usageRecord) {
-                        // Create a meaningful title from the prompt
                         const promptPreview = usageRecord.prompt?.length > 60 
                             ? usageRecord.prompt.substring(0, 60) + '...'
                             : usageRecord.prompt || 'Untitled Request';
@@ -321,54 +393,60 @@ export class RequestScoringService {
                             notes: score.notes
                         });
                     }
-                } catch (error) {
-                    loggingService.error(`Error enriching request ${score.requestId}:`, { error: error instanceof Error ? error.message : String(error) });
-                    // Fallback with minimal info
-                    topScoredRequests.push({
-                        requestId: score.requestId,
-                        title: `Request ${score.requestId.substring(0, 8)}...`,
-                        model: 'Unknown',
-                        provider: 'Unknown',
-                        score: score.score,
-                        tokenEfficiency: score.tokenEfficiency || 0,
-                        costEfficiency: score.costEfficiency || 0,
-                        trainingTags: score.trainingTags,
-                        notes: score.notes
-                    });
                 }
             }
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return {
-                totalScored,
-                averageScore,
+                totalScored: basicStats.totalScored,
+                averageScore: basicStats.averageScore,
                 scoreDistribution,
-                trainingCandidates,
+                trainingCandidates: basicStats.trainingCandidates,
                 topScoredRequests
             };
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error getting scoring analytics:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
 
     /**
-     * Bulk score requests
+     * Bulk score requests (optimized with parallel processing)
      */
     static async bulkScoreRequests(
         userId: string,
         scores: ScoreRequestData[]
     ): Promise<IRequestScore[]> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
+            // Process in batches to avoid overwhelming the database
+            const BATCH_SIZE = 10;
             const results: IRequestScore[] = [];
 
-            for (const scoreData of scores) {
-                const result = await this.scoreRequest(userId, scoreData);
-                results.push(result);
+            for (let i = 0; i < scores.length; i += BATCH_SIZE) {
+                const batch = scores.slice(i, i + BATCH_SIZE);
+                
+                // Process batch in parallel
+                const batchPromises = batch.map(scoreData => this.scoreRequest(userId, scoreData));
+                const batchResults = await Promise.all(batchPromises);
+                
+                results.push(...batchResults);
             }
+
+            // Reset failure count on success
+            this.dbFailureCount = 0;
 
             loggingService.info(`Bulk scored ${scores.length} requests for user ${userId}`);
             return results;
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error bulk scoring requests:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
@@ -379,15 +457,92 @@ export class RequestScoringService {
      */
     static async deleteScore(userId: string, requestId: string): Promise<boolean> {
         try {
+            // Check circuit breaker
+            if (this.isDbCircuitBreakerOpen()) {
+                throw new Error('Database circuit breaker is open');
+            }
+
             const result = await RequestScore.deleteOne({
                 requestId,
                 userId: new mongoose.Types.ObjectId(userId)
             });
 
+            // Reset failure count on success
+            this.dbFailureCount = 0;
+
             return result.deletedCount > 0;
         } catch (error) {
+            this.recordDbFailure();
             loggingService.error('Error deleting request score:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
+        }
+    }
+
+    /**
+     * Circuit breaker utilities for database operations
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Background processing utilities
+     */
+    private static queueBackgroundOperation(operation: () => Promise<void>): void {
+        this.backgroundQueue.push(operation);
+    }
+
+    private static startBackgroundProcessor(): void {
+        this.backgroundProcessor = setInterval(async () => {
+            if (this.backgroundQueue.length > 0) {
+                const operation = this.backgroundQueue.shift();
+                if (operation) {
+                    try {
+                        await operation();
+                    } catch (error) {
+                        loggingService.error('Background operation failed:', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+            }
+        }, 1000);
+    }
+
+    /**
+     * Cleanup method for graceful shutdown
+     */
+    static cleanup(): void {
+        if (this.backgroundProcessor) {
+            clearInterval(this.backgroundProcessor);
+            this.backgroundProcessor = undefined;
+        }
+        
+        // Process remaining queue items
+        while (this.backgroundQueue.length > 0) {
+            const operation = this.backgroundQueue.shift();
+            if (operation) {
+                operation().catch(error => {
+                    loggingService.error('Cleanup operation failed:', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
         }
     }
 }
