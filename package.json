@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r ts-node/register -r ./src/observability/register.ts src/server.ts\"",
     "build": "tsc",
-    "start": "node --max-old-space-size=4096 --expose-gc -r ./dist/observability/register.js dist/server.js",
+    "start": "SENTRY_RELEASE=$npm_package_version node --max-old-space-size=4096 --expose-gc -r ./dist/observability/register.js dist/server.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src/**/*.ts",
@@ -64,6 +64,8 @@
     "@opentelemetry/sdk-node": "^0.56.0",
     "@opentelemetry/sdk-trace-node": "^1.29.0",
     "@opentelemetry/semantic-conventions": "^1.29.0",
+    "@sentry/node": "^10.15.0",
+    "@sentry/profiling-node": "^10.15.0",
     "@types/cookie-parser": "^1.4.9",
     "@types/qrcode": "^1.5.5",
     "@types/speakeasy": "^2.0.10",

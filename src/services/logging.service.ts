@@ -1,5 +1,7 @@
 import { BasicLoggerService } from './basic-logger.service';
 import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
+import { addBreadcrumb, captureError } from '../config/sentry';
+import * as Sentry from '@sentry/node';
 
 export interface LogContext {
     requestId?: string;
@@ -70,21 +72,25 @@ export class LoggingService {
     }
 
     // ===== BASIC LOGGING METHODS =====
-    
+
     info(message: string, context: LogContext = {}): void {
         BasicLoggerService.info(message, context);
+        this.addSentryBreadcrumb(message, 'info', 'log', context);
     }
 
     error(message: string, context: LogContext = {}): void {
         BasicLoggerService.error(message, context);
+        this.addSentryBreadcrumb(message, 'error', 'log', context);
     }
 
     warn(message: string, context: LogContext = {}): void {
         BasicLoggerService.warn(message, context);
+        this.addSentryBreadcrumb(message, 'warning', 'log', context);
     }
 
     debug(message: string, context: LogContext = {}): void {
         BasicLoggerService.debug(message, context);
+        this.addSentryBreadcrumb(message, 'debug', 'log', context);
     }
 
     verbose(message: string, context: LogContext = {}): void {
@@ -419,6 +425,63 @@ export class LoggingService {
             component: 'LoggingService',
             operation: 'clearRequestContext'
         });
+    }
+
+    // ===== SENTRY INTEGRATION =====
+
+    private addSentryBreadcrumb(
+        message: string,
+        level: Sentry.SeverityLevel,
+        category: string,
+        data?: LogContext
+    ): void {
+        try {
+            // Only add breadcrumbs for significant log levels
+            if (level === 'debug' && process.env.NODE_ENV === 'production') {
+                return; // Skip debug logs in production
+            }
+
+            // Filter out health check and other noisy logs
+            if (message.includes('health') || message.includes('Health')) {
+                return;
+            }
+
+            // Prepare breadcrumb data
+            const breadcrumbData: any = { ...data };
+
+            // Remove sensitive information
+            delete breadcrumbData.password;
+            delete breadcrumbData.token;
+            delete breadcrumbData.secret;
+            delete breadcrumbData.apiKey;
+
+            // Limit data size to prevent performance issues
+            const dataString = JSON.stringify(breadcrumbData);
+            if (dataString.length > 1000) {
+                breadcrumbData._truncated = true;
+                // Keep only essential fields
+                const essentialFields = ['component', 'operation', 'userId', 'requestId', 'error'];
+                const filteredData: any = {};
+                essentialFields.forEach(field => {
+                    if (breadcrumbData[field]) {
+                        filteredData[field] = breadcrumbData[field];
+                    }
+                });
+                breadcrumbData._filtered = filteredData;
+            }
+
+            // Add breadcrumb
+            addBreadcrumb(message, category, level, breadcrumbData);
+
+            // For error logs, also set context tags
+            if (level === 'error' && data) {
+                if (data.component) Sentry.setTag('log.component', data.component);
+                if (data.operation) Sentry.setTag('log.operation', data.operation);
+                if (data.userId) Sentry.setTag('log.user_id', data.userId);
+            }
+
+        } catch (error) {
+        }
     }
 
     // ===== SHUTDOWN =====

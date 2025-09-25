@@ -70,4 +70,5 @@ export * from './database';
 export * from './aws';
 export * from './email';
 export * from './redis';
-export * from './telemetry'; 
+export * from './telemetry';
+export * from './sentry'; 

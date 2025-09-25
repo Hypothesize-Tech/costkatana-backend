@@ -1,11 +1,12 @@
 /**
- * OpenTelemetry Registration
- * 
+ * OpenTelemetry & Sentry Registration
+ *
  * This file is loaded via the -r flag before any other imports
- * to ensure that OpenTelemetry instrumentation is initialized first.
+ * to ensure that OpenTelemetry and Sentry instrumentation are initialized first.
  */
 
 import { startTelemetry } from './otel';
+import { initializeSentry, isSentryEnabled } from '../config/sentry';
 import { loggingService } from '../services/logging.service';
 
 // Disable exporters in development mode to prevent connection errors
@@ -25,48 +26,75 @@ if (process.env.NODE_ENV !== 'production' && !process.env.OTLP_URL) {
   });
 }
 
-// Start telemetry as early as possible
+// Start telemetry and Sentry as early as possible
 (async () => {
   const startTime = Date.now();
-  
-  loggingService.info('=== OPENTELEMETRY REGISTRATION STARTED ===', {
-    component: 'OpenTelemetryRegistration',
+
+  loggingService.info('=== OPENTELEMETRY & SENTRY REGISTRATION STARTED ===', {
+    component: 'ObservabilityRegistration',
     operation: 'register',
-    type: 'telemetry_registration',
+    type: 'observability_registration',
     step: 'started'
   });
 
   try {
-    loggingService.info('Step 1: Starting OpenTelemetry initialization', {
-      component: 'OpenTelemetryRegistration',
+    // Initialize Sentry first (lightweight, synchronous)
+    loggingService.info('Step 1: Initializing Sentry error tracking', {
+      component: 'ObservabilityRegistration',
       operation: 'register',
-      type: 'telemetry_registration',
-      step: 'start_initialization'
+      type: 'observability_registration',
+      step: 'sentry_initialization'
+    });
+
+    initializeSentry();
+
+    if (isSentryEnabled()) {
+      loggingService.info('✅ Sentry initialized successfully', {
+        component: 'ObservabilityRegistration',
+        operation: 'register',
+        type: 'observability_registration',
+        step: 'sentry_completed'
+      });
+    } else {
+      loggingService.info('ℹ️ Sentry not enabled (no DSN provided)', {
+        component: 'ObservabilityRegistration',
+        operation: 'register',
+        type: 'observability_registration',
+        step: 'sentry_disabled'
+      });
+    }
+
+    // Initialize OpenTelemetry
+    loggingService.info('Step 2: Starting OpenTelemetry initialization', {
+      component: 'ObservabilityRegistration',
+      operation: 'register',
+      type: 'observability_registration',
+      step: 'otel_initialization'
     });
 
     await startTelemetry();
-    
-    loggingService.info('OpenTelemetry initialized successfully', {
-      component: 'OpenTelemetryRegistration',
+
+    loggingService.info('✅ OpenTelemetry initialized successfully', {
+      component: 'ObservabilityRegistration',
       operation: 'register',
-      type: 'telemetry_registration',
-      step: 'initialization_completed',
+      type: 'observability_registration',
+      step: 'otel_completed',
       totalTime: `${Date.now() - startTime}ms`
     });
 
-    loggingService.info('=== OPENTELEMETRY REGISTRATION COMPLETED ===', {
-      component: 'OpenTelemetryRegistration',
+    loggingService.info('=== OPENTELEMETRY & SENTRY REGISTRATION COMPLETED ===', {
+      component: 'ObservabilityRegistration',
       operation: 'register',
-      type: 'telemetry_registration',
+      type: 'observability_registration',
       step: 'completed',
       totalTime: `${Date.now() - startTime}ms`
     });
 
   } catch (error) {
-    loggingService.error('OpenTelemetry initialization failed', {
-      component: 'OpenTelemetryRegistration',
+    loggingService.error('Observability initialization failed', {
+      component: 'ObservabilityRegistration',
       operation: 'register',
-      type: 'telemetry_registration',
+      type: 'observability_registration',
       step: 'error',
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined,

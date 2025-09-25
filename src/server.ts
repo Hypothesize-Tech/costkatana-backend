@@ -6,6 +6,8 @@ import helmet from 'helmet';
 import compression from 'compression';
 import morgan from 'morgan';
 import { EventEmitter } from 'events';
+import * as Sentry from '@sentry/node';
+import { flushSentry, closeSentry, isSentryEnabled, getSentryConfig } from './config/sentry';
 
 // Increase EventEmitter limit globally to prevent memory leak warnings
 EventEmitter.defaultMaxListeners = 25;
@@ -14,13 +16,13 @@ import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
 import { traceInterceptor } from './middleware/trace.middleware';
-import { 
-    trackApiRequests, 
-    trackAuthEvents, 
-    trackAnalyticsEvents, 
-    trackProjectEvents, 
-    trackUserSession, 
-    trackOptimizationEvents 
+import {
+    trackApiRequests,
+    trackAuthEvents,
+    trackAnalyticsEvents,
+    trackProjectEvents,
+    trackUserSession,
+    trackOptimizationEvents
 } from './middleware/mixpanel.middleware';
 import { stream } from './utils/logger';
 import { apiRouter } from './routes';
@@ -34,6 +36,7 @@ import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
 import { loggingService } from './services/logging.service';
 import { loggerMiddleware } from './middleware/logger.middleware';
+import { sentryContextMiddleware, sentryPerformanceMiddleware, sentryBusinessErrorMiddleware } from './middleware/sentry.middleware';
 
 // Create Express app
 const app: Application = express();
@@ -128,6 +131,9 @@ app.use(loggerMiddleware);
 app.use(otelBaggageMiddleware);
 app.use(requestMetricsMiddleware);
 
+// Sentry performance monitoring - apply early for transaction tracking
+app.use(sentryPerformanceMiddleware);
+
 // Sanitize input
 app.use(sanitizeInput);
 
@@ -142,6 +148,9 @@ app.use(trackOptimizationEvents);
 // Trace interceptor middleware
 app.use(traceInterceptor);
 
+// Sentry context middleware - capture user and request context
+app.use(sentryContextMiddleware);
+
 // API routes
 app.use('/api', apiRouter);
 
@@ -149,26 +158,32 @@ app.use('/api', apiRouter);
 app.use(cacheMiddleware);
 
 // Health check route with minimal logging
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
     const isHealthCheck = req.get('User-Agent')?.includes('ELB-HealthChecker');
 
-            if (!isHealthCheck) {
-            loggingService.info('Health check accessed', {
-                component: 'Server',
-                operation: 'healthCheck',
-                type: 'health_check',
-                step: 'health_check_accessed',
-                ip: req.ip,
-                userAgent: req.get('User-Agent')
-            });
-        }
+    if (!isHealthCheck) {
+        loggingService.info('Health check accessed', {
+            component: 'Server',
+            operation: 'healthCheck',
+            type: 'health_check',
+            step: 'health_check_accessed',
+            ip: req.ip,
+            userAgent: req.get('User-Agent')
+        });
+    }
+
+    // Check Sentry health
+    const sentryHealth = await checkSentryHealth();
 
     res.json({
         success: true,
         message: 'Cost Katana Backend API',
         version: '1.0.0',
         docs: '/api-docs',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        services: {
+            sentry: sentryHealth
+        }
     });
 });
 
@@ -178,6 +193,36 @@ app.get('/health', (_req, res) => {
         status: 'healthy',
         timestamp: new Date().toISOString()
     });
+});
+
+// Sentry status endpoint for monitoring
+app.get('/sentry-status', async (_req, res) => {
+    try {
+        const sentryHealth = await checkSentryHealth();
+        const sentryConfig = getSentryConfig();
+
+        res.json({
+            service: 'sentry',
+            status: sentryHealth.enabled ? 'operational' : 'disabled',
+            configured: sentryHealth.configured,
+            environment: sentryHealth.environment,
+            release: sentryHealth.release,
+            sampleRate: sentryConfig.sampleRate,
+            tracesSampleRate: sentryConfig.tracesSampleRate,
+            profilesSampleRate: sentryConfig.profilesSampleRate,
+            enablePerformanceMonitoring: sentryConfig.enablePerformanceMonitoring,
+            enableProfiling: sentryConfig.enableProfiling,
+            timestamp: new Date().toISOString(),
+            ...(sentryHealth.lastError && { lastError: sentryHealth.lastError })
+        });
+    } catch (error) {
+        res.status(500).json({
+            service: 'sentry',
+            status: 'error',
+            error: error instanceof Error ? error.message : 'Unknown error',
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 // Security monitoring dashboard (protected endpoint)
@@ -209,13 +254,62 @@ app.get('/security-dashboard', (req, res): any => {
     });
 });
 
+// Sentry business error middleware - capture business logic errors
+app.use(sentryBusinessErrorMiddleware);
+
 // 404 handler
 app.use(notFoundHandler);
 
 // Error handler
 app.use(errorHandler);
 
+// Sentry error handler - must be added after all other error middleware
+app.use(Sentry.expressErrorHandler());
+
 const PORT = process.env.PORT || 8000;
+
+/**
+ * Check Sentry health status
+ */
+async function checkSentryHealth(): Promise<{
+    enabled: boolean;
+    configured: boolean;
+    environment?: string;
+    release?: string;
+    lastError?: string;
+}> {
+    try {
+        const enabled = isSentryEnabled();
+        const sentryConfig = getSentryConfig();
+
+        if (!enabled) {
+            return {
+                enabled: false,
+                configured: !!sentryConfig.dsn,
+                environment: sentryConfig.environment,
+                release: sentryConfig.release
+            };
+        }
+
+        // Test Sentry by sending a test event (but don't actually send it)
+        // We'll just check if the client is properly configured
+        const client = Sentry.getClient();
+        const isHealthy = !!client && !!client.getDsn();
+
+        return {
+            enabled: true,
+            configured: true,
+            environment: sentryConfig.environment,
+            release: sentryConfig.release
+        };
+    } catch (error) {
+        return {
+            enabled: false,
+            configured: false,
+            lastError: error instanceof Error ? error.message : 'Unknown error'
+        };
+    }
+}
 
 export const startServer = async () => {
     try {
@@ -522,9 +616,18 @@ process.on('SIGTERM', async () => {
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
         const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
+
+        // Flush Sentry events first (quick operation)
+        await flushSentry(2000);
+
+        // Cleanup services
         await multiAgentFlowService.cleanup();
         await webhookDeliveryService.shutdown();
+
+        // Shutdown telemetry and Sentry
         await shutdownTelemetry();
+        await closeSentry(2000);
+
         process.exit(0);
     } catch (error) {
         loggingService.error('❌ Error during graceful shutdown', {
@@ -548,8 +651,19 @@ process.on('SIGINT', async () => {
     });
     try {
         const { multiAgentFlowService } = await import('./services/multiAgentFlow.service');
+        const { webhookDeliveryService } = await import('./services/webhookDelivery.service');
+
+        // Flush Sentry events first (quick operation)
+        await flushSentry(2000);
+
+        // Cleanup services
         await multiAgentFlowService.cleanup();
+        await webhookDeliveryService.shutdown();
+
+        // Shutdown telemetry and Sentry
         await shutdownTelemetry();
+        await closeSentry(2000);
+
         process.exit(0);
     } catch (error) {
         loggingService.error('❌ Error during graceful shutdown', {

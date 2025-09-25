@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import { loggingService } from '../services/logging.service';
 import { config } from '../config';
+import { captureError, setUserContext, setRequestContext, setBusinessContext, isSentryEnabled } from '../config/sentry';
 
 interface ErrorResponse {
     success: false;
@@ -190,6 +191,92 @@ export const errorHandler = (
         type: 'error_handling',
         step: 'determine_priority'
     });
+
+    // Send critical errors to Sentry
+    const shouldSendToSentry = isSentryEnabled() && (
+        error.statusCode >= 500 || // Server errors
+        error.name === 'MongoServerError' ||
+        error.name === 'ValidationError' ||
+        err.name === 'CastError' ||
+        error.isOperational === false // Unexpected errors
+    );
+
+    if (shouldSendToSentry) {
+        loggingService.info('Sending error to Sentry for tracking', {
+            component: 'ErrorMiddleware',
+            operation: 'errorHandler',
+            type: 'error_handling',
+            step: 'sentry_reporting',
+            statusCode: error.statusCode,
+            errorName: err.name
+        });
+
+        try {
+            // Set Sentry context before capturing error
+            if (req.user) {
+                setUserContext({
+                    id: req.user.id || req.user._id,
+                    email: req.user.email,
+                    username: req.user.username,
+                    role: req.user.role,
+                    organization: req.user.organizationId || req.user.organization
+                });
+            }
+
+            setRequestContext({
+                method: req.method,
+                url: req.originalUrl,
+                headers: req.headers,
+                query: req.query as Record<string, any>,
+                params: req.params as Record<string, any>
+            });
+
+            // Extract business context from request
+            const businessContext = extractBusinessContext(req);
+            setBusinessContext(businessContext);    
+
+            // Capture error with enhanced context
+            captureError(err, {
+                user: req.user ? {
+                    id: req.user.id || req.user._id,
+                    email: req.user.email,
+                    role: req.user.role,
+                    organization: req.user.organizationId || req.user.organization
+                } : undefined,
+                request: {
+                    method: req.method,
+                    url: req.originalUrl,
+                    headers: req.headers,
+                    query: req.query,
+                    params: req.params
+                },
+                business: businessContext,
+                tags: {
+                    'http.status_code': error.statusCode.toString(),
+                    'http.method': req.method,
+                    'http.url': req.originalUrl,
+                    'error.type': err.name,
+                    'error.operational': error.isOperational?.toString() || 'true'
+                },
+                extra: {
+                    stack: error.stack,
+                    userAgent: req.get('User-Agent'),
+                    ip: req.ip,
+                    timestamp: new Date().toISOString(),
+                    environment: config.env
+                }
+            });
+
+        } catch (sentryError) {
+            loggingService.warn('Failed to send error to Sentry', {
+                component: 'ErrorMiddleware',
+                operation: 'errorHandler',
+                type: 'error_handling',
+                step: 'sentry_error',
+                sentryError: sentryError instanceof Error ? sentryError.message : 'Unknown Sentry error'
+            });
+        }
+    }
 
     // Log security-related errors with higher priority
     if (error.statusCode === 403 || error.statusCode === 401) {
@@ -520,7 +607,7 @@ const checkSuspiciousQuery = (query: any): boolean => {
 
 const checkSuspiciousBody = (body: any): boolean => {
     if (!body) return false;
-    
+
     const suspiciousPatterns = [
         /script/i,
         /javascript/i,
@@ -534,3 +621,80 @@ const checkSuspiciousBody = (body: any): boolean => {
         suspiciousPatterns.some(pattern => pattern.test(value))
     );
 };
+
+/**
+ * Extract business context from request for Sentry error reporting
+ */
+function extractBusinessContext(req: Request & { user?: any }): {
+    operation?: string;
+    component?: string;
+    feature?: string;
+    userId?: string;
+    projectId?: string;
+    costOptimizationId?: string;
+} {
+    const path = req.path;
+    const method = req.method;
+
+    let operation = 'unknown';
+    let component = 'unknown';
+    let feature = 'unknown';
+
+    // Authentication routes
+    if (path.includes('/auth') || path.includes('/login') || path.includes('/register')) {
+        operation = method === 'POST' ? 'authentication' : 'auth_check';
+        component = 'authentication';
+        feature = 'user_access';
+    }
+    // User management
+    else if (path.includes('/users') || path.includes('/profile')) {
+        operation = method === 'GET' ? 'read' : method === 'POST' ? 'create' : method === 'PUT' ? 'update' : method === 'DELETE' ? 'delete' : method.toLowerCase();
+        component = 'user_management';
+        feature = 'user_profiles';
+    }
+    // Project management
+    else if (path.includes('/projects')) {
+        operation = method === 'GET' ? 'read' : method === 'POST' ? 'create' : method === 'PUT' ? 'update' : method === 'DELETE' ? 'delete' : method.toLowerCase();
+        component = 'project_management';
+        feature = 'projects';
+    }
+    // Cost optimization
+    else if (path.includes('/optimization') || path.includes('/cost')) {
+        operation = method === 'GET' ? 'read' : method === 'POST' ? 'create' : method === 'PUT' ? 'update' : method === 'DELETE' ? 'delete' : method.toLowerCase();
+        component = 'cost_optimization';
+        feature = 'optimization';
+    }
+    // AI operations
+    else if (path.includes('/ai') || path.includes('/intelligence') || path.includes('/chat')) {
+        operation = 'ai_interaction';
+        component = 'ai_services';
+        feature = 'ai_interactions';
+    }
+    // Analytics and reporting
+    else if (path.includes('/analytics') || path.includes('/metrics') || path.includes('/reports')) {
+        operation = 'data_analysis';
+        component = 'analytics';
+        feature = 'reporting';
+    }
+    // API keys and security
+    else if (path.includes('/keys') || path.includes('/security') || path.includes('/apikey')) {
+        operation = method === 'GET' ? 'read' : method === 'POST' ? 'create' : method === 'PUT' ? 'update' : method === 'DELETE' ? 'delete' : method.toLowerCase();
+        component = 'security';
+        feature = 'api_keys';
+    }
+    // Webhooks
+    else if (path.includes('/webhook')) {
+        operation = method === 'POST' ? 'webhook_delivery' : 'webhook_management';
+        component = 'webhooks';
+        feature = 'integrations';
+    }
+
+    return {
+        operation,
+        component,
+        feature,
+        userId: req.user?.id || req.user?._id,
+        projectId: req.params?.projectId || (req.query?.projectId as string),
+        costOptimizationId: req.params?.optimizationId || req.params?.id
+    };
+}
