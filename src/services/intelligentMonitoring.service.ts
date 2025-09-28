@@ -62,6 +62,70 @@ export class IntelligentMonitoringService {
     private static readonly MAX_AI_FAILURES = 3;
     private static readonly CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
     private static lastFailureTime = 0;
+
+    /**
+     * Safely parse JSON from AI responses with multiple fallback strategies
+     */
+    private static safeJsonParse(text: string, fallback: any = {}): any {
+        if (!text || typeof text !== 'string') {
+            return fallback;
+        }
+
+        const cleanedText = text.trim();
+
+        // Strategy 1: Try direct parsing
+        try {
+            return JSON.parse(cleanedText);
+        } catch (e) {
+            // Continue to other strategies
+        }
+
+        // Strategy 2: Try to extract JSON using regex patterns
+        const jsonPatterns = [
+            /```(?:json)?\s*(\{[\s\S]*?\})\s*```/,  // JSON in code blocks
+            /\{[\s\S]*\}/,                            // JSON objects
+            /\[[\s\S]*\]/                             // JSON arrays
+        ];
+
+        for (const pattern of jsonPatterns) {
+            const match = cleanedText.match(pattern);
+            if (match) {
+                try {
+                    const extracted = match[1] || match[0];
+                    return JSON.parse(extracted);
+                } catch (e) {
+                    // Continue to next pattern
+                }
+            }
+        }
+
+        // Strategy 3: Try to fix common JSON issues
+        try {
+            let fixedText = cleanedText;
+
+            // Remove trailing commas
+            fixedText = fixedText.replace(/,(\s*[}\]])/g, '$1');
+
+            // Fix unquoted keys (basic)
+            fixedText = fixedText.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+
+            // Remove any remaining invalid characters at start/end
+            fixedText = fixedText.replace(/^[^{[]*[{\[]/, match => match.slice(-1));
+            fixedText = fixedText.replace(/[}\]][^}\]]*?$/, match => match.slice(0, 1));
+
+            return JSON.parse(fixedText);
+        } catch (e) {
+            // All strategies failed
+        }
+
+        // Strategy 4: Return fallback
+        loggingService.warn('Failed to parse AI response as JSON, using fallback', {
+            responseSnippet: cleanedText.substring(0, 200),
+            error: 'JSON parsing failed after all strategies'
+        });
+
+        return fallback;
+    }
     
     // Background processing queue
     private static backgroundQueue: Array<() => Promise<void>> = [];
@@ -315,11 +379,29 @@ Please analyze and provide a detailed user profile in JSON format:
 
 Make this highly specific to the user's actual usage patterns, not generic advice.`;
 
-            const response = await this.executeWithCircuitBreaker(() => 
+            const response = await this.executeWithCircuitBreaker(() =>
                 BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
             );
+
+            if (!response) {
+                throw new Error('AI service unavailable due to circuit breaker');
+            }
+
             const cleanedResponse = BedrockService.extractJson(response);
-            const profileData = JSON.parse(cleanedResponse);
+            if (!cleanedResponse || cleanedResponse.trim() === '') {
+                throw new Error('AI service returned empty or invalid response');
+            }
+
+            const profileData = this.safeJsonParse(cleanedResponse, {
+                userProfile: 'General AI user',
+                usagePersonality: 'Mixed usage patterns',
+                optimizationStyle: 'Balanced optimization approach',
+                preferredModels: [],
+                costSensitivity: 'medium',
+                technicalLevel: 'intermediate',
+                personalizedTips: [],
+                optimizationPriorities: []
+            });
 
             return {
                 userProfile: profileData.userProfile || 'General AI user',
@@ -512,11 +594,22 @@ JSON Format:
 
 Make recommendations highly specific to their usage patterns, not generic advice.`;
 
-            const response = await this.executeWithCircuitBreaker(() => 
+            const response = await this.executeWithCircuitBreaker(() =>
                 BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20240620-v1:0')
             );
+
+            if (!response) {
+                throw new Error('AI service unavailable due to circuit breaker');
+            }
+
             const cleanedResponse = BedrockService.extractJson(response);
-            const aiRecommendations = JSON.parse(cleanedResponse);
+            if (!cleanedResponse || cleanedResponse.trim() === '') {
+                throw new Error('AI service returned empty or invalid response');
+            }
+
+            const aiRecommendations = this.safeJsonParse(cleanedResponse, {
+                recommendations: []
+            });
 
             // Convert AI recommendations to our format
             const recommendations: SmartRecommendation[] = aiRecommendations.recommendations.map((rec: any) => ({
@@ -591,11 +684,22 @@ JSON Format:
     ]
 }`;
 
-            const response = await this.executeWithCircuitBreaker(() => 
+            const response = await this.executeWithCircuitBreaker(() =>
                 BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
             );
+
+            if (!response) {
+                throw new Error('AI service unavailable due to circuit breaker');
+            }
+
             const cleanedResponse = BedrockService.extractJson(response);
-            const onboardingData = JSON.parse(cleanedResponse);
+            if (!cleanedResponse || cleanedResponse.trim() === '') {
+                throw new Error('AI service returned empty or invalid response');
+            }
+
+            const onboardingData = this.safeJsonParse(cleanedResponse, {
+                recommendations: []
+            });
 
             return onboardingData.recommendations.map((rec: any) => ({
                 type: 'personalized_coaching' as const,
