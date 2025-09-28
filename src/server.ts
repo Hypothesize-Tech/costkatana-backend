@@ -398,7 +398,9 @@ export const startServer = async () => {
             step: 'init_tips'
         });
 
-        await intelligenceService.initializeDefaultTips();
+        if (process.env.NODE_ENV !== 'test') {
+            await intelligenceService.initializeDefaultTips();
+        }
         
         // Initialize AIOps Agent
         try {

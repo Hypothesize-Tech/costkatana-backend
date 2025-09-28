@@ -1,3 +1,4 @@
+import { expect } from '@playwright/test';
 import request from 'supertest';
 import app from '../server';
 import { User } from '../models/User';
@@ -14,18 +15,6 @@ describe('Authentication API Endpoints', () => {
         // Set test environment
         process.env.NODE_ENV = 'test';
         process.env.JWT_SECRET = 'test-jwt-secret';
-
-        // Connect to test database
-        await connectDatabase();
-    });
-
-    afterAll(async () => {
-        await disconnectDatabase();
-    });
-
-    afterEach(async () => {
-        // Clean up all test users after each test
-        await User.deleteMany({ email: { $regex: /.*@example\.com$/ } });
     });
 
     describe('POST /auth/register', () => {
