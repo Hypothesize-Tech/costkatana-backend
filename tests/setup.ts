@@ -10,32 +10,65 @@ import { connectDatabase, disconnectDatabase } from '../src/config/database';
 dotenv.config();
 
 // Mock Redis to prevent connection issues
+jest.mock('ioredis', () => {
+    return jest.fn().mockImplementation(() => ({
+        on: jest.fn(),
+        connect: jest.fn().mockResolvedValue(undefined),
+        disconnect: jest.fn().mockResolvedValue(undefined),
+        quit: jest.fn().mockResolvedValue('OK'),
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        del: jest.fn().mockResolvedValue(1),
+        expire: jest.fn().mockResolvedValue(1),
+        exists: jest.fn().mockResolvedValue(0),
+        publish: jest.fn().mockResolvedValue(1),
+        subscribe: jest.fn().mockResolvedValue(undefined),
+    }));
+});
+
+jest.mock('redis', () => ({
+    createClient: jest.fn(() => ({
+        on: jest.fn(),
+        connect: jest.fn().mockResolvedValue(undefined),
+        disconnect: jest.fn().mockResolvedValue(undefined),
+        quit: jest.fn().mockResolvedValue('OK'),
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        del: jest.fn().mockResolvedValue(1),
+        expire: jest.fn().mockResolvedValue(1),
+        exists: jest.fn().mockResolvedValue(0),
+        publish: jest.fn().mockResolvedValue(1),
+        subscribe: jest.fn().mockResolvedValue(undefined),
+    })),
+}));
+
 jest.mock('../src/services/redis.service', () => ({
     RedisService: {
         getInstance: jest.fn(() => ({
-            get: jest.fn(),
-            set: jest.fn(),
-            del: jest.fn(),
-            expire: jest.fn(),
-            exists: jest.fn(),
-            publish: jest.fn(),
-            subscribe: jest.fn(),
+            get: jest.fn().mockResolvedValue(null),
+            set: jest.fn().mockResolvedValue('OK'),
+            del: jest.fn().mockResolvedValue(1),
+            expire: jest.fn().mockResolvedValue(1),
+            exists: jest.fn().mockResolvedValue(0),
+            publish: jest.fn().mockResolvedValue(1),
+            subscribe: jest.fn().mockResolvedValue(undefined),
             on: jest.fn(),
+            quit: jest.fn().mockResolvedValue('OK'),
         })),
-        disconnect: jest.fn(),
+        disconnect: jest.fn().mockResolvedValue(undefined),
     },
 }));
 
 // Mock BullMQ to prevent Redis dependency
 jest.mock('bullmq', () => ({
     Queue: jest.fn(() => ({
-        add: jest.fn(),
-        getJobs: jest.fn(),
-        close: jest.fn(),
+        add: jest.fn().mockResolvedValue({ id: 'mock-job-id' }),
+        getJobs: jest.fn().mockResolvedValue([]),
+        close: jest.fn().mockResolvedValue(undefined),
     })),
     Worker: jest.fn(() => ({
         on: jest.fn(),
-        close: jest.fn(),
+        close: jest.fn().mockResolvedValue(undefined),
     })),
 }));
 
@@ -74,12 +107,20 @@ afterAll(async () => {
 
         // Stop the MongoDB memory server
         if (mongoServer) {
-            await mongoServer.stop();
+            await mongoServer.stop({ doCleanup: true, force: true });
+        }
+
+        // Clear all timers and intervals
+        jest.clearAllTimers();
+
+        // Force garbage collection if available
+        if (global.gc && typeof global.gc === 'function') {
+            global.gc();
         }
     } catch (error) {
         console.error('Failed to cleanup test database:', error);
     }
-});
+}, 10000);
 
 afterEach(async () => {
     try {
