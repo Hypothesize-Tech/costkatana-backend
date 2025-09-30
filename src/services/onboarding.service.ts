@@ -84,7 +84,7 @@ export class OnboardingService {
             const user = await User.findById(userId).select('onboarding').lean();
             if (!user) return null;
 
-            const onboarding = user.onboarding || {
+            const onboarding: any = user.onboarding || {
                 completed: false,
                 skipped: false,
                 projectCreated: false,
