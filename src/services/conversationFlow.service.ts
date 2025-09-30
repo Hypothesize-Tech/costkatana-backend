@@ -1016,7 +1016,7 @@ export class ConversationalFlowService {
         } catch (error) {
             loggingService.error('Error handling knowledge base query:', { error: error instanceof Error ? error.message : String(error) });
             return {
-                response: 'I apologize, but I encountered an error accessing the knowledge base. Please try rephrasing your question about Cost Katana or the AI Cost Optimizer platform.',
+                response: 'I apologize, but I encountered an error accessing the knowledge base. Please try rephrasing your question about Cost Katana or the CostKatana.',
                 isComplete: true,
                 requiresMcpCall: false
             };

@@ -40,7 +40,7 @@ export class KnowledgeBaseTool extends Tool {
     - Security best practices and monitoring
     - Cost optimization techniques and strategies
     
-    Input should be a specific question or search query about any aspect of the AI Cost Optimizer platform.`;
+    Input should be a specific question or search query about any aspect of the CostKatana.`;
 
     async _call(query: string): Promise<string> {
         const startTime = Date.now();
@@ -408,9 +408,9 @@ Please try:
      */
     private handleCostKatanaQuery(query: string): string {
         return `💡 **CostKatana Specific Query:**\n\n` +
-               `I understand you're asking about CostKatana. This tool is primarily focused on the AI Cost Optimizer platform. ` +
+               `I understand you're asking about CostKatana. This tool is primarily focused on the CostKatana. ` +
                `For specific CostKatana-related questions, please refer to the dedicated CostKatana documentation or support channels. ` +
-               `The AI Cost Optimizer platform itself provides a comprehensive set of tools and features for cost optimization, ` +
+               `The CostKatana itself provides a comprehensive set of tools and features for cost optimization, ` +
                `including model switching, context trimming, and usage analytics.`;
     }
 }

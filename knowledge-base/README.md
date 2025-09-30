@@ -1,7 +1,7 @@
 # AI Cost Optimizer Knowledge Base
 
 ## Overview
-This knowledge base provides comprehensive information about all features and capabilities of the AI Cost Optimizer platform. It serves as a reference for AI agents in the multiagent chat system to understand system architecture, provide accurate assistance, and make informed recommendations.
+This knowledge base provides comprehensive information about all features and capabilities of the Costkatana. It serves as a reference for AI agents in the multiagent chat system to understand system architecture, provide accurate assistance, and make informed recommendations.
 
 ## Knowledge Base Structure
 
