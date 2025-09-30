@@ -92,6 +92,13 @@ export interface IUser {
             expiresAt: Date;
         }>;
     };
+    onboarding: {
+        completed: boolean;
+        completedAt?: Date;
+        projectCreated: boolean;
+        firstLlmCall: boolean;
+        stepsCompleted: string[];
+    };
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
@@ -347,6 +354,24 @@ const userSchema = new Schema<IUser>({
                 type: Date,
                 required: true,
             },
+        }],
+    },
+    onboarding: {
+        completed: {
+            type: Boolean,
+            default: false,
+        },
+        completedAt: Date,
+        projectCreated: {
+            type: Boolean,
+            default: false,
+        },
+        firstLlmCall: {
+            type: Boolean,
+            default: false,
+        },
+        stepsCompleted: [{
+            type: String,
         }],
     },
 }, {
