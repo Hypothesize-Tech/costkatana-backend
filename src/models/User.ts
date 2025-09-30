@@ -362,6 +362,11 @@ const userSchema = new Schema<IUser>({
             default: false,
         },
         completedAt: Date,
+        skipped: {
+            type: Boolean,
+            default: false,
+        },
+        skippedAt: Date,
         projectCreated: {
             type: Boolean,
             default: false,

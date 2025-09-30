@@ -18,6 +18,8 @@ interface OnboardingData {
     completed: boolean;
     startedAt: Date;
     completedAt?: Date;
+    skipped?: boolean;
+    skippedAt?: Date;
 }
 
 interface CreateProjectData {
@@ -59,8 +61,8 @@ export class OnboardingService {
             const user = await User.findById(userId).select('onboarding projects').lean();
             if (!user) return true;
 
-            // Check if onboarding is completed or if user has projects
-            if (user.onboarding?.completed) return false;
+            // Check if onboarding is completed or skipped
+            if (user.onboarding?.completed || (user.onboarding as any)?.skipped) return false;
 
             // If user has projects but didn't complete onboarding, still show onboarding
             // This ensures they complete the full flow
@@ -84,6 +86,7 @@ export class OnboardingService {
 
             const onboarding = user.onboarding || {
                 completed: false,
+                skipped: false,
                 projectCreated: false,
                 firstLlmCall: false,
                 stepsCompleted: []
@@ -103,7 +106,9 @@ export class OnboardingService {
                 steps,
                 completed: onboarding.completed || false,
                 startedAt: onboarding.completedAt || new Date(),
-                completedAt: onboarding.completedAt
+                completedAt: onboarding.completedAt,
+                skipped: onboarding.skipped || false,
+                skippedAt: onboarding.skippedAt
             };
         } catch (error) {
             loggingService.error('Error getting onboarding status:', {
@@ -123,8 +128,9 @@ export class OnboardingService {
             if (!user) throw new Error('User not found');
 
             // Initialize onboarding data
-            user.onboarding = {
+            (user.onboarding as any) = {
                 completed: false,
+                skipped: false,
                 projectCreated: false,
                 firstLlmCall: false,
                 stepsCompleted: []
@@ -143,7 +149,8 @@ export class OnboardingService {
                 currentStep: 0,
                 steps,
                 completed: false,
-                startedAt: new Date()
+                startedAt: new Date(),
+                skipped: false
             };
         } catch (error) {
             loggingService.error('Error initializing onboarding:', {
@@ -374,9 +381,10 @@ export class OnboardingService {
             if (!user) throw new Error('User not found');
 
             // Mark onboarding as completed
-            user.onboarding = user.onboarding || {};
-            user.onboarding.completed = true;
-            user.onboarding.completedAt = new Date();
+            (user.onboarding as any) = (user.onboarding as any) || {};
+            (user.onboarding as any).completed = true;
+            (user.onboarding as any).skipped = false; // Ensure it's not marked as skipped when completing
+            (user.onboarding as any).completedAt = new Date();
 
             await user.save();
 
@@ -391,6 +399,37 @@ export class OnboardingService {
             return this.getOnboardingStatus(userId) as Promise<OnboardingData>;
         } catch (error) {
             loggingService.error('Error completing onboarding:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Skip onboarding process
+     */
+    static async skipOnboarding(userId: string): Promise<OnboardingData> {
+        try {
+            const user = await User.findById(userId);
+            if (!user) throw new Error('User not found');
+
+            // Mark onboarding as skipped
+            (user.onboarding as any) = (user.onboarding as any) || {};
+            (user.onboarding as any).skipped = true;
+            (user.onboarding as any).completed = false; // Ensure it's not marked as completed when skipping
+            (user.onboarding as any).skippedAt = new Date();
+
+            await user.save();
+
+            loggingService.info('Onboarding skipped successfully:', {
+                userId,
+                skippedAt: (user.onboarding as any).skippedAt
+            });
+
+            return this.getOnboardingStatus(userId) as Promise<OnboardingData>;
+        } catch (error) {
+            loggingService.error('Error skipping onboarding:', {
                 error: error instanceof Error ? error.message : String(error),
                 userId
             });

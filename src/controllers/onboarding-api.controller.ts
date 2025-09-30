@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+import {  Response } from 'express';
 import { OnboardingService } from '../services/onboarding.service';
 import { ProjectService } from '../services/project.service';
 import { loggingService } from '../services/logging.service';
@@ -7,7 +7,7 @@ export class OnboardingApiController {
     /**
      * Get onboarding status
      */
-    static async getOnboardingStatus(req: Request, res: Response): Promise<void> {
+    static async getOnboardingStatus(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
 
@@ -72,7 +72,7 @@ export class OnboardingApiController {
     /**
      * Initialize onboarding
      */
-    static async initializeOnboarding(req: Request, res: Response): Promise<void> {
+    static async initializeOnboarding(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
 
@@ -126,7 +126,7 @@ export class OnboardingApiController {
     /**
      * Complete onboarding step
      */
-    static async completeStep(req: Request, res: Response): Promise<void> {
+    static async completeStep(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
         const { stepId, data } = req.body;
@@ -194,7 +194,7 @@ export class OnboardingApiController {
     /**
      * Create project during onboarding
      */
-    static async createProject(req: Request, res: Response): Promise<void> {
+    static async createProject(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
         const projectData = req.body;
@@ -262,7 +262,7 @@ export class OnboardingApiController {
     /**
      * Execute LLM query during onboarding
      */
-    static async executeLlmQuery(req: Request, res: Response): Promise<void> {
+    static async executeLlmQuery(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
         const queryData = req.body;
@@ -347,7 +347,7 @@ export class OnboardingApiController {
     /**
      * Complete onboarding
      */
-    static async completeOnboarding(req: Request, res: Response): Promise<void> {
+    static async completeOnboarding(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = (req as any).user?.id;
 
@@ -405,6 +405,72 @@ export class OnboardingApiController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to complete onboarding',
+                message: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+    }
+
+    /**
+     * Skip onboarding
+     */
+    static async skipOnboarding(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = (req as any).user?.id;
+
+        try {
+            loggingService.info('Skipping onboarding', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const status = await OnboardingService.skipOnboarding(userId);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Onboarding skipped successfully', {
+                userId,
+                skippedAt: status.skippedAt,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'onboarding_skipped',
+                category: 'onboarding_operations',
+                value: duration,
+                metadata: {
+                    userId,
+                    skippedAt: status.skippedAt
+                }
+            });
+
+            res.json({
+                success: true,
+                data: status,
+                message: 'Onboarding skipped successfully!'
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+
+            loggingService.error('Error skipping onboarding', {
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(500).json({
+                success: false,
+                error: 'Failed to skip onboarding',
                 message: error instanceof Error ? error.message : 'Unknown error'
             });
         }

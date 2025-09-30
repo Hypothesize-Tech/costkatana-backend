@@ -124,4 +124,13 @@ router.post(
     asyncHandler(OnboardingApiController.completeOnboarding)
 );
 
+/**
+ * Skip onboarding
+ * POST /api/onboarding/skip
+ */
+router.post(
+    '/skip',
+    asyncHandler(OnboardingApiController.skipOnboarding)
+);
+
 export { router as onboardingApiRoutes };
