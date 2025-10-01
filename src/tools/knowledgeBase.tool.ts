@@ -1,6 +1,8 @@
 import { Tool } from "@langchain/core/tools";
 import { vectorStoreService } from "../services/vectorStore.service";
 import { loggingService } from '../services/logging.service';
+import { ChatBedrockConverse } from "@langchain/aws";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
 export class KnowledgeBaseTool extends Tool {
     name = "knowledge_base_search";
@@ -23,6 +25,7 @@ export class KnowledgeBaseTool extends Tool {
     - Cortex architecture (Encoder, Core Processor, Decoder)
     - Cortex impact analytics and justification system
     - Authentication patterns and API endpoints
+    - Backend API URL: https://cost-katana-backend.store
     - Real-time monitoring and observability features
     - Webhook management and delivery systems
     - Workflow orchestration capabilities
@@ -31,6 +34,13 @@ export class KnowledgeBaseTool extends Tool {
     - Financial governance and cost management
     - Email configuration and notification systems
     - Proactive intelligence and automation
+
+    PACKAGE INFORMATION:
+    - NPM Package: ai-cost-tracker (https://www.npmjs.com/package/ai-cost-tracker) - Core library for AI cost tracking
+    - NPM Package: ai-cost-optimizer-cli (https://www.npmjs.com/package/ai-cost-optimizer-cli) - Command-line interface for AI cost optimization
+    - PyPI Package: cost-katana (https://pypi.org/project/cost-katana/) - Python SDK with Cortex meta-language optimization
+    - Official packages only - no hypothetical or non-existent packages
+    - Cross-platform compatibility and deployment options
     
     BEST PRACTICES:
     - Implementation guidelines and recommendations
@@ -63,8 +73,32 @@ export class KnowledgeBaseTool extends Tool {
                 timestamp: new Date().toISOString()
             });
 
-            // Search the vector store with the core query for better results
-            const results = await vectorStoreService.search(coreQuery, 7);
+            // First, check if we should use AI-enhanced RAG approach (only on core query, not contextual query)
+            if (this.shouldUseAIRAG(coreQuery)) {
+                return await this.generateAIRAGResponse(coreQuery, contextInfo);
+            }
+
+            // Build enhanced search query with context information
+            let searchQuery = coreQuery;
+            if (hasContext && contextInfo.currentSubject) {
+                // Boost search with current subject for better relevance
+                searchQuery = `${contextInfo.currentSubject} ${coreQuery}`;
+                
+                // Add recent entities if available
+                if (contextInfo.recentEntities && contextInfo.recentEntities.length > 0) {
+                    searchQuery += ` ${contextInfo.recentEntities.slice(0, 3).join(' ')}`;
+                }
+                
+                loggingService.info('Enhanced search query with context', {
+                    originalQuery: coreQuery,
+                    enhancedQuery: searchQuery,
+                    currentSubject: contextInfo.currentSubject,
+                    recentEntities: contextInfo.recentEntities
+                });
+            }
+            
+            // Search the vector store with the enhanced query
+            const results = await vectorStoreService.search(searchQuery, 7);
             
             if (results.length === 0) {
                 loggingService.warn('No knowledge base results found', {
@@ -321,14 +355,51 @@ Please try:
             modelContext?: string;
             conversationId?: string;
             projectId?: string;
+            currentSubject?: string;
+            currentIntent?: string;
+            recentEntities?: string[];
         };
     } {
         const contextInfo: any = {};
         let coreQuery = query;
         let hasContext = false;
 
-        // Check if the query contains conversation context
-        if (query.includes('Context from conversation:') || query.includes('Conversation context:')) {
+        // Check if the query contains the new context preamble format
+        if (query.includes('Current subject:') || query.includes('Recent conversation:') || query.includes('Intent:')) {
+            hasContext = true;
+            
+            // Extract current subject
+            const subjectMatch = query.match(/Current subject:\s*([^\n]+)/);
+            if (subjectMatch) {
+                contextInfo.currentSubject = subjectMatch[1].trim();
+            }
+            
+            // Extract intent
+            const intentMatch = query.match(/Intent:\s*([^\n]+)/);
+            if (intentMatch) {
+                contextInfo.currentIntent = intentMatch[1].trim();
+            }
+            
+            // Extract recent entities
+            const entitiesMatch = query.match(/Recent entities:\s*([^\n]+)/);
+            if (entitiesMatch) {
+                contextInfo.recentEntities = entitiesMatch[1].trim().split(',').map(e => e.trim());
+            }
+            
+            // Extract conversation context
+            const conversationMatch = query.match(/Recent conversation:\s*(.*?)(?:\n\nUser query:|$)/s);
+            if (conversationMatch) {
+                contextInfo.conversationContext = conversationMatch[1].trim();
+            }
+
+            // Extract the actual query
+            const queryMatch = query.match(/(?:User query:|Query:)\s*(.*?)(?:\n|$)/s);
+            if (queryMatch) {
+                coreQuery = queryMatch[1].trim();
+            }
+        }
+        // Legacy context format support
+        else if (query.includes('Context from conversation:') || query.includes('Conversation context:')) {
             hasContext = true;
             
             // Extract conversation context
@@ -404,13 +475,349 @@ Please try:
     }
 
     /**
+     * Determine if we should use AI-enhanced RAG approach vs traditional vector search
+     */
+    private shouldUseAIRAG(query: string): boolean {
+        const lowerQuery = query.toLowerCase();
+
+        // Use AI RAG for:
+        // 1. Complex questions requiring synthesis
+        // 2. Questions about integration or implementation
+        // 3. Questions asking for examples or code
+        // 4. Questions about best practices or recommendations
+        // 5. Questions that need contextual understanding
+
+        const aiRagKeywords = [
+            'how to', 'integrate', 'implement', 'example', 'code', 'best practice',
+            'recommend', 'setup', 'configure', 'install', 'use', 'tutorial',
+            'guide', 'step by step', 'walkthrough', 'explanation', 'understand'
+        ];
+
+        return aiRagKeywords.some(keyword => lowerQuery.includes(keyword));
+    }
+
+    /**
+     * Generate response using AI-enhanced RAG (Retrieval-Augmented Generation)
+     */
+    private async generateAIRAGResponse(query: string, contextInfo: any): Promise<string> {
+        const startTime = Date.now();
+
+        try {
+            loggingService.info('🤖 Using AI-enhanced RAG for knowledge base query', {
+                component: 'knowledgeBaseTool',
+                query: query,
+                approach: 'ai_rag'
+            });
+
+            // First, retrieve relevant documents using vector search
+            const relevantDocs = await vectorStoreService.search(query, 5);
+
+            if (relevantDocs.length === 0) {
+                return this.generateVectorSearchResponse(query, query, false, contextInfo, startTime);
+            }
+
+            // Extract content from relevant documents
+            const contextContent = relevantDocs.map(doc => {
+                const source = this.extractSourceName(doc.metadata.source);
+                return `**${source}:**\n${this.formatContent(doc.pageContent)}\n`;
+            }).join('\n');
+
+            // Create AI model for RAG
+            const llm = new ChatBedrockConverse({
+                model: "anthropic.claude-3-sonnet-20240229-v1:0",
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.1, // Lower temperature for factual accuracy
+                maxTokens: 1000,
+            });
+
+            // Create RAG prompt
+            const ragPrompt = `You are an expert AI assistant for CostKatana, a cost optimization platform for AI applications.
+
+You have access to the following knowledge base information:
+
+${contextContent}
+
+Based on this knowledge base, please provide a comprehensive and accurate answer to the following question:
+
+"${query}"
+
+Guidelines:
+- Be specific and factual
+- Reference the correct package names (ai-cost-tracker, ai-cost-optimizer-cli, cost-katana)
+- Include installation commands and links when relevant
+- Do not invent or suggest non-existent packages or features
+- If the question is about specific packages, provide their exact npm/pypi links
+- Structure your response clearly with sections when appropriate
+
+Answer:`;
+
+            // Generate response using AI model
+            const response = await llm.invoke([
+                new SystemMessage("You are a helpful AI assistant specialized in CostKatana documentation and integration."),
+                new HumanMessage(ragPrompt)
+            ]);
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('🤖 AI RAG response generated successfully', {
+                component: 'knowledgeBaseTool',
+                query: query,
+                documentsUsed: relevantDocs.length,
+                responseLength: response.content.length,
+                duration: duration,
+                approach: 'ai_rag'
+            });
+
+            return `🤖 **AI-Enhanced Knowledge Base Response:**\n\n${response.content}`;
+
+        } catch (error) {
+            loggingService.error('🤖 AI RAG failed, falling back to vector search', {
+                component: 'knowledgeBaseTool',
+                query: query,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            // Fallback to traditional vector search
+            return await this.generateVectorSearchResponse(query, query, false, contextInfo, startTime);
+        }
+    }
+
+    /**
+     * Generate response using traditional vector search approach
+     */
+    private async generateVectorSearchResponse(query: string, coreQuery: string, hasContext: boolean, contextInfo: any, startTime: number): Promise<string> {
+        // Search the vector store with the core query for better results
+        const results = await vectorStoreService.search(coreQuery, 7);
+
+        if (results.length === 0) {
+            loggingService.warn('No knowledge base results found', {
+                component: 'knowledgeBaseTool',
+                query: query
+            });
+            return `No relevant information found in the AI Cost Optimizer knowledge base for: "${query}"
+
+Suggestions:
+- Try rephrasing your question
+- Use more specific terms related to cost optimization, analytics, or system features
+- Ask about specific components like workflows, webhooks, or user management`;
+        }
+
+        // Categorize and format results
+        const categorizedResults = this.categorizeResults(results);
+        let response = `🔍 **Knowledge Base Search Results for: "${coreQuery}"**\n`;
+
+        // Add context information if available
+        if (hasContext) {
+            response += `📋 **Context Considered:**\n`;
+            if (contextInfo.conversationContext) {
+                response += `- Previous conversation context included\n`;
+            }
+            if (contextInfo.modelContext) {
+                response += `- Current model: ${contextInfo.modelContext}\n`;
+            }
+            if (contextInfo.conversationId) {
+                response += `- Conversation ID: ${contextInfo.conversationId}\n`;
+            }
+            if (contextInfo.projectId) {
+                response += `- Project context: ${contextInfo.projectId}\n`;
+            }
+            response += '\n';
+        }
+
+        response += `Found ${results.length} relevant sources:\n\n`;
+
+        // Group by category for better organization
+        const categories = Object.keys(categorizedResults);
+
+        categories.forEach(category => {
+            const categoryResults = categorizedResults[category];
+            if (categoryResults.length > 0) {
+                response += `📚 **${category.toUpperCase()}**\n`;
+
+                categoryResults.forEach((doc, index) => {
+                    const source = this.extractSourceName(doc.metadata.source);
+                    const relevanceScore = doc.metadata.score ? ` (${Math.round(doc.metadata.score * 100)}% relevant)` : '';
+
+                    response += `\n${index + 1}. **${source}**${relevanceScore}\n`;
+                    response += `${this.formatContent(doc.pageContent)}\n`;
+                });
+                response += '\n';
+            }
+        });
+
+        // Add contextual recommendations
+        response += this.generateRecommendations(query, results);
+
+        const duration = Date.now() - startTime;
+
+        loggingService.info('Knowledge base search completed', {
+            component: 'knowledgeBaseTool',
+            query: query,
+            resultsCount: results.length,
+            categoriesFound: categories.length,
+            duration: duration
+        });
+
+        return response;
+    }
+
+    /**
      * Handle CostKatana-specific queries to provide more accurate responses.
      */
     private handleCostKatanaQuery(query: string): string {
-        return `💡 **CostKatana Specific Query:**\n\n` +
-               `I understand you're asking about CostKatana. This tool is primarily focused on the CostKatana. ` +
-               `For specific CostKatana-related questions, please refer to the dedicated CostKatana documentation or support channels. ` +
-               `The CostKatana itself provides a comprehensive set of tools and features for cost optimization, ` +
-               `including model switching, context trimming, and usage analytics.`;
+        const lowerQuery = query.toLowerCase();
+
+        // Handle npm package queries
+        if (lowerQuery.includes('npm') && lowerQuery.includes('package')) {
+            return `📦 **CostKatana NPM Packages:**\n\n` +
+                   `**Available NPM Packages:**\n` +
+                   `• **ai-cost-tracker** - Core library for AI cost tracking and optimization\n` +
+                   `  📦 Install: \`npm install ai-cost-tracker\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-tracker\n\n` +
+                   `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
+                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `**Key Features:**\n` +
+                   `• Provider abstraction across multiple AI services\n` +
+                   `• Real-time cost tracking and analytics\n` +
+                   `• Cortex meta-language optimization (70-95% token reduction)\n` +
+                   `• Automatic failover and intelligent routing\n` +
+                   `• Comprehensive error handling and retry logic`;
+        }
+
+        // Handle CLI queries
+        if (lowerQuery.includes('cli') || lowerQuery.includes('command') && lowerQuery.includes('line')) {
+            return `💻 **CostKatana CLI Tool:**\n\n` +
+                   `**Available CLI Package:**\n` +
+                   `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
+                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `**Key CLI Features:**\n` +
+                   `• Interactive chat sessions with AI models\n` +
+                   `• Cost analysis and optimization workflows\n` +
+                   `• Bulk processing and batch operations\n` +
+                   `• Cortex optimization for 70-95% token reduction\n` +
+                   `• Budget management and cost monitoring\n` +
+                   `• Multi-step workflow crafting and evaluation\n` +
+                   `• Cost simulation and what-if scenarios\n` +
+                   `• Intelligent prompt rewriting\n` +
+                   `• Model management and comparison\n\n` +
+                   `**Quick Start:**\n` +
+                   `\`\`\`bash\n` +
+                   `# Install globally\n` +
+                   `npm install -g ai-cost-optimizer-cli\n\n` +
+                   `# Initialize configuration\n` +
+                   `cost-katana init\n\n` +
+                   `# Test setup\n` +
+                   `cost-katana test\n\n` +
+                   `# Start interactive chat\n` +
+                   `cost-katana chat --model nova-lite\n\n` +
+                   `# Optimize with Cortex (70-95% savings)\n` +
+                   `cost-katana optimize --prompt "your query" --cortex\n\n` +
+                   `# Analyze costs\n` +
+                   `cost-katana analyze --days 30\n\n` +
+                   `# List available models\n` +
+                   `cost-katana list-models\n` +
+                   `\`\`\``;
+        }
+
+        // Handle queries asking which CLI for python/javascript
+        if (lowerQuery.includes('which') && lowerQuery.includes('cli') && (lowerQuery.includes('python') || lowerQuery.includes('javascript'))) {
+            return `🔍 **CostKatana CLI Tools for Python and JavaScript:**\n\n` +
+                   `**JavaScript/TypeScript CLI:**\n` +
+                   `• **ai-cost-optimizer-cli** (NPM package)\n` +
+                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
+                   `  🔗 https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `**Python CLI:**\n` +
+                   `• **cost-katana** (PyPI package) - Includes CLI functionality\n` +
+                   `  📦 Install: \`pip install cost-katana\`\n` +
+                   `  🔗 https://pypi.org/project/cost-katana/\n\n` +
+                   `**Important Notes:**\n` +
+                   `• CostKatana does NOT have separate CLI packages like \`costkatana-cli\`\n` +
+                   `• The main packages include CLI functionality\n` +
+                   `• Both packages provide command-line interfaces for cost optimization\n` +
+                   `• Use the official packages listed above, not hypothetical packages`;
+        }
+
+        // Handle Python package queries
+        if (lowerQuery.includes('python') || lowerQuery.includes('pypi')) {
+            return `🐍 **CostKatana Python Package:**\n\n` +
+                   `**Available PyPI Package:**\n` +
+                   `• **cost-katana** - Python SDK for AI cost optimization with Cortex meta-language\n` +
+                   `  📦 Install: \`pip install cost-katana\`\n` +
+                   `  🔗 Package: https://pypi.org/project/cost-katana/\n\n` +
+                   `**Key Features:**\n` +
+                   `• Cortex meta-language for 70-95% token reduction\n` +
+                   `• SAST (Semantic Abstract Syntax Tree) processing\n` +
+                   `• Multi-provider support (OpenAI, Anthropic, Google, AWS Bedrock)\n` +
+                   `• Real-time cost tracking and analytics\n` +
+                   `• Chat sessions and conversation management\n` +
+                   `• Comprehensive error handling and retry logic\n` +
+                   `• Advanced configuration and environment management\n\n` +
+                   `**Quick Start:**\n` +
+                   `\`\`\`python\n` +
+                   `import cost_katana as ck\n\n` +
+                   `# Configure with API key\n` +
+                   `ck.configure(api_key='dak_your_key_here')\n\n` +
+                   `# Use any AI model\n` +
+                   `model = ck.GenerativeModel('nova-lite')\n` +
+                   `response = model.generate_content('Hello, world!')\n` +
+                   `print(f'Cost: \${response.usage_metadata.cost:.4f}')\n\n` +
+                   `# Enable Cortex optimization\n` +
+                   `response = model.generate_content(\n` +
+                   `    'Complex query here',\n` +
+                   `    cortex={'enabled': True, 'mode': 'answer_generation'}\n` +
+                   `)\n` +
+                   `print(f'Token reduction: {response.cortex_metadata.token_reduction}%')\n` +
+                   `\`\`\``;
+        }
+
+        // Handle backend URL queries
+        if (lowerQuery.includes('backend') && lowerQuery.includes('url')) {
+            return `🔗 **CostKatana Backend URL Information:**\n\n` +
+                   `**Backend API URL:** https://cost-katana-backend.store\n\n` +
+                   `**Key Information:**\n` +
+                   `• This is the primary API endpoint for all CostKatana services\n` +
+                   `• Use this URL for API integrations and SDK configurations\n` +
+                   `• The backend provides authentication, cost tracking, and optimization services\n` +
+                   `• Health check endpoint: https://cost-katana-backend.store/health\n\n` +
+                   `**Configuration Examples:**\n` +
+                   `• Environment variable: \`COST_KATANA_BASE_URL=https://cost-katana-backend.store\`\n` +
+                   `• SDK configuration: \`baseUrl: 'https://cost-katana-backend.store'\`\n` +
+                   `• CLI configuration: \`cost-katana config --set baseUrl=https://cost-katana-backend.store\``;
+        }
+
+        // Handle API endpoint queries
+        if (lowerQuery.includes('api') && lowerQuery.includes('endpoint')) {
+            return `🔌 **CostKatana API Endpoints:**\n\n` +
+                   `**Base URL:** https://cost-katana-backend.store\n\n` +
+                   `**Key Endpoints:**\n` +
+                   `• **Authentication:** \`POST /auth/login\` - User authentication\n` +
+                   `• **Cost Tracking:** \`POST /api/track\` - Track API usage and costs\n` +
+                   `• **Model Management:** \`GET /api/models\` - List available AI models\n` +
+                   `• **Analytics:** \`GET /api/analytics\` - Usage analytics and insights\n` +
+                   `• **Webhooks:** \`POST /api/webhooks\` - Configure webhook notifications\n` +
+                   `• **Health Check:** \`GET /health\` - Service health status\n\n` +
+                   `**Authentication:** All API requests require the \`Authorization: Bearer <API_KEY>\` header\n` +
+                   `**API Key Format:** Keys must start with \`dak_\` (e.g., \`dak_your_key_here\`)`;
+        }
+
+        return `💡 **CostKatana Package Information:**\n\n` +
+               `CostKatana provides comprehensive cost optimization solutions for AI applications through these official packages:\n\n` +
+               `**📦 NPM Packages:**\n` +
+               `• **ai-cost-tracker** - Core library for AI cost tracking and optimization\n` +
+               `  📦 Install: \`npm install ai-cost-tracker\`\n` +
+               `  🔗 https://www.npmjs.com/package/ai-cost-tracker\n\n` +
+               `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
+               `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
+               `  🔗 https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+               `**🐍 PyPI Package:**\n` +
+               `• **cost-katana** - Python SDK for AI cost optimization with Cortex meta-language\n` +
+               `  📦 Install: \`pip install cost-katana\`\n` +
+               `  🔗 https://pypi.org/project/cost-katana/\n\n` +
+               `**Backend URL:** https://cost-katana-backend.store\n` +
+               `**Documentation:** https://docs.costkatana.com\n` +
+               `**Dashboard:** https://costkatana.com/dashboard\n\n` +
+               `**Note:** CostKatana does NOT have packages like \`costkatana-cli\`, \`@costkatana/sdk\`, or other hypothetical packages. Please use the official packages listed above.`;
     }
 }

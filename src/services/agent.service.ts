@@ -13,7 +13,7 @@ import { LifeUtilityTool } from "../tools/lifeUtility.tool";
 import { vectorStoreService } from "./vectorStore.service";
 import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
 import { loggingService } from "./logging.service";
-import { buildSystemPrompt, getOptimizedPromptForQueryType, getCompressedPrompt } from "../config/agent-prompt-template";
+import { buildSystemPrompt, getCompressedPrompt } from "../config/agent-prompt-template";
 import { ResponseFormattersService } from "./response-formatters.service";
 import crypto from 'crypto';
 
@@ -365,21 +365,93 @@ export class AgentService {
                 throw new Error('Agent not properly initialized');
             }
 
+            // Check if this is a CostKatana-specific query and handle it directly
+            const lowerQuery = queryData.query.toLowerCase();
+            loggingService.info('🔍 Query analysis:', { 
+                query: queryData.query, 
+                lowerQuery, 
+                containsCostkatana: lowerQuery.includes('costkatana'),
+                containsNpm: lowerQuery.includes('npm'),
+                containsPackage: lowerQuery.includes('package'),
+                containsAiCostTracker: lowerQuery.includes('ai-cost-tracker'),
+                containsAiCostOptimizerCli: lowerQuery.includes('ai-cost-optimizer-cli'),
+                containsCostKatana: lowerQuery.includes('cost-katana'),
+                containsPypi: lowerQuery.includes('pypi')
+            });
+            
+            if (lowerQuery.includes('costkatana') || lowerQuery.includes('npm') || lowerQuery.includes('package') || 
+                lowerQuery.includes('ai-cost-tracker') || lowerQuery.includes('ai-cost-optimizer-cli') || 
+                lowerQuery.includes('cost-katana') || lowerQuery.includes('pypi')) {
+                
+                loggingService.info('🎯 CostKatana-specific query detected, using knowledge base tool directly');
+                
+                const knowledgeBaseTool = this.getToolInstance('knowledge_base_search');
+                const knowledgeResponse = await knowledgeBaseTool.invoke({ input: queryData.query });
+                
+                const executionTime = Date.now() - startTime;
+                
+                return {
+                    success: true,
+                    response: knowledgeResponse,
+                    metadata: {
+                        executionTime,
+                        sources: ['Knowledge Base'],
+                        fromCache: false,
+                        knowledgeEnhanced: true
+                    },
+                    thinking: {
+                        title: "CostKatana Package Information",
+                        summary: "Retrieved comprehensive information about CostKatana packages, integration guides, and troubleshooting resources.",
+                        steps: [
+                            {
+                                step: 1,
+                                description: "Knowledge Base Search",
+                                reasoning: "Searched the comprehensive CostKatana knowledge base for relevant package information and integration details.",
+                                outcome: "Found detailed information about npm packages, Python SDK, and CLI tools"
+                            },
+                            {
+                                step: 2,
+                                description: "Package Information Retrieval",
+                                reasoning: "Extracted specific details about available packages, installation commands, and official links.",
+                                outcome: "Compiled complete package information with installation instructions"
+                            },
+                            {
+                                step: 3,
+                                description: "Integration Guidance",
+                                reasoning: "Provided step-by-step integration examples and best practices for each package.",
+                                outcome: "Generated actionable integration guidance with code examples"
+                            }
+                        ]
+                    }
+                };
+            }
+
             // Build user context (with caching)
             const userContext = this.buildUserContextCached(queryData);
 
+            // Check if query contains context preamble (from chat service)
+            let enhancedQuery = queryData.query;
+            if (queryData.query.includes('Current subject:') || queryData.query.includes('Recent conversation:')) {
+                // This is a context-enhanced query from chat service
+                loggingService.info('🔍 Context-enhanced query detected', {
+                    hasContextPreamble: true,
+                    queryLength: queryData.query.length
+                });
+                enhancedQuery = queryData.query; // Use as-is since it already contains context
+            }
+
             // Generate thinking process for cost-related queries
-            const thinking = this.generateThinkingProcess(queryData.query);
+            const thinking = this.generateThinkingProcess(enhancedQuery);
 
             // Determine query type for prompt optimization
-            const queryType = this.determineQueryType(queryData.query);
+            const queryType = this.determineQueryType(enhancedQuery);
 
             // Use queryType in the agentExecutor input for prompt optimization
             const result = await Promise.race([
                 this.circuitBreaker(async () => {
                     return await this.retryExecutor(async () => {
                         return await this.agentExecutor!.invoke({
-                            input: queryData.query,
+                            input: enhancedQuery,
                             user_context: userContext,
                             queryType // Pass queryType to the agent
                         });

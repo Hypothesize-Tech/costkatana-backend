@@ -3,11 +3,31 @@ import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { Conversation, IConversation, ChatMessage } from '../models';
 import { Types } from 'mongoose';
 import mongoose from 'mongoose';
-import { agentService } from './agent.service';
-import { conversationalFlowService } from './conversationFlow.service';
-import { multiAgentFlowService } from './multiAgentFlow.service';
+// import { agentService } from './agent.service';
+// import { conversationalFlowService } from './conversationFlow.service';
+// import { multiAgentFlowService } from './multiAgentFlow.service';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { loggingService } from './logging.service';
+
+// Conversation Context Types
+export interface ConversationContext {
+    conversationId: string;
+    currentSubject?: string;
+    currentIntent?: string;
+    lastReferencedEntities: string[];
+    lastToolUsed?: string;
+    lastDomain?: string;
+    languageFramework?: string;
+    subjectConfidence: number;
+    timestamp: Date;
+}
+
+export interface CoreferenceResult {
+    resolved: boolean;
+    subject?: string;
+    confidence: number;
+    method: 'rule-based' | 'llm-fallback';
+}
 
 export interface ChatMessageResponse {
     id: string;
@@ -75,6 +95,12 @@ export interface ChatSendMessageResponse {
 }
 
 export class ChatService {
+    // Context management
+    private static contextCache = new Map<string, ConversationContext>();
+    private static readonly CTX_MAX_HISTORY = parseInt(process.env.CTX_MAX_HISTORY || '3');
+    private static readonly CTX_REDIS_TTL = parseInt(process.env.CTX_REDIS_TTL || '600');
+    private static readonly CTX_COREF_LL_ENABLED = process.env.CTX_COREF_LL_ENABLED !== 'false';
+
     // Static fallback models to prevent memory allocation on every error
     private static readonly FALLBACK_MODELS = [
         {
@@ -123,6 +149,275 @@ export class ChatService {
     private static errorCounts = new Map<string, number>();
     private static readonly MAX_ERRORS = 5;
     private static readonly ERROR_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+
+    // Context Management Methods
+    private static buildConversationContext(
+        conversationId: string, 
+        userMessage: string, 
+        recentMessages: any[]
+    ): ConversationContext {
+        const existingContext = this.contextCache.get(conversationId);
+        
+        // Extract entities from current message and recent history
+        const entities = this.extractEntities(userMessage, recentMessages);
+        
+        // Determine current subject and intent
+        const { subject, intent, domain, confidence } = this.analyzeMessage(userMessage, recentMessages);
+        
+        const context: ConversationContext = {
+            conversationId,
+            currentSubject: subject || existingContext?.currentSubject,
+            currentIntent: intent,
+            lastReferencedEntities: [...(existingContext?.lastReferencedEntities || []), ...entities].slice(-10), // Keep last 10
+            lastToolUsed: existingContext?.lastToolUsed,
+            lastDomain: domain || existingContext?.lastDomain,
+            languageFramework: this.detectLanguageFramework(userMessage),
+            subjectConfidence: confidence,
+            timestamp: new Date()
+        };
+
+        // Cache the context
+        this.contextCache.set(conversationId, context);
+        
+        loggingService.info('🔍 Built conversation context', {
+            conversationId,
+            subject: context.currentSubject,
+            intent: context.currentIntent,
+            domain: context.lastDomain,
+            confidence: context.subjectConfidence,
+            entitiesCount: context.lastReferencedEntities.length
+        });
+
+        return context;
+    }
+
+    private static extractEntities(message: string, recentMessages: any[]): string[] {
+        const entities: string[] = [];
+        const text = `${message} ${recentMessages.map(m => m.content).join(' ')}`.toLowerCase();
+        
+        // Package entities
+        const packagePatterns = [
+            /ai-cost-tracker/g, /ai-cost-optimizer-cli/g, /cost-katana/g,
+            /npm\s+package/g, /pypi\s+package/g, /python\s+package/g,
+            /javascript\s+package/g, /typescript\s+package/g
+        ];
+        
+        packagePatterns.forEach(pattern => {
+            const matches = text.match(pattern);
+            if (matches) entities.push(...matches);
+        });
+
+        // Service entities
+        const servicePatterns = [
+            /costkatana/g, /cost katana/g, /backend/g, /api/g,
+            /claude/g, /gpt/g, /bedrock/g, /openai/g
+        ];
+        
+        servicePatterns.forEach(pattern => {
+            const matches = text.match(pattern);
+            if (matches) entities.push(...matches);
+        });
+
+        return [...new Set(entities)]; // Remove duplicates
+    }
+
+    private static analyzeMessage(message: string, recentMessages: any[]): {
+        subject?: string;
+        intent?: string;
+        domain?: string;
+        confidence: number;
+    } {
+        const lowerMessage = message.toLowerCase();
+        
+        // Intent detection
+        let intent = 'general';
+        if (lowerMessage.includes('how to') || lowerMessage.includes('integrate') || lowerMessage.includes('install')) {
+            intent = 'integration';
+        } else if (lowerMessage.includes('example') || lowerMessage.includes('code')) {
+            intent = 'example';
+        } else if (lowerMessage.includes('error') || lowerMessage.includes('issue') || lowerMessage.includes('problem')) {
+            intent = 'troubleshooting';
+        }
+
+        // Domain detection
+        let domain = 'general';
+        let subject: string | undefined;
+        let confidence = 0.5;
+
+        if (lowerMessage.includes('costkatana') || lowerMessage.includes('cost katana')) {
+            domain = 'costkatana';
+            confidence = 0.9;
+            
+            if (lowerMessage.includes('python') || lowerMessage.includes('pypi')) {
+                subject = 'cost-katana-python';
+            } else if (lowerMessage.includes('npm') || lowerMessage.includes('javascript') || lowerMessage.includes('typescript')) {
+                subject = 'ai-cost-tracker';
+            } else if (lowerMessage.includes('cli') || lowerMessage.includes('command')) {
+                subject = 'ai-cost-optimizer-cli';
+            }
+        } else if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi')) {
+            domain = 'packages';
+            confidence = 0.8;
+        } else if (lowerMessage.includes('cost') || lowerMessage.includes('billing') || lowerMessage.includes('pricing')) {
+            domain = 'billing';
+            confidence = 0.7;
+        }
+
+        // Check for coreference (this, that, it, the package, etc.)
+        const corefPatterns = [
+            /this\s+(package|tool|service|model)/g,
+            /that\s+(package|tool|service|model)/g,
+            /the\s+(package|tool|service|model)/g,
+            /\bit\b/g
+        ];
+        
+        const hasCoref = corefPatterns.some(pattern => pattern.test(lowerMessage));
+        if (hasCoref && recentMessages.length > 0) {
+            // Try to resolve from recent context
+            const recentContext = recentMessages.slice(-3).map(m => m.content).join(' ');
+            if (recentContext.includes('cost-katana') || recentContext.includes('python')) {
+                subject = 'cost-katana-python';
+            } else if (recentContext.includes('ai-cost-tracker') || recentContext.includes('npm')) {
+                subject = 'ai-cost-tracker';
+            } else if (recentContext.includes('ai-cost-optimizer-cli') || recentContext.includes('cli')) {
+                subject = 'ai-cost-optimizer-cli';
+            }
+            confidence = Math.max(confidence, 0.6);
+        }
+
+        return { subject, intent, domain, confidence };
+    }
+
+    private static detectLanguageFramework(message: string): string | undefined {
+        const lowerMessage = message.toLowerCase();
+        
+        if (lowerMessage.includes('python') || lowerMessage.includes('pip') || lowerMessage.includes('pypi')) {
+            return 'python';
+        } else if (lowerMessage.includes('javascript') || lowerMessage.includes('typescript') || lowerMessage.includes('node') || lowerMessage.includes('npm')) {
+            return 'javascript';
+        } else if (lowerMessage.includes('react') || lowerMessage.includes('vue') || lowerMessage.includes('angular')) {
+            return 'frontend';
+        }
+        
+        return undefined;
+    }
+
+    private static async resolveCoreference(
+        message: string, 
+        context: ConversationContext, 
+        recentMessages: any[]
+    ): Promise<CoreferenceResult> {
+        const lowerMessage = message.toLowerCase();
+        
+        // Rule-based coreference resolution
+        const corefPatterns = [
+            { pattern: /this\s+(package|tool|service|model)/g, weight: 0.9 },
+            { pattern: /that\s+(package|tool|service|model)/g, weight: 0.8 },
+            { pattern: /the\s+(package|tool|service|model)/g, weight: 0.7 },
+            { pattern: /\bit\b/g, weight: 0.6 }
+        ];
+        
+        for (const { pattern, weight } of corefPatterns) {
+            if (pattern.test(lowerMessage)) {
+                if (context.currentSubject) {
+                    return {
+                        resolved: true,
+                        subject: context.currentSubject,
+                        confidence: weight * context.subjectConfidence,
+                        method: 'rule-based'
+                    };
+                }
+            }
+        }
+
+        // LLM fallback for ambiguous cases
+        if (this.CTX_COREF_LL_ENABLED && context.subjectConfidence < 0.6) {
+            try {
+                const llm = new (await import('@langchain/aws')).ChatBedrockConverse({
+                    model: "anthropic.claude-3-5-haiku-20241022-v1:0",
+                    region: process.env.AWS_REGION || 'us-east-1',
+                    temperature: 0.1,
+                    maxTokens: 200,
+                });
+
+                const contextSummary = recentMessages.slice(-2).map(m => `${m.role}: ${m.content}`).join('\n');
+                const prompt = `Context: ${contextSummary}\n\nUser query: ${message}\n\nWhat is the user referring to with "this", "that", "it", or "the package"? Respond with just the entity name or "unclear".`;
+
+                const response = await llm.invoke([new (await import('@langchain/core/messages')).HumanMessage(prompt)]);
+                const resolvedSubject = response.content?.toString().trim().toLowerCase();
+
+                if (resolvedSubject && resolvedSubject !== 'unclear') {
+                    return {
+                        resolved: true,
+                        subject: resolvedSubject,
+                        confidence: 0.7,
+                        method: 'llm-fallback'
+                    };
+                }
+            } catch (error) {
+                loggingService.warn('LLM coreference resolution failed', { error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+
+        return {
+            resolved: false,
+            confidence: 0.3,
+            method: 'rule-based'
+        };
+    }
+
+    private static decideRoute(context: ConversationContext, message: string): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
+        const lowerMessage = message.toLowerCase();
+        
+        // High confidence CostKatana queries go to knowledge base
+        if (context.lastDomain === 'costkatana' && context.subjectConfidence > 0.7) {
+            return 'knowledge_base';
+        }
+        
+        // Package-related queries
+        if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi') || 
+            lowerMessage.includes('install') || lowerMessage.includes('integrate')) {
+            return 'knowledge_base';
+        }
+        
+        // Web scraping for external content
+        if (lowerMessage.includes('search') || lowerMessage.includes('find') || lowerMessage.includes('latest') || 
+            lowerMessage.includes('news') || lowerMessage.includes('trending')) {
+            return 'web_scraper';
+        }
+        
+        // Analytics queries
+        if (lowerMessage.includes('cost') || lowerMessage.includes('billing') || lowerMessage.includes('analytics') || 
+            lowerMessage.includes('usage') || lowerMessage.includes('optimization')) {
+            return 'multi_agent';
+        }
+        
+        // Default to conversational flow for general queries
+        return 'conversational_flow';
+    }
+
+    private static buildContextPreamble(context: ConversationContext, recentMessages: any[]): string {
+        const preamble = [];
+        
+        if (context.currentSubject) {
+            preamble.push(`Current subject: ${context.currentSubject}`);
+        }
+        
+        if (context.currentIntent) {
+            preamble.push(`Intent: ${context.currentIntent}`);
+        }
+        
+        if (context.lastReferencedEntities.length > 0) {
+            preamble.push(`Recent entities: ${context.lastReferencedEntities.slice(-3).join(', ')}`);
+        }
+        
+        if (recentMessages.length > 0) {
+            const recentContext = recentMessages.slice(-2).map(m => `${m.role}: ${m.content}`).join('\n');
+            preamble.push(`Recent conversation:\n${recentContext}`);
+        }
+        
+        return preamble.join('\n\n');
+    }
 
     /**
      * Get optimal context size based on message complexity
@@ -200,107 +495,281 @@ export class ChatService {
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
         
-        // Check if multi-agent processing is requested or if query needs web scraping
-        const needsWebScraping = this.detectWebScrapingNeeds(request.message);
-        const needsKnowledgeBase = this.detectKnowledgeBaseMention(request.message);
+        // Build conversation context
+        const context = this.buildConversationContext(
+            conversation._id.toString(),
+            request.message,
+            recentMessages
+        );
         
-        if (request.useMultiAgent || request.chatMode || needsWebScraping || needsKnowledgeBase) {
-            // Use the new multi-agent system
-            const multiAgentResult = await multiAgentFlowService.processMessage(
-                conversation._id.toString(),
-                request.userId,
-                request.message,
-                {
-                    chatMode: request.chatMode || 'balanced',
-                    costBudget: 0.10
-                }
+        // Resolve coreference if needed
+        const corefResult = await this.resolveCoreference(request.message, context, recentMessages);
+        let resolvedMessage = request.message;
+        
+        if (corefResult.resolved && corefResult.subject) {
+            resolvedMessage = request.message.replace(
+                /\b(this|that|it|the package|the tool|the service)\b/gi,
+                corefResult.subject
             );
+            
+            loggingService.info('🔗 Coreference resolved', {
+                original: request.message,
+                resolved: resolvedMessage,
+                subject: corefResult.subject,
+                confidence: corefResult.confidence,
+                method: corefResult.method
+            });
+        }
+        
+        // Decide routing based on context
+        const route = this.decideRoute(context, resolvedMessage);
+        
+        loggingService.info('🎯 Route decision', {
+            route,
+            subject: context.currentSubject,
+            domain: context.lastDomain,
+            confidence: context.subjectConfidence,
+            intent: context.currentIntent
+        });
+        
+        // Build context preamble
+        const contextPreamble = this.buildContextPreamble(context, recentMessages);
+        
+        // Route to appropriate handler
+        switch (route) {
+            case 'knowledge_base':
+                return await this.handleKnowledgeBaseRoute(request, context, contextPreamble, recentMessages);
+            case 'web_scraper':
+                return await this.handleWebScraperRoute(request, context, contextPreamble, recentMessages);
+            case 'multi_agent':
+                return await this.handleMultiAgentRoute(request, context, contextPreamble, recentMessages);
+            case 'conversational_flow':
+            default:
+                return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+        }
+    }
 
-            return {
-                response: multiAgentResult.response,
-                agentThinking: multiAgentResult.thinking,
-                agentPath: multiAgentResult.agentPath,
-                optimizationsApplied: multiAgentResult.optimizationsApplied,
-                cacheHit: multiAgentResult.cacheHit,
-                riskLevel: multiAgentResult.riskLevel || 'low'
-            };
-        } else {
-            // Use traditional conversational flow service
-            const flowResult = await conversationalFlowService.processMessage(
-                conversation._id.toString(),
-                request.userId,
-                request.message,
-                {
+    private static async handleKnowledgeBaseRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        contextPreamble: string,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        loggingService.info('📚 Routing to knowledge base', {
+            subject: context.currentSubject,
+            domain: context.lastDomain
+        });
+        
+        try {
+            const { agentService } = await import('./agent.service');
+            
+            // Build enhanced query with context
+            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            
+            const agentResponse = await agentService.query({
+                userId: request.userId,
+                query: enhancedQuery,
+                context: {
+                    conversationId: context.conversationId,
+                    previousMessages: recentMessages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    }))
+                }
+            });
+
+            if (agentResponse.success && agentResponse.response) {
+                return {
+                    response: agentResponse.response,
+                    agentThinking: agentResponse.thinking,
+                    agentPath: ['knowledge_base'],
+                    optimizationsApplied: ['context_enhancement', 'knowledge_base_routing'],
+                    cacheHit: false,
+                    riskLevel: 'low'
+                };
+            }
+        } catch (error) {
+            loggingService.warn('Knowledge base routing failed, falling back to conversational flow', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        // Fallback to conversational flow
+        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+    }
+
+    private static async handleWebScraperRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        contextPreamble: string,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        loggingService.info('🌐 Routing to web scraper', {
+            subject: context.currentSubject,
+            domain: context.lastDomain
+        });
+        
+        try {
+            const { agentService } = await import('./agent.service');
+            
+            // Build enhanced query with context
+            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            
+            const agentResponse = await agentService.query({
+                userId: request.userId,
+                query: enhancedQuery,
+                context: {
+                    conversationId: context.conversationId,
                     previousMessages: recentMessages.map(msg => ({
                         role: msg.role,
                         content: msg.content
                     })),
+                    useWebScraper: true,
+                    searchTerms: this.extractSearchTerms(request.message)
+                }
+            });
+
+            if (agentResponse.success && agentResponse.response) {
+                return {
+                    response: agentResponse.response,
+                    agentThinking: agentResponse.thinking,
+                    agentPath: ['web_scraper'],
+                    optimizationsApplied: ['context_enhancement', 'web_scraper_routing'],
+                    cacheHit: false,
+                    riskLevel: 'medium'
+                };
+            }
+        } catch (error) {
+            loggingService.warn('Web scraper routing failed, falling back to conversational flow', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        // Fallback to conversational flow
+        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+    }
+
+    private static extractSearchTerms(message: string): string[] {
+        const lowerMessage = message.toLowerCase();
+        const searchTerms: string[] = [];
+        
+        // Extract potential search terms
+        const words = message.split(/\s+/).filter(word => 
+            word.length > 3 && 
+            !['what', 'how', 'when', 'where', 'why', 'which', 'who', 'the', 'and', 'or', 'but', 'for', 'with', 'from', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once'].includes(word.toLowerCase())
+        );
+        
+        // Add specific terms based on context
+        if (lowerMessage.includes('latest') || lowerMessage.includes('recent')) {
+            searchTerms.push('latest', 'recent', 'new');
+        }
+        if (lowerMessage.includes('news') || lowerMessage.includes('update')) {
+            searchTerms.push('news', 'update', 'announcement');
+        }
+        if (lowerMessage.includes('trending') || lowerMessage.includes('popular')) {
+            searchTerms.push('trending', 'popular', 'viral');
+        }
+        
+        // Add extracted words
+        searchTerms.push(...words.slice(0, 5)); // Limit to 5 terms
+        
+        return [...new Set(searchTerms)]; // Remove duplicates
+    }
+
+    private static async handleMultiAgentRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        contextPreamble: string,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        loggingService.info('🤖 Routing to multi-agent', {
+            subject: context.currentSubject,
+            domain: context.lastDomain
+        });
+        
+        try {
+            const { multiAgentFlowService } = await import('./multiAgentFlow.service');
+            
+            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            
+            const result = await multiAgentFlowService.processMessage(
+                context.conversationId,
+                request.userId,
+                enhancedQuery,
+                {
+                    chatMode: 'balanced',
+                    costBudget: 0.10
+                }
+            );
+
+            if (result.response) {
+                return {
+                    response: result.response,
+                    agentThinking: result.thinking,
+                    agentPath: ['multi_agent'],
+                    optimizationsApplied: ['context_enhancement', 'multi_agent_routing'],
+                    cacheHit: false,
+                    riskLevel: result.riskLevel || 'medium'
+                };
+            }
+        } catch (error) {
+            loggingService.warn('Multi-agent routing failed, falling back to conversational flow', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        // Fallback to conversational flow
+        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+    }
+
+    private static async handleConversationalFlowRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        contextPreamble: string,
+        recentMessages: any[]
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+        
+        loggingService.info('💬 Routing to conversational flow', {
+            subject: context.currentSubject,
+            domain: context.lastDomain
+        });
+        
+        try {
+            const { conversationalFlowService } = await import('./conversationFlow.service');
+            
+            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            
+            const result = await conversationalFlowService.processMessage(
+                context.conversationId,
+                request.userId,
+                enhancedQuery,
+                {
+                    previousMessages: [],
                     selectedModel: request.modelId
                 }
             );
 
-            let response = flowResult.response;
-            let agentThinking = flowResult.thinking;
-            
-            // Handle MCP calls if needed
-            if (flowResult.requiresMcpCall && flowResult.mcpAction && flowResult.mcpData) {
-                try {
-                    const mcpData = { ...flowResult.mcpData, userId: request.userId };
-                    
-                    const agentResponse = await Promise.race([
-                        agentService.query({
-                            userId: request.userId,
-                            query: `Execute ${flowResult.mcpAction} with data: ${JSON.stringify(mcpData)}`,
-                            context: {
-                                conversationId: conversation._id.toString(),
-                                previousMessages: recentMessages.map(msg => ({
-                                    role: msg.role,
-                                    content: msg.content
-                                })),
-                                selectedModel: request.modelId,
-                                mcpAction: flowResult.mcpAction,
-                                mcpData: mcpData
-                            }
-                        }),
-                        new Promise((_, reject) => 
-                            setTimeout(() => reject(new Error('Agent query timeout')), 90000)
-                        )
-                    ]) as any;
-
-                    if (agentResponse.success && agentResponse.response) {
-                        response = agentResponse.response;
-                        if (agentResponse.thinking) {
-                            agentThinking = {
-                                ...agentThinking,
-                                steps: [
-                                    ...(agentThinking?.steps || []),
-                                    ...(agentResponse.thinking.steps || [])
-                                ]
-                            };
-                        }
-                    } else if (agentResponse.success && !agentResponse.response) {
-                        response += '\n\nTask completed successfully.';
-                    } else {
-                        response += '\n\nI encountered an issue executing the task. Please try again.';
-                    }
-                } catch (mcpError) {
-                    if (mcpError instanceof Error && mcpError.message.includes('timeout')) {
-                        response += '\n\n⏱️ Your query took longer than expected to process. Please try a simpler request.';
-                    } else {
-                        response += '\n\nI encountered an issue executing the task. Please try again.';
-                    }
-                }
+            if (result.response) {
+                return {
+                    response: result.response,
+                    agentThinking: result.thinking,
+                    agentPath: ['conversational_flow'],
+                    optimizationsApplied: ['context_enhancement', 'conversational_routing'],
+                    cacheHit: false,
+                    riskLevel: 'low'
+                };
             }
-
-            return {
-                response,
-                agentThinking,
-                agentPath: ['traditional_flow'],
-                optimizationsApplied: [],
-                cacheHit: false,
-                riskLevel: 'low'
-            };
+        } catch (error) {
+            loggingService.warn('Conversational flow failed, using direct Bedrock fallback', {
+                error: error instanceof Error ? error.message : String(error)
+            });
         }
+        
+        // Final fallback to direct Bedrock
+        return this.directBedrockFallback(request, recentMessages);
     }
 
     /**
@@ -394,6 +863,7 @@ export class ChatService {
             // Get predictive analytics for risk assessment (only for multi-agent)
             if (agentPath.includes('multi_agent')) {
                 try {
+                    const { multiAgentFlowService } = await import('./multiAgentFlow.service');
                     const analytics = await multiAgentFlowService.getPredictiveCostAnalytics(request.userId);
                     riskLevel = analytics.riskLevel;
                 } catch (error) {
@@ -607,7 +1077,7 @@ export class ChatService {
     /**
      * Get available models for chat
      */
-    static async getAvailableModels(): Promise<Array<{
+    static getAvailableModels(): Array<{
         id: string;
         name: string;
         provider: string;
@@ -618,7 +1088,7 @@ export class ChatService {
             output: number;
             unit: string;
         };
-    }>> {
+    }> {
         try {
             // Use AWS Bedrock pricing data directly to avoid circular dependencies
             const models = AWS_BEDROCK_PRICING.map(pricing => ({
@@ -1069,7 +1539,14 @@ export class ChatService {
             'ai cost optimizer',
             'ai cost optimization',
             'cost optimizer platform',
-            'cost optimization system'
+            'cost optimization system',
+            'npm packages',
+            'npm package',
+            'ai-cost-tracker',
+            'ai-cost-optimizer-cli',
+            'cost-katana',
+            'pypi package',
+            'python package'
         ];
         
         const messageLower = message.toLowerCase();
@@ -1083,7 +1560,13 @@ export class ChatService {
             /tell\s+me\s+about\s+cost\s*katana/i,
             /explain\s+cost\s*katana/i,
             /ai\s+cost\s+optimizer/i,
-            /cost\s+optimization\s+platform/i
+            /cost\s+optimization\s+platform/i,
+            /npm\s+packages?/i,
+            /ai-cost-tracker/i,
+            /ai-cost-optimizer-cli/i,
+            /cost-katana/i,
+            /pypi\s+package/i,
+            /python\s+package/i
         ];
         
         // Check for Cost Katana specific patterns first

@@ -149,16 +149,27 @@ export class VectorStoreService {
             '../../docs/FINANCIAL_GOVERNANCE.md',
             '../../docs/PROACTIVE_INTELLIGENCE.md',
             '../../docs/EMAIL_CONFIGURATION.md',
-            
-            // Knowledge Base files - all folders included
+
+            // Main knowledge base files
             '../../knowledge-base/README.md',
+            '../../knowledge-base/costkatana-integration-guide.md',
+            '../../knowledge-base/core-integration-guide.md',
+            '../../knowledge-base/cli-integration-guide.md',
+            '../../knowledge-base/python-integration-guide.md',
+            '../../knowledge-base/faq-troubleshooting.md',
+            '../../knowledge-base/migration-guide.md',
+
+            // Knowledge Base subdirectories - include all relevant files
             '../../knowledge-base/cost-optimization/README.md',
-            '../../knowledge-base/ai-insights/README.md',
-            '../../knowledge-base/api-integration/README.md',
+            '../../knowledge-base/cost-optimization/AI_USAGE_OPTIMIZATION.md',
+            '../../knowledge-base/cortex-optimization/CORTEX_ARCHITECTURE.md',
+            '../../knowledge-base/cortex-optimization/IMPACT_ANALYTICS.md',
             '../../knowledge-base/multi-agent-workflows/README.md',
-            '../../knowledge-base/user-coaching/README.md',
             '../../knowledge-base/predictive-analytics/README.md',
             '../../knowledge-base/security-monitoring/README.md',
+            '../../knowledge-base/user-coaching/README.md',
+            '../../knowledge-base/ai-insights/README.md',
+            '../../knowledge-base/api-integration/README.md',
             '../../knowledge-base/data-analytics/README.md'
         ];
 

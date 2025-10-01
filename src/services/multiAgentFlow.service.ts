@@ -8,7 +8,7 @@ import { WebScraperTool } from '../tools/webScraper.tool';
 import { LifeUtilityTool } from '../tools/lifeUtility.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { SmartTagGeneratorService } from './smartTagGenerator.service';
-import { memoryService, MemoryContext } from './memory.service';
+import { memoryService, MemoryContext, MemoryService } from './memory.service';
 import { memoryReaderAgent, memoryWriterAgent, MemoryAgentState } from './memoryAgents.service';
 import { userPreferenceService } from './userPreference.service';
 import { EventEmitter } from 'events';
@@ -1625,6 +1625,28 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             // Get the final response from messages
             const finalMessage = state.messages[state.messages.length - 1];
             const response = finalMessage?.content?.toString() || '';
+
+            // Skip memory storage if response is empty or invalid
+            if (!response || response.trim().length === 0) {
+                loggingService.warn('💾 Skipping memory storage - empty response', {
+                    userId: state.userId,
+                    conversationId: state.conversationId,
+                    responseLength: response.length
+                });
+                return state;
+            }
+
+            // Check for ambiguous subject context
+            const conversationContext = await MemoryService.getConversationContext(state.conversationId);
+            if (conversationContext && conversationContext.subjectConfidence < 0.6) {
+                loggingService.warn('💾 Skipping memory storage - ambiguous subject', {
+                    userId: state.userId,
+                    conversationId: state.conversationId,
+                    subjectConfidence: conversationContext.subjectConfidence,
+                    currentSubject: conversationContext.currentSubject
+                });
+                return state;
+            }
 
             // Create memory context for storage
             const memoryContext: MemoryContext = {

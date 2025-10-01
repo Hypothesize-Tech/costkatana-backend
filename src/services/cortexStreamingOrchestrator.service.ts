@@ -283,6 +283,9 @@ export class CortexStreamingOrchestratorService extends EventEmitter {
     private averageExecutionTime = 0;
     private averageCost = 0;
 
+    // Redis client for recovery
+    private redisClient: any = null;
+
     private constructor() {
         super();
         this.setMaxListeners(1000); // Support many concurrent streaming sessions
@@ -1341,7 +1344,48 @@ export class CortexStreamingOrchestratorService extends EventEmitter {
             // This would load active executions from Redis for recovery
             // Implementation would depend on your Redis schema
             loggingService.info('🔄 Loading active executions from Redis for recovery...');
-            // TODO: Implement Redis recovery loading
+            
+            // Use existing redisService for recovery
+            if (redisService.isConnected) {
+                // Load active executions from Redis using redisService
+                const activeExecutionKeys = await redisService.client.keys('cortex:execution:*');
+                const recoveredExecutions: any[] = [];
+                
+                for (const key of activeExecutionKeys) {
+                    try {
+                        const executionData = await redisService.client.get(key);
+                        if (executionData) {
+                            const execution = JSON.parse(executionData);
+                            const timeSinceStart = Date.now() - execution.startTime;
+                            
+                            // Only recover executions that are less than 1 hour old
+                            if (timeSinceStart < 3600000) {
+                                recoveredExecutions.push(execution);
+                                loggingService.info(`🔄 Recovered execution: ${execution.id}`, {
+                                    executionId: execution.id,
+                                    userId: execution.userId,
+                                    timeSinceStart: Math.round(timeSinceStart / 1000) + 's'
+                                });
+                            } else {
+                                // Clean up old executions
+                                await redisService.client.del(key);
+                                loggingService.info(`🧹 Cleaned up old execution: ${execution.id}`);
+                            }
+                        }
+                    } catch (parseError) {
+                        loggingService.warn(`Failed to parse execution data for key ${key}`, {
+                            error: parseError instanceof Error ? parseError.message : String(parseError)
+                        });
+                        // Clean up corrupted data
+                        await redisService.client.del(key);
+                    }
+                }
+                
+                loggingService.info(`✅ Redis recovery completed: ${recoveredExecutions.length} executions recovered`);
+            } else {
+                loggingService.warn('Redis not connected, skipping execution recovery');
+            }
+            
         } catch (error) {
             loggingService.warn('Failed to load active executions from Redis', {
                 error: error instanceof Error ? error.message : String(error)

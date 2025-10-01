@@ -44,13 +44,13 @@ export class MemoryWriterAgent {
             const operations: string[] = [];
 
             // Store conversation memory
-            if (state.query && state.response) {
+            if (state.query && state.response && state.response.trim().length > 0) {
                 await this.storeConversationMemory(state);
                 operations.push('conversation_stored');
             }
 
             // Analyze and store user preferences
-            if (state.query && state.response) {
+            if (state.query && state.response && state.response.trim().length > 0) {
                 await this.analyzeAndStorePreferences(state);
                 operations.push('preferences_analyzed');
             }

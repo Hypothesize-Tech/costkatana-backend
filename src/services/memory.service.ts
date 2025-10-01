@@ -4,6 +4,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory';
 import { VectorMemoryService } from './vectorMemory.service';
 import { UserPreferenceService } from './userPreference.service';
+import { cacheService } from './cache.service';
 import mongoose from 'mongoose';
 
 export interface MemoryContext {
@@ -12,6 +13,18 @@ export interface MemoryContext {
     query: string;
     response?: string;
     metadata?: any;
+}
+
+export interface ConversationContext {
+    conversationId: string;
+    currentSubject?: string;
+    currentIntent?: string;
+    lastReferencedEntities: string[];
+    lastToolUsed?: string;
+    lastDomain?: string;
+    languageFramework?: string;
+    subjectConfidence: number;
+    timestamp: Date;
 }
 
 export interface MemoryInsight {
@@ -45,6 +58,10 @@ export class MemoryService {
     private readonly SESSION_CACHE_TTL = 5 * 60 * 1000;
     private readonly CONVERSATION_CACHE_TTL = 60 * 60 * 1000;
     private readonly SECURITY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+    
+    // Context management
+    private static contextCache = new Map<string, ConversationContext>();
+    private static readonly CTX_REDIS_TTL = parseInt(process.env.CTX_REDIS_TTL || '600');
 
     constructor() {
         this.memoryAgent = new ChatBedrockConverse({
@@ -61,13 +78,102 @@ export class MemoryService {
         setInterval(() => this.cleanupCaches(), 10 * 60 * 1000); // Every 10 minutes
     }
 
+    // Context Management Methods
+    static async getConversationContext(conversationId: string): Promise<ConversationContext | null> {
+        // Try in-memory cache first
+        const cachedContext = this.contextCache.get(conversationId);
+        if (cachedContext) {
+            return cachedContext;
+        }
+
+        // Try cache service fallback
+        try {
+            const cacheKey = `context:${conversationId}`;
+            const contextData = await cacheService.get(cacheKey);
+            if (contextData) {
+                const context = contextData as ConversationContext;
+                // Restore to in-memory cache for faster access
+                this.contextCache.set(conversationId, context);
+                return context;
+            }
+        } catch (error) {
+            loggingService.warn('Cache service fallback failed, using in-memory cache only', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+
+        return null;
+    }
+
+    static async setConversationContext(context: ConversationContext): Promise<void> {
+        // Store in memory cache
+        this.contextCache.set(context.conversationId, context);
+        
+        // Store in cache service with TTL
+        try {
+            const cacheKey = `context:${context.conversationId}`;
+            await cacheService.set(cacheKey, context, this.CTX_REDIS_TTL);
+        } catch (error) {
+            loggingService.warn('Failed to store context in cache service, using in-memory cache only', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        loggingService.info('💾 Conversation context stored', {
+            conversationId: context.conversationId,
+            subject: context.currentSubject,
+            domain: context.lastDomain,
+            confidence: context.subjectConfidence
+        });
+    }
+
+    static async clearConversationContext(conversationId: string): Promise<void> {
+        this.contextCache.delete(conversationId);
+        
+        // Clear from cache service as well
+        try {
+            const cacheKey = `context:${conversationId}`;
+            await cacheService.delete(cacheKey);
+        } catch (error) {
+            loggingService.warn('Failed to clear context from cache service', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+        
+        loggingService.info('🗑️ Conversation context cleared', {
+            conversationId
+        });
+    }
+
     /**
      * Store conversation memory with vector embedding
      */
     async storeConversationMemory(context: MemoryContext): Promise<void> {
         try {
+            // Validate that we have a valid response before storing
+            if (!context.response || context.response.trim().length === 0) {
+                loggingService.warn('🧠 Skipping conversation memory storage - empty response', {
+                    userId: context.userId,
+                    conversationId: context.conversationId,
+                    responseLength: context.response?.length || 0
+                });
+                return;
+            }
+
+            // Check for ambiguous subject context
+            const conversationContext = await MemoryService.getConversationContext(context.conversationId);
+            if (conversationContext && conversationContext.subjectConfidence < 0.6) {
+                loggingService.warn('🧠 Skipping conversation memory storage - ambiguous subject', {
+                    userId: context.userId,
+                    conversationId: context.conversationId,
+                    subjectConfidence: conversationContext.subjectConfidence,
+                    currentSubject: conversationContext.currentSubject
+                });
+                return;
+            }
+
             loggingService.info(`🧠 Storing conversation memory for user: ${context.userId}`);
-            
+
             // Store in MongoDB
             const conversationMemory = new ConversationMemory({
                 userId: context.userId,
@@ -81,7 +187,7 @@ export class MemoryService {
                     responseLength: context.response?.length || 0
                 }
             });
-            
+
             await conversationMemory.save();
             
             // Store vector embedding for similarity search
