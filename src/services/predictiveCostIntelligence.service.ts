@@ -1,7 +1,6 @@
 import { Usage } from '../models/Usage';
 import { Project } from '../models/Project';
 import { loggingService } from './logging.service';
-import { ForecastingService, ForecastData } from './forecasting.service';
 import { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
 import mongoose from 'mongoose';
 
@@ -11,7 +10,6 @@ export interface PredictiveIntelligenceData {
     teamId?: string;
     userId: string;
     timeHorizon: number; // days
-    forecasts: EnhancedForecastData[];
     historicalTokenTrends: TokenTrendAnalysis;
     promptLengthGrowth: PromptLengthGrowthAnalysis;
     modelSwitchPatterns: ModelSwitchPatternAnalysis;
@@ -24,24 +22,6 @@ export interface PredictiveIntelligenceData {
     lastUpdated: Date;
 }
 
-export interface EnhancedForecastData extends ForecastData {
-    tokenProjection: {
-        promptTokens: number;
-        completionTokens: number;
-        totalTokens: number;
-    };
-    modelRecommendations: {
-        current: string;
-        recommended: string;
-        reasonCode: string;
-        potentialSavings: number;
-    }[];
-    riskFactors: {
-        factor: string;
-        probability: number;
-        impact: number;
-    }[];
-}
 
 export interface TokenTrendAnalysis {
     averagePromptLength: number;
@@ -231,7 +211,6 @@ export class PredictiveCostIntelligenceService {
 
             // Run all analysis in parallel for better performance
             const [
-                forecasts,
                 tokenTrends,
                 promptGrowth,
                 modelPatterns,
@@ -240,7 +219,6 @@ export class PredictiveCostIntelligenceService {
                 scenarioSims,
                 crossPlatformData
             ] = await Promise.all([
-                this.generateEnhancedForecasts(userId, scopeId, timeHorizon),
                 this.analyzeTokenTrends(userId, scopeId),
                 this.analyzePromptLengthGrowth(userId, scopeId),
                 this.analyzeModelSwitchPatterns(userId, scopeId),
@@ -254,7 +232,6 @@ export class PredictiveCostIntelligenceService {
             const proactiveAlerts = await this.generateProactiveAlerts({
                 userId,
                 scopeId,
-                forecasts,
                 tokenTrends,
                 promptGrowth,
                 modelPatterns,
@@ -264,7 +241,6 @@ export class PredictiveCostIntelligenceService {
 
             // Calculate overall confidence score
             const confidenceScore = this.calculateConfidenceScore({
-                forecasts,
                 tokenTrends,
                 promptGrowth,
                 modelPatterns
@@ -275,7 +251,6 @@ export class PredictiveCostIntelligenceService {
                 teamId: scope === 'team' ? scopeId : undefined,
                 userId,
                 timeHorizon,
-                forecasts,
                 historicalTokenTrends: tokenTrends,
                 promptLengthGrowth: promptGrowth,
                 modelSwitchPatterns: modelPatterns,
@@ -307,7 +282,6 @@ export class PredictiveCostIntelligenceService {
                     teamId: undefined,
                     userId,
                     timeHorizon: options.timeHorizon || 30,
-                    forecasts: [],
                     historicalTokenTrends: {
                         averagePromptLength: 0,
                         promptLengthGrowthRate: 0,
@@ -371,77 +345,6 @@ export class PredictiveCostIntelligenceService {
         }
     }
 
-    /**
-     * Generate enhanced forecasts with ML-based predictions
-     */
-    private static async generateEnhancedForecasts(
-        userId: string,
-        scopeId: string | undefined,
-        timeHorizon: number
-    ): Promise<EnhancedForecastData[]> {
-        try {
-            // Get base forecasts from existing service
-            const baseForecast = await ForecastingService.generateCostForecast(userId, {
-                forecastType: 'daily',
-                timeHorizon,
-                tags: scopeId ? [`project:${scopeId}`] : undefined
-            });
-
-            // Enhance each forecast with additional intelligence
-            const enhancedForecasts: EnhancedForecastData[] = [];
-
-            for (const forecast of baseForecast.forecasts) {
-                // Get historical token usage for this period
-                const tokenProjection = await this.projectTokenUsage(
-                    userId, 
-                    scopeId,
-                    new Date(forecast.period)
-                );
-
-                // Generate model recommendations
-                const modelRecommendations = await this.generateModelRecommendations(
-                    userId,
-                    scopeId,
-                    forecast.predictedCost,
-                    tokenProjection.totalTokens
-                );
-
-                // Assess risk factors
-                const riskFactors = await this.assessRiskFactors(
-                    userId,
-                    scopeId,
-                    forecast,
-                    tokenProjection
-                );
-
-                // Ensure forecast has valid predicted cost
-                const predictedCost = forecast.predictedCost !== null && forecast.predictedCost !== undefined 
-                    ? forecast.predictedCost 
-                    : this.estimateCostFromTokens(tokenProjection.totalTokens);
-                
-                // Ensure forecast has valid confidence
-                const confidence = forecast.confidence !== null && forecast.confidence !== undefined
-                    ? forecast.confidence
-                    : 0.7; // Default moderate confidence
-
-                const enhancedForecast: EnhancedForecastData = {
-                    ...forecast,
-                    predictedCost,
-                    confidence,
-                    tokenProjection,
-                    modelRecommendations,
-                    riskFactors
-                };
-
-                enhancedForecasts.push(enhancedForecast);
-            }
-
-            return enhancedForecasts;
-        } catch (error) {
-            loggingService.error('Error generating enhanced forecasts:', { error: error instanceof Error ? error.message : String(error) });
-            throw error;
-        }
-    }
 
     /**
      * Analyze historical token trends and project future usage
@@ -615,7 +518,6 @@ export class PredictiveCostIntelligenceService {
     private static async generateProactiveAlerts(data: {
         userId: string;
         scopeId: string | undefined;
-        forecasts: EnhancedForecastData[];
         tokenTrends: TokenTrendAnalysis;
         promptGrowth: PromptLengthGrowthAnalysis;
         modelPatterns: ModelSwitchPatternAnalysis;
@@ -623,7 +525,7 @@ export class PredictiveCostIntelligenceService {
         optimizationRecs: IntelligentOptimizationRecommendation[];
     }): Promise<ProactiveAlert[]> {
         const alerts: ProactiveAlert[] = [];
-        const { userId, forecasts, budgetProjections, optimizationRecs } = data;
+        const { userId, budgetProjections, optimizationRecs } = data;
 
         // Budget exceedance alerts - More sensitive threshold 
         for (const projection of budgetProjections) {
@@ -656,35 +558,6 @@ export class PredictiveCostIntelligenceService {
             }
         }
 
-        // Cost spike prediction alerts - More sensitive threshold
-        const highCostForecasts = forecasts.filter(f => f.predictedCost && f.baselineCost && f.predictedCost > f.baselineCost * 1.2);
-        for (const forecast of highCostForecasts) {
-            const daysUntil = Math.ceil((new Date(forecast.period).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-            
-            alerts.push({
-                id: `cost_spike_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                type: 'cost_spike',
-                severity: forecast.predictedCost > forecast.baselineCost * 2 ? 'high' : 'medium',
-                title: `Cost spike predicted on ${new Date(forecast.period).toLocaleDateString()}`,
-                message: `Expected cost of $${forecast.predictedCost.toFixed(2)} is ${((forecast.predictedCost / forecast.baselineCost - 1) * 100).toFixed(1)}% above baseline`,
-                projectedDate: new Date(forecast.period),
-                daysUntilImpact: Math.max(0, daysUntil),
-                estimatedImpact: forecast.predictedCost - forecast.baselineCost,
-                actionableInsights: forecast.modelRecommendations.map(rec => ({
-                    action: `Switch from ${rec.current} to ${rec.recommended}`,
-                    expectedSaving: rec.potentialSavings,
-                    difficulty: 'easy',
-                    timeToImplement: 'Immediate'
-                })),
-                affectedResources: [{
-                    type: 'user',
-                    id: userId,
-                    name: 'User'
-                }],
-                autoOptimizationAvailable: true,
-                createdAt: new Date()
-            });
-        }
 
         // Optimization opportunity alerts - Lower threshold for more alerts
         const highValueOptimizations = optimizationRecs.filter(opt => opt.potentialSavings > 10);
@@ -1691,35 +1564,6 @@ export class PredictiveCostIntelligenceService {
         }
     }
 
-    private static async assessRiskFactors(
-        userId: string,
-        scopeId: string | undefined,
-        forecast: ForecastData,
-        tokenProjection: { promptTokens: number; completionTokens: number; totalTokens: number }
-    ): Promise<Array<{
-        factor: string;
-        probability: number;
-        impact: number;
-    }>> {
-        // Use parameters to prevent linting warnings
-        loggingService.debug(`Assessing risk factors for user: ${userId}, scope: ${scopeId}, tokens: ${tokenProjection.totalTokens}`);
-        
-        // Ensure we have a valid predicted cost for impact calculation
-        const baseCost = forecast.predictedCost || this.estimateCostFromTokens(tokenProjection.totalTokens);
-        
-        return [
-            {
-                factor: 'Usage spike due to project scaling',
-                probability: 0.3,
-                impact: baseCost * 0.5
-            },
-            {
-                factor: 'Model price increase',
-                probability: 0.2,
-                impact: baseCost * 0.25
-            }
-        ];
-    }
 
     private static async getProjectSpendingHistory(
         projectId: string,
@@ -1803,30 +1647,22 @@ export class PredictiveCostIntelligenceService {
     }
 
     private static calculateConfidenceScore(data: {
-        forecasts: EnhancedForecastData[];
         tokenTrends: TokenTrendAnalysis;
         promptGrowth: PromptLengthGrowthAnalysis;
         modelPatterns: ModelSwitchPatternAnalysis;
     }): number {
-        // Handle null confidence values in forecasts
-        const validConfidences = data.forecasts
-            .map(f => f.confidence)
-            .filter(c => c !== null && c !== undefined && !isNaN(c)) as number[];
-        
-        const forecastConfidence = validConfidences.length > 0 
-            ? validConfidences.reduce((sum, c) => sum + c, 0) / validConfidences.length
-            : 0.5; // Default moderate confidence
-            
         const tokenConfidence = data.tokenTrends.confidenceLevel || 0.5;
-        const dataQuality = data.forecasts.length > 30 ? 0.9 : Math.max(data.forecasts.length / 30, 0.1);
+        const promptConfidence = 0.5; // Default confidence
+        const modelConfidence = 0.5; // Default confidence
         
-        const score = (forecastConfidence + tokenConfidence + dataQuality) / 3;
+        const score = (tokenConfidence + promptConfidence + modelConfidence) / 3;
         
-        loggingService.debug('Confidence score calculation:', { value:  { forecastConfidence,
+        loggingService.debug('Confidence score calculation:', { 
             tokenConfidence, 
-            dataQuality,
+            promptConfidence,
+            modelConfidence,
             finalScore: score
-         } });
+        });
         
         return Math.min(Math.max(score, 0), 1); // Ensure 0-1 range
     }

@@ -5,8 +5,6 @@ import { AICostTrackerService } from '../services/aiCostTracker.service';
 import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
-import { IntelligentRoutingService } from '../services/intelligentRouting.service';
-import { CPIOptimizationStrategy } from '../types/cpi.types';
 import { GatewayCortexService } from '../services/gatewayCortex.service';
 import https from 'https';
 
@@ -57,74 +55,11 @@ export class GatewayController {
      * Main gateway proxy handler - routes requests to AI providers with optimizations
      */
     static async proxyRequest(req: Request, res: Response): Promise<void> {
-        // Check if intelligent routing is enabled
-        if (req.headers['x-costkatana-intelligent-routing'] === 'true') {
-            await this.handleIntelligentRouting(req, res);
-            return;
-        }
 
         // Fall back to standard routing
         await this.handleStandardRouting(req, res);
     }
 
-    /**
-     * Handle intelligent routing using CPI system
-     */
-    private static async handleIntelligentRouting(req: Request, res: Response): Promise<void> {
-        try {
-            const context = req.gatewayContext!;
-            
-            loggingService.info('=== INTELLIGENT ROUTING REQUEST STARTED ===', {
-                requestId: context.requestId,
-                userId: context.userId,
-                intelligentRouting: true,
-                headerRequestId: req.headers['x-request-id'] as string
-            });
-
-            // Parse optimization strategy from headers
-            const strategy = this.parseOptimizationStrategy(req);
-            
-            // Get intelligent routing decision
-            const routingDecision = await IntelligentRoutingService.getRoutingDecision(
-                req.body,
-                strategy,
-                (context as any).availableProviders
-            );
-
-            loggingService.info('Intelligent routing decision made', {
-                selectedProvider: routingDecision.selectedProvider,
-                selectedModel: routingDecision.selectedModel,
-                cpiScore: routingDecision.confidence,
-                reasoning: routingDecision.reasoning,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Update context with selected provider
-            context.targetUrl = this.getProviderUrl(routingDecision.selectedProvider);
-            (context as any).selectedModel = routingDecision.selectedModel;
-            (context as any).routingDecision = routingDecision;
-
-            // Add routing headers
-            res.setHeader('CostKatana-Intelligent-Routing', 'true');
-            res.setHeader('CostKatana-Selected-Provider', routingDecision.selectedProvider);
-            res.setHeader('CostKatana-Selected-Model', routingDecision.selectedModel);
-            res.setHeader('CostKatana-CPI-Score', routingDecision.confidence.toString());
-            res.setHeader('CostKatana-Routing-Confidence', routingDecision.confidence.toString());
-
-            // Proceed with standard routing using the selected provider
-            await this.handleStandardRouting(req, res);
-
-        } catch (error: any) {
-            loggingService.error('Intelligent routing failed, falling back to standard routing', {
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
-            // Fall back to standard routing
-            await this.handleStandardRouting(req, res);
-        }
-    }
 
     /**
      * Handle standard routing (existing logic)
@@ -1813,51 +1748,8 @@ export class GatewayController {
         }
     }
 
-    /**
-     * Parse optimization strategy from request headers
-     */
-    private static parseOptimizationStrategy(req: Request): CPIOptimizationStrategy {
-        const strategyHeader = req.headers['x-costkatana-optimization-strategy'];
-        
-        if (strategyHeader) {
-            try {
-                return JSON.parse(strategyHeader as string);
-                    } catch (error: any) {
-            loggingService.warn('Invalid optimization strategy header, using default', {
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-        }
-        }
 
-        // Default balanced strategy
-        return {
-            strategy: 'balanced',
-            weightings: {
-                cost: 0.3,
-                performance: 0.3,
-                quality: 0.2,
-                reliability: 0.2
-            },
-            constraints: {}
-        };
-    }
-
-    /**
-     * Get provider URL based on provider name
-     */
-    private static getProviderUrl(provider: string): string {
-        const providerUrls: Record<string, string> = {
-            'openai': 'https://api.openai.com/v1',
-            'anthropic': 'https://api.anthropic.com',
-            'aws-bedrock': 'https://bedrock-runtime.us-east-1.amazonaws.com',
-            'google-ai': 'https://generativelanguage.googleapis.com',
-            'cohere': 'https://api.cohere.ai'
-        };
-
-        return providerUrls[provider] || 'https://api.openai.com/v1';
-    }
-
+   
     // ============================================================================
     // OPTIMIZATION UTILITY METHODS
     // ============================================================================

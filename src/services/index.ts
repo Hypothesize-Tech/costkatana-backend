@@ -13,7 +13,6 @@ export { ProjectService } from './project.service';
 export { PromptTemplateService } from './promptTemplate.service';
 export { RealtimePricingService } from './realtime-pricing.service';
 export { TaggingService } from './tagging.service';
-export { ForecastingService } from './forecasting.service';
 export { PerformanceCostAnalysisService } from './performanceCostAnalysis.service';
 export { RecommendationEngineService } from './recommendationEngine.service';
 export { KeyVaultService } from './keyVault.service';
