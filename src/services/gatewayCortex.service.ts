@@ -11,9 +11,6 @@ import { CortexControlFlowService, ControlFlowExecutionResult } from './cortexCo
 import { CortexHybridExecutionEngine, HybridExecutionResult } from './cortexHybridEngine.service';
 import { CortexFragmentCacheService, FragmentCacheResult, FragmentComposition } from './cortexFragmentCache.service';
 import { CortexContextManagerService, ConversationContext, ContextExtractionResult } from './cortexContextManager.service';
-import { SemanticPrimitivesService } from './semanticPrimitives.service';
-import { CortexSastEncoderService } from './cortexSastEncoder.service';
-import { CortexSastIntegrationService } from './cortexSastIntegration.service';
 import { 
     CortexProcessingRequest,
     CortexEncodingRequest,
@@ -226,93 +223,9 @@ export class GatewayCortexService {
                 language: 'en'
             };
 
-            // 🧬 DYNAMIC SAST vs TRADITIONAL CORTEX SELECTION
-            let encodingResult: any;
-            let sastMetadata: any = {};
-            
-            // Check if SAST mode is enabled via headers
-            const useSast = (context.cortexOperation as any) === 'sast' || (context.cortexOperation as any) === 'analyze' || 
-                          ((context.cortexOperation as any) === 'optimize' && complexityAnalysis.overallComplexity === 'complex');
-
-            if (useSast) {
-                loggingService.info('🧬 Using SAST (Semantic Abstract Syntax Tree) encoding', {
-                    requestId: context.requestId,
-                    reason: (context.cortexOperation as any) === 'sast' ? 'explicit_sast_request' : 
-                           (context.cortexOperation as any) === 'analyze' ? 'analysis_request' : 'high_complexity_optimization'
-                });
-
-                // Initialize SAST services dynamically
-                const semanticPrimitives = SemanticPrimitivesService.getInstance();
-                const sastEncoder = CortexSastEncoderService.getInstance();
-                const sastIntegration = CortexSastIntegrationService.getInstance();
-
-                // Get vocabulary stats for metadata
-                const vocabStats = semanticPrimitives.getVocabularyStats();
-                
-                // Perform SAST encoding
-                const sastResult = await sastEncoder.encodeSast({
-                    text: optimizedPrompt,
-                    language: encodingRequest.language || 'en',
-                    disambiguationStrategy: 'hybrid',
-                    preserveAmbiguity: false,
-                    outputFormat: 'frame'
-                });
-
-                // Compare with traditional approach if requested
-                let evolutionComparison;
-                if ((context.cortexOperation as any) === 'analyze') {
-                    evolutionComparison = await sastIntegration.compareEvolution(
-                        optimizedPrompt,
-                        encodingRequest.language || 'en'
-                    );
-                }
-
-                // Convert SAST result to traditional encoding format
-                encodingResult = {
-                    cortexFrame: {
-                        frameType: sastResult.semanticFrame.frameType,
-                        ...sastResult.semanticFrame.primitives,
-                        metadata: sastResult.metadata
-                    },
-                    confidence: sastResult.metadata.confidence,
-                    processingTime: sastResult.metadata.processingTime,
-                    model: finalModels.cortexEncodingModel,
-                    metadata: sastResult.metadata
-                };
-
-                sastMetadata = {
-                    usedSast: true,
-                    semanticPrimitives: {
-                        totalVocabulary: vocabStats.totalPrimitives,
-                        categoryCoverage: vocabStats.primitivesByCategory,
-                        crossLingualSupport: vocabStats.coverageByLanguage
-                    },
-                    ambiguitiesResolved: sastResult.ambiguitiesResolved.length,
-                    syntacticComplexity: sastResult.metadata.syntacticComplexity,
-                    semanticDepth: sastResult.metadata.semanticDepth,
-                    universalCompatibility: sastResult.metadata.universalCompatibility,
-                    evolutionComparison: evolutionComparison ? {
-                        tokenReduction: evolutionComparison.improvements.tokenReduction,
-                        ambiguityReduction: evolutionComparison.improvements.ambiguityReduction,
-                        semanticClarityGain: evolutionComparison.improvements.semanticClarityGain,
-                        recommendedApproach: evolutionComparison.metadata.recommendedApproach
-                    } : null
-                };
-
-                loggingService.info('✨ SAST encoding completed with semantic enhancement', {
-                    requestId: context.requestId,
-                    primitiveCount: sastResult.sourceMapping.primitives.length,
-                    ambiguitiesResolved: sastResult.ambiguitiesResolved.length,
-                    confidence: sastResult.metadata.confidence,
-                    semanticExplicitness: sastResult.metadata.crossLingualEquivalent ? 'universal' : 'language_specific'
-                });
-            } else {
-                // Traditional Cortex encoding
-                const encoderService = CortexEncoderService.getInstance();
-                encodingResult = await encoderService.encode(encodingRequest);
-                
-                sastMetadata = { usedSast: false, reason: 'traditional_cortex_sufficient' };
-            }
+            // Traditional Cortex encoding
+            const encoderService = CortexEncoderService.getInstance();
+            const encodingResult = await encoderService.encode(encodingRequest);
 
             // 🔍 Step 1.5: Schema validation - validate encoded structure before expensive processing
             let schemaValidationResult: ValidationResult | null = null;
@@ -850,8 +763,6 @@ export class GatewayCortexService {
                 decodingConfidence: decodingResult.confidence,
                 semanticIntegrity: processingResult.metadata.semanticIntegrity,
                 
-                // 🧬 DYNAMIC SAST METADATA
-                sast: sastMetadata,
                 
                 // 🎯 ADAPTIVE ROUTING METADATA
                 complexity: {
@@ -1232,26 +1143,6 @@ export class GatewayCortexService {
                 }
             }
             
-            // 🧬 SAST (Semantic Abstract Syntax Tree) headers
-            if (metadata.sast && metadata.sast.usedSast) {
-                res.setHeader('CostKatana-Cortex-SAST-Enabled', 'true');
-                res.setHeader('CostKatana-Cortex-SAST-TotalVocabulary', metadata.sast.semanticPrimitives.totalVocabulary.toString());
-                res.setHeader('CostKatana-Cortex-SAST-AmbiguitiesResolved', metadata.sast.ambiguitiesResolved.toString());
-                res.setHeader('CostKatana-Cortex-SAST-SyntacticComplexity', metadata.sast.syntacticComplexity.toString());
-                res.setHeader('CostKatana-Cortex-SAST-SemanticDepth', metadata.sast.semanticDepth.toString());
-                res.setHeader('CostKatana-Cortex-SAST-UniversalCompatibility', metadata.sast.universalCompatibility.toString());
-                res.setHeader('CostKatana-Cortex-SAST-CrossLingualSupport', JSON.stringify(Object.keys(metadata.sast.semanticPrimitives.crossLingualSupport)));
-                
-                if (metadata.sast.evolutionComparison) {
-                    res.setHeader('CostKatana-Cortex-SAST-TokenReduction', metadata.sast.evolutionComparison.tokenReduction.toFixed(1));
-                    res.setHeader('CostKatana-Cortex-SAST-AmbiguityReduction', metadata.sast.evolutionComparison.ambiguityReduction.toFixed(1));
-                    res.setHeader('CostKatana-Cortex-SAST-SemanticGain', (metadata.sast.evolutionComparison.semanticClarityGain * 100).toFixed(1));
-                    res.setHeader('CostKatana-Cortex-SAST-RecommendedApproach', metadata.sast.evolutionComparison.recommendedApproach);
-                }
-            } else if (metadata.sast) {
-                res.setHeader('CostKatana-Cortex-SAST-Enabled', 'false');
-                res.setHeader('CostKatana-Cortex-SAST-Reason', metadata.sast.reason);
-            }
         }
     }
 

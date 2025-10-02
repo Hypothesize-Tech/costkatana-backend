@@ -17,4 +17,3 @@ export { PerformanceCostAnalysisService } from './performanceCostAnalysis.servic
 export { RecommendationEngineService } from './recommendationEngine.service';
 export { KeyVaultService } from './keyVault.service';
 export { FailoverService } from './failover.service';
-export { costDebuggerService } from './costDebugger.service';

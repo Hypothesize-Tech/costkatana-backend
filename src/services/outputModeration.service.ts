@@ -119,25 +119,6 @@ export class OutputModerationService {
                 moderationResult = this.runPatternModerationCheck(content, config);
             }
 
-            // Stage 2: PII Detection if enabled
-            if (config.enablePIIDetection && !moderationResult.isBlocked) {
-                const { PIIDetectionService } = await import('./piiDetection.service');
-                const piiResult = await PIIDetectionService.detectPII(content, false); // Use regex only for speed
-                
-                if (piiResult.hasPII && piiResult.riskLevel === 'high') {
-                    moderationResult.isBlocked = true;
-                    moderationResult.violationCategories.push('privacy_violations');
-                    moderationResult.reason = 'High-risk PII detected in model output';
-                    moderationResult.details.piiDetected = true;
-                    
-                    // Redact PII if action is redact
-                    if (config.action === 'redact') {
-                        moderationResult.sanitizedContent = PIIDetectionService.sanitizeText(content, piiResult);
-                        moderationResult.action = 'redact';
-                    }
-                }
-            }
-
             // Log threat detection if content is blocked
             if (moderationResult.isBlocked) {
                 await this.logOutputThreatDetection(requestId, moderationResult, modelUsed);

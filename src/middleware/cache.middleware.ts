@@ -34,40 +34,6 @@ export const cacheMiddleware = async (req: any, res: Response, next: NextFunctio
         });
     }
 
-    const pathChecks = {
-        reqPath: req.path.includes('/cost-debugger/'),
-        reqOriginalUrl: req.originalUrl.includes('/cost-debugger/'),
-        reqUrl: req.url.includes('/cost-debugger/'),
-        reqOriginalUrlApi: req.originalUrl.includes('/api/cost-debugger/'),
-        reqUrlApi: req.url.includes('/api/cost-debugger/')
-    };
-
-    const shouldBypass = Object.values(pathChecks).some(Boolean);
-
-    loggingService.info('Cache bypass check', {
-        component: 'CacheMiddleware',
-        operation: 'cacheMiddleware',
-        type: 'cache',
-        step: 'bypass_check',
-        path: req.path,
-        originalUrl: req.originalUrl,
-        url: req.url,
-        pathChecks,
-        shouldBypass
-    });
-
-    if (shouldBypass) {
-        loggingService.info('Cache disabled for cost debugger endpoint', {
-            component: 'CacheMiddleware',
-            operation: 'cacheMiddleware',
-            type: 'cache',
-            step: 'bypass',
-            path: req.path,
-            originalUrl: req.originalUrl
-        });
-        res.setHeader('X-Cache', 'DISABLED-COST-DEBUGGER');
-        return next();
-    }
 
     loggingService.info('Cache enabled for this route, proceeding with cache check', {
         component: 'CacheMiddleware',
