@@ -43,6 +43,7 @@ import moderationRoutes from './moderation.routes';
 import { securityRoutes } from './security.routes';
 import unexplainedCostRoutes from './unexplainedCost.routes';
 import cortexTrainingDataRoutes from './cortexTrainingData.routes';
+import backupRoutes from './backupRoutes';
 
 const router = Router();
 
@@ -101,5 +102,6 @@ router.use('/moderation', moderationRoutes);
 router.use('/security', securityRoutes);
 router.use('/unexplained-costs', unexplainedCostRoutes);
 router.use('/cortex-training-data', cortexTrainingDataRoutes);
+router.use('/backup', backupRoutes);
 
 export const apiRouter = router;

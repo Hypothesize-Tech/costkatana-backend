@@ -31,6 +31,7 @@ import { initializeCronJobs } from './utils/cronJobs';
 import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
 import { redisService } from './services/redis.service';
+import { backupScheduler } from './services/backupScheduler';
 import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
@@ -519,7 +520,33 @@ export const startServer = async () => {
 
         initializeCronJobs();
 
-        loggingService.info('Step 8: Starting HTTP server', {
+        // Initialize backup scheduler
+        loggingService.info('Step 8: Initializing backup scheduler', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'init_backup_scheduler'
+        });
+
+        try {
+            backupScheduler.start();
+            loggingService.info('✅ Backup scheduler started successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'backup_scheduler_started'
+            });
+        } catch (error) {
+            loggingService.warn('⚠️ Backup scheduler failed to start', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'backup_scheduler_failed',
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
+
+        loggingService.info('Step 9: Starting HTTP server', {
             component: 'Server',
             operation: 'startServer',
             type: 'server_startup',
