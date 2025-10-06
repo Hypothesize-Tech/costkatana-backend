@@ -10,9 +10,14 @@ import { Request } from 'express';
  */
 export class TracedBedrockService {
     /**
-     * Wrapped invokeModel that adds tracing
+     * Wrapped invokeModel that adds tracing (enhanced with ChatGPT-style context)
      */
-    static async invokeModel(prompt: string, model: string, req?: Request): Promise<any> {
+    static async invokeModel(
+        prompt: string, 
+        model: string, 
+        context?: { recentMessages?: Array<{ role: string; content: string }>; useSystemPrompt?: boolean }, 
+        req?: Request
+    ): Promise<any> {
         const parentId = req?.traceContext?.traceId;
         const sessionId = req?.traceContext?.sessionId;
         
@@ -41,8 +46,8 @@ export class TracedBedrockService {
         let error: any;
         
         try {
-            // Call the parent class static method
-            response = await BedrockService.invokeModel(prompt, model);
+            // Call the parent class static method with context
+            response = await BedrockService.invokeModel(prompt, model, context);
             
             // Estimate tokens (simplified - in production you'd use proper tokenization)
             const inputTokens = estimateTokens(prompt);

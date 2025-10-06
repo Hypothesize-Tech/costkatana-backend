@@ -48,6 +48,37 @@ interface UsageAnalysisResponse {
 export class BedrockService {
     
     /**
+     * Build messages array from recent conversation history (ChatGPT-style)
+     */
+    private static buildMessagesArray(
+        recentMessages: Array<{ role: string; content: string }>,
+        newMessage: string
+    ): Array<{ role: 'user' | 'assistant'; content: string }> {
+        const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        
+        // Convert recent messages to chronological order
+        const chronological = [...recentMessages].reverse();
+        
+        // Add each message
+        chronological.forEach(msg => {
+            if ((msg.role === 'user' || msg.role === 'assistant') && msg.content) {
+                messages.push({
+                    role: msg.role as 'user' | 'assistant',
+                    content: msg.content
+                });
+            }
+        });
+        
+        // Add the new user message
+        messages.push({
+            role: 'user',
+            content: newMessage
+        });
+        
+        return messages;
+    }
+
+    /**
      * Get appropriate max tokens based on model capability
      */
     private static getMaxTokensForModel(modelId: string): number {
@@ -240,7 +271,11 @@ export class BedrockService {
         };
     }
 
-    public static async invokeModel(prompt: string, model: string): Promise<any> {
+    public static async invokeModel(
+        prompt: string, 
+        model: string, 
+        context?: { recentMessages?: Array<{ role: string; content: string }>; useSystemPrompt?: boolean }
+    ): Promise<any> {
         const startTime = Date.now();
         let payload: any;
         let responsePath: string;
@@ -248,14 +283,53 @@ export class BedrockService {
         let outputTokens = 0;
         let result: string = '';
 
+        // Enhanced: Use messages array format for Claude/Nova if context provided
+        const useMessagesFormat = context?.recentMessages && context.recentMessages.length > 0 &&
+            (model.includes('claude-3') || model.includes('claude-4') || model.includes('nova'));
+
         // Check model type and create appropriate payload
         if (model.includes('claude-3') || model.includes('claude-4') || model.includes('claude-opus-4')) {
-            // Modern Claude models (3.x) use messages format
-            payload = this.createMessagesPayload(prompt, model);
+            if (useMessagesFormat && context?.recentMessages) {
+                // Use messages array for better context
+                const messages = this.buildMessagesArray(context.recentMessages, prompt);
+                payload = {
+                    anthropic_version: 'bedrock-2023-05-31',
+                    max_tokens: this.getMaxTokensForModel(model),
+                    temperature: 0.7,
+                    messages: messages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content
+                    }))
+                };
+                
+                // Add system prompt for conversational behavior
+                if (context?.useSystemPrompt !== false) {
+                    payload.system = 'You are a helpful AI assistant specializing in AI cost optimization and cloud infrastructure. Remember context from previous messages and provide actionable, cost-effective recommendations.';
+                }
+            } else {
+                // Modern Claude models (3.x) use messages format
+                payload = this.createMessagesPayload(prompt, model);
+            }
             responsePath = 'content';
         } else if (model.includes('nova')) {
-            // Amazon Nova models
-            payload = this.createNovaPayload(prompt, model);
+            if (useMessagesFormat && context?.recentMessages) {
+                // Use messages array for better context
+                const messages = this.buildMessagesArray(context.recentMessages, prompt);
+                payload = {
+                    messages: messages.map(msg => ({
+                        role: msg.role,
+                        content: [{ text: msg.content }]
+                    })),
+                    inferenceConfig: {
+                        max_new_tokens: this.getMaxTokensForModel(model),
+                        temperature: 0.7,
+                        top_p: 0.9
+                    }
+                };
+            } else {
+                // Amazon Nova models
+                payload = this.createNovaPayload(prompt, model);
+            }
             responsePath = 'nova';
         } else if (model.includes('amazon.titan')) {
             // Amazon Titan models

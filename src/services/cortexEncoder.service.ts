@@ -7,7 +7,6 @@
 
 import {
     CortexFrame,
-    CortexConfig,
     CortexError,
     CortexErrorCode,
     CortexEncodingResult,
@@ -17,7 +16,7 @@ import {
 import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 import { validateCortexFrame } from '../utils/cortex.utils';
-import { TextAnalysis, analyzeText } from '../utils/textAnalysis';
+import { analyzeText } from '../utils/textAnalysis';
 
 // ============================================================================
 // CORTEX ENCODER SERVICE
@@ -44,14 +43,14 @@ export class CortexEncoderService {
         try {
             loggingService.info('🚀 Starting Cortex encoding process', {
                 textLength: request.text.length,
-                model: request.config?.encoding?.model || DEFAULT_CORTEX_CONFIG.encoding.model
+                model: request.config?.encoding?.model ?? DEFAULT_CORTEX_CONFIG.encoding.model
             });
 
             // Analyze text for context
             const analysis = await analyzeText(request.text);
             
             const jsonResponse = await this.generateCortexStructure(request);
-            const cortexFrame: CortexFrame = JSON.parse(jsonResponse);
+            const cortexFrame: CortexFrame = JSON.parse(jsonResponse) as CortexFrame;
 
             const validation = validateCortexFrame(cortexFrame);
             if (!validation.isValid) {
@@ -65,7 +64,7 @@ export class CortexEncoderService {
                 cortexFrame,
                 confidence: 0.9, // This should be dynamic based on validation
                 processingTime,
-                modelUsed: request.config?.encoding?.model || DEFAULT_CORTEX_CONFIG.encoding.model,
+                modelUsed: request.config?.encoding?.model ?? DEFAULT_CORTEX_CONFIG.encoding.model,
                 originalText: request.text,
                 analysis: {
                     language: analysis.language,
@@ -95,14 +94,14 @@ export class CortexEncoderService {
      */
     private async generateCortexStructure(request: CortexEncodingRequest): Promise<string> {
         const { text, config } = request;
-        const systemPrompt = request.prompt || CORTEX_ENCODER_SYSTEM_PROMPT;
+        const systemPrompt = request.prompt ?? CORTEX_ENCODER_SYSTEM_PROMPT;
         const fullPrompt = `${systemPrompt}\n\n${text}`;
-        const model = config?.encoding?.model || DEFAULT_CORTEX_CONFIG.encoding.model;
+        const model = config?.encoding?.model ?? DEFAULT_CORTEX_CONFIG.encoding.model;
 
-        const rawResponse = await BedrockService.invokeModel(fullPrompt, model);
+        const rawResponse = await BedrockService.invokeModel(fullPrompt, model) as string;
         
         // First, try to extract JSON from the response
-        const jsonResponse = BedrockService.extractJson(rawResponse);
+        const jsonResponse = BedrockService.extractJson(rawResponse as string);
 
         // Check if we got valid JSON
         if (jsonResponse.startsWith('{') || jsonResponse.startsWith('[')) {
@@ -110,7 +109,7 @@ export class CortexEncoderService {
         }
         
         // If not JSON, check if we got LISP format and convert it to JSON
-        const lispMatch = rawResponse.match(/\(query:.*?\)/s);
+        const lispMatch = rawResponse.match(/\(query:.*?\)/s) as RegExpMatchArray | null;
         if (lispMatch) {
             const lispCode = lispMatch[0];
             loggingService.info('Converting LISP format to JSON', { lispCode });

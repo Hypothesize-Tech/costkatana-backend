@@ -5,6 +5,13 @@
  * to ensure that OpenTelemetry and Sentry instrumentation are initialized first.
  */
 
+// Polyfill for Node.js v18 compatibility with undici
+if (typeof globalThis.File === 'undefined') {
+  globalThis.File = class File {
+    constructor(public readonly name: string, public readonly lastModified: number = Date.now()) {}
+  } as any;
+}
+
 import { startTelemetry } from './otel';
 import { initializeSentry, isSentryEnabled } from '../config/sentry';
 import { loggingService } from '../services/logging.service';

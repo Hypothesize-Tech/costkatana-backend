@@ -98,6 +98,7 @@ export class ChatService {
     // Context management
     private static contextCache = new Map<string, ConversationContext>();
     private static readonly CTX_MAX_HISTORY = parseInt(process.env.CTX_MAX_HISTORY || '3');
+    
     private static readonly CTX_REDIS_TTL = parseInt(process.env.CTX_REDIS_TTL || '600');
     private static readonly CTX_COREF_LL_ENABLED = process.env.CTX_COREF_LL_ENABLED !== 'false';
 
@@ -773,21 +774,38 @@ export class ChatService {
     }
 
     /**
-     * Direct Bedrock fallback
+     * Direct Bedrock fallback with ChatGPT-style context
      */
     private static async directBedrockFallback(
         request: ChatSendMessageRequest,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
         
+        // Build contextual prompt, but pass messages for intelligent handling
         const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
-        const response = await BedrockService.invokeModel(contextualPrompt, request.modelId, request.req);
+        
+        // Enhanced: Pass context to BedrockService for ChatGPT-style conversation
+        const response = await BedrockService.invokeModel(
+            contextualPrompt,
+            request.modelId,
+            {
+                recentMessages: recentMessages,
+                useSystemPrompt: true
+            }
+        );
+        
+        // Track optimizations based on context usage
+        const optimizations = ['circuit_breaker'];
+        if (recentMessages && recentMessages.length > 0) {
+            optimizations.push('multi_turn_context');
+            optimizations.push('system_prompt');
+        }
         
         return {
             response,
             agentThinking: undefined,
             agentPath: ['bedrock_direct'],
-            optimizationsApplied: ['circuit_breaker'],
+            optimizationsApplied: optimizations,
             cacheHit: false,
             riskLevel: 'low'
         };
@@ -816,10 +834,11 @@ export class ChatService {
                         }
                         conversation = foundConversation;
                     } else {
-                        // Create new conversation
+                        // Create new conversation with smart title from first message
+                        const title = this.generateSimpleTitle(request.message, request.modelId);
                         const newConversation = new Conversation({
                             userId: request.userId,
-                            title: `Chat with ${this.getModelDisplayName(request.modelId)}`,
+                            title: title,
                             modelId: request.modelId,
                             messageCount: 0,
                             totalCost: 0
@@ -1116,7 +1135,31 @@ export class ChatService {
     }
 
     /**
-     * Build contextual prompt from conversation history
+     * Generate a simple, descriptive title from the first message
+     */
+    private static generateSimpleTitle(firstMessage: string, modelId: string): string {
+        // Remove markdown, code blocks, etc.
+        let cleaned = firstMessage
+            .replace(/```[\s\S]*?```/g, '')
+            .replace(/`[^`]+`/g, '')
+            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+            .trim();
+        
+        // Get first sentence or first 60 characters
+        const firstSentence = cleaned.split(/[.!?]/)[0].trim();
+        
+        if (firstSentence.length > 60) {
+            return firstSentence.substring(0, 57) + '...';
+        } else if (firstSentence.length > 0) {
+            return firstSentence;
+        } else {
+            return `Chat with ${this.getModelDisplayName(modelId)}`;
+        }
+    }
+
+    /**
+     * Build contextual prompt from conversation history (LEGACY - kept for backward compatibility)
+     * @deprecated Use convertToMessagesArray instead for better multi-turn support
      */
     private static buildContextualPrompt(messages: any[], newMessage: string): string {
         // Optimized: Use the messages as-is since they're already optimally sized
