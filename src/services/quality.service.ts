@@ -2,6 +2,7 @@ import { QualityScore, IQualityScore } from '../models/QualityScore';
 import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
+import { AICostTrackingService } from './aiCostTracking.service';
 
 export interface QualityAssessment {
     score: number;
@@ -35,20 +36,20 @@ export class QualityService {
     constructor() { }
 
     /**
-     * Score the quality of an AI response with async processing optimization
+     * Score the quality of an AI response (optimized - default to automated)
      */
     async scoreResponse(
         prompt: string,
         response: string,
         expectedOutput?: string,
-        method: 'ai_model' | 'automated' | 'hybrid' = 'hybrid'
+        method: 'ai_model' | 'automated' | 'hybrid' = 'automated' // Changed default to automated
     ): Promise<QualityAssessment> {
         try {
             let assessment: QualityAssessment;
 
             switch (method) {
                 case 'ai_model':
-                    // Use timeout with fallback for AI-only requests
+                    // Only use AI when explicitly requested
                     assessment = await Promise.race([
                         this.aiModelScoring(prompt, response, expectedOutput),
                         new Promise<QualityAssessment>(resolve => 
@@ -60,14 +61,11 @@ export class QualityService {
                     assessment = this.automatedScoring(prompt, response);
                     break;
                 case 'hybrid':
+                    // For hybrid, use automated as base (no background AI queue to eliminate costs)
+                    assessment = this.automatedScoring(prompt, response);
+                    break;
                 default:
-                    // Return fast automated score immediately for hybrid
-                    const autoScore = this.automatedScoring(prompt, response);
-                    
-                    // Queue AI scoring for background enhancement
-                    this.queueAIScoring(prompt, response, expectedOutput, autoScore);
-                    
-                    assessment = autoScore;
+                    assessment = this.automatedScoring(prompt, response);
                     break;
             }
 
@@ -86,17 +84,53 @@ export class QualityService {
         response: string,
         expectedOutput?: string
     ): Promise<QualityAssessment> {
+        const startTime = Date.now();
+        const modelId = 'anthropic.claude-instant-v1';
+        
         try {
             const scoringPrompt = this.buildScoringPrompt(prompt, response, expectedOutput);
+            const estimatedInputTokens = Math.ceil(scoringPrompt.length / 4);
 
             // Use a cheap model for scoring
             const result = await BedrockService['invokeModel'](
                 scoringPrompt,
-                'anthropic.claude-instant-v1'
+                modelId
             );
+
+            const estimatedOutputTokens = Math.ceil(result.length / 4);
+            const latency = Date.now() - startTime;
+
+            // Track AI cost for monitoring
+            AICostTrackingService.trackCall({
+                service: 'quality_scoring',
+                operation: 'ai_scoring',
+                model: modelId,
+                inputTokens: estimatedInputTokens,
+                outputTokens: estimatedOutputTokens,
+                estimatedCost: (estimatedInputTokens * 0.0000008 + estimatedOutputTokens * 0.0000024), // Claude Instant pricing
+                latency,
+                success: true,
+                metadata: {
+                    promptLength: prompt.length,
+                    responseLength: response.length
+                }
+            });
 
             return this.parseScoringResult(result);
         } catch (error) {
+            // Track failed AI call
+            AICostTrackingService.trackCall({
+                service: 'quality_scoring',
+                operation: 'ai_scoring',
+                model: modelId,
+                inputTokens: 0,
+                outputTokens: 0,
+                estimatedCost: 0,
+                latency: Date.now() - startTime,
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
             loggingService.error('Error in AI model scoring:', { error: error instanceof Error ? error.message : String(error) });
             return this.getDefaultScore();
         }

@@ -1,5 +1,6 @@
 import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
+import { AICostTrackingService } from './aiCostTracking.service';
 
 export interface TrendingQuery {
     needsRealTimeData: boolean;
@@ -390,8 +391,8 @@ export class TrendingDetectorService {
     }
 
     private async classifyWithAI(query: string): Promise<{ confidence: number; reasoning: string }> {
-        try {
-            const prompt = `Analyze this query and determine if it needs real-time web data.
+        const startTime = Date.now();
+        const prompt = `Analyze this query and determine if it needs real-time web data.
 
 Query: "${query}"
 
@@ -408,26 +409,60 @@ Respond with JSON:
     "reasoning": "brief explanation"
 }`;
 
+        const estimatedInputTokens = Math.ceil(prompt.length / 4);
+
+        try {
             const response = await this.classifier.invoke([
                 { role: 'user', content: prompt }
             ]);
 
+            const latency = Date.now() - startTime;
+            const responseText = response.content.toString();
+            const estimatedOutputTokens = Math.ceil(responseText.length / 4);
+
+            // Track AI cost for monitoring
+            AICostTrackingService.trackCall({
+                service: 'trending_detection',
+                operation: 'classify_query',
+                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                inputTokens: estimatedInputTokens,
+                outputTokens: estimatedOutputTokens,
+                estimatedCost: (estimatedInputTokens * 0.0000008 + estimatedOutputTokens * 0.000004), // Claude Haiku pricing
+                latency,
+                success: true,
+                metadata: {
+                    queryLength: query.length
+                }
+            });
+
             try {
-                const parsed = JSON.parse(response.content.toString());
+                const parsed = JSON.parse(responseText);
                 return {
                     confidence: parsed.confidence || 0,
                     reasoning: parsed.reasoning || 'No reasoning provided'
                 };
             } catch {
                 // Fallback parsing
-                const content = response.content.toString();
-                const confidenceMatch = content.match(/confidence["\s:]+([0-9.]+)/i);
+                const confidenceMatch = responseText.match(/confidence["\s:]+([0-9.]+)/i);
                 const confidence = confidenceMatch ? parseFloat(confidenceMatch[1]) : 0;
                 
-                return { confidence, reasoning: content };
+                return { confidence, reasoning: responseText };
             }
 
         } catch (error) {
+            // Track failed AI call
+            AICostTrackingService.trackCall({
+                service: 'trending_detection',
+                operation: 'classify_query',
+                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                inputTokens: estimatedInputTokens,
+                outputTokens: 0,
+                estimatedCost: 0,
+                latency: Date.now() - startTime,
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
             loggingService.error('AI classification failed:', { error: error instanceof Error ? error.message : String(error) });
             return { confidence: 0, reasoning: 'Classification failed' };
         }

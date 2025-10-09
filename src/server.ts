@@ -292,11 +292,6 @@ async function checkSentryHealth(): Promise<{
             };
         }
 
-        // Test Sentry by sending a test event (but don't actually send it)
-        // We'll just check if the client is properly configured
-        const client = Sentry.getClient();
-        const isHealthy = !!client && !!client.getDsn();
-
         return {
             enabled: true,
             configured: true,

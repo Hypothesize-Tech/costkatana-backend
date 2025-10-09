@@ -31,6 +31,13 @@ export interface IUser {
         weeklyReports: boolean;
         optimizationSuggestions: boolean;
         lastDigestSent?: Date;
+        emailEngagement?: {
+            totalSent: number;
+            totalOpened: number;
+            totalClicked: number;
+            lastOpened?: Date;
+            consecutiveIgnored: number;
+        };
     };
     subscription: {
         plan: 'free' | 'plus' | 'pro' | 'enterprise';
@@ -201,6 +208,25 @@ const userSchema = new Schema<IUser>({
             default: true,
         },
         lastDigestSent: Date,
+        emailEngagement: {
+            totalSent: {
+                type: Number,
+                default: 0
+            },
+            totalOpened: {
+                type: Number,
+                default: 0
+            },
+            totalClicked: {
+                type: Number,
+                default: 0
+            },
+            lastOpened: Date,
+            consecutiveIgnored: {
+                type: Number,
+                default: 0
+            }
+        }
     },
     subscription: {
         plan: {

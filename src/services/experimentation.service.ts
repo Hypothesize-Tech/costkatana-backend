@@ -7,6 +7,7 @@ import { MODEL_PRICING } from '../utils/pricing';
 import mongoose from 'mongoose';
 import { BedrockService } from './bedrock.service'; 
 import { EventEmitter } from 'events';
+import { AICostTrackingService } from './aiCostTracking.service';
 
 export interface ExperimentResult {
     id: string;
@@ -532,6 +533,9 @@ export class ExperimentationService {
         evaluationCriteria: string[],
         customEvaluationPrompt?: string
     ): Promise<RealTimeComparisonResult[]> {
+        const startTime = Date.now();
+        let modelUsed = '';
+
         try {
             // Create evaluation prompt for AI judge
             const evaluationPrompt = customEvaluationPrompt || this.createDefaultEvaluationPrompt(
@@ -539,6 +543,8 @@ export class ExperimentationService {
                 results.map(r => ({ model: r.model, response: r.response })),
                 evaluationCriteria
             );
+
+            const estimatedInputTokens = Math.ceil(evaluationPrompt.length / 4);
 
             // Add substantial delay to prevent throttling (AWS Bedrock has strict limits)
             await new Promise(resolve => setTimeout(resolve, 15000)); // Increased delay
@@ -548,19 +554,44 @@ export class ExperimentationService {
             // Try with Claude 3.5 Haiku first (lower rate limits) as per user memory
             try {
                 loggingService.info('Attempting evaluation with Claude 3.5 Haiku...');
+                modelUsed = 'anthropic.claude-3-5-haiku-20241022-v1:0';
                 evaluationResponse = await this.invokeWithExponentialBackoff(
                     evaluationPrompt,
-                    'anthropic.claude-3-5-haiku-20241022-v1:0'
+                    modelUsed
                 );
             } catch (haikuError) {
                 loggingService.warn('Claude 3.5 Haiku failed, trying Sonnet with longer delay...', { error: haikuError instanceof Error ? haikuError.message : String(haikuError) });
                 // Wait even longer before trying Sonnet
                 await new Promise(resolve => setTimeout(resolve, 20000));
+                modelUsed = 'anthropic.claude-sonnet-4-20250514-v1:0';
                 evaluationResponse = await this.invokeWithExponentialBackoff(
                     evaluationPrompt,
-                    'anthropic.claude-sonnet-4-20250514-v1:0'
+                    modelUsed
                 );
             }
+
+            const estimatedOutputTokens = Math.ceil(evaluationResponse.length / 4);
+            const latency = Date.now() - startTime;
+
+            // Track AI cost for monitoring
+            const estimatedCost = modelUsed.includes('haiku')
+                ? (estimatedInputTokens * 0.0000008 + estimatedOutputTokens * 0.000004)
+                : (estimatedInputTokens * 0.000003 + estimatedOutputTokens * 0.000015);
+
+            AICostTrackingService.trackCall({
+                service: 'experimentation',
+                operation: 'ai_evaluation',
+                model: modelUsed,
+                inputTokens: estimatedInputTokens,
+                outputTokens: estimatedOutputTokens,
+                estimatedCost,
+                latency,
+                success: true,
+                metadata: {
+                    modelsCompared: results.length,
+                    promptLength: originalPrompt.length
+                }
+            });
 
             // Parse evaluation results
             const evaluationData = this.parseEvaluationResponse(evaluationResponse, results);
@@ -577,6 +608,19 @@ export class ExperimentationService {
             }));
 
         } catch (error) {
+            // Track failed AI call
+            AICostTrackingService.trackCall({
+                service: 'experimentation',
+                operation: 'ai_evaluation',
+                model: modelUsed || 'unknown',
+                inputTokens: 0,
+                outputTokens: 0,
+                estimatedCost: 0,
+                latency: Date.now() - startTime,
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
             loggingService.error('Error performing AI evaluation:', { error: error instanceof Error ? error.message : String(error) });
             // Return results with fallback AI evaluation based on execution metrics
             return results.map((result) => {
@@ -2233,95 +2277,63 @@ export class ExperimentationService {
     }
 
     /**
-     * AI-powered risk assessment for optimization strategies
+     * Deterministic risk assessment for optimization strategies
+     * Replaces AI-powered assessment to eliminate unnecessary LLM costs
      */
-    private static async assessOptimizationRisk(
+    private static assessOptimizationRisk(
         optimizationType: string,
         currentModel: string,
         newModel?: string,
         trimPercentage?: number,
         promptLength?: number,
         savingsPercentage?: number
-    ): Promise<'low' | 'medium' | 'high'> {
-        try {
-            const prompt = `As an AI cost optimization expert, assess the risk level for this optimization strategy:
-
-Optimization Type: ${optimizationType}
-Current Model: ${currentModel}
-${newModel ? `New Model: ${newModel}` : ''}
-${trimPercentage ? `Context Trim Percentage: ${trimPercentage}%` : ''}
-${promptLength ? `Original Prompt Length: ${promptLength} characters` : ''}
-${savingsPercentage ? `Expected Savings: ${savingsPercentage.toFixed(1)}%` : ''}
-
-Consider factors like:
-- Model capability differences
-- Context preservation impact
-- Quality degradation risk
-- Implementation complexity
-- Business impact
-
-Return ONLY: "low", "medium", or "high" based on the risk assessment.`;
-
-            const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-haiku-20241022-v1:0');
-            const riskLevel = response.trim().toLowerCase();
+    ): 'low' | 'medium' | 'high' {
+        // Model switching risk based on capability gap
+        if (optimizationType === 'model_switch') {
+            const modelTiers: Record<string, number> = {
+                'gpt-4': 4,
+                'gpt-4-turbo': 4,
+                'claude-3-opus': 4,
+                'claude-3.5-sonnet': 4,
+                'claude-3-sonnet': 3,
+                'gpt-3.5-turbo': 3,
+                'claude-3-haiku': 3,
+                'amazon.nova-pro-v1': 3,
+                'gpt-3.5': 2,
+                'claude-instant': 2,
+                'gpt-3.5-turbo-instruct': 2,
+                'amazon.nova-lite-v1': 2,
+                'amazon.nova-micro-v1': 1
+            };
             
-            if (riskLevel === 'low' || riskLevel === 'medium' || riskLevel === 'high') {
-                return riskLevel as 'low' | 'medium' | 'high';
-            }
+            const currentTier = modelTiers[currentModel] || 2;
+            const newTier = newModel ? (modelTiers[newModel] || 2) : 2;
+            const tierGap = currentTier - newTier;
             
-            // Fallback logic based on optimization type
-            if (optimizationType === 'model_switch') {
-                return 'medium'; // Model switching has medium risk
-            } else if (optimizationType === 'context_trimming') {
-                return trimPercentage && trimPercentage > 40 ? 'high' : 
-                       trimPercentage && trimPercentage > 25 ? 'medium' : 'low';
-            } else if (optimizationType === 'prompt_optimization') {
-                return 'low'; // Prompt optimization is generally low risk
-            }
-            
-            return 'medium'; // Default fallback
-        } catch (error) {
-            loggingService.warn('AI risk assessment failed, using fallback logic:', { error: error instanceof Error ? error.message : String(error) });
-            
-            // Enhanced fallback logic with more sophisticated risk assessment
-            if (optimizationType === 'model_switch') {
-                // Model switching risk based on model capabilities
-                if (newModel && currentModel) {
-                    const highEndModels = ['gpt-4', 'claude-3-opus', 'claude-3-sonnet'];
-                    const midEndModels = ['gpt-3.5-turbo', 'claude-3-haiku', 'amazon.nova-pro-v1'];
-                    const lowEndModels = ['amazon.nova-micro-v1', 'amazon.nova-lite-v1'];
-                    
-                    const currentTier = highEndModels.includes(currentModel) ? 'high' : 
-                                      midEndModels.includes(currentModel) ? 'mid' : 
-                                      lowEndModels.includes(currentModel) ? 'low' : 'mid';
-                    const newTier = highEndModels.includes(newModel) ? 'high' : 
-                                  midEndModels.includes(newModel) ? 'mid' : 
-                                  lowEndModels.includes(newModel) ? 'low' : 'mid';
-                    
-                    // Risk is higher when switching from high to low tier
-                    if (currentTier === 'high' && newTier === 'low') return 'high';
-                    if (currentTier === 'high' && newTier === 'mid') return 'medium';
-                    if (currentTier === 'mid' && newTier === 'low') return 'medium';
-                    return 'low';
-                }
-                return 'medium';
-            } else if (optimizationType === 'context_trimming') {
-                // Context trimming risk based on percentage and prompt length
-                if (trimPercentage && promptLength) {
-                    if (trimPercentage > 50) return 'high';
-                    if (trimPercentage > 30) return 'medium';
-                    if (promptLength > 1000 && trimPercentage > 20) return 'medium';
-                    return 'low';
-                }
-                return trimPercentage && trimPercentage > 40 ? 'high' : 
-                       trimPercentage && trimPercentage > 25 ? 'medium' : 'low';
-            } else if (optimizationType === 'prompt_optimization') {
-                // Prompt optimization is generally low risk
-                return 'low';
-            }
-            
-            return 'medium';
+            if (tierGap >= 2) return 'high';
+            if (tierGap === 1) return 'medium';
+            return 'low';
         }
+        
+        // Context trimming risk
+        if (optimizationType === 'context_trimming') {
+            if (trimPercentage && trimPercentage > 50) return 'high';
+            if (trimPercentage && trimPercentage > 30) return 'medium';
+            if (promptLength && promptLength > 1000 && trimPercentage && trimPercentage > 20) return 'medium';
+            return 'low';
+        }
+        
+        // Prompt optimization risk based on length
+        if (optimizationType === 'prompt_optimization') {
+            if (promptLength && promptLength > 3000) return 'medium';
+            return 'low';
+        }
+        
+        // Batch processing is generally low risk
+        if (optimizationType === 'batch_processing') return 'low';
+        
+        // Default to medium for unknown types
+        return 'medium';
     }
 
     /**

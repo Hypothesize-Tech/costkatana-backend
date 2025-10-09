@@ -1,6 +1,7 @@
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { AICostTrackingService } from './aiCostTracking.service';
 
 export interface OutputModerationResult {
     isBlocked: boolean;
@@ -165,6 +166,7 @@ export class OutputModerationService {
         config: OutputModerationConfig,
         _requestId: string
     ): Promise<OutputModerationResult> {
+        const startTime = Date.now();
         const moderationPrompt = `
 You are a content moderation system. Analyze this model output for policy violations:
 
@@ -189,6 +191,9 @@ Respond with JSON only:
     "threatLevel": "low|medium|high",
     "recommendedAction": "allow|annotate|redact|block"
 }`;
+
+        const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+        const estimatedInputTokens = Math.ceil(moderationPrompt.length / 4);
 
         try {
             const response = await retryBedrockOperation(async () => {
@@ -231,6 +236,25 @@ Respond with JSON only:
             }
             
             const analysis = JSON.parse(responseText);
+            const estimatedOutputTokens = Math.ceil(responseText.length / 4);
+            const latency = Date.now() - startTime;
+
+            // Track AI cost for monitoring
+            AICostTrackingService.trackCall({
+                service: 'output_moderation',
+                operation: 'ai_moderation_check',
+                model: modelId,
+                inputTokens: estimatedInputTokens,
+                outputTokens: estimatedOutputTokens,
+                estimatedCost: (estimatedInputTokens * 0.0000003 + estimatedOutputTokens * 0.0000012), // Approx Nova Pro pricing
+                latency,
+                success: true,
+                metadata: {
+                    contentLength: content.length,
+                    isViolation: analysis.isViolation || false,
+                    threatLevel: analysis.threatLevel || 'low'
+                }
+            });
 
             return {
                 isBlocked: analysis.isViolation || false,
@@ -248,6 +272,19 @@ Respond with JSON only:
             };
 
         } catch (error) {
+            // Track failed AI call
+            AICostTrackingService.trackCall({
+                service: 'output_moderation',
+                operation: 'ai_moderation_check',
+                model: modelId,
+                inputTokens: estimatedInputTokens,
+                outputTokens: 0,
+                estimatedCost: 0,
+                latency: Date.now() - startTime,
+                success: false,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
             loggingService.error('AI output moderation failed', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }

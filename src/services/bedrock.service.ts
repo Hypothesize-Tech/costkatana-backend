@@ -6,6 +6,7 @@ import { calculateCost } from '../utils/pricing';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
 import { loggingService } from './logging.service';
+import { AICostTrackingService } from './aiCostTracking.service';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -453,6 +454,23 @@ export class BedrockService {
                 latencyMs: Date.now() - startTime,
             });
 
+            // Track AI cost for monitoring
+            AICostTrackingService.trackCall({
+                service: 'bedrock',
+                operation: 'invoke_model',
+                model: actualModelId,
+                inputTokens,
+                outputTokens,
+                estimatedCost: costUSD,
+                latency: Date.now() - startTime,
+                success: true,
+                metadata: {
+                    promptLength: prompt.length,
+                    responseLength: result.length,
+                    hasContext: !!context?.recentMessages
+                }
+            });
+
             return result;
         } catch (error: any) {
             loggingService.error('Error invoking Bedrock model:', { 
@@ -471,6 +489,23 @@ export class BedrockService {
                 costUSD: 0,
                 error,
                 latencyMs: Date.now() - startTime,
+            });
+
+            // Track failed AI call for monitoring
+            AICostTrackingService.trackCall({
+                service: 'bedrock',
+                operation: 'invoke_model',
+                model: actualModelId,
+                inputTokens,
+                outputTokens: 0,
+                estimatedCost: 0,
+                latency: Date.now() - startTime,
+                success: false,
+                error: error.message || String(error),
+                metadata: {
+                    promptLength: prompt.length,
+                    errorType: error.name || 'UnknownError'
+                }
             });
 
             throw error;

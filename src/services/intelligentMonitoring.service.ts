@@ -1,9 +1,9 @@
 import { User } from '../models/User';
 import { Usage } from '../models/Usage';
 import { EmailService } from './email.service';
-import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
+import { RecommendationRulesService } from './recommendationRules.service';
 
 interface ChatGPTPlan {
     name: 'free' | 'plus' | 'team' | 'enterprise';
@@ -260,69 +260,14 @@ export class IntelligentMonitoringService {
             .slice(0, 3)
             .map(([hour]) => parseInt(hour));
 
-        // Extract topics using basic analysis (will be enhanced by AI)
+        // Extract topics using basic analysis
         const commonTopics = this.extractCommonTopics(monthlyUsage);
 
-        // Get AI-powered comprehensive insights
-        let aiInsights = undefined;
-        let personalizedAnalysis = undefined;
-
-        if (monthlyUsage.length >= 3) {
-            try {
-                // Prepare comprehensive data for AI analysis
-                const usageData = monthlyUsage.map(u => ({
-                    prompt: u.prompt || 'No prompt available',
-                    tokens: u.totalTokens,
-                    cost: u.cost,
-                    model: u.model,
-                    timestamp: u.createdAt,
-                    promptTokens: u.promptTokens || 0,
-                    completionTokens: u.completionTokens || 0,
-                    responseTime: u.responseTime || 0,
-                    metadata: u.metadata || {}
-                }));
-
-                // Historical context for better AI analysis
-                const historicalData = historicalUsage.map(u => ({
-                    prompt: u.prompt || 'No prompt available',
-                    tokens: u.totalTokens,
-                    cost: u.cost,
-                    model: u.model,
-                    timestamp: u.createdAt,
-                    metadata: u.metadata || {}
-                }));
-
-                // AI-powered usage pattern analysis with circuit breaker
-                const [aiInsightsResult, personalizedAnalysisResult] = await Promise.all([
-                    this.executeWithCircuitBreaker(() => 
-                        BedrockService.analyzeUsagePatterns({
-                            usageData,
-                            timeframe: 'monthly'
-                        })
-                    ),
-                    this.executeWithCircuitBreaker(() => 
-                        this.generatePersonalizedUserProfile(userId, usageData, historicalData)
-                    )
-                ]);
-
-                aiInsights = aiInsightsResult;
-                personalizedAnalysis = personalizedAnalysisResult;
-
-                loggingService.info('AI insights and personalization generated successfully', { value:  { 
-                    userId,
-                    potentialSavings: aiInsights?.potentialSavings || 0,
-                    patternsFound: aiInsights?.patterns?.length || 0,
-                    userProfile: personalizedAnalysis?.userProfile || 'Unknown',
-                    technicalLevel: personalizedAnalysis?.technicalLevel || 'intermediate'
-                 } });
-
-            } catch (error) {
-                loggingService.warn('Failed to generate AI insights and personalization:', { error: error instanceof Error ? error.message : String(error) });
-            }
-        }
-
-        // Calculate inefficiency score (basic calculation, enhanced by AI insights)
+        // Calculate inefficiency score
         const inefficiencyScore = this.calculateInefficiencyScore(monthlyUsage, averageTokensPerRequest);
+
+        // Generate heuristic profile instead of AI (eliminates AI costs)
+        const personalizedAnalysis = this.generateHeuristicUserProfile(monthlyUsage, historicalUsage);
 
         return {
             averageTokensPerRequest,
@@ -330,111 +275,82 @@ export class IntelligentMonitoringService {
             peakUsageHours,
             commonTopics,
             inefficiencyScore,
-            aiInsights: aiInsights || undefined,
-            personalizedAnalysis: personalizedAnalysis || undefined
+            personalizedAnalysis
         };
     }
 
     /**
-     * Generate personalized user profile using AI analysis
+     * Generate heuristic user profile (replaces AI-powered analysis)
      */
-    private static async generatePersonalizedUserProfile(
-        _userId: string, 
-        usageData: any[], 
+    private static generateHeuristicUserProfile(
+        monthlyUsage: any[],
         historicalData: any[]
-    ): Promise<{
+    ): {
         userProfile: string;
         usagePersonality: string;
         optimizationStyle: string;
         preferredModels: string[];
         costSensitivity: 'low' | 'medium' | 'high';
         technicalLevel: 'beginner' | 'intermediate' | 'advanced';
-    }> {
-        try {
-            const profileAnalysisPrompt = `You are an AI user behavior analyst. Analyze this user's AI usage patterns to create a comprehensive personality profile for personalized optimization recommendations.
-
-CURRENT MONTH USAGE DATA:
-${usageData.slice(0, 20).map(u => 
-    `- ${u.timestamp.toISOString().split('T')[0]}: "${u.prompt.substring(0, 100)}..." (${u.tokens} tokens, ${u.model}, $${u.cost.toFixed(4)})`
-).join('\n')}
-
-HISTORICAL USAGE PATTERNS:
-- Total historical requests: ${historicalData.length}
-- Average tokens over time: ${historicalData.reduce((sum, u) => sum + u.tokens, 0) / historicalData.length || 0}
-- Most used models: ${[...new Set(historicalData.map(u => u.model))].slice(0, 5).join(', ')}
-- Usage frequency: ${historicalData.length > 50 ? 'Heavy user' : historicalData.length > 20 ? 'Regular user' : 'Light user'}
-
-Please analyze and provide a detailed user profile in JSON format:
-
-{
-    "userProfile": "one_sentence_description_of_user_type",
-    "usagePersonality": "description_of_how_they_use_AI", 
-    "optimizationStyle": "what_optimization_approach_would_work_best",
-    "preferredModels": ["list", "of", "models", "they", "prefer"],
-    "costSensitivity": "low|medium|high based on spending patterns",
-    "technicalLevel": "beginner|intermediate|advanced based on prompt complexity",
-    "personalizedTips": [
-        "specific_tip_1_for_this_user",
-        "specific_tip_2_for_this_user",
-        "specific_tip_3_for_this_user"
-    ],
-    "optimizationPriorities": [
-        "what_to_optimize_first",
-        "what_to_optimize_second",
-        "what_to_optimize_third"
-    ]
-}
-
-Make this highly specific to the user's actual usage patterns, not generic advice.`;
-
-            const response = await this.executeWithCircuitBreaker(() =>
-                BedrockService.invokeModel(profileAnalysisPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
-            );
-
-            if (!response) {
-                throw new Error('AI service unavailable due to circuit breaker');
-            }
-
-            const cleanedResponse = BedrockService.extractJson(response);
-            if (!cleanedResponse || cleanedResponse.trim() === '') {
-                throw new Error('AI service returned empty or invalid response');
-            }
-
-            const profileData = this.safeJsonParse(cleanedResponse, {
-                userProfile: 'General AI user',
-                usagePersonality: 'Mixed usage patterns',
-                optimizationStyle: 'Balanced optimization approach',
-                preferredModels: [],
-                costSensitivity: 'medium',
-                technicalLevel: 'intermediate',
-                personalizedTips: [],
-                optimizationPriorities: []
-            });
-
-            return {
-                userProfile: profileData.userProfile || 'General AI user',
-                usagePersonality: profileData.usagePersonality || 'Mixed usage patterns',
-                optimizationStyle: profileData.optimizationStyle || 'Balanced optimization approach',
-                preferredModels: profileData.preferredModels || [],
-                costSensitivity: profileData.costSensitivity || 'medium',
-                technicalLevel: profileData.technicalLevel || 'intermediate'
-            };
-
-        } catch (error) {
-            loggingService.warn('Failed to generate personalized user profile:', { error: error instanceof Error ? error.message : String(error) });
-            return {
-                userProfile: 'AI user with mixed patterns',
-                usagePersonality: 'Varied AI usage',
-                optimizationStyle: 'Balanced approach',
-                preferredModels: [],
-                costSensitivity: 'medium',
-                technicalLevel: 'intermediate'
-            };
-        }
+    } {
+        const totalRequests = historicalData.length;
+        const totalCost = historicalData.reduce((sum, u) => sum + u.cost, 0);
+        const avgCost = totalRequests > 0 ? totalCost / totalRequests : 0;
+        
+        // Model usage analysis
+        const modelCounts = historicalData.reduce((acc, u) => {
+            acc[u.model] = (acc[u.model] || 0) + 1;
+            return acc;
+        }, {} as Record<string, number>);
+        
+        const preferredModels = Object.entries(modelCounts)
+            .sort(([, a], [, b]) => (b as number) - (a as number))
+            .slice(0, 3)
+            .map(([model]) => model);
+        
+        // Determine user type
+        let userProfile = 'General AI user';
+        if (totalRequests > 100) userProfile = 'Power user with high engagement';
+        else if (totalRequests > 50) userProfile = 'Regular AI user';
+        else userProfile = 'Occasional AI user';
+        
+        // Usage personality
+        const usesGPT4 = preferredModels.some(m => m.includes('gpt-4'));
+        const usagePersonality = usesGPT4 
+            ? 'Prefers advanced models for complex tasks'
+            : 'Cost-conscious user focusing on efficient models';
+        
+        // Optimization style
+        const optimizationStyle = totalCost > 100 
+            ? 'Focus on cost reduction through model switching'
+            : 'Focus on efficiency and quality';
+        
+        // Cost sensitivity
+        let costSensitivity: 'low' | 'medium' | 'high' = 'medium';
+        if (avgCost > 0.05) costSensitivity = 'low';
+        else if (avgCost < 0.01) costSensitivity = 'high';
+        
+        // Technical level based on prompt complexity
+        const avgPromptLength = monthlyUsage.length > 0
+            ? monthlyUsage.reduce((sum, u) => sum + ((u.prompt || '').length), 0) / monthlyUsage.length
+            : 0;
+        
+        let technicalLevel: 'beginner' | 'intermediate' | 'advanced' = 'intermediate';
+        if (avgPromptLength > 500) technicalLevel = 'advanced';
+        else if (avgPromptLength < 200) technicalLevel = 'beginner';
+        
+        return {
+            userProfile,
+            usagePersonality,
+            optimizationStyle,
+            preferredModels,
+            costSensitivity,
+            technicalLevel
+        };
     }
 
     /**
-     * Generate 100% AI-powered personalized recommendations
+     * Generate rule-based personalized recommendations (replaces AI-powered)
      */
     private static async generateAIPersonalizedRecommendations(
         userId: string,
@@ -447,11 +363,11 @@ Make this highly specific to the user's actual usage patterns, not generic advic
         const recommendations: SmartRecommendation[] = [];
 
         try {
-            // Check for critical limits first (these can be rule-based for immediate action)
+            // Check for critical limits first (these are rule-based for immediate action)
             const monthlyGPT4Count = monthlyUsage.filter(u => u.model.includes('gpt-4')).length;
             const dailyCount = dailyUsage.length;
 
-            // Critical limit warnings (immediate, rule-based)
+            // Critical limit warnings
             if (plan.monthlyLimit && plan.monthlyLimit > 0) {
                 const monthlyPercentage = (monthlyGPT4Count / plan.monthlyLimit) * 100;
                 
@@ -488,258 +404,24 @@ Make this highly specific to the user's actual usage patterns, not generic advic
                 }
             }
 
-            // Now generate AI-powered personalized recommendations
-            if (monthlyUsage.length >= 3) {
-                const aiRecommendations = await this.generateComprehensiveAIRecommendations(
-                    userId, 
-                    user, 
-                    monthlyUsage, 
-                    pattern, 
-                    plan
-                );
-                recommendations.push(...aiRecommendations);
-            }
-
-            // If we don't have enough data, generate AI-powered onboarding recommendations
-            if (monthlyUsage.length < 3) {
-                const onboardingRecommendations = await this.generateAIOnboardingRecommendations(userId, user, monthlyUsage);
-                recommendations.push(...onboardingRecommendations);
-            }
+            // Generate rule-based recommendations (replaces AI calls)
+            const ruleRecommendations = RecommendationRulesService.generateRecommendations(
+                userId,
+                monthlyUsage,
+                pattern,
+                plan
+            );
+            recommendations.push(...ruleRecommendations);
 
         } catch (error) {
-            loggingService.error('Error generating AI personalized recommendations:', { error: error instanceof Error ? error.message : String(error) });
-            
-            // Fallback: Generate at least one helpful recommendation
-            recommendations.push({
-                type: 'ai_insights',
-                priority: 'medium',
-                title: 'AI Analysis Temporarily Unavailable',
-                message: 'Our AI optimization engine is temporarily unavailable, but we\'re still tracking your usage patterns.',
-                suggestedAction: 'Check your Cost Katana dashboard for basic optimization insights, and we\'ll provide AI-powered recommendations once the service is restored.',
-                costKatanaUrl: `${process.env.FRONTEND_URL}/dashboard?source=ai_fallback`,
-                aiGenerated: false,
-                personalized: false,
-                confidence: 70
+            loggingService.error('Error generating recommendations:', { 
+                error: error instanceof Error ? error.message : String(error) 
             });
         }
 
         return recommendations;
     }
 
-    /**
-     * Generate comprehensive AI-powered recommendations based on user data
-     */
-    private static async generateComprehensiveAIRecommendations(
-        _userId: string,
-        user: any,
-        monthlyUsage: any[],
-        pattern: UsagePattern,
-        plan: ChatGPTPlan
-    ): Promise<SmartRecommendation[]> {
-        try {
-            const totalCost = monthlyUsage.reduce((sum, u) => sum + u.cost, 0);
-            const avgTokens = pattern.averageTokensPerRequest;
-            
-            // Comprehensive AI analysis prompt
-            const recommendationPrompt = `You are an AI cost optimization expert for Cost Katana. Analyze this user's ChatGPT usage and create highly personalized, actionable recommendations.
-
-USER PROFILE:
-- Name: ${user.name}
-- User Type: ${pattern.personalizedAnalysis?.userProfile || 'Regular AI user'}
-- Technical Level: ${pattern.personalizedAnalysis?.technicalLevel || 'intermediate'}
-- Cost Sensitivity: ${pattern.personalizedAnalysis?.costSensitivity || 'medium'}
-- Usage Personality: ${pattern.personalizedAnalysis?.usagePersonality || 'Mixed usage'}
-
-CURRENT USAGE ANALYSIS:
-- ChatGPT Plan: ${plan.name} ($${plan.cost}/month)
-- Monthly Usage: ${monthlyUsage.length} requests
-- Total Monthly Cost: $${totalCost.toFixed(2)}
-- Average Tokens/Request: ${avgTokens.toFixed(0)}
-- Most Used Models: ${pattern.mostUsedModels.join(', ')}
-- Common Topics: ${pattern.commonTopics.join(', ')}
-- Peak Hours: ${pattern.peakUsageHours.map(h => `${h}:00`).join(', ')}
-- Inefficiency Score: ${pattern.inefficiencyScore}/100
-
-TOP RECENT CONVERSATIONS:
-${monthlyUsage.slice(0, 10).map((u, i) => 
-    `${i+1}. ${u.model} (${u.totalTokens} tokens, $${u.cost.toFixed(4)}): "${(u.prompt || '').substring(0, 80)}..."`
-).join('\n')}
-
-AI DETECTED PATTERNS:
-${pattern.aiInsights ? `
-- Patterns: ${pattern.aiInsights.patterns.join(', ')}
-- AI Recommendations: ${pattern.aiInsights.recommendations.join('; ')}
-- Potential Savings: $${pattern.aiInsights.potentialSavings.toFixed(2)}
-` : 'No AI insights available'}
-
-Please generate 3-5 highly personalized recommendations in JSON format. Each recommendation should be:
-1. Specific to this user's actual usage patterns
-2. Actionable with clear next steps
-3. Include estimated savings when possible
-4. Prioritized by impact and user preference
-5. Use their technical level and cost sensitivity
-
-JSON Format:
-{
-    "recommendations": [
-        {
-            "type": "prompt_optimization|model_switch|cost_reduction|timing|personalized_coaching",
-            "priority": "low|medium|high",
-            "title": "specific_actionable_title",
-            "message": "personalized_message_explaining_the_insight",
-            "suggestedAction": "specific_next_step_for_this_user",
-            "potentialSavings": {
-                "tokens": estimated_token_savings,
-                "cost": estimated_cost_savings_per_request,
-                "percentage": percentage_improvement
-            },
-            "confidence": confidence_score_0_to_100,
-            "userContext": "why_this_is_relevant_to_this_specific_user",
-            "reasoning": "detailed_explanation_of_the_analysis"
-        }
-    ]
-}
-
-Make recommendations highly specific to their usage patterns, not generic advice.`;
-
-            const response = await this.executeWithCircuitBreaker(() =>
-                BedrockService.invokeModel(recommendationPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-sonnet-20240620-v1:0')
-            );
-
-            if (!response) {
-                throw new Error('AI service unavailable due to circuit breaker');
-            }
-
-            const cleanedResponse = BedrockService.extractJson(response);
-            if (!cleanedResponse || cleanedResponse.trim() === '') {
-                throw new Error('AI service returned empty or invalid response');
-            }
-
-            const aiRecommendations = this.safeJsonParse(cleanedResponse, {
-                recommendations: []
-            });
-
-            // Convert AI recommendations to our format
-            const recommendations: SmartRecommendation[] = aiRecommendations.recommendations.map((rec: any) => ({
-                type: rec.type || 'personalized_coaching',
-                priority: rec.priority || 'medium',
-                title: rec.title,
-                message: rec.message,
-                suggestedAction: rec.suggestedAction,
-                potentialSavings: rec.potentialSavings ? {
-                    tokens: rec.potentialSavings.tokens || 0,
-                    cost: rec.potentialSavings.cost || 0,
-                    percentage: rec.potentialSavings.percentage || 0
-                } : undefined,
-                costKatanaUrl: this.generatePersonalizedURL(rec.type, _userId, rec.userContext),
-                aiGenerated: true,
-                personalized: true,
-                userContext: rec.userContext || '',
-                confidence: rec.confidence || 80
-            }));
-
-            loggingService.info('AI-powered personalized recommendations generated', {
-                userId: _userId,
-                recommendationsCount: recommendations.length,
-                avgConfidence: recommendations.reduce((sum, r) => sum + r.confidence, 0) / recommendations.length,
-                types: recommendations.map(r => r.type)
-            });
-
-            return recommendations;
-
-        } catch (error) {
-            loggingService.error('Error generating comprehensive AI recommendations:', { error: error instanceof Error ? error.message : String(error) });
-            return [];
-        }
-    }
-
-    /**
-     * Generate AI-powered onboarding recommendations for new users
-     */
-    private static async generateAIOnboardingRecommendations(
-        _userId: string,
-        user: any,
-        limitedUsage: any[]
-    ): Promise<SmartRecommendation[]> {
-        try {
-            const onboardingPrompt = `You are an AI onboarding specialist for Cost Katana. This user just started using our ChatGPT cost tracking. Create personalized onboarding recommendations.
-
-USER INFO:
-- Name: ${user.name}
-- Email: ${user.email}
-- Usage So Far: ${limitedUsage.length} ChatGPT conversations tracked
-
-EARLY USAGE PATTERNS:
-${limitedUsage.map((u, i) => 
-    `${i+1}. ${u.model} (${u.totalTokens} tokens): "${(u.prompt || '').substring(0, 60)}..."`
-).join('\n')}
-
-Create 2-3 welcoming, educational recommendations that help them:
-1. Understand Cost Katana's value
-2. Learn optimization best practices
-3. Set up their account for success
-4. Get early wins
-
-JSON Format:
-{
-    "recommendations": [
-        {
-            "title": "welcome_focused_title",
-            "message": "encouraging_educational_message",
-            "suggestedAction": "specific_next_step",
-            "confidence": 90
-        }
-    ]
-}`;
-
-            const response = await this.executeWithCircuitBreaker(() =>
-                BedrockService.invokeModel(onboardingPrompt, process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-5-haiku-20241022-v1:0')
-            );
-
-            if (!response) {
-                throw new Error('AI service unavailable due to circuit breaker');
-            }
-
-            const cleanedResponse = BedrockService.extractJson(response);
-            if (!cleanedResponse || cleanedResponse.trim() === '') {
-                throw new Error('AI service returned empty or invalid response');
-            }
-
-            const onboardingData = this.safeJsonParse(cleanedResponse, {
-                recommendations: []
-            });
-
-            return onboardingData.recommendations.map((rec: any) => ({
-                type: 'personalized_coaching' as const,
-                priority: 'medium' as const,
-                title: rec.title,
-                message: rec.message,
-                suggestedAction: rec.suggestedAction,
-                costKatanaUrl: `${process.env.FRONTEND_URL}/onboarding?source=ai_welcome`,
-                aiGenerated: true,
-                personalized: true,
-                userContext: 'New user onboarding',
-                confidence: rec.confidence || 85
-            }));
-
-        } catch (error) {
-            loggingService.error('Error generating AI onboarding recommendations:', { error: error instanceof Error ? error.message : String(error) });
-            
-            // Fallback onboarding recommendation
-            return [{
-                type: 'personalized_coaching',
-                priority: 'medium',
-                title: 'Welcome to Cost Katana!',
-                message: 'Great start! You\'ve begun tracking your ChatGPT usage. Keep using ChatGPT normally, and we\'ll provide personalized optimization insights as we learn your patterns.',
-                suggestedAction: 'Continue using ChatGPT and check back in a few days for AI-powered personalized recommendations.',
-                costKatanaUrl: `${process.env.FRONTEND_URL}/getting-started?source=welcome`,
-                aiGenerated: false,
-                personalized: true,
-                userContext: 'New user encouragement',
-                confidence: 80
-            }];
-        }
-    }
 
     /**
      * Generate personalized URLs based on recommendation context
@@ -832,30 +514,68 @@ JSON Format:
             return;
         }
 
-        // Send personalized weekly digest for medium/high priority recommendations ONLY
-        // This is now protected by distributed locking to prevent duplicates
+        // Smart weekly digest logic with engagement tracking
         if (highRecs.length > 0 || mediumRecs.length > 0) {
             const shouldSendWeeklyDigest = await this.shouldSendWeeklyDigest(userId);
-            
-            if (shouldSendWeeklyDigest) {
-                loggingService.info('Sending weekly digest', {
-                    userId,
-                    email: user.email,
-                    highRecs: highRecs.length,
-                    mediumRecs: mediumRecs.length,
-                    component: 'IntelligentMonitoring',
-                    operation: 'sendWeeklyDigest'
-                });
-                
-                await this.sendPersonalizedWeeklyDigest(user, [...highRecs, ...mediumRecs], pattern);
-            } else {
-                loggingService.debug('Weekly digest skipped', {
-                    userId,
-                    reason: 'Cooldown period active or lock held by another process',
-                    highRecs: highRecs.length,
-                    mediumRecs: mediumRecs.length
-                });
+            if (!shouldSendWeeklyDigest) {
+                loggingService.debug('Weekly digest skipped (cooldown active)', { userId });
+                return;
             }
+
+            // Initialize email engagement if not exists
+            if (!user.preferences.emailEngagement) {
+                user.preferences.emailEngagement = {
+                    totalSent: 0,
+                    totalOpened: 0,
+                    totalClicked: 0,
+                    consecutiveIgnored: 0
+                };
+            }
+
+            const engagement = user.preferences.emailEngagement;
+
+            // Auto-disable for non-engaged users (3+ consecutive ignores)
+            if (engagement.consecutiveIgnored >= 3) {
+                loggingService.info('User has ignored 3+ consecutive emails, auto-disabling digest', { userId });
+                await User.findByIdAndUpdate(user._id, {
+                    'preferences.weeklyReports': false,
+                    'preferences.emailEngagement.consecutiveIgnored': 0
+                });
+                return;
+            }
+
+            // Calculate total potential savings
+            const totalSavings = recommendations.reduce((sum, r) => 
+                sum + (r.potentialSavings?.cost || 0), 0
+            );
+
+            // Only send if meaningful savings (>$10) OR first-time user
+            const isFirstTime = !user.preferences.lastDigestSent;
+            if (totalSavings < 10 && !isFirstTime) {
+                loggingService.info('Insufficient savings to warrant email', { 
+                    userId, 
+                    totalSavings,
+                    threshold: 10
+                });
+                return;
+            }
+
+            // Send weekly digest
+            loggingService.info('Sending weekly digest', {
+                userId,
+                email: user.email,
+                highRecs: highRecs.length,
+                mediumRecs: mediumRecs.length,
+                totalSavings
+            });
+            
+            await this.sendPersonalizedWeeklyDigest(user, [...highRecs, ...mediumRecs], pattern);
+            
+            // Update engagement tracking
+            await User.findByIdAndUpdate(user._id, {
+                'preferences.emailEngagement.totalSent': engagement.totalSent + 1,
+                'preferences.emailEngagement.consecutiveIgnored': engagement.consecutiveIgnored + 1
+            });
         } else {
             loggingService.debug('No weekly digest needed', {
                 userId,
