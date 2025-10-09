@@ -10,67 +10,42 @@ export const initializeCronJobs = () => {
         step: 'start'
     });
 
-    // Daily intelligent monitoring - runs at 9 AM every day
-    cron.schedule('0 9 * * *', async () => {
-        loggingService.info('Running daily intelligent monitoring', {
+    // Weekly digest - runs at 9 AM on Mondays ONLY
+    // This is the ONLY cron job that sends weekly digests
+    cron.schedule('0 9 * * 1', async () => {
+        loggingService.info('Running weekly digest job', {
             component: 'cronJobs',
-            operation: 'dailyIntelligentMonitoring',
+            operation: 'weeklyDigest',
             step: 'start',
-            schedule: '0 9 * * *'
+            schedule: '0 9 * * 1 (Mondays at 9 AM)'
         });
         try {
             await IntelligentMonitoringService.runDailyMonitoring();
-            loggingService.info('Daily intelligent monitoring completed', {
+            loggingService.info('Weekly digest job completed', {
                 component: 'cronJobs',
-                operation: 'dailyIntelligentMonitoring',
+                operation: 'weeklyDigest',
                 step: 'complete',
-                schedule: '0 9 * * *'
+                schedule: '0 9 * * 1'
             });
         } catch (error) {
-            loggingService.error('Daily intelligent monitoring failed', {
+            loggingService.error('Weekly digest job failed', {
                 component: 'cronJobs',
-                operation: 'dailyIntelligentMonitoring',
+                operation: 'weeklyDigest',
                 step: 'error',
-                schedule: '0 9 * * *',
+                schedule: '0 9 * * 1',
                 error: error instanceof Error ? error.message : String(error)
             });
         }
     });
 
-    // Weekly digest check - runs at 10 AM on Mondays
-    cron.schedule('0 10 * * 1', async () => {
-        loggingService.info('Running weekly digest check', {
-            component: 'cronJobs',
-            operation: 'weeklyDigestCheck',
-            step: 'start',
-            schedule: '0 10 * * 1'
-        });
-        try {
-            await IntelligentMonitoringService.runDailyMonitoring(); // This handles weekly digests too
-            loggingService.info('Weekly digest check completed', {
-                component: 'cronJobs',
-                operation: 'weeklyDigestCheck',
-                step: 'complete',
-                schedule: '0 10 * * 1'
-            });
-        } catch (error) {
-            loggingService.error('Weekly digest check failed', {
-                component: 'cronJobs',
-                operation: 'weeklyDigestCheck',
-                step: 'error',
-                schedule: '0 10 * * 1',
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-
-    // Urgent alerts check - runs every 2 hours during business hours
-    cron.schedule('0 */2 8-20 * * *', async () => {
+    // Urgent alerts check - runs every 4 hours (reduced from 2 hours)
+    // This ONLY sends urgent alerts, NOT weekly digests
+    cron.schedule('0 */4 * * *', async () => {
         loggingService.info('Running urgent alerts check', {
             component: 'cronJobs',
             operation: 'urgentAlertsCheck',
             step: 'start',
-            schedule: '0 */2 8-20 * * *'
+            schedule: '0 */4 * * * (Every 4 hours)'
         });
         try {
             // Get users who might need urgent alerts
@@ -81,7 +56,8 @@ export const initializeCronJobs = () => {
             }).select('_id').limit(100); // Process in batches
 
             const promises = activeUsers.map(user =>
-                IntelligentMonitoringService.monitorUserUsage(user._id.toString())
+                // urgentOnly = true means ONLY urgent alerts, NO weekly digests
+                IntelligentMonitoringService.monitorUserUsage(user._id.toString(), true)
                     .catch(error => loggingService.error('Failed urgent check for user', {
                         component: 'cronJobs',
                         operation: 'urgentAlertsCheck',
@@ -96,7 +72,7 @@ export const initializeCronJobs = () => {
                 component: 'cronJobs',
                 operation: 'urgentAlertsCheck',
                 step: 'complete',
-                schedule: '0 */2 8-20 * * *',
+                schedule: '0 */4 * * *',
                 usersProcessed: activeUsers.length
             });
         } catch (error) {
@@ -104,7 +80,7 @@ export const initializeCronJobs = () => {
                 component: 'cronJobs',
                 operation: 'urgentAlertsCheck',
                 step: 'error',
-                schedule: '0 */2 8-20 * * *',
+                schedule: '0 */4 * * *',
                 error: error instanceof Error ? error.message : String(error)
             });
         }

@@ -3,6 +3,7 @@ import { Usage } from '../models/Usage';
 import { EmailService } from './email.service';
 import { BedrockService } from './bedrock.service';
 import { loggingService } from './logging.service';
+import { redisService } from './redis.service';
 
 interface ChatGPTPlan {
     name: 'free' | 'plus' | 'team' | 'enterprise';
@@ -62,6 +63,10 @@ export class IntelligentMonitoringService {
     private static readonly MAX_AI_FAILURES = 3;
     private static readonly CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
     private static lastFailureTime = 0;
+
+    // Distributed locking for weekly digest sending
+    private static readonly WEEKLY_DIGEST_LOCK_TTL = 3600; // 1 hour in seconds
+    private static readonly WEEKLY_DIGEST_COOLDOWN = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 
     /**
      * Safely parse JSON from AI responses with multiple fallback strategies
@@ -163,8 +168,10 @@ export class IntelligentMonitoringService {
 
     /**
      * Monitor user's ChatGPT usage and send intelligent alerts
+     * @param userId - User ID to monitor
+     * @param urgentOnly - If true, only sends urgent alerts (not weekly digests)
      */
-    static async monitorUserUsage(userId: string): Promise<void> {
+    static async monitorUserUsage(userId: string, urgentOnly: boolean = false): Promise<void> {
         try {
             const user = await User.findById(userId);
             if (!user) return;
@@ -192,12 +199,13 @@ export class IntelligentMonitoringService {
             // Queue notifications for background processing
             if (recommendations.length > 0) {
                 this.queueBackgroundOperation(() => 
-                    this.sendIntelligentNotifications(user, recommendations, usagePattern)
+                    this.sendIntelligentNotifications(user, recommendations, usagePattern, urgentOnly)
                 );
             }
 
             loggingService.info('AI-powered intelligent monitoring completed', {
                 userId,
+                urgentOnly,
                 monthlyRequests: monthlyUsage.length,
                 dailyRequests: dailyUsage.length,
                 recommendationsCount: recommendations.length,
@@ -777,26 +785,82 @@ JSON Format:
 
     /**
      * Send intelligent email notifications with AI-personalized content
+     * Separated urgent alerts from weekly digests to prevent duplicate sends
+     * @param urgentOnly - If true, only sends urgent alerts (skips weekly digest)
      */
     private static async sendIntelligentNotifications(
         user: any,
         recommendations: SmartRecommendation[],
-        pattern: UsagePattern
+        pattern: UsagePattern,
+        urgentOnly: boolean = false
     ): Promise<void> {
+        const userId = user._id.toString();
+        
+        loggingService.info('Processing intelligent notifications', {
+            userId,
+            email: user.email,
+            totalRecommendations: recommendations.length,
+            urgentOnly,
+            component: 'IntelligentMonitoring',
+            operation: 'sendIntelligentNotifications'
+        });
+        
         // Group recommendations by priority
         const urgentRecs = recommendations.filter(r => r.priority === 'urgent');
         const highRecs = recommendations.filter(r => r.priority === 'high');
         const mediumRecs = recommendations.filter(r => r.priority === 'medium');
 
-        // Send urgent notifications immediately
+        loggingService.debug('Recommendations grouped by priority', {
+            userId,
+            urgent: urgentRecs.length,
+            high: highRecs.length,
+            medium: mediumRecs.length
+        });
+
+        // Send urgent notifications immediately (separate from weekly digest)
         if (urgentRecs.length > 0) {
+            loggingService.info('Sending urgent alert', {
+                userId,
+                urgentRecsCount: urgentRecs.length
+            });
             await this.sendUrgentAlert(user, urgentRecs[0]);
         }
 
-        // Send personalized weekly digest for medium/high priority recommendations
-        const shouldSendWeeklyDigest = await this.shouldSendWeeklyDigest(user._id);
-        if (shouldSendWeeklyDigest && (highRecs.length > 0 || mediumRecs.length > 0)) {
-            await this.sendPersonalizedWeeklyDigest(user, [...highRecs, ...mediumRecs], pattern);
+        // Skip weekly digest if urgentOnly flag is set (used by urgent alerts cron)
+        if (urgentOnly) {
+            loggingService.debug('Skipping weekly digest (urgent only mode)', { userId });
+            return;
+        }
+
+        // Send personalized weekly digest for medium/high priority recommendations ONLY
+        // This is now protected by distributed locking to prevent duplicates
+        if (highRecs.length > 0 || mediumRecs.length > 0) {
+            const shouldSendWeeklyDigest = await this.shouldSendWeeklyDigest(userId);
+            
+            if (shouldSendWeeklyDigest) {
+                loggingService.info('Sending weekly digest', {
+                    userId,
+                    email: user.email,
+                    highRecs: highRecs.length,
+                    mediumRecs: mediumRecs.length,
+                    component: 'IntelligentMonitoring',
+                    operation: 'sendWeeklyDigest'
+                });
+                
+                await this.sendPersonalizedWeeklyDigest(user, [...highRecs, ...mediumRecs], pattern);
+            } else {
+                loggingService.debug('Weekly digest skipped', {
+                    userId,
+                    reason: 'Cooldown period active or lock held by another process',
+                    highRecs: highRecs.length,
+                    mediumRecs: mediumRecs.length
+                });
+            }
+        } else {
+            loggingService.debug('No weekly digest needed', {
+                userId,
+                reason: 'No high or medium priority recommendations'
+            });
         }
     }
 
@@ -1064,15 +1128,140 @@ JSON Format:
         return Math.min(100, Math.max(0, inefficiencyFactors));
     }
 
+    /**
+     * Robust weekly digest check with distributed locking to prevent duplicates
+     * Uses Redis for distributed locking across multiple server instances
+     */
     private static async shouldSendWeeklyDigest(userId: string): Promise<boolean> {
-        const user = await User.findById(userId);
-        if (!user || !user.preferences.weeklyReports) return false;
-        
-        const lastDigest = user.preferences.lastDigestSent;
-        if (!lastDigest) return true;
-        
-        const daysSinceLastDigest = (Date.now() - lastDigest.getTime()) / (1000 * 60 * 60 * 24);
-        return daysSinceLastDigest >= 7;
+        try {
+            const user = await User.findById(userId);
+            if (!user || !user.preferences.weeklyReports) {
+                loggingService.debug('Weekly digest check: user preferences disabled', {
+                    userId,
+                    hasUser: !!user,
+                    weeklyReportsEnabled: user?.preferences.weeklyReports
+                });
+                return false;
+            }
+            
+            // Check last digest sent time in database
+            const lastDigest = user.preferences.lastDigestSent;
+            if (lastDigest) {
+                const timeSinceLastDigest = Date.now() - lastDigest.getTime();
+                if (timeSinceLastDigest < this.WEEKLY_DIGEST_COOLDOWN) {
+                    const daysRemaining = Math.ceil((this.WEEKLY_DIGEST_COOLDOWN - timeSinceLastDigest) / (1000 * 60 * 60 * 24));
+                    loggingService.debug('Weekly digest check: cooldown period not met', {
+                        userId,
+                        lastDigestSent: lastDigest.toISOString(),
+                        daysRemaining,
+                        cooldownDays: 7
+                    });
+                    return false;
+                }
+            }
+            
+            // Distributed lock check using Redis
+            const lockKey = `weekly_digest_lock:${userId}`;
+            
+            try {
+                // Check if Redis is connected
+                if (!redisService.isConnected) {
+                    loggingService.warn('Weekly digest check: Redis not connected, using database fallback', {
+                        userId
+                    });
+                    throw new Error('Redis not connected');
+                }
+                
+                // Try to acquire lock with NX (only set if not exists) and EX (expiration)
+                // This ensures only ONE cron job/process can send the weekly digest
+                const lockAcquired = await redisService.client.set(lockKey, Date.now().toString(), {
+                    NX: true, // Only set if key doesn't exist
+                    EX: this.WEEKLY_DIGEST_LOCK_TTL // Expire after 1 hour
+                });
+                
+                if (!lockAcquired) {
+                    loggingService.info('Weekly digest check: lock already held by another process', {
+                        userId,
+                        lockKey,
+                        component: 'IntelligentMonitoring',
+                        operation: 'shouldSendWeeklyDigest',
+                        preventedDuplicate: true
+                    });
+                    return false;
+                }
+                
+                loggingService.info('Weekly digest check: lock acquired successfully', {
+                    userId,
+                    lockKey,
+                    component: 'IntelligentMonitoring',
+                    operation: 'shouldSendWeeklyDigest'
+                });
+                
+                return true;
+            } catch (redisError) {
+                // If Redis is unavailable, fall back to in-memory check with database
+                loggingService.warn('Weekly digest check: Redis unavailable, using database fallback', {
+                    userId,
+                    error: redisError instanceof Error ? redisError.message : String(redisError)
+                });
+                
+                // Use database update with atomic operation as fallback
+                const now = new Date();
+                const updateResult = await User.findOneAndUpdate(
+                    {
+                        _id: userId,
+                        $or: [
+                            { 'preferences.lastDigestSent': { $exists: false } },
+                            { 'preferences.lastDigestSent': { $lt: new Date(Date.now() - this.WEEKLY_DIGEST_COOLDOWN) } }
+                        ]
+                    },
+                    {
+                        $set: { 'preferences.lastDigestSent': now }
+                    },
+                    { new: true }
+                );
+                
+                return !!updateResult;
+            }
+        } catch (error) {
+            loggingService.error('Error checking weekly digest eligibility', {
+                userId,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Utility method to clear weekly digest lock for a user (admin/debugging only)
+     * Use this if a lock is stuck and preventing reports from being sent
+     */
+    static async clearWeeklyDigestLock(userId: string): Promise<boolean> {
+        try {
+            if (!redisService.isConnected) {
+                loggingService.warn('Cannot clear lock: Redis not connected', { userId });
+                return false;
+            }
+            
+            const lockKey = `weekly_digest_lock:${userId}`;
+            const result = await redisService.client.del(lockKey);
+            
+            loggingService.info('Weekly digest lock cleared', {
+                userId,
+                lockKey,
+                existed: result > 0,
+                component: 'IntelligentMonitoring',
+                operation: 'clearWeeklyDigestLock'
+            });
+            
+            return result > 0;
+        } catch (error) {
+            loggingService.error('Error clearing weekly digest lock', {
+                userId,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return false;
+        }
     }
 
     /**
