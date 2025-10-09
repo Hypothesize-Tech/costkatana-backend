@@ -564,7 +564,7 @@ See [OBSERVABILITY.md](OBSERVABILITY.md) for complete documentation.
 ## 💬 **Support**
 
 ### **Get Help**
-- 📧 **Email**: abdul@hypothesize.tech
+- 📧 **Email**: support@costkatana.com
 - 🐛 **Issues**: [GitHub Issues](https://github.com/cost-katana/costkatana-backend/issues)
 
 ### **AI Feature Support**

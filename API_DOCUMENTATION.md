@@ -640,10 +640,10 @@ See [WEBHOOK_DOCUMENTATION.md](./WEBHOOK_DOCUMENTATION.md)
 
 ---
 
-## 💬 **Support & Feedback**
+## 💬 **Support & Feedback**f
 
 For API support:
-- 📧 **Email**: abdul@hypothesize.tech
+- 📧 **Email**: support@costkatana.com
 - 📖 **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/Hypothesize-Tech/costkatana-backend/issues)
 

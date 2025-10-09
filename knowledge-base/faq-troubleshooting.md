@@ -803,7 +803,7 @@ const response = await tracker.generateContent('Hello', {
 ### Support Channels:
 - **📖 Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
 - **💬 Discord Community**: [discord.gg/costkatana](https://discord.gg/costkatana)
-- **📧 Email Support**: abdul@hypothesize.tech
+- **📧 Email Support**: support@costkatana.com
 - **🐛 GitHub Issues**: [github.com/cost-katana](https://github.com/cost-katana)
 
 ### When to Contact Support:
