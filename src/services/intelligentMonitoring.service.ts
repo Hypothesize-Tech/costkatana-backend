@@ -849,8 +849,7 @@ export class IntelligentMonitoringService {
     }
 
     /**
-     * Robust weekly digest check with distributed locking to prevent duplicates
-     * Uses Redis for distributed locking across multiple server instances
+     * FIXED: Robust weekly digest check with proper cooldown and locking
      */
     private static async shouldSendWeeklyDigest(userId: string): Promise<boolean> {
         try {
@@ -864,85 +863,59 @@ export class IntelligentMonitoringService {
                 return false;
             }
             
-            // Check last digest sent time in database
+            // FIXED: More robust cooldown check with 7-day minimum
             const lastDigest = user.preferences.lastDigestSent;
             if (lastDigest) {
                 const timeSinceLastDigest = Date.now() - lastDigest.getTime();
-                if (timeSinceLastDigest < this.WEEKLY_DIGEST_COOLDOWN) {
-                    const daysRemaining = Math.ceil((this.WEEKLY_DIGEST_COOLDOWN - timeSinceLastDigest) / (1000 * 60 * 60 * 24));
+                const daysSinceLastDigest = timeSinceLastDigest / (1000 * 60 * 60 * 24);
+                
+                // FIXED: Require at least 6 days (144 hours) between digests
+                if (daysSinceLastDigest < 6) {
+                    const daysRemaining = Math.ceil(6 - daysSinceLastDigest);
                     loggingService.debug('Weekly digest check: cooldown period not met', {
                         userId,
                         lastDigestSent: lastDigest.toISOString(),
+                        daysSinceLastDigest: daysSinceLastDigest.toFixed(2),
                         daysRemaining,
-                        cooldownDays: 7
+                        requiredDays: 6
                     });
                     return false;
                 }
             }
             
-            // Distributed lock check using Redis
-            const lockKey = `weekly_digest_lock:${userId}`;
+            // FIXED: Use atomic database update to prevent race conditions
+            const now = new Date();
+            const updateResult = await User.findOneAndUpdate(
+                {
+                    _id: userId,
+                    $or: [
+                        { 'preferences.lastDigestSent': { $exists: false } },
+                        { 'preferences.lastDigestSent': { $lt: new Date(Date.now() - (6 * 24 * 60 * 60 * 1000)) } } // 6 days ago
+                    ]
+                },
+                {
+                    $set: { 'preferences.lastDigestSent': now }
+                },
+                { new: true }
+            );
             
-            try {
-                // Check if Redis is connected
-                if (!redisService.isConnected) {
-                    loggingService.warn('Weekly digest check: Redis not connected, using database fallback', {
-                        userId
-                    });
-                    throw new Error('Redis not connected');
-                }
-                
-                // Try to acquire lock with NX (only set if not exists) and EX (expiration)
-                // This ensures only ONE cron job/process can send the weekly digest
-                const lockAcquired = await redisService.client.set(lockKey, Date.now().toString(), {
-                    NX: true, // Only set if key doesn't exist
-                    EX: this.WEEKLY_DIGEST_LOCK_TTL // Expire after 1 hour
-                });
-                
-                if (!lockAcquired) {
-                    loggingService.info('Weekly digest check: lock already held by another process', {
-                        userId,
-                        lockKey,
-                        component: 'IntelligentMonitoring',
-                        operation: 'shouldSendWeeklyDigest',
-                        preventedDuplicate: true
-                    });
-                    return false;
-                }
-                
-                loggingService.info('Weekly digest check: lock acquired successfully', {
+            if (!updateResult) {
+                loggingService.debug('Weekly digest check: cooldown period not met (atomic update failed)', {
                     userId,
-                    lockKey,
-                    component: 'IntelligentMonitoring',
-                    operation: 'shouldSendWeeklyDigest'
+                    lastDigestSent: lastDigest?.toISOString(),
+                    reason: 'Another process already sent digest or cooldown not met'
                 });
-                
-                return true;
-            } catch (redisError) {
-                // If Redis is unavailable, fall back to in-memory check with database
-                loggingService.warn('Weekly digest check: Redis unavailable, using database fallback', {
-                    userId,
-                    error: redisError instanceof Error ? redisError.message : String(redisError)
-                });
-                
-                // Use database update with atomic operation as fallback
-                const now = new Date();
-                const updateResult = await User.findOneAndUpdate(
-                    {
-                        _id: userId,
-                        $or: [
-                            { 'preferences.lastDigestSent': { $exists: false } },
-                            { 'preferences.lastDigestSent': { $lt: new Date(Date.now() - this.WEEKLY_DIGEST_COOLDOWN) } }
-                        ]
-                    },
-                    {
-                        $set: { 'preferences.lastDigestSent': now }
-                    },
-                    { new: true }
-                );
-                
-                return !!updateResult;
+                return false;
             }
+            
+            loggingService.info('Weekly digest check: cooldown period met, proceeding with digest', {
+                userId,
+                lastDigestSent: lastDigest?.toISOString(),
+                newDigestSent: now.toISOString()
+            });
+            
+            return true;
+            
         } catch (error) {
             loggingService.error('Error checking weekly digest eligibility', {
                 userId,
@@ -953,30 +926,29 @@ export class IntelligentMonitoringService {
     }
 
     /**
-     * Utility method to clear weekly digest lock for a user (admin/debugging only)
-     * Use this if a lock is stuck and preventing reports from being sent
+     * FIXED: Clear weekly digest cooldown for a user (admin/debugging only)
+     * Use this to reset the cooldown period for testing
      */
-    static async clearWeeklyDigestLock(userId: string): Promise<boolean> {
+    static async clearWeeklyDigestCooldown(userId: string): Promise<boolean> {
         try {
-            if (!redisService.isConnected) {
-                loggingService.warn('Cannot clear lock: Redis not connected', { userId });
-                return false;
-            }
-            
-            const lockKey = `weekly_digest_lock:${userId}`;
-            const result = await redisService.client.del(lockKey);
-            
-            loggingService.info('Weekly digest lock cleared', {
+            const result = await User.findByIdAndUpdate(
                 userId,
-                lockKey,
-                existed: result > 0,
+                {
+                    $unset: { 'preferences.lastDigestSent': 1 }
+                },
+                { new: true }
+            );
+            
+            loggingService.info('Weekly digest cooldown cleared', {
+                userId,
+                success: !!result,
                 component: 'IntelligentMonitoring',
-                operation: 'clearWeeklyDigestLock'
+                operation: 'clearWeeklyDigestCooldown'
             });
             
-            return result > 0;
+            return !!result;
         } catch (error) {
-            loggingService.error('Error clearing weekly digest lock', {
+            loggingService.error('Error clearing weekly digest cooldown', {
                 userId,
                 error: error instanceof Error ? error.message : String(error)
             });
@@ -985,7 +957,35 @@ export class IntelligentMonitoringService {
     }
 
     /**
-     * Run intelligent monitoring for all active users
+     * FIXED: Clear weekly digest cooldown for ALL users (admin only)
+     * Use this to reset all cooldowns for testing
+     */
+    static async clearAllWeeklyDigestCooldowns(): Promise<number> {
+        try {
+            const result = await User.updateMany(
+                {},
+                {
+                    $unset: { 'preferences.lastDigestSent': 1 }
+                }
+            );
+            
+            loggingService.info('All weekly digest cooldowns cleared', {
+                modifiedCount: result.modifiedCount,
+                component: 'IntelligentMonitoring',
+                operation: 'clearAllWeeklyDigestCooldowns'
+            });
+            
+            return result.modifiedCount;
+        } catch (error) {
+            loggingService.error('Error clearing all weekly digest cooldowns', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return 0;
+        }
+    }
+
+    /**
+     * Run intelligent monitoring for all active users (DEPRECATED - use specific methods)
      */
     static async runDailyMonitoring(): Promise<void> {
         try {
@@ -1007,6 +1007,46 @@ export class IntelligentMonitoringService {
             loggingService.info('AI-powered daily monitoring completed successfully');
         } catch (error) {
             loggingService.error('Error in daily monitoring:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * FIXED: Run weekly digest for all active users (ONLY weekly digests)
+     */
+    static async runWeeklyDigest(): Promise<void> {
+        try {
+            const activeUsers = await User.find({
+                isActive: true,
+                'preferences.emailAlerts': true,
+                'preferences.weeklyReports': true
+            }).select('_id');
+
+            loggingService.info(`Running weekly digest for ${activeUsers.length} users`);
+
+            const promises = activeUsers.map(user => 
+                this.monitorUserUsage(user._id.toString(), false).catch(error => 
+                    loggingService.error(`Failed to send weekly digest to user ${user._id}:`, error)
+                )
+            );
+
+            await Promise.all(promises);
+            
+            loggingService.info('Weekly digest completed successfully');
+        } catch (error) {
+            loggingService.error('Error in weekly digest:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * FIXED: Run urgent alerts check for a specific user (ONLY urgent alerts)
+     */
+    static async runUrgentAlertsCheck(userId: string): Promise<void> {
+        try {
+            await this.monitorUserUsage(userId, true);
+        } catch (error) {
+            loggingService.error(`Failed urgent alerts check for user ${userId}:`, { 
+                error: error instanceof Error ? error.message : String(error) 
+            });
         }
     }
 

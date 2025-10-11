@@ -22,7 +22,8 @@ export const initializeCronJobs = () => {
             schedule: '0 9 * * 1 (Mondays at 9 AM)'
         });
         try {
-            await IntelligentMonitoringService.runDailyMonitoring();
+            // FIXED: Use runWeeklyDigest instead of runDailyMonitoring
+            await IntelligentMonitoringService.runWeeklyDigest();
             loggingService.info('Weekly digest job completed', {
                 component: 'cronJobs',
                 operation: 'weeklyDigest',
@@ -58,8 +59,8 @@ export const initializeCronJobs = () => {
             }).select('_id').limit(100); // Process in batches
 
             const promises = activeUsers.map(user =>
-                // urgentOnly = true means ONLY urgent alerts, NO weekly digests
-                IntelligentMonitoringService.monitorUserUsage(user._id.toString(), true)
+                // FIXED: Use runUrgentAlertsCheck instead of monitorUserUsage
+                IntelligentMonitoringService.runUrgentAlertsCheck(user._id.toString())
                     .catch(error => loggingService.error('Failed urgent check for user', {
                         component: 'cronJobs',
                         operation: 'urgentAlertsCheck',

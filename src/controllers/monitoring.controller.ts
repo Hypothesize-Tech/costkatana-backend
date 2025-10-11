@@ -29,7 +29,8 @@ export class MonitoringController {
                 requestId: req.headers['x-request-id'] as string
             });
             
-            await IntelligentMonitoringService.monitorUserUsage(userId);
+            // FIXED: Manual triggers should only check for urgent alerts, not weekly digests
+            await IntelligentMonitoringService.runUrgentAlertsCheck(userId);
 
             const duration = Date.now() - startTime;
 
@@ -539,9 +540,9 @@ export class MonitoringController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // Run monitoring in background
-            IntelligentMonitoringService.runDailyMonitoring().catch(error => 
-                loggingService.error('Background monitoring failed', {
+            // FIXED: Admin trigger should only run urgent alerts, not weekly digests
+            IntelligentMonitoringService.runWeeklyDigest().catch(error => 
+                loggingService.error('Background weekly digest failed', {
                     userId,
                     userRole,
                     error: error.message || 'Unknown error',
