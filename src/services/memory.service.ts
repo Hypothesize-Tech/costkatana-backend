@@ -708,6 +708,282 @@ export class MemoryService {
         }
     }
 
+    // ============ CONSOLIDATED MEMORY AGENT CAPABILITIES ============
+    // The following methods consolidate MemoryWriterAgent and MemoryReaderAgent functionality
+
+    /**
+     * Process memory write operations (consolidated from MemoryWriterAgent)
+     */
+    async processMemoryWrite(state: {
+        userId: string;
+        conversationId: string;
+        query: string;
+        response?: string;
+        securityFlags?: string[];
+        metadata?: any;
+    }): Promise<{ memoryOperations: string[]; metadata: any }> {
+        try {
+            loggingService.info(`📝 Processing memory write for user: ${state.userId}`);
+
+            const operations: string[] = [];
+
+            // Store conversation memory
+            if (state.query && state.response && state.response.trim().length > 0) {
+                await this.storeConversationMemory({
+                    userId: state.userId,
+                    conversationId: state.conversationId,
+                    query: state.query,
+                    response: state.response,
+                    metadata: state.metadata
+                });
+                operations.push('conversation_stored');
+            }
+
+            // Analyze and store user preferences
+            if (state.query && state.response && state.response.trim().length > 0) {
+                await this.analyzeAndStorePreferencesConsolidated(state);
+                operations.push('preferences_analyzed');
+            }
+
+            // Store security insights if any flags were raised
+            if (state.securityFlags && state.securityFlags.length > 0) {
+                await this.storeSecurityInsightsConsolidated(state);
+                operations.push('security_insights_stored');
+            }
+
+            // Generate learning insights
+            await this.generateLearningInsightsConsolidated(state);
+            operations.push('learning_insights_generated');
+
+            loggingService.info(`✅ Memory write completed: ${operations.length} operations`);
+
+            return {
+                memoryOperations: operations,
+                metadata: {
+                    ...state.metadata,
+                    memoryWriteTimestamp: new Date(),
+                    operationsCompleted: operations
+                }
+            };
+        } catch (error) {
+            loggingService.error('❌ Memory write failed:', { error: error instanceof Error ? error.message : String(error) });
+            return {
+                memoryOperations: ['error'],
+                metadata: {
+                    ...state.metadata,
+                    memoryWriteError: error instanceof Error ? error.message : 'Unknown error'
+                }
+            };
+        }
+    }
+
+    /**
+     * Process memory read operations (consolidated from MemoryReaderAgent)
+     */
+    async processMemoryRead(state: {
+        userId: string;
+        query: string;
+        conversationId: string;
+        metadata?: any;
+    }): Promise<{
+        memoryInsights: MemoryInsight[];
+        similarConversations: SimilarConversation[];
+        userPreferences: any;
+        personalizedRecommendations: string[];
+        securityFlags: string[];
+        metadata: any;
+    }> {
+        try {
+            loggingService.info(`🔍 Processing memory read for user: ${state.userId}`);
+
+            const [
+                memoryInsights,
+                similarConversations,
+                userPreferences,
+                personalizedRecommendations,
+                securityCheck
+            ] = await Promise.all([
+                this.getUserMemoryInsights(state.userId),
+                this.getSimilarConversations(state.userId, state.query, 3),
+                this.userPreferenceService.getUserPreferences(state.userId),
+                this.getPersonalizedRecommendations(state.userId, state.query),
+                this.checkSecurityPatterns(state.userId, state.query)
+            ]);
+
+            // Check for security concerns
+            const securityFlags: string[] = [];
+            if (securityCheck) {
+                securityFlags.push(securityCheck.content);
+            }
+
+            loggingService.info(`✅ Memory read completed for user: ${state.userId}`);
+
+            return {
+                memoryInsights,
+                similarConversations,
+                userPreferences,
+                personalizedRecommendations,
+                securityFlags,
+                metadata: {
+                    ...state.metadata,
+                    memoryReadTimestamp: new Date(),
+                    hasMemoryContext: memoryInsights.length > 0,
+                    hasSimilarConversations: similarConversations.length > 0,
+                    hasSecurityConcerns: securityFlags.length > 0
+                }
+            };
+        } catch (error) {
+            loggingService.error('❌ Memory read failed:', { error: error instanceof Error ? error.message : String(error) });
+            return {
+                memoryInsights: [],
+                similarConversations: [],
+                userPreferences: null,
+                personalizedRecommendations: [],
+                securityFlags: [],
+                metadata: {
+                    ...state.metadata,
+                    memoryReadError: error instanceof Error ? error.message : 'Unknown error'
+                }
+            };
+        }
+    }
+
+    /**
+     * Enhance prompt with memory context (consolidated from MemoryReaderAgent)
+     */
+    async enhancePromptWithMemory(state: {
+        query: string;
+        memoryInsights?: MemoryInsight[];
+        userPreferences?: any;
+        similarConversations?: SimilarConversation[];
+        personalizedRecommendations?: string[];
+    }): Promise<string> {
+        try {
+            if (!state.memoryInsights || state.memoryInsights.length === 0) {
+                return state.query;
+            }
+
+            const enhancementPrompt = `Enhance this user query with relevant memory context:
+
+            Original Query: "${state.query}"
+
+            Memory Context:
+            ${state.memoryInsights.map(insight => `- ${insight.type}: ${insight.content}`).join('\n')}
+
+            User Preferences:
+            ${state.userPreferences ? `
+            - Preferred Model: ${state.userPreferences.preferredModel || 'Not set'}
+            - Technical Level: ${state.userPreferences.technicalLevel || 'Not set'}
+            - Response Length: ${state.userPreferences.responseLength || 'Not set'}
+            - Common Topics: ${state.userPreferences.commonTopics?.join(', ') || 'None'}
+            ` : 'No preferences set'}
+
+            Similar Past Conversations:
+            ${state.similarConversations?.map(conv => `- "${conv.query}" (similarity: ${conv.similarity.toFixed(2)})`).join('\n') || 'None'}
+
+            Personalized Recommendations:
+            ${state.personalizedRecommendations?.join('\n- ') || 'None'}
+
+            Create an enhanced version of the query that incorporates relevant memory context.
+            Return only the enhanced query, no other text.`;
+
+            const response = await this.memoryAgent.invoke([new HumanMessage(enhancementPrompt)]);
+            const enhancedQuery = response.content.toString().trim();
+
+            loggingService.info(`🎯 Enhanced query with memory context`);
+            return enhancedQuery;
+        } catch (error) {
+            loggingService.error('❌ Failed to enhance prompt with memory:', { error: error instanceof Error ? error.message : String(error) });
+            return state.query;
+        }
+    }
+
+    /**
+     * Analyze and store user preferences (consolidated from MemoryWriterAgent)
+     */
+    private async analyzeAndStorePreferencesConsolidated(state: any): Promise<void> {
+        const analysisPrompt = `Analyze this conversation for user preferences:
+
+        User Query: "${state.query}"
+        Assistant Response: "${state.response?.substring(0, 1000) || ''}"
+
+        Extract insights about communication style, topics, complexity level, tool preferences, cost sensitivity.
+
+        Respond with JSON only:
+        {
+            "communication_style": "style or null",
+            "topics_of_interest": [],
+            "complexity_level": "beginner|intermediate|expert or null",
+            "tool_preferences": [],
+            "cost_sensitivity": "low|medium|high or null",
+            "response_format": "preference or null"
+        }`;
+
+        try {
+            const response = await this.memoryAgent.invoke([new HumanMessage(analysisPrompt)]);
+            const analysis = this.parseAIResponseHelper(response.content.toString());
+
+            const preferenceUpdates: any = {};
+
+            if (analysis.communication_style) preferenceUpdates.preferredStyle = analysis.communication_style;
+            if (analysis.complexity_level) preferenceUpdates.technicalLevel = analysis.complexity_level;
+            if (analysis.topics_of_interest?.length) preferenceUpdates.commonTopics = analysis.topics_of_interest;
+
+            if (Object.keys(preferenceUpdates).length > 0) {
+                await this.userPreferenceService.updatePreferences(state.userId, preferenceUpdates);
+            }
+        } catch (error) {
+            loggingService.error('❌ Failed to analyze preferences:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Store security insights (consolidated from MemoryWriterAgent)
+     */
+    private async storeSecurityInsightsConsolidated(state: any): Promise<void> {
+        if (!state.securityFlags || state.securityFlags.length === 0) return;
+        loggingService.warn(`🚨 Security flags for user ${state.userId}: ${state.securityFlags.join(', ')}`);
+    }
+
+    /**
+     * Generate learning insights (consolidated from MemoryWriterAgent)
+     */
+    private async generateLearningInsightsConsolidated(state: any): Promise<string[]> {
+        try {
+            const insightPrompt = `Based on this conversation, generate 2-3 learning insights:
+
+            User Query: "${state.query}"
+            Assistant Response: "${state.response?.substring(0, 500) || ''}"
+
+            Respond with a JSON array of insight strings: ["insight1", "insight2"]`;
+
+            const response = await this.memoryAgent.invoke([new HumanMessage(insightPrompt)]);
+            const insights = this.parseAIResponseHelper(response.content.toString());
+
+            return Array.isArray(insights) ? insights : [];
+        } catch (error) {
+            loggingService.error('❌ Failed to generate learning insights:', { error: error instanceof Error ? error.message : String(error) });
+            return [];
+        }
+    }
+
+    /**
+     * Parse AI response helper (consolidated from MemoryWriterAgent)
+     */
+    private parseAIResponseHelper(content: string): any {
+        try {
+            return JSON.parse(content);
+        } catch (error) {
+            const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```/);
+            if (jsonMatch) return JSON.parse(jsonMatch[1]);
+            
+            const objectMatch = content.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+            if (objectMatch) return JSON.parse(objectMatch[0]);
+            
+            throw error;
+        }
+    }
+
 }
 
 export const memoryService = new MemoryService();

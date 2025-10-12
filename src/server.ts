@@ -35,6 +35,7 @@ import { backupScheduler } from './services/backupScheduler';
 import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
+import { TelemetryCleanupService } from './services/telemetryCleanup.service';
 import { loggingService } from './services/logging.service';
 import { loggerMiddleware } from './middleware/logger.middleware';
 import { sentryContextMiddleware, sentryPerformanceMiddleware, sentryBusinessErrorMiddleware } from './middleware/sentry.middleware';
@@ -514,6 +515,26 @@ export const startServer = async () => {
         });
 
         initializeCronJobs();
+
+        // Initialize telemetry cleanup scheduler
+        loggingService.info('Step 7.5: Initializing telemetry cleanup scheduler', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'telemetry_cleanup_init'
+        });
+        
+        TelemetryCleanupService.scheduleCleanup();
+        
+        // Log current telemetry configuration
+        const telemetryConfig = TelemetryCleanupService.getConfig();
+        loggingService.info('📊 Telemetry cleanup configuration', {
+            component: 'Server',
+            operation: 'startServer',
+            type: 'server_startup',
+            step: 'telemetry_config',
+            config: telemetryConfig
+        });
 
         // Initialize backup scheduler
         loggingService.info('Step 8: Initializing backup scheduler', {

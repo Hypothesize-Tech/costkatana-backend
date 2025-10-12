@@ -100,52 +100,6 @@ export const initializeCronJobs = () => {
         }
     });
 
-    // Weekly AI cost monitoring report - runs every Monday at 10 AM
-    cron.schedule('0 10 * * 1', async () => {
-        loggingService.info('Running weekly AI cost monitoring report', {
-            component: 'cronJobs',
-            operation: 'aiCostReport',
-            step: 'start',
-            schedule: '0 10 * * 1 (Mondays at 10 AM)'
-        });
-        try {
-            const summary = AICostTrackingService.getMonthlySummary();
-            const drivers = AICostTrackingService.getTopCostDrivers(10);
-            const serviceSummary = AICostTrackingService.getServiceSummary();
-
-            // Alert if costs exceed threshold ($500/month)
-            if (summary.totalCost > 500) {
-                loggingService.warn('🚨 HIGH AI COSTS DETECTED!', {
-                    totalCost: summary.totalCost,
-                    threshold: 500,
-                    topDrivers: drivers.slice(0, 5)
-                });
-            }
-
-            // Log weekly summary
-            loggingService.info('📊 Weekly AI Cost Report', {
-                summary,
-                topDrivers: drivers.slice(0, 5),
-                serviceBreakdown: serviceSummary
-            });
-
-            loggingService.info('Weekly AI cost monitoring report completed', {
-                component: 'cronJobs',
-                operation: 'aiCostReport',
-                step: 'complete',
-                totalCost: summary.totalCost,
-                totalCalls: summary.totalCalls
-            });
-        } catch (error) {
-            loggingService.error('Weekly AI cost monitoring report failed', {
-                component: 'cronJobs',
-                operation: 'aiCostReport',
-                step: 'error',
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-
     loggingService.info('Cron jobs initialized successfully', {
         component: 'cronJobs',
         operation: 'initializeCronJobs',

@@ -20,7 +20,6 @@ export interface IUser {
     preferences: {
         emailAlerts: boolean;
         alertThreshold: number;
-        weeklyReports: boolean;
         optimizationSuggestions: boolean;
     };
     subscription: {

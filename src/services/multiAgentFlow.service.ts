@@ -5,11 +5,8 @@ import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
 import { langSmithService } from './langsmith.service';
 import { RetryWithBackoff, RetryConfigs } from '../utils/retryWithBackoff';
 import { WebScraperTool } from '../tools/webScraper.tool';
-import { LifeUtilityTool } from '../tools/lifeUtility.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
-import { SmartTagGeneratorService } from './smartTagGenerator.service';
 import { memoryService, MemoryContext, MemoryService } from './memory.service';
-import { memoryReaderAgent, memoryWriterAgent, MemoryAgentState } from './memoryAgents.service';
 import { userPreferenceService } from './userPreference.service';
 import { EventEmitter } from 'events';
 
@@ -50,8 +47,8 @@ const MultiAgentStateAnnotation = Annotation.Root({
         default: () => [],
     }),
     // Memory-related state
-    memoryContext: Annotation<MemoryAgentState | null>({
-        reducer: (x: MemoryAgentState | null, y: MemoryAgentState | null) => y ?? x,
+    memoryContext: Annotation<any | null>({
+        reducer: (x: any | null, y: any | null) => y ?? x,
         default: () => null,
     }),
     personalizedRecommendations: Annotation<string[]>({
@@ -109,9 +106,7 @@ export class MultiAgentFlowService {
     private graph: any;
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
     private webScraperTool: WebScraperTool;
-    private lifeUtilityTool: LifeUtilityTool;
     private trendingDetector: TrendingDetectorService;
-    private smartTagGenerator: SmartTagGeneratorService;
 
     constructor() {
         // Increase EventEmitter limits to prevent memory leak warnings
@@ -122,9 +117,7 @@ export class MultiAgentFlowService {
         
         // Initialize web scraping components
         this.webScraperTool = new WebScraperTool();
-        this.lifeUtilityTool = new LifeUtilityTool();
         this.trendingDetector = new TrendingDetectorService();
-        this.smartTagGenerator = new SmartTagGeneratorService();
         
         // Initialize retry mechanism for multi-agent operations
         this.retryExecutor = RetryWithBackoff.createBedrockRetry({
@@ -172,7 +165,6 @@ export class MultiAgentFlowService {
         const workflow = new StateGraph(MultiAgentStateAnnotation)
             .addNode("prompt_analyzer", this.promptAnalyzer.bind(this))
             .addNode("trending_detector", this.trendingDetectorNode.bind(this))
-            .addNode("life_utility", this.lifeUtilityNode.bind(this))
             .addNode("web_scraper", this.webScrapingNode.bind(this))
             .addNode("content_summarizer", this.contentSummarizerNode.bind(this))
             .addNode("memory_reader", this.memoryReaderNode.bind(this))
@@ -186,12 +178,11 @@ export class MultiAgentFlowService {
             .addEdge("__start__", "memory_reader")
             .addEdge("memory_reader", "prompt_analyzer")
             .addConditionalEdges("prompt_analyzer", this.routeAfterPromptAnalysis.bind(this), ["trending_detector", "semantic_cache", "master_agent"])
-            .addConditionalEdges("trending_detector", this.routeAfterTrendingDetection.bind(this), ["life_utility", "web_scraper", "semantic_cache", "master_agent"])
+            .addConditionalEdges("trending_detector", this.routeAfterTrendingDetection.bind(this), ["web_scraper", "semantic_cache", "master_agent"])
             .addConditionalEdges("web_scraper", this.routeAfterWebScraping.bind(this), ["content_summarizer", "master_agent"])
             .addConditionalEdges("content_summarizer", this.routeAfterContentSummarization.bind(this), ["master_agent", "__end__"])
             .addConditionalEdges("semantic_cache", this.routeAfterCache.bind(this), ["master_agent", "__end__"])
             .addConditionalEdges("master_agent", this.routeFromMaster.bind(this), ["cost_optimizer", "quality_analyst", "failure_recovery", "__end__"])
-            .addEdge("life_utility", "memory_writer")
             .addEdge("cost_optimizer", "quality_analyst")
             .addEdge("quality_analyst", "memory_writer")
             .addEdge("memory_writer", "__end__")
@@ -598,17 +589,10 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             const query = lastMessage.content;
-            loggingService.info(`🔍 Analyzing query with smart tags: "${query}"`);
+            loggingService.info(`🔍 Analyzing query with trending detection: "${query}"`);
             
-            // Generate smart tags for better platform detection
-            const smartTags = await this.smartTagGenerator.generateSmartTags(query);
+            // Use trending detector for platform detection and source analysis
             const trendingAnalysis = await this.trendingDetector.analyzeQuery(query);
-            
-            loggingService.info(`🏷️ Smart tags generated:`, {
-                primaryTags: smartTags.primaryTags.map(t => ({ tag: t.tag, confidence: t.confidence, platform: t.platform })),
-                recommendedPlatforms: smartTags.recommendedPlatforms,
-                optimizedQuery: smartTags.searchQuery
-            });
             
             loggingService.info(`🎯 Trending analysis result:`, {
                 needsWebData: trendingAnalysis.needsRealTimeData,
@@ -617,28 +601,21 @@ Would you like me to help you with anything else, or would you prefer to check t
                 sourcesCount: trendingAnalysis.suggestedSources.length
             });
 
-            // Use smart navigation strategies if available, otherwise fallback to trending analysis
-            const webSources = smartTags.navigationStrategy.length > 0 
-                ? smartTags.navigationStrategy.map(nav => nav.url)
-                : trendingAnalysis.suggestedSources;
+            // Use trending analysis for web sources
+            const webSources = trendingAnalysis.suggestedSources;
 
             return {
-                needsWebData: trendingAnalysis.needsRealTimeData || smartTags.primaryTags.length > 0,
+                needsWebData: trendingAnalysis.needsRealTimeData,
                 webSources,
-                agentPath: [`smart_detected_${trendingAnalysis.queryType}`],
+                agentPath: [`trending_detected_${trendingAnalysis.queryType}`],
                 metadata: {
                     ...(state.metadata || {}),
-                    smartTags: {
-                        primaryTags: smartTags.primaryTags,
-                        recommendedPlatforms: smartTags.recommendedPlatforms,
-                        optimizedQuery: smartTags.searchQuery,
-                        navigationStrategies: smartTags.navigationStrategy
-                    },
                     trendingAnalysis: {
                         confidence: trendingAnalysis.confidence,
                         queryType: trendingAnalysis.queryType,
                         extractionStrategy: trendingAnalysis.extractionStrategy,
-                        cacheStrategy: trendingAnalysis.cacheStrategy
+                        cacheStrategy: trendingAnalysis.cacheStrategy,
+                        suggestedSources: trendingAnalysis.suggestedSources
                     }
                 }
             };
@@ -661,7 +638,6 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             const trendingAnalysis = state.metadata?.trendingAnalysis;
-            const smartTags = state.metadata?.smartTags;
             const sources = state.webSources || [];
             
             if (sources.length === 0) {
@@ -670,8 +646,8 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
 
             loggingService.info(`🕷️ Starting intelligent web scraping from ${sources.length} sources...`);
-            if (smartTags?.recommendedPlatforms) {
-                loggingService.info(`🎯 Target platforms: ${smartTags.recommendedPlatforms.join(', ')}`);
+            if (trendingAnalysis?.suggestedSources) {
+                loggingService.info(`🎯 Using trending analysis for ${sources.length} sources`);
             }
             
             const scrapingResults = [];
@@ -683,17 +659,13 @@ Would you like me to help you with anything else, or would you prefer to check t
                 try {
                     loggingService.info(`📄 Scraping: ${source}`);
                     
-                    // Get smart navigation strategy for this source
-                    const navigationStrategy = smartTags?.navigationStrategies?.find((nav: any) => nav.url === source);
-                    
-                    // Get scraping template for known sites or use smart navigation
+                    // Get scraping template for known sites
                     const template = this.trendingDetector.getScrapingTemplate(source);
-                    const smartSelectors = navigationStrategy?.selectors;
                     
                     const scrapingRequest = {
                         operation: 'scrape' as const,
                         url: source,
-                        selectors: smartSelectors || template?.selectors || trendingAnalysis?.extractionStrategy?.selectors || {
+                        selectors: template?.selectors || trendingAnalysis?.extractionStrategy?.selectors || {
                             title: 'h1, .title, .headline',
                             content: '.content, article, .post',
                             links: 'a[href]'
@@ -884,176 +856,6 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         }
     }
 
-    private async lifeUtilityNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
-        try {
-            const lastMessage = state.messages[state.messages.length - 1];
-            const query = lastMessage?.content?.toString() || '';
-            const queryType = state.metadata?.trendingAnalysis?.queryType;
-            
-            loggingService.info(`🎯 Processing Life Utility query: ${queryType}`);
-            
-            let lifeUtilityRequest: any = {};
-            
-            // Determine the operation based on query type
-            switch (queryType) {
-                case 'health':
-                    lifeUtilityRequest = {
-                        operation: 'health_guidance',
-                        data: {
-                            symptoms: this.extractSymptoms(query),
-                            severity: 'moderate',
-                            duration: 'recent'
-                        }
-                    };
-                    break;
-                
-                case 'travel':
-                    lifeUtilityRequest = {
-                        operation: 'travel_plan',
-                        data: {
-                            from: this.extractLocation(query, 'from') || 'Mumbai',
-                            to: this.extractLocation(query, 'to') || 'Delhi',
-                            date: this.extractDate(query) || new Date().toISOString().split('T')[0],
-                            budget: 15000
-                        }
-                    };
-                    break;
-                
-                case 'shopping':
-                    lifeUtilityRequest = {
-                        operation: 'price_track',
-                        data: {
-                            product: this.extractProduct(query),
-                            userId: state.userId,
-                            notificationMethod: 'email'
-                        }
-                    };
-                    break;
-                
-                case 'reverse_search':
-                    lifeUtilityRequest = {
-                        operation: 'reverse_search',
-                        data: {
-                            description: query,
-                            category: 'electronics'
-                        }
-                    };
-                    break;
-                
-                case 'weather':
-                default:
-                    lifeUtilityRequest = {
-                        operation: 'weather_advice',
-                        data: {
-                            location: this.extractLocation(query) || 'bangalore',
-                            query: query,
-                            userProfile: {
-                                preferences: ['comfortable', 'casual']
-                            }
-                        }
-                    };
-                    break;
-            }
-            
-            const result = await this.lifeUtilityTool._call(JSON.stringify(lifeUtilityRequest));
-            const parsedResult = JSON.parse(result);
-            
-            if (parsedResult.success) {
-                const responseMessage = new AIMessage(parsedResult.result);
-                return {
-                    messages: [responseMessage],
-                    agentPath: [`life_utility_${queryType}`],
-                    currentAgent: 'life_utility',
-                    metadata: {
-                        ...state.metadata,
-                        lifeUtilityResult: parsedResult
-                    }
-                };
-            } else {
-                loggingService.warn('❌ Life Utility operation failed:', { value:  { value: parsedResult.error } });
-                return {
-                    agentPath: ['life_utility_failed'],
-                    failureCount: 1
-                };
-            }
-            
-        } catch (error) {
-            loggingService.error('❌ Life Utility node failed:', { error: error instanceof Error ? error.message : String(error) });
-            return {
-                agentPath: ['life_utility_error'],
-                failureCount: 1
-            };
-        }
-    }
-
-    // Helper methods for Life Utility
-    private extractSymptoms(query: string): string[] {
-        const symptoms = [];
-        const commonSymptoms = ['headache', 'fever', 'cough', 'pain', 'nausea', 'fatigue', 'cold', 'flu'];
-        for (const symptom of commonSymptoms) {
-            if (query.toLowerCase().includes(symptom)) {
-                symptoms.push(symptom);
-            }
-        }
-        return symptoms.length > 0 ? symptoms : ['general discomfort'];
-    }
-
-    private extractLocation(query: string, type?: 'from' | 'to'): string | null {
-        const cities = ['mumbai', 'delhi', 'bangalore', 'bengaluru', 'chennai', 'kolkata', 'hyderabad', 'pune', 'ahmedabad', 'goa'];
-        const queryLower = query.toLowerCase();
-        
-        if (type === 'from') {
-            const fromMatch = queryLower.match(/from\s+(\w+)/);
-            if (fromMatch) return fromMatch[1];
-        }
-        
-        if (type === 'to') {
-            const toMatch = queryLower.match(/to\s+(\w+)/);
-            if (toMatch) return toMatch[1];
-        }
-        
-        for (const city of cities) {
-            if (queryLower.includes(city)) {
-                return city;
-            }
-        }
-        return null;
-    }
-
-    private extractDate(query: string): string | null {
-        const dateMatch = query.match(/(\d{4}-\d{2}-\d{2})|(\d{1,2}\/\d{1,2}\/\d{4})|(\d{1,2}-\d{1,2}-\d{4})/);
-        if (dateMatch) return dateMatch[0];
-        
-        if (query.includes('today')) return new Date().toISOString().split('T')[0];
-        if (query.includes('tomorrow')) {
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            return tomorrow.toISOString().split('T')[0];
-        }
-        
-        return null;
-    }
-
-    private extractProduct(query: string): string {
-        const products = ['iphone', 'macbook', 'samsung', 'oneplus', 'laptop', 'phone', 'headphones', 'watch'];
-        const queryLower = query.toLowerCase();
-        
-        for (const product of products) {
-            if (queryLower.includes(product)) {
-                return product;
-            }
-        }
-        
-        // Extract product from common patterns
-        const priceMatch = queryLower.match(/price\s+of\s+(.+?)(?:\s|$)/);
-        if (priceMatch) return priceMatch[1];
-        
-        const trackMatch = queryLower.match(/track\s+(.+?)\s+price/);
-        if (trackMatch) return trackMatch[1];
-        
-        return query.replace(/price|cost|track|of|the/gi, '').trim();
-    }
-
     // Routing functions
     private routeAfterPromptAnalysis(state: MultiAgentState): string {
         const lastPath = state.agentPath[state.agentPath.length - 1];
@@ -1075,15 +877,6 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
     }
 
     private routeAfterTrendingDetection(state: MultiAgentState): string {
-        const queryType = state.metadata?.trendingAnalysis?.queryType;
-        
-        // Route life utility queries directly to Life Utility Agent
-        if (['health', 'travel', 'shopping', 'reverse_search'].includes(queryType) || 
-            (queryType === 'weather' && state.messages[state.messages.length - 1]?.content?.toString().includes('wear'))) {
-            loggingService.info(`🎯 Routing to Life Utility Agent for ${queryType} query`);
-            return 'life_utility';
-        }
-        
         if (state.needsWebData && state.webSources && state.webSources.length > 0) {
             return 'web_scraper'; // Proceed with web scraping
         }
@@ -1149,8 +942,6 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 return 'cost_optimizer'; // Optimize then check quality
         }
     }
-
-
 
     // Helper methods
     private estimatePromptCost(prompt: string): number {
@@ -1558,16 +1349,16 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         try {
             loggingService.info(`🧠 Memory Reader processing for user: ${state.userId}`);
 
-            // Create memory agent state
-            const memoryState: MemoryAgentState = {
+            // Create memory state for consolidated memory service
+            const memoryState = {
                 userId: state.userId,
                 conversationId: state.conversationId,
                 query: state.messages[state.messages.length - 1]?.content?.toString() || '',
                 metadata: state.metadata
             };
 
-            // Process memory reading
-            const memoryResult = await memoryReaderAgent.processMemoryRead(memoryState);
+            // Process memory reading using consolidated memoryService
+            const memoryResult = await memoryService.processMemoryRead(memoryState);
 
             // Get personalized model recommendation
             const recommendedModel = await userPreferenceService.getRecommendedModel(
@@ -1579,7 +1370,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             const recommendedChatMode = await userPreferenceService.getRecommendedChatMode(state.userId);
 
             // Update state with memory context
-            const updatedMemoryContext: MemoryAgentState = {
+            const updatedMemoryContext = {
                 ...memoryState,
                 ...memoryResult
             };
@@ -1671,8 +1462,8 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             // Store conversation memory
             await memoryService.storeConversationMemory(memoryContext);
 
-            // Create memory agent state for learning
-            const memoryAgentState: MemoryAgentState = {
+            // Create memory state for consolidated memory service
+            const memoryAgentState = {
                 userId: state.userId,
                 conversationId: state.conversationId,
                 query: memoryContext.query,
@@ -1681,8 +1472,8 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 securityFlags: state.metadata?.securityFlags || []
             };
 
-            // Process memory writing (learning and storage)
-            const memoryWriteResult = await memoryWriterAgent.processMemoryWrite(memoryAgentState);
+            // Process memory writing (learning and storage) using consolidated memoryService
+            const memoryWriteResult = await memoryService.processMemoryWrite(memoryAgentState);
 
             // Learn from the interaction
             await userPreferenceService.learnFromInteraction(state.userId, {
@@ -1723,11 +1514,6 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         try {
             // Cleanup web scraper tool
             await this.webScraperTool.cleanup();
-            
-            // Cleanup life utility tool if it has cleanup method
-            if (this.lifeUtilityTool && typeof this.lifeUtilityTool.cleanup === 'function') {
-                await this.lifeUtilityTool.cleanup();
-            }
             
             // Reset EventEmitter max listeners to default
             EventEmitter.defaultMaxListeners = 10;

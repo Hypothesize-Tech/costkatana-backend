@@ -87,6 +87,19 @@ export class TelemetryService {
       const spanContext = span.spanContext();
       if (!spanContext) return null;
 
+      // Apply sampling for successful requests to reduce storage
+      const sampleRate = parseFloat(process.env.TELEMETRY_SAMPLE_RATE || '0.1'); // Default 10%
+      const status = this.mapSpanStatus(span.status?.code);
+      
+      // Always store errors and slow requests, sample successful fast requests
+      const isError = status === 'error';
+      const isSlowRequest = span.duration && (span.duration[0] * 1000 + span.duration[1] / 1000000) > 3000; // >3s
+      
+      if (!isError && !isSlowRequest && Math.random() > sampleRate) {
+        // Skip storing this span (sampled out)
+        return null;
+      }
+
       // Get baggage from context (optimized)
       const baggageEntries = context.active().getValue(Symbol.for('opentelemetry.baggage'));
       const baggage: Record<string, string> = {};

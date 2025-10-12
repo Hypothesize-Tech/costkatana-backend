@@ -59,8 +59,5 @@ export const EMAIL_CONFIG = {
         optimizationAvailable: {
             subject: 'Optimization Opportunity: Save on your AI API costs',
         },
-        weeklyReport: {
-            subject: 'Weekly AI Usage Report',
-        },
     },
 }; 

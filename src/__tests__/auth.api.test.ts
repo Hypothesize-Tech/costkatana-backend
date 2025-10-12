@@ -110,7 +110,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []
@@ -166,7 +165,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []
@@ -227,7 +225,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []
@@ -272,7 +269,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []
@@ -369,7 +365,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []
@@ -419,7 +414,6 @@ describe('Authentication API Endpoints', () => {
                 preferences: {
                     emailAlerts: true,
                     alertThreshold: 100,
-                    weeklyReports: true,
                     optimizationSuggestions: true
                 },
                 apiKeys: []

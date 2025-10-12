@@ -103,7 +103,6 @@ export class ProjectService {
                     enableCostAllocation: true,
                     notifications: {
                         budgetAlerts: true,
-                        weeklyReports: true,
                         monthlyReports: true,
                         usageReports: true
                     },

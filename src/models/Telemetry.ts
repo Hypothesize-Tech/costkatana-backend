@@ -345,8 +345,10 @@ TelemetrySchema.index({ trace_id: 1, span_id: 1 });
 TelemetrySchema.index({ parent_span_id: 1 });
 TelemetrySchema.index({ error_type: 1, timestamp: -1 });
 
-// TTL index to automatically delete old telemetry data after 30 days
-TelemetrySchema.index({ timestamp: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+// TTL index to automatically delete old telemetry data
+// Configurable via TELEMETRY_TTL_DAYS environment variable (default: 7 days)
+const ttlDays = parseInt(process.env.TELEMETRY_TTL_DAYS || '7');
+TelemetrySchema.index({ timestamp: 1 }, { expireAfterSeconds: ttlDays * 24 * 60 * 60 });
 
 // Vector search index for semantic queries (MongoDB Atlas Vector Search)
 // Note: This needs to be created manually in MongoDB Atlas or via MongoDB CLI

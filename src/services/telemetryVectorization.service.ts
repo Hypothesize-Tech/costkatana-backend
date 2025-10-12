@@ -18,8 +18,13 @@ export class TelemetryVectorizationService {
   private currentJob: VectorizationJob | null = null;
   private readonly BATCH_SIZE = 10;
   private readonly JOB_STATUS_KEY = 'vectorization:job:status';
+  private readonly ENABLED = process.env.ENABLE_TELEMETRY_VECTORIZATION === 'true';
 
-  private constructor() {}
+  private constructor() {
+    if (!this.ENABLED) {
+      loggingService.info('📊 Telemetry vectorization is DISABLED (set ENABLE_TELEMETRY_VECTORIZATION=true to enable)');
+    }
+  }
 
   static getInstance(): TelemetryVectorizationService {
     if (!TelemetryVectorizationService.instance) {
@@ -37,6 +42,11 @@ export class TelemetryVectorizationService {
     workspace_id?: string;
     forceReprocess?: boolean;
   }): Promise<VectorizationJob> {
+    // Check if vectorization is enabled
+    if (!this.ENABLED) {
+      throw new Error('Telemetry vectorization is disabled. Enable with ENABLE_TELEMETRY_VECTORIZATION=true');
+    }
+
     if (this.currentJob && this.currentJob.status === 'processing') {
       throw new Error('Vectorization job already in progress');
     }

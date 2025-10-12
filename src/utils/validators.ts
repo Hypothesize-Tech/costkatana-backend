@@ -22,7 +22,6 @@ export const updateProfileSchema = z.object({
     preferences: z.object({
         emailAlerts: z.boolean().optional(),
         alertThreshold: z.number().positive().optional(),
-        weeklyReports: z.boolean().optional(),
         optimizationSuggestions: z.boolean().optional(),
     }).optional(),
 });

@@ -296,7 +296,6 @@ export class OnboardingController {
                     preferences: {
                         emailAlerts: true,
                         alertThreshold: 80,
-                        weeklyReports: true,
                         optimizationSuggestions: true
                     },
                     dashboardApiKeys: [{

@@ -28,7 +28,6 @@ export interface IUser {
     preferences: {
         emailAlerts: boolean;
         alertThreshold: number;
-        weeklyReports: boolean;
         optimizationSuggestions: boolean;
         lastDigestSent?: Date;
         emailEngagement?: {
@@ -198,10 +197,6 @@ const userSchema = new Schema<IUser>({
         alertThreshold: {
             type: Number,
             default: 100,
-        },
-        weeklyReports: {
-            type: Boolean,
-            default: true,
         },
         optimizationSuggestions: {
             type: Boolean,

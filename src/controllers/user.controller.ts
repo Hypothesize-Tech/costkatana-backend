@@ -454,7 +454,6 @@ export class UserController {
                 email: {
                     costAlerts: user.preferences.emailAlerts,
                     optimizationSuggestions: user.preferences.optimizationSuggestions,
-                    weeklyReports: user.preferences.weeklyReports,
                     monthlyReports: false,
                     anomalyDetection: true,
                 },
@@ -505,7 +504,6 @@ export class UserController {
             if (email) {
                 user.preferences.emailAlerts = email.costAlerts || false;
                 user.preferences.optimizationSuggestions = email.optimizationSuggestions || false;
-                user.preferences.weeklyReports = email.weeklyReports || false;
             }
 
             if (thresholds && thresholds.dailyCostLimit) {
