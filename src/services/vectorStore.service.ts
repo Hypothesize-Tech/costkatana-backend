@@ -1,41 +1,80 @@
-import { HNSWLib } from '@langchain/community/vectorstores/hnswlib';
 import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
 import { redisService } from './redis.service';
 import { loggingService } from './logging.service';
+import { fallbackVectorStoreService } from './fallbackVectorStore.service';
+
+// Type-safe dynamic import for HNSWLib to handle Docker compatibility issues
+interface HNSWLibInterface {
+  fromTexts: (texts: string[], metadatas: any[], embeddings: any) => Promise<any>;
+  fromDocuments: (documents: any[], embeddings: any) => Promise<any>;
+  addVectors: (vectors: number[][], metadatas: any[]) => Promise<void>;
+  similaritySearchVectorWithScore: (vector: number[], k: number) => Promise<any[]>;
+  similaritySearch: (query: string, k: number) => Promise<any[]>;
+  addDocuments: (documents: any[]) => Promise<void>;
+  save: (directory: string) => Promise<void>;
+  load: (directory: string, embeddings: any) => Promise<any>;
+}
+
+let HNSWLib: HNSWLibInterface | null = null;
+try {
+  const hnswlibModule = require('@langchain/community/vectorstores/hnswlib');
+  HNSWLib = hnswlibModule.HNSWLib;
+} catch (error) {
+  loggingService.warn('⚠️ HNSWLib not available, using fallback vector store implementation');
+  // Set to null to ensure fallback is used
+  HNSWLib = null;
+}
 
 const SIMILARITY_THRESHOLD = 0.9;
 
 // This is a simplified in-memory vector store. For production, use a persistent solution.
-let vectorStore: HNSWLib;
+let vectorStore: HNSWLibInterface | null = null;
 
 const initializeVectorStore = async () => {
-  const embeddings = new BedrockEmbeddings({
-    region: process.env.AWS_REGION || 'us-east-1',
-  });
-  vectorStore = await HNSWLib.fromTexts(
-    ['initialization'],
-    [[]],
-    embeddings
-  );
+  if (!HNSWLib) {
+    loggingService.warn('⚠️ HNSWLib not available, skipping vector store initialization');
+    return;
+  }
+  
+  try {
+    const embeddings = new BedrockEmbeddings({
+      region: process.env.AWS_REGION ?? 'us-east-1',
+    });
+    vectorStore = await HNSWLib.fromTexts(
+      ['initialization'],
+      [[]],
+      embeddings
+    );
+  } catch (error) {
+    loggingService.error('❌ Failed to initialize vector store:', { error: error instanceof Error ? error.message : String(error) });
+  }
 };
 
-initializeVectorStore();
+void initializeVectorStore();
 
-export const saveEmbedding = async (key: string, embedding: number[], response: any) => {
-  if (!vectorStore) return;
+export const saveEmbedding = async (key: string, embedding: number[], response: unknown) => {
+  if (!vectorStore || !HNSWLib) return;
+  try {
     await vectorStore.addVectors([embedding], [{ pageContent: '', metadata: { key } }]);
-  await redisService.client.set(`response:${key}`, JSON.stringify(response));
+    await redisService.client.set(`response:${key}`, JSON.stringify(response));
+  } catch (error) {
+    loggingService.error('❌ Failed to save embedding:', { error: error instanceof Error ? error.message : String(error) });
+  }
 };
 
-export const findSimilar = async (embedding: number[]): Promise<any | null> => {
-  if (!vectorStore) return null;
+export const findSimilar = async (embedding: number[]): Promise<unknown | null> => {
+  if (!vectorStore || !HNSWLib) return null;
 
-  const results = await vectorStore.similaritySearchVectorWithScore(embedding, 1);
+  try {
+    const results = await vectorStore.similaritySearchVectorWithScore(embedding, 1);
 
-  if (results.length > 0 && results[0][1] >= SIMILARITY_THRESHOLD) {
-    const similarKey = results[0][0].metadata.key;
-    const cachedResponse = await redisService.client.get(`response:${similarKey}`);
-    return cachedResponse ? JSON.parse(cachedResponse) : null;
+    if (results.length > 0 && results[0][1] >= SIMILARITY_THRESHOLD) {
+      const similarKey = results[0][0].metadata.key;
+      const cachedResponse = await redisService.client.get(`response:${similarKey}`);
+      return cachedResponse ? JSON.parse(cachedResponse) : null;
+    }
+  } catch (error) {
+    loggingService.error('❌ Failed to find similar embeddings:', { error: error instanceof Error ? error.message : String(error) });
   }
 
   return null;
@@ -47,19 +86,25 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export class VectorStoreService {
-    private vectorStore?: HNSWLib;
+    private vectorStore?: HNSWLibInterface;
     private embeddings: BedrockEmbeddings;
     private initialized = false;
+    private hnswlibAvailable = false;
 
     constructor() {
+        // Check if HNSWLib is available
+        this.hnswlibAvailable = !!HNSWLib;
+        if (!this.hnswlibAvailable) {
+            loggingService.warn('⚠️ HNSWLib not available, using fallback vector store');
+        }
         try {
             // Initialize AWS Bedrock embeddings with correct model ID
             this.embeddings = new BedrockEmbeddings({
-                region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
+                region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',
                 model: 'amazon.titan-embed-text-v2:0',  // Updated to v2 with proper format
                 credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
                 },
                 // Additional configuration to ensure proper API calls
                 maxRetries: 3,
@@ -72,11 +117,11 @@ export class VectorStoreService {
             try {
                 loggingService.info('🔄 Trying fallback to titan-embed-text-v1:0...');
                 this.embeddings = new BedrockEmbeddings({
-                    region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
+                    region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',
                     model: 'amazon.titan-embed-text-v1:0',
                     credentials: {
-                        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+                        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
                     },
                     maxRetries: 3,
                 });
@@ -97,6 +142,13 @@ export class VectorStoreService {
     async initialize(): Promise<void> {
         if (this.initialized) return;
 
+        if (!this.hnswlibAvailable) {
+            loggingService.warn('⚠️ HNSWLib not available, initializing fallback vector store');
+            await fallbackVectorStoreService.initialize();
+            this.initialized = true;
+            return;
+        }
+
         try {
             loggingService.info('🧠 Initializing Agent Knowledge Base...');
 
@@ -115,10 +167,12 @@ export class VectorStoreService {
             
             // Create vector store from documents
             loggingService.info('📚 Creating vector store from documents...');
-            this.vectorStore = await HNSWLib.fromDocuments(
-                documents,
-                this.embeddings
-            );
+            if (HNSWLib) {
+                this.vectorStore = await HNSWLib.fromDocuments(
+                    documents,
+                    this.embeddings
+                );
+            }
 
             this.initialized = true;
             loggingService.info(`✅ Agent Knowledge Base initialized with ${documents.length} documents`);
@@ -253,8 +307,18 @@ export class VectorStoreService {
      * Search the knowledge base for relevant information
      */
     async search(query: string, k: number = 5): Promise<Document[]> {
-        if (!this.initialized || !this.vectorStore) {
+        if (!this.initialized) {
             loggingService.warn('Vector store not initialized. Returning empty results.');
+            return [];
+        }
+
+        if (!this.hnswlibAvailable) {
+            // Use fallback vector store
+            return await fallbackVectorStoreService.search(query, k);
+        }
+
+        if (!this.vectorStore) {
+            loggingService.warn('Vector store not available. Returning empty results.');
             return [];
         }
 
@@ -340,9 +404,11 @@ export class VectorStoreService {
      */
     async load(directory: string = './agent-knowledge'): Promise<void> {
         try {
-            this.vectorStore = await HNSWLib.load(directory, this.embeddings);
-            this.initialized = true;
-            loggingService.info(`📂 Vector store loaded from ${directory}`);
+            if (HNSWLib) {
+                this.vectorStore = await HNSWLib.load(directory, this.embeddings);
+                this.initialized = true;
+                loggingService.info(`📂 Vector store loaded from ${directory}`);
+            }
         } catch (error) {
             loggingService.warn('Could not load existing vector store, will create new one');
             await this.initialize();
