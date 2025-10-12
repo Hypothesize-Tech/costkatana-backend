@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
 import { ProjectService } from '../services/project.service';
 import { UsageService } from '../services/usage.service';
-import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
-import { BedrockService } from '../services/bedrock.service';
 import { loggingService } from '../services/logging.service';
 
 interface ChatGPTRequest extends Request {
@@ -594,25 +592,6 @@ export class ChatGPTController {
 
             const usage = await UsageService.trackUsage(usageData);
 
-            // Trigger intelligent monitoring in background (non-blocking)
-            IntelligentMonitoringService.monitorUserUsage(userId).catch(error => 
-                loggingService.error('Background monitoring failed', {
-                    userId,
-                    error: error instanceof Error ? error.message : 'Unknown error',
-                    requestId: req.headers['x-request-id'] as string
-                })
-            );
-
-            // Generate AI-powered smart tip
-            const smartTip = await ChatGPTController.generateAISmartTip(
-                userId, 
-                conversation_data.model, 
-                totalTokens, 
-                cost,
-                conversation_data.prompt,
-                conversation_data.response
-            );
-
             const duration = Date.now() - startTime;
 
             loggingService.info('ChatGPT usage tracked successfully', {
@@ -636,7 +615,6 @@ export class ChatGPTController {
                     totalTokens,
                     cost,
                     conversationId: conversation_data.conversation_id,
-                    hasSmartTip: !!smartTip
                 }
             });
 
@@ -649,7 +627,6 @@ export class ChatGPTController {
                     tokens: usage?.totalTokens,
                     estimated_monthly_cost: cost * 30, // Rough estimate
                     message: `Tracked ${totalTokens} tokens for $${cost.toFixed(6)}`,
-                    smart_tip: smartTip
                 }
             });
         } catch (error: any) {
@@ -672,103 +649,6 @@ export class ChatGPTController {
         }
     }
 
-    /**
-     * Generate AI-powered smart tip using Bedrock service
-     */
-    private static async generateAISmartTip(
-        userId: string, 
-        model: string, 
-        tokens: number, 
-        cost: number,
-        prompt: string,
-        response: string
-    ): Promise<string> {
-        try {
-            // Get recent usage to provide context-aware tips
-            const { Usage } = await import('../models/Usage');
-            const recentUsage = await Usage.find({
-                userId,
-                service: 'openai',
-                'metadata.source': 'chatgpt-custom-gpt'
-            }).limit(10).sort({ createdAt: -1 });
-
-            if (recentUsage.length < 2) {
-                return "💡 Tip: Track more conversations to get AI-powered personalized optimization recommendations!";
-            }
-
-            // Calculate basic metrics for context
-            const avgTokens = recentUsage.reduce((sum, u) => sum + u.totalTokens, 0) / recentUsage.length;
-            const gpt4Usage = recentUsage.filter(u => u.model.includes('gpt-4')).length;
-
-            // Try to get AI-powered optimization tip
-            try {
-                const optimizationRequest = {
-                    prompt,
-                    model,
-                    service: 'openai',
-                    context: `User's average tokens: ${avgTokens.toFixed(0)}, Current tokens: ${tokens}, Model: ${model}, Response quality: ${response.length > 100 ? 'detailed' : 'concise'}`,
-                    targetReduction: 20,
-                    preserveIntent: true
-                };
-
-                const aiOptimization = await BedrockService.optimizePrompt(optimizationRequest);
-                
-                if (aiOptimization.estimatedTokenReduction > 15) {
-                    return `🤖 AI Tip: Your prompt can be optimized to save ${aiOptimization.estimatedTokenReduction}% tokens. Try: "${aiOptimization.optimizedPrompt.substring(0, 80)}..." - Technique: ${aiOptimization.techniques[0]}`;
-                }
-            } catch (aiError) {
-                loggingService.warn('AI optimization tip failed, using fallback', {
-                    userId,
-                    model,
-                    error: aiError instanceof Error ? aiError.message : 'Unknown error',
-                    requestId: 'background'
-                });
-            }
-
-            // Fallback to pattern-based tips
-            if (tokens > avgTokens * 1.5) {
-                return `💡 Smart Tip: This conversation used ${Math.round(((tokens - avgTokens) / avgTokens) * 100)}% more tokens than your average. Try shorter, more focused prompts for better efficiency.`;
-            }
-
-            if (model.includes('gpt-4') && tokens < 200) {
-                return "💡 Efficiency Tip: For simple tasks like this, GPT-3.5 Turbo could save you 95% while providing similar quality!";
-            }
-
-            if (gpt4Usage / recentUsage.length > 0.7) {
-                return "💡 Cost Tip: You use GPT-4 frequently. Consider using GPT-3.5 for simpler tasks to significantly reduce costs.";
-            }
-
-            if (cost > 0.01) {
-                return `💡 Budget Tip: High-cost conversation detected ($${cost.toFixed(4)}). Break complex requests into smaller parts for better cost control.`;
-            }
-
-            // Positive reinforcement for good usage patterns
-            if (tokens < avgTokens * 0.8) {
-                return "✨ Excellent! This conversation was very token-efficient. Keep up the concise prompting!";
-            }
-
-            // Topic-specific AI tips
-            const promptLower = prompt.toLowerCase();
-            if (promptLower.includes('code') || promptLower.includes('programming') || promptLower.includes('debug')) {
-                return "🤖 Coding Tip: For programming questions, start with specific error messages or code snippets to get more targeted, efficient responses.";
-            }
-
-            if (promptLower.includes('explain') || promptLower.includes('how does')) {
-                return "🤖 Learning Tip: For explanations, specify your knowledge level (beginner/intermediate/advanced) to get appropriately detailed responses.";
-            }
-
-            return "📊 Visit your Cost Katana dashboard for AI-powered analytics and personalized optimization recommendations.";
-
-        } catch (error) {
-            loggingService.error('Error generating AI smart tip', {
-                userId,
-                model,
-                error: error instanceof Error ? error.message : 'Unknown error',
-                requestId: 'background'
-            });
-            return "🤖 Tip: Check your Cost Katana dashboard for AI-powered optimization insights!";
-        }
-    }
 
     /**
      * Create a new project from ChatGPT

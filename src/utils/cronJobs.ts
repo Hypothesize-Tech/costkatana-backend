@@ -1,9 +1,7 @@
 import cron from 'node-cron';
 import { loggingService } from '../services/logging.service';
-import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 import { GuardrailsService } from '../services/guardrails.service';
 import { AICostTrackingService } from '../services/aiCostTracking.service';
-import { EmailService } from '../services/email.service';
 
 export const initializeCronJobs = () => {
     loggingService.info('Initializing cron jobs', {
@@ -11,118 +9,6 @@ export const initializeCronJobs = () => {
         operation: 'initializeCronJobs',
         step: 'start'
     });
-
-    // Weekly digest - runs at 9 AM on Mondays ONLY
-    // This is the ONLY cron job that sends weekly digests
-    cron.schedule('0 9 * * 1', async () => {
-        loggingService.info('Running weekly digest job', {
-            component: 'cronJobs',
-            operation: 'weeklyDigest',
-            step: 'start',
-            schedule: '0 9 * * 1 (Mondays at 9 AM)'
-        });
-        try {
-            // FIXED: Use runWeeklyDigest instead of runDailyMonitoring
-            await IntelligentMonitoringService.runWeeklyDigest();
-            loggingService.info('Weekly digest job completed', {
-                component: 'cronJobs',
-                operation: 'weeklyDigest',
-                step: 'complete',
-                schedule: '0 9 * * 1'
-            });
-        } catch (error) {
-            loggingService.error('Weekly digest job failed', {
-                component: 'cronJobs',
-                operation: 'weeklyDigest',
-                step: 'error',
-                schedule: '0 9 * * 1',
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-
-    // Urgent alerts check - runs every 4 hours (reduced from 2 hours)
-    // This ONLY sends urgent alerts, NOT weekly digests
-    cron.schedule('0 */4 * * *', async () => {
-        loggingService.info('Running urgent alerts check', {
-            component: 'cronJobs',
-            operation: 'urgentAlertsCheck',
-            step: 'start',
-            schedule: '0 */4 * * * (Every 4 hours)'
-        });
-        try {
-            // Get users who might need urgent alerts
-            const { User } = await import('../models/User');
-            const activeUsers = await User.find({
-                isActive: true,
-                'preferences.emailAlerts': true
-            }).select('_id').limit(100); // Process in batches
-
-            const promises = activeUsers.map(user =>
-                // FIXED: Use runUrgentAlertsCheck instead of monitorUserUsage
-                IntelligentMonitoringService.runUrgentAlertsCheck(user._id.toString())
-                    .catch(error => loggingService.error('Failed urgent check for user', {
-                        component: 'cronJobs',
-                        operation: 'urgentAlertsCheck',
-                        step: 'userCheckError',
-                        userId: user._id.toString(),
-                        error: error instanceof Error ? error.message : String(error)
-                    }))
-            );
-
-            await Promise.all(promises);
-            loggingService.info('Urgent alerts check completed', {
-                component: 'cronJobs',
-                operation: 'urgentAlertsCheck',
-                step: 'complete',
-                schedule: '0 */4 * * *',
-                usersProcessed: activeUsers.length
-            });
-        } catch (error) {
-            loggingService.error('Urgent alerts check failed', {
-                component: 'cronJobs',
-                operation: 'urgentAlertsCheck',
-                step: 'error',
-                schedule: '0 */4 * * *',
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-
-    // Monthly usage reset - runs at midnight on the 1st of every month
-    cron.schedule('0 0 1 * *', async () => {
-        loggingService.info('Running monthly usage reset', {
-            component: 'cronJobs',
-            operation: 'monthlyUsageReset',
-            step: 'start',
-            schedule: '0 0 1 * *'
-        });
-        try {
-            const { User } = await import('../models/User');
-            // Reset monthly usage for all users
-            await User.updateMany({}, { 
-                $set: { 
-                    'monthlyUsage.current': 0,
-                    'monthlyUsage.lastReset': new Date()
-                }
-            });
-            loggingService.info('Monthly usage reset completed', {
-                component: 'cronJobs',
-                operation: 'monthlyUsageReset',
-                step: 'complete',
-                schedule: '0 0 1 * *'
-            });
-        } catch (error) {
-            loggingService.error('Monthly usage reset failed', {
-                component: 'cronJobs',
-                operation: 'monthlyUsageReset',
-                step: 'error',
-                schedule: '0 0 1 * *',
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-    });
-
     // Monthly usage reset - runs at midnight on the 1st of each month
     cron.schedule('0 0 1 * *', async () => {
         loggingService.info('Running monthly usage reset via guardrails', {

@@ -1,5 +1,4 @@
 import { Response } from 'express';
-import { IntelligentMonitoringService } from '../services/intelligentMonitoring.service';
 import { Usage } from '../models/Usage';
 import { loggingService } from '../services/logging.service';
 
@@ -29,9 +28,6 @@ export class MonitoringController {
                 requestId: req.headers['x-request-id'] as string
             });
             
-            // FIXED: Manual triggers should only check for urgent alerts, not weekly digests
-            await IntelligentMonitoringService.runUrgentAlertsCheck(userId);
-
             const duration = Date.now() - startTime;
 
             loggingService.info('User monitoring triggered successfully', {
@@ -539,17 +535,6 @@ export class MonitoringController {
                 userRole,
                 requestId: req.headers['x-request-id'] as string
             });
-
-            // FIXED: Admin trigger should only run urgent alerts, not weekly digests
-            IntelligentMonitoringService.runWeeklyDigest().catch(error => 
-                loggingService.error('Background weekly digest failed', {
-                    userId,
-                    userRole,
-                    error: error.message || 'Unknown error',
-                    stack: error.stack,
-                    requestId: req.headers['x-request-id'] as string
-                })
-            );
 
             const duration = Date.now() - startTime;
 
