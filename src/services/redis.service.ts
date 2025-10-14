@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from '@langchain/aws';
 import { resolveRedisUrl, getRedisOptions, getRedisErrorDiagnostic } from '../config/redis';
+import { LRUCache } from 'lru-cache';
 
 dotenv.config();
 
@@ -51,7 +52,7 @@ export class RedisService {
     private readerClient!: RedisClientType;
     private embeddingModel: ChatBedrockConverse;
     private _isConnected: boolean = false;
-    private inMemoryCache: Map<string, { value: string; expiry: number }> = new Map();
+    private inMemoryCache: LRUCache<string, { value: string; expiry: number }>;
     private isLocalDev: boolean = false;
     private connectionInProgress: boolean = false;
     
@@ -69,6 +70,14 @@ export class RedisService {
     private readonly DEDUP_TTL = 300; // 5 minutes
     
     private constructor() {
+        // Initialize in-memory cache with LRU limits
+        this.inMemoryCache = new LRUCache({
+            max: 10000, // Maximum 10,000 cache entries
+            ttl: this.DEFAULT_TTL * 1000, // Convert seconds to milliseconds
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
         // Always use in-memory cache in development unless explicitly configured for Redis
         this.isLocalDev = process.env.NODE_ENV === 'development' && !process.env.REDIS_HOST;
         

@@ -91,7 +91,7 @@
     "jsonwebtoken": "^9.0.2",
     "langchain": "^0.3.30",
     "langsmith": "^0.3.50",
-    "lru-cache": "^11.2.1",
+    "lru-cache": "^11.2.2",
     "mixpanel": "^0.18.1",
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",

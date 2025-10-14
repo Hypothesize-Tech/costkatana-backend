@@ -8,6 +8,7 @@ import { WebScraperTool } from '../tools/webScraper.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { memoryService, MemoryContext, MemoryService } from './memory.service';
 import { userPreferenceService } from './userPreference.service';
+import { LRUCache } from 'lru-cache';
 import { EventEmitter } from 'events';
 
 // Multi-Agent State using LangGraph Annotation
@@ -107,10 +108,28 @@ export class MultiAgentFlowService {
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
     private webScraperTool: WebScraperTool;
     private trendingDetector: TrendingDetectorService;
+    private retryService: RetryWithBackoff;
+    private trendingDetectorService: TrendingDetectorService;
+    
+    // Semantic cache with LRU limits
+    private semanticCache: LRUCache<string, { response: string; embedding: number[]; timestamp: number; hits: number }>;
 
     constructor() {
         // Increase EventEmitter limits to prevent memory leak warnings
         EventEmitter.defaultMaxListeners = 20;
+        
+        // Initialize semantic cache with proper size limits
+        this.semanticCache = new LRUCache({
+            max: 1000, // Maximum 1000 cached responses
+            ttl: 60 * 60 * 1000, // 1 hour TTL
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+        
+        this.retryService = new RetryWithBackoff();
+        this.webScraperTool = new WebScraperTool();
+        this.trendingDetectorService = new TrendingDetectorService();
+        this.trendingDetector = this.trendingDetectorService;
         
         this.initializeAgents();
         this.initializeGraph();
@@ -971,8 +990,6 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             .replace(/\b(um|uh|well|you know)\b/gi, '') // Remove filler words
             .trim();
     }
-
-    private semanticCache: Map<string, { response: string; embedding: number[]; timestamp: number; hits: number }> = new Map();
 
     private generateCacheKey(content: string): string {
         // Generate a more sophisticated cache key using content hash

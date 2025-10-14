@@ -160,7 +160,7 @@ app.use('/api', apiRouter);
 app.use(cacheMiddleware);
 
 // Health check route with minimal logging
-app.get('/', async (req, res) => {
+app.get('/', (req, res): void => {
     const isHealthCheck = req.get('User-Agent')?.includes('ELB-HealthChecker');
 
     if (!isHealthCheck) {
@@ -175,7 +175,7 @@ app.get('/', async (req, res) => {
     }
 
     // Check Sentry health
-    const sentryHealth = await checkSentryHealth();
+    const sentryHealth = checkSentryHealth();
 
     res.json({
         success: true,
@@ -198,9 +198,9 @@ app.get('/health', (_req, res) => {
 });
 
 // Sentry status endpoint for monitoring
-app.get('/sentry-status', async (_req, res) => {
+app.get('/sentry-status', (_req, res): void => {
     try {
-        const sentryHealth = await checkSentryHealth();
+        const sentryHealth = checkSentryHealth();
         const sentryConfig = getSentryConfig();
 
         res.json({
@@ -228,10 +228,10 @@ app.get('/sentry-status', async (_req, res) => {
 });
 
 // Security monitoring dashboard (protected endpoint)
-app.get('/security-dashboard', (req, res): any => {
+app.get('/security-dashboard', (req, res) => {
     // Simple IP-based protection for security dashboard
     const allowedIPs = ['*'];
-    const clientIP = req.ip || 'unknown';
+    const clientIP = req.ip ?? 'unknown';
 
     // For production, you should implement proper authentication
     if (process.env.NODE_ENV === 'production') {
@@ -254,6 +254,7 @@ app.get('/security-dashboard', (req, res): any => {
         data: {},
         timestamp: new Date().toISOString()
     });
+    return;
 });
 
 // Sentry business error middleware - capture business logic errors
@@ -268,18 +269,18 @@ app.use(errorHandler);
 // Sentry error handler - must be added after all other error middleware
 app.use(Sentry.expressErrorHandler());
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT ?? 8000;
 
 /**
  * Check Sentry health status
  */
-async function checkSentryHealth(): Promise<{
+function checkSentryHealth(): {
     enabled: boolean;
     configured: boolean;
     environment?: string;
     release?: string;
     lastError?: string;
-}> {
+} {
     try {
         const enabled = isSentryEnabled();
         const sentryConfig = getSentryConfig();
@@ -488,13 +489,13 @@ export const startServer = async () => {
                             nextAttempt: attempt + 1,
                             delaySeconds: (attempt + 1) * 5
                         });
-                        retryProcessingWithBackoff(attempt + 1, maxAttempts);
+                        void retryProcessingWithBackoff(attempt + 1, maxAttempts);
                     }
                 }
             };
             
             // Start the retry process
-            retryProcessingWithBackoff();
+            void retryProcessingWithBackoff();
             
         } catch (error) {
             loggingService.warn('⚠️ Webhook delivery service initialization failed', {
@@ -648,7 +649,7 @@ export const startServer = async () => {
     }
 };
 
-startServer();
+void startServer();
 
 // Graceful shutdown handling
 process.on('SIGTERM', async () => {

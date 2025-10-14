@@ -1,6 +1,7 @@
 import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
+import { LRUCache } from 'lru-cache';
 
 export interface VectorMemoryItem {
     id: string;
@@ -27,12 +28,12 @@ export interface SimilarityResult {
 export class VectorMemoryService {
     private embeddingAgent: ChatBedrockConverse;
     
-    // In-memory vector storage (JavaScript Map for O(1) access)
-    private vectorStore = new Map<string, VectorMemoryItem>();
-    private userVectorIndex = new Map<string, Set<string>>(); // userId -> Set of vector IDs
+    // In-memory vector storage with LRU limits
+    private vectorStore: LRUCache<string, VectorMemoryItem>;
+    private userVectorIndex: LRUCache<string, Set<string>>; // userId -> Set of vector IDs
     
-    // Embedding cache to avoid re-computing same queries
-    private embeddingCache = new Map<string, number[]>();
+    // Embedding cache with LRU limits to avoid re-computing same queries
+    private embeddingCache: LRUCache<string, number[]>;
 
     constructor() {
         this.embeddingAgent = new ChatBedrockConverse({
@@ -42,8 +43,27 @@ export class VectorMemoryService {
             maxTokens: 1000,
         });
         
-        // Clean up embedding cache periodically
-        setInterval(() => this.cleanupEmbeddingCache(), 60 * 60 * 1000); // Every hour
+        // Initialize LRU caches with proper limits
+        this.vectorStore = new LRUCache({
+            max: 5000, // Maximum 5000 vector memories
+            ttl: 7 * 24 * 60 * 60 * 1000, // 7 days TTL
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
+        this.userVectorIndex = new LRUCache({
+            max: 1000, // Maximum 1000 users
+            ttl: 7 * 24 * 60 * 60 * 1000, // 7 days TTL
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
+        this.embeddingCache = new LRUCache({
+            max: 2000, // Maximum 2000 cached embeddings
+            ttl: 60 * 60 * 1000, // 1 hour TTL for embeddings
+            updateAgeOnGet: true,
+            allowStale: false
+        });
     }
 
     /**
@@ -358,18 +378,6 @@ export class VectorMemoryService {
             memoryUsage,
             cacheSize: this.embeddingCache.size
         };
-    }
-
-    /**
-     * Clean up expired embedding cache
-     */
-    private cleanupEmbeddingCache(): void {
-        // For simplicity, clear all cache periodically
-        // In production, you might want to track timestamps
-        if (this.embeddingCache.size > 10000) {
-            this.embeddingCache.clear();
-            loggingService.info('🧹 Cleared embedding cache');
-        }
     }
 
     // ============================================================================

@@ -5,6 +5,7 @@ import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory
 import { VectorMemoryService } from './vectorMemory.service';
 import { UserPreferenceService } from './userPreference.service';
 import { cacheService } from './cache.service';
+import { LRUCache } from 'lru-cache';
 import mongoose from 'mongoose';
 
 export interface MemoryContext {
@@ -49,18 +50,18 @@ export class MemoryService {
     private vectorMemoryService: VectorMemoryService;
     private userPreferenceService: UserPreferenceService;
     
-    // In-memory caches for performance (JavaScript built-in)
-    private userSessionCache = new Map<string, any>();
-    private conversationCache = new Map<string, { data: SimilarConversation[]; timestamp: number }>();
-    private securityPatternCache = new Map<string, number>();
+    // LRU caches for performance with proper size limits
+    private userSessionCache: LRUCache<string, any>;
+    private conversationCache: LRUCache<string, { data: SimilarConversation[]; timestamp: number }>;
+    private securityPatternCache: LRUCache<string, number>;
     
     // Cache expiry (5 minutes for sessions, 1 hour for conversations)
     private readonly SESSION_CACHE_TTL = 5 * 60 * 1000;
     private readonly CONVERSATION_CACHE_TTL = 60 * 60 * 1000;
     private readonly SECURITY_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
     
-    // Context management
-    private static contextCache = new Map<string, ConversationContext>();
+    // Context management with LRU cache
+    private static contextCache: LRUCache<string, ConversationContext>;
     private static readonly CTX_REDIS_TTL = parseInt(process.env.CTX_REDIS_TTL || '600');
 
     constructor() {
@@ -74,8 +75,37 @@ export class MemoryService {
         this.vectorMemoryService = new VectorMemoryService();
         this.userPreferenceService = new UserPreferenceService();
         
-        // Clean up caches periodically
-        setInterval(() => this.cleanupCaches(), 10 * 60 * 1000); // Every 10 minutes
+        // Initialize LRU caches with proper size limits and TTL
+        this.userSessionCache = new LRUCache({
+            max: 1000, // Maximum 1000 user sessions
+            ttl: this.SESSION_CACHE_TTL,
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
+        this.conversationCache = new LRUCache({
+            max: 500, // Maximum 500 conversations
+            ttl: this.CONVERSATION_CACHE_TTL,
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
+        this.securityPatternCache = new LRUCache({
+            max: 10000, // Security patterns can be numerous
+            ttl: this.SECURITY_CACHE_TTL,
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
+        // Initialize static context cache if not already done
+        if (!MemoryService.contextCache) {
+            MemoryService.contextCache = new LRUCache({
+                max: 1000, // Maximum 1000 conversation contexts
+                ttl: MemoryService.CTX_REDIS_TTL * 1000, // Convert seconds to milliseconds
+                updateAgeOnGet: true,
+                allowStale: false
+            });
+        }
     }
 
     // Context Management Methods
@@ -491,44 +521,10 @@ export class MemoryService {
     }
 
     /**
-     * Clean up expired cache entries
-     */
-    private cleanupCaches(): void {
-        const now = Date.now();
-        
-        // Clean session cache
-        for (const [key, value] of Array.from(this.userSessionCache.entries())) {
-            if (now - value.timestamp > this.SESSION_CACHE_TTL) {
-                this.userSessionCache.delete(key);
-            }
-        }
-        
-        // Clean conversation cache
-        for (const [key, value] of Array.from(this.conversationCache.entries())) {
-            if (now - value.timestamp > this.CONVERSATION_CACHE_TTL) {
-                this.conversationCache.delete(key);
-            }
-        }
-        
-        // Clean security cache
-        for (const [key, timestamp] of Array.from(this.securityPatternCache.entries())) {
-            if (now - timestamp > this.SECURITY_CACHE_TTL) {
-                this.securityPatternCache.delete(key);
-            }
-        }
-        
-        loggingService.info(`🧹 Cleaned up memory caches`);
-    }
-
-    /**
      * Get user session data from cache
      */
     getUserSession(userId: string): any {
-        const session = this.userSessionCache.get(userId);
-        if (session && Date.now() - session.timestamp < this.SESSION_CACHE_TTL) {
-            return session;
-        }
-        return null;
+        return this.userSessionCache.get(userId) || null;
     }
 
     /**
