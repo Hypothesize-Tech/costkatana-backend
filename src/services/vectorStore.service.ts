@@ -84,6 +84,7 @@ import { Document } from "@langchain/core/documents";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 import * as fs from 'fs';
 import * as path from 'path';
+import mongoose from 'mongoose';
 
 export class VectorStoreService {
     private vectorStore?: HNSWLibInterface;
@@ -423,6 +424,239 @@ export class VectorStoreService {
             initialized: this.initialized,
             documentsCount: this.initialized ? 1 : 0 // Simplified for now
         };
+    }
+
+    /**
+     * Add document to MongoDB with embedding
+     */
+    async addToMongoDB(content: string, metadata: any, embedding?: number[]): Promise<string> {
+        try {
+            const { DocumentModel } = await import('../models/Document');
+            
+            // Generate embedding if not provided
+            const embeddingVector = embedding || await this.embeddings.embedQuery(content);
+            
+            // Generate content hash
+            const crypto = await import('crypto');
+            const contentHash = crypto.createHash('sha256').update(content).digest('hex');
+            
+            // Create document
+            const doc = new DocumentModel({
+                content,
+                contentHash,
+                embedding: embeddingVector,
+                metadata,
+                chunkIndex: 0,
+                totalChunks: 1,
+                ingestedAt: new Date(),
+                status: 'active',
+                accessCount: 0
+            });
+            
+            await doc.save();
+            
+            loggingService.info('Document added to MongoDB', {
+                component: 'VectorStoreService',
+                operation: 'addToMongoDB',
+                documentId: doc._id
+            });
+            
+            return (doc._id as mongoose.Types.ObjectId).toString();
+        } catch (error) {
+            loggingService.error('Failed to add document to MongoDB', {
+                component: 'VectorStoreService',
+                operation: 'addToMongoDB',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+    
+    /**
+     * Search MongoDB using vector similarity
+     */
+    async searchMongoDB(query: string, k: number = 5, filters: any = {}): Promise<Document[]> {
+        try {
+            loggingService.info('🔍 Starting MongoDB vector search', {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDB',
+                query: query.substring(0, 100),
+                limit: k,
+                filters
+            });
+
+            const { DocumentModel } = await import('../models/Document');
+            
+            // Generate query embedding
+            const queryEmbedding = await this.embeddings.embedQuery(query);
+            
+            loggingService.info('✅ Query embedding generated', {
+                component: 'VectorStoreService',
+                dimensions: queryEmbedding.length
+            });
+            
+            // Perform vector search using MongoDB aggregation
+            // Note: This requires MongoDB Atlas Vector Search index to be set up
+            const vectorIndexName = process.env.MONGODB_VECTOR_INDEX_NAME || 'document_vector_index';
+            
+            const pipeline: any[] = [
+                {
+                    $vectorSearch: {
+                        index: vectorIndexName,
+                        path: 'embedding',
+                        queryVector: queryEmbedding,
+                        numCandidates: k * 10,
+                        limit: k,
+                        filter: {
+                            status: { $eq: 'active' },
+                            ...filters
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        content: 1,
+                        metadata: 1,
+                        score: { $meta: 'vectorSearchScore' }
+                    }
+                }
+            ];
+            
+            loggingService.info('📊 Executing aggregation pipeline', {
+                component: 'VectorStoreService',
+                indexName: vectorIndexName,
+                numCandidates: k * 10
+            });
+            
+            const results = await DocumentModel.aggregate(pipeline);
+            
+            loggingService.info(`✅ MongoDB aggregation returned ${results.length} results`, {
+                component: 'VectorStoreService'
+            });
+            
+            // Convert to LangChain Document format
+            const documents = results.map((doc: any) => new Document({
+                pageContent: doc.content,
+                metadata: {
+                    ...doc.metadata,
+                    score: doc.score,
+                    _id: doc._id.toString()
+                }
+            }));
+            
+            loggingService.info('✅ MongoDB vector search completed', {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDB',
+                resultsCount: documents.length,
+                query: query.substring(0, 100)
+            });
+            
+            return documents;
+        } catch (error) {
+            loggingService.error('❌ MongoDB vector search failed', {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDB',
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+            });
+            
+            // Fallback to empty results instead of throwing
+            return [];
+        }
+    }
+    
+    /**
+     * Hybrid search: Try HNSWLib cache first, fallback to MongoDB
+     */
+    async searchHybrid(query: string, k: number = 5, filters: any = {}): Promise<Document[]> {
+        try {
+            // Try in-memory cache first (fast)
+            if (this.initialized && this.vectorStore) {
+                try {
+                    const cacheResults = await this.vectorStore.similaritySearch(query, k);
+                    if (cacheResults.length > 0) {
+                        loggingService.info('Cache hit for vector search', {
+                            component: 'VectorStoreService',
+                            operation: 'searchHybrid',
+                            source: 'cache'
+                        });
+                        return cacheResults;
+                    }
+                } catch (cacheError) {
+                    loggingService.warn('Cache search failed, falling back to MongoDB', {
+                        component: 'VectorStoreService',
+                        error: cacheError instanceof Error ? cacheError.message : String(cacheError)
+                    });
+                }
+            }
+            
+            // Fallback to MongoDB (persistent)
+            loggingService.info('Using MongoDB for vector search', {
+                component: 'VectorStoreService',
+                operation: 'searchHybrid',
+                source: 'mongodb'
+            });
+            
+            return await this.searchMongoDB(query, k, filters);
+        } catch (error) {
+            loggingService.error('Hybrid search failed', {
+                component: 'VectorStoreService',
+                operation: 'searchHybrid',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        }
+    }
+    
+    /**
+     * Sync frequently accessed documents to in-memory cache
+     */
+    async syncToMemory(limit: number = 100): Promise<void> {
+        if (!this.hnswlibAvailable || !HNSWLib) {
+            loggingService.warn('HNSWLib not available, skipping sync to memory');
+            return;
+        }
+        
+        try {
+            const { DocumentModel } = await import('../models/Document');
+            
+            // Get most frequently accessed documents
+            const documents = await DocumentModel.find({
+                status: 'active'
+            })
+            .sort({ accessCount: -1, lastAccessedAt: -1 })
+            .limit(limit);
+            
+            if (documents.length === 0) return;
+            
+            // Extract content and embeddings
+            const texts = documents.map(d => d.content);
+            const embeddings = documents.map(d => d.embedding);
+            const metadatas = documents.map(d => ({ ...d.metadata, _id: (d._id as mongoose.Types.ObjectId).toString() }));
+            
+            // Add to HNSWLib
+            if (!this.vectorStore) {
+                this.vectorStore = await HNSWLib.fromTexts(
+                    texts,
+                    metadatas,
+                    this.embeddings
+                );
+            } else {
+                await this.vectorStore.addVectors(embeddings, metadatas);
+            }
+            
+            loggingService.info('Synced documents to in-memory cache', {
+                component: 'VectorStoreService',
+                operation: 'syncToMemory',
+                documentsCount: documents.length
+            });
+        } catch (error) {
+            loggingService.error('Failed to sync to memory', {
+                component: 'VectorStoreService',
+                operation: 'syncToMemory',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
     }
 
 }

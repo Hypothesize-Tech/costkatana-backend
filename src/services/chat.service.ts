@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 // import { conversationalFlowService } from './conversationFlow.service';
 // import { multiAgentFlowService } from './multiAgentFlow.service';
 import { TrendingDetectorService } from './trendingDetector.service';
+import { retrievalService } from './retrieval.service';
 import { loggingService } from './logging.service';
 
 // Conversation Context Types
@@ -66,6 +67,7 @@ export interface ChatSendMessageRequest {
     maxTokens?: number;
     chatMode?: 'fastest' | 'cheapest' | 'balanced';
     useMultiAgent?: boolean;
+    documentIds?: string[]; // Document IDs for RAG context
     req?: any; // Express Request object for tracing context
 }
 
@@ -335,8 +337,8 @@ export class ChatService {
         if (this.CTX_COREF_LL_ENABLED && context.subjectConfidence < 0.6) {
             try {
                 const llm = new (await import('@langchain/aws')).ChatBedrockConverse({
-                    model: "anthropic.claude-3-5-haiku-20241022-v1:0",
-                    region: process.env.AWS_REGION || 'us-east-1',
+                    model: "us.anthropic.claude-3-5-haiku-20241022-v1:0",  // Using inference profile
+                    region: process.env.AWS_REGION ?? 'us-east-1',
                     temperature: 0.1,
                     maxTokens: 200,
                 });
@@ -375,21 +377,45 @@ export class ChatService {
             return 'knowledge_base';
         }
         
-        // Package-related queries
-        if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi') || 
-            lowerMessage.includes('install') || lowerMessage.includes('integrate')) {
+        // Cost Katana specific queries - Check for product-specific terms
+        const costKatanaTerms = [
+            'costkatana', 'cost katana', 'cortex', 'multi-agent', 'workflow',
+            'integration guide', 'api documentation', 'how to use', 'getting started',
+            'setup', 'configure', 'tutorial', 'documentation', 'guide',
+            'features', 'capabilities', 'architecture', 'best practices'
+        ];
+        
+        if (costKatanaTerms.some(term => lowerMessage.includes(term))) {
             return 'knowledge_base';
         }
         
-        // Web scraping for external content
-        if (lowerMessage.includes('search') || lowerMessage.includes('find') || lowerMessage.includes('latest') || 
-            lowerMessage.includes('news') || lowerMessage.includes('trending')) {
+        // Package-related queries
+        if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi') || 
+            lowerMessage.includes('install') || lowerMessage.includes('integrate') || lowerMessage.includes('python') ||
+            lowerMessage.includes('cli') || lowerMessage.includes('sdk')) {
+            return 'knowledge_base';
+        }
+        
+        // "How to" and "What is" questions likely need documentation
+        if ((lowerMessage.startsWith('how ') || lowerMessage.startsWith('what ') || 
+             lowerMessage.startsWith('where ') || lowerMessage.startsWith('why ') ||
+             lowerMessage.includes('how do') || lowerMessage.includes('what is') ||
+             lowerMessage.includes('tell me about')) && 
+            !lowerMessage.includes('latest news') && !lowerMessage.includes('current')) {
+            return 'knowledge_base';
+        }
+        
+        // Web scraping for external content (news, trends, latest info)
+        if ((lowerMessage.includes('latest') || lowerMessage.includes('news') || 
+             lowerMessage.includes('trending') || lowerMessage.includes('current')) &&
+            (lowerMessage.includes('search') || lowerMessage.includes('find'))) {
             return 'web_scraper';
         }
         
-        // Analytics queries
-        if (lowerMessage.includes('cost') || lowerMessage.includes('billing') || lowerMessage.includes('analytics') || 
-            lowerMessage.includes('usage') || lowerMessage.includes('optimization')) {
+        // Analytics queries about user's own data
+        if ((lowerMessage.includes('my cost') || lowerMessage.includes('my billing') || 
+             lowerMessage.includes('my usage') || lowerMessage.includes('my analytics')) &&
+            (lowerMessage.includes('show') || lowerMessage.includes('what') || lowerMessage.includes('analyze'))) {
             return 'multi_agent';
         }
         
@@ -522,15 +548,25 @@ export class ChatService {
             });
         }
         
-        // Decide routing based on context
-        const route = this.decideRoute(context, resolvedMessage);
+        // If documentIds are provided, always route to knowledge_base for RAG
+        let route: 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper';
+        if (request.documentIds && request.documentIds.length > 0) {
+            route = 'knowledge_base';
+            loggingService.info('📄 Routing to knowledge_base due to document context', {
+                documentCount: request.documentIds.length
+            });
+        } else {
+            // Decide routing based on context
+            route = this.decideRoute(context, resolvedMessage);
+        }
         
         loggingService.info('🎯 Route decision', {
             route,
             subject: context.currentSubject,
             domain: context.lastDomain,
             confidence: context.subjectConfidence,
-            intent: context.currentIntent
+            intent: context.currentIntent,
+            hasDocuments: !!request.documentIds?.length
         });
         
         // Build context preamble
@@ -563,10 +599,53 @@ export class ChatService {
         });
         
         try {
+            // Retrieve relevant context from RAG system
+            const retrievalOptions: any = {
+                limit: 5,
+                useCache: true,
+                rerank: true
+            };
+            
+            // If specific documents are provided, filter by them
+            if (request.documentIds && request.documentIds.length > 0) {
+                retrievalOptions.filters = {
+                    documentIds: request.documentIds
+                };
+                retrievalOptions.limit = 10; // Increase limit for document-specific queries
+            }
+            
+            const ragContext = await retrievalService.retrieveWithContext(
+                request.message,
+                {
+                    userId: request.userId,
+                    recentMessages: recentMessages.slice(-3).map(msg => msg.content),
+                    currentTopic: context.currentSubject
+                },
+                retrievalOptions
+            );
+
+            loggingService.info('📚 Retrieved RAG context', {
+                documentsFound: ragContext.documents.length,
+                sources: ragContext.sources || [],
+                userId: request.userId
+            });
+
             const { agentService } = await import('./agent.service');
             
-            // Build enhanced query with context
-            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            // Build enhanced query with RAG context
+            let enhancedQuery = `${contextPreamble}\n\n`;
+            
+            // Add RAG context if available
+            if (ragContext.documents.length > 0) {
+                enhancedQuery += `**Relevant Knowledge Base Context:**\n`;
+                ragContext.documents.slice(0, 3).forEach((doc, idx) => {
+                    const content = (doc as any).content || (doc as any).pageContent || '';
+                    enhancedQuery += `${idx + 1}. ${content.substring(0, 200)}...\n`;
+                });
+                enhancedQuery += `\n`;
+            }
+            
+            enhancedQuery += `User query: ${request.message}`;
             
             const agentResponse = await agentService.query({
                 userId: request.userId,
@@ -584,9 +663,14 @@ export class ChatService {
                 return {
                     response: agentResponse.response,
                     agentThinking: agentResponse.thinking,
-                    agentPath: ['knowledge_base'],
-                    optimizationsApplied: ['context_enhancement', 'knowledge_base_routing'],
-                    cacheHit: false,
+                    agentPath: ['knowledge_base', 'rag_enhanced'],
+                    optimizationsApplied: [
+                        'context_enhancement',
+                        'knowledge_base_routing',
+                        'rag_retrieval',
+                        `retrieved_${ragContext.documents.length}_docs`
+                    ],
+                    cacheHit: ragContext.cacheHit || false,
                     riskLevel: 'low'
                 };
             }

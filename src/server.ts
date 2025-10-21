@@ -427,6 +427,48 @@ export const startServer = async () => {
             });
         }
         
+        // Initialize RAG Ingestion System
+        try {
+            loggingService.info('Step 5.5: Initializing RAG Ingestion System', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_rag'
+            });
+
+            const { ingestionService } = await import('./services/ingestion.service');
+            const { ingestionJobService } = await import('./services/ingestionJob.service');
+            
+            await ingestionService.initialize();
+            loggingService.info('✅ RAG Ingestion Service initialized', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'rag_initialized'
+            });
+
+            // Run startup ingestion (knowledge base only)
+            await ingestionJobService.runStartupIngestion();
+            
+            // Start background scheduler
+            ingestionJobService.startScheduler();
+            loggingService.info('✅ RAG background scheduler started', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'rag_scheduler_started'
+            });
+        } catch (error) {
+            loggingService.warn('⚠️ RAG System initialization failed', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'rag_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
+        
         // Initialize Webhook Delivery Service
         try {
             loggingService.info('Step 6: Initializing webhook delivery service', {

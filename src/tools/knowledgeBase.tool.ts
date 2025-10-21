@@ -1,5 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import { vectorStoreService } from "../services/vectorStore.service";
+import { retrievalService } from "../services/retrieval.service";
 import { loggingService } from '../services/logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
@@ -509,8 +510,9 @@ Please try:
                 approach: 'ai_rag'
             });
 
-            // First, retrieve relevant documents using vector search
-            const relevantDocs = await vectorStoreService.search(query, 5);
+            // First, retrieve relevant documents using enhanced retrieval service
+            const retrievalResult = await retrievalService.retrieveKnowledgeBase(query, 5);
+            const relevantDocs = retrievalResult.documents;
 
             if (relevantDocs.length === 0) {
                 return this.generateVectorSearchResponse(query, query, false, contextInfo, startTime);
@@ -518,7 +520,7 @@ Please try:
 
             // Extract content from relevant documents
             const contextContent = relevantDocs.map(doc => {
-                const source = this.extractSourceName(doc.metadata.source);
+                const source = this.extractSourceName(doc.metadata?.fileName || doc.metadata?.source || 'Unknown');
                 return `**${source}:**\n${this.formatContent(doc.pageContent)}\n`;
             }).join('\n');
 
@@ -565,10 +567,11 @@ Answer:`;
                 documentsUsed: relevantDocs.length,
                 responseLength: response.content.length,
                 duration: duration,
-                approach: 'ai_rag'
+                approach: 'ai_rag',
+                retrievalStats: retrievalResult.stats
             });
 
-            return `🤖 **AI-Enhanced Knowledge Base Response:**\n\n${response.content}`;
+            return `🤖 **AI-Enhanced Knowledge Base Response:**\n\n${response.content}\n\n📊 **Sources:** ${relevantDocs.length} documents from ${retrievalResult.stats.sources.join(', ')}`;
 
         } catch (error) {
             loggingService.error('🤖 AI RAG failed, falling back to vector search', {

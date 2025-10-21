@@ -12,7 +12,7 @@ export interface AuthenticatedRequest extends Request {
 export const sendMessage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
-    const { message, modelId, conversationId, temperature = 0.7, maxTokens = 2000 } = req.body;
+    const { message, modelId, conversationId, temperature = 0.7, maxTokens = 2000, documentIds } = req.body;
 
     try {
         loggingService.info('Chat message request initiated', {
@@ -59,6 +59,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             conversationId,
             temperature,
             maxTokens,
+            documentIds,
             req
         });
 

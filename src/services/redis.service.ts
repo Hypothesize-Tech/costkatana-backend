@@ -212,6 +212,23 @@ export class RedisService {
             expire: async () => 1,
             quit: async () => {},
             info: async () => '',
+            scan: async (cursor: string, matchOption: string, pattern: string) => {
+                // In-memory scan implementation
+                const allKeys = Array.from(this.inMemoryCache.keys());
+                
+                // Parse cursor to determine starting position
+                const startIndex = parseInt(cursor) || 0;
+                
+                // Apply pattern matching if provided
+                let keysToScan = allKeys;
+                if (matchOption === 'MATCH' && pattern) {
+                    const regex = new RegExp(pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+                    keysToScan = allKeys.filter((key: string) => regex.test(key));
+                }
+                
+                // Return subset of keys based on cursor position
+                return keysToScan.slice(startIndex);
+            }
         };
     }
 
@@ -1099,6 +1116,45 @@ export class RedisService {
 
         // Always delete from in-memory as fallback
         this.inMemoryCache.delete(key);
+    }
+
+    /**
+     * Scan keys matching a pattern
+     * Returns array of matching keys
+     */
+    public async scanKeys(pattern: string): Promise<string[]> {
+        try {
+            if (this.isLocalDev) {
+                // In-memory implementation
+                const allKeys = Array.from(this.inMemoryCache.keys());
+                const regex = new RegExp(pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+                return allKeys.filter(key => regex.test(key));
+            }
+
+            if (this.readerClient && this._isConnected) {
+                // Use Redis SCAN command
+                const keys: string[] = [];
+                let cursor = 0;
+                
+                do {
+                    const result = await this.readerClient.scan(cursor, {
+                        MATCH: pattern,
+                        COUNT: 100
+                    });
+                    cursor = result.cursor;
+                    keys.push(...result.keys);
+                } while (cursor !== 0);
+                
+                return keys;
+            }
+        } catch (error) {
+            loggingService.warn('Redis scan failed, using in-memory fallback:', { error: error instanceof Error ? error.message : String(error) });
+        }
+
+        // Fallback to in-memory
+        const allKeys = Array.from(this.inMemoryCache.keys());
+        const regex = new RegExp(pattern.replace(/\*/g, '.*').replace(/\?/g, '.'));
+        return allKeys.filter(key => regex.test(key));
     }
 
     /**

@@ -46,6 +46,8 @@ import cortexTrainingDataRoutes from './cortexTrainingData.routes';
 import backupRoutes from './backupRoutes';
 import emailTrackingRoutes from './emailTracking.routes';
 import aiCostMonitoringRoutes from './admin/aiCostMonitoring.routes';
+import ingestionRoutes from './ingestion.routes';
+import userTelemetryConfigRoutes from './userTelemetryConfig.routes';
 
 const router = Router();
 
@@ -107,5 +109,7 @@ router.use('/cortex-training-data', cortexTrainingDataRoutes);
 router.use('/backup', backupRoutes);
 router.use('/email', emailTrackingRoutes);
 router.use('/admin/ai-costs', aiCostMonitoringRoutes);
+router.use('/ingestion', ingestionRoutes);
+router.use('/telemetry-config', userTelemetryConfigRoutes);
 
 export const apiRouter = router;
