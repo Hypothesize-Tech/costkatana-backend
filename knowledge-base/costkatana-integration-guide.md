@@ -495,7 +495,7 @@ response = model.generate_content("Hello")
 
 ### Support Channels
 - **Documentation**: [docs.costkatana.com](https://docs.costkatana.com)
-- **Discord Community**: [discord.gg/costkatana](https://discord.gg/Wcwzw8wM)
+- **Discord Community**: [discord.gg/costkatana](https://discord.gg/D8nDArmKbY)
 - **Email Support**: support@costkatana.com
 - **GitHub Issues**: [github.com/cost-katana](https://github.com/cost-katana)
 

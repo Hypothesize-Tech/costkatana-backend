@@ -470,5 +470,5 @@ cost-katana analyze --days 7 --verbose --export performance-report.csv
 
 ---
 
-**Need help with CLI integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/Wcwzw8wM) 🚀
+**Need help with CLI integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/D8nDArmKbY) 🚀
 

@@ -802,5 +802,5 @@ COST_KATANA_COST_LIMIT=100.0
 
 ---
 
-**Need help with Python SDK integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/Wcwzw8wM) 🚀
+**Need help with Python SDK integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/D8nDArmKbY) 🚀
 

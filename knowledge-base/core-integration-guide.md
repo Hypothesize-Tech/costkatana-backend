@@ -644,5 +644,5 @@ spec:
 
 ---
 
-**Need help with Core package integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/Wcwzw8wM) 🚀
+**Need help with Core package integration?** Visit [docs.costkatana.com](https://docs.costkatana.com) or join our [Discord community](https://discord.gg/D8nDArmKbY) 🚀
 
