@@ -182,18 +182,54 @@ export class AuthService {
                 throw new Error('User with this email already exists');
             }
 
-            // Create new user
+            // Create new user (System role is 'user' by default)
             const user = await User.create({
                 ...data,
                 verificationToken,
                 emailVerified: false,
             });
 
+            // Create default workspace for the user
+            const { WorkspaceService } = await import('./workspace.service');
+            const workspace = await WorkspaceService.createDefaultWorkspace(
+                (user as any)._id.toString(),
+                user.name
+            );
+
+            // Update user with workspace (primary workspace)
+            user.workspaceId = workspace._id;
+            user.workspaceMemberships = [{
+                workspaceId: workspace._id,
+                role: 'owner', // Workspace role (different from User.role which is 'user')
+                joinedAt: new Date(),
+            }];
+            await user.save();
+
+            // Create owner team member record
+            const { TeamMember } = await import('../models/TeamMember');
+            await TeamMember.create({
+                workspaceId: workspace._id,
+                userId: user._id,
+                email: user.email,
+                role: 'owner', // Workspace role
+                status: 'active',
+                joinedAt: new Date(),
+                customPermissions: {
+                    canManageBilling: true,
+                    canManageTeam: true,
+                    canManageProjects: true,
+                    canManageIntegrations: true,
+                    canViewAnalytics: true,
+                    canExportData: true,
+                },
+            });
+
             // Generate tokens
             const tokens = this.generateTokens(user);
 
-            loggingService.info(`New user registered: ${user.email}`, {
+            loggingService.info(`New user registered with default workspace: ${user.email}`, {
                 userId: (user as any)._id,
+                workspaceId: workspace._id,
                 executionTime: Date.now() - startTime
             });
 
@@ -219,7 +255,7 @@ export class AuthService {
             }
 
             // Find user with optimized query - only select needed fields
-            const user = await User.findOne({ email }).select('email password isActive mfa lastLogin _id');
+            const user = await User.findOne({ email }).select('email password isActive mfa lastLogin accountClosure _id name');
             if (!user) {
                 throw new Error('Invalid credentials');
             }
@@ -247,9 +283,25 @@ export class AuthService {
                 throw new Error('Invalid credentials');
             }
 
+            // Check account closure status
+            if (user.accountClosure && user.accountClosure.status === 'deleted') {
+                throw new Error('Account has been permanently deleted');
+            }
+
             // Check if user is active
             if (!user.isActive) {
                 throw new Error('Account is deactivated');
+            }
+
+            // Auto-reactivate if account is pending deletion
+            if (user.accountClosure && user.accountClosure.status === 'pending_deletion') {
+                const { accountClosureService } = await import('./accountClosure.service');
+                await accountClosureService.reactivateAccount(user._id.toString());
+                
+                loggingService.info('Account auto-reactivated on login', {
+                    userId: user._id.toString(),
+                    email: user.email,
+                });
             }
 
             // Check if MFA is required
@@ -360,16 +412,35 @@ export class AuthService {
 
     static async verifyEmail(token: string): Promise<void> {
         try {
-            const user = await User.findOne({ verificationToken: token });
+            // First, try to find user with primary email verification token
+            let user: any = await User.findOne({ verificationToken: token });
+            
+            if (user) {
+                // Verify primary email
+                user.emailVerified = true;
+                user.verificationToken = undefined;
+                await user.save();
+                loggingService.info(`Primary email verified for user: ${user.email}`);
+                return;
+            }
+
+            // If not found, check for secondary email verification token
+            user = await User.findOne({ 'otherEmails.verificationToken': token });
+            
             if (!user) {
                 throw new Error('Invalid verification token');
             }
 
-            user.emailVerified = true;
-            user.verificationToken = undefined;
-            await user.save();
-
-            loggingService.info(`Email verified for user: ${user.email}`);
+            // Find and verify the specific secondary email
+            const otherEmail = user.otherEmails?.find((e: any) => e.verificationToken === token);
+            if (otherEmail) {
+                otherEmail.verified = true;
+                otherEmail.verificationToken = undefined;
+                await user.save();
+                loggingService.info(`Secondary email verified for user: ${user.email} - verified email: ${otherEmail.email}`);
+            } else {
+                throw new Error('Invalid verification token');
+            }
         } catch (error: unknown) {
             loggingService.error('Error verifying email:', { error: error instanceof Error ? error.message : String(error) });
             throw error;

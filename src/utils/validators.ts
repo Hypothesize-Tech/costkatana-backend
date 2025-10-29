@@ -189,3 +189,82 @@ export const emailSchema = z.object({
 export const updateSubscriptionSchema = z.object({
     plan: z.enum(['free', 'pro', 'enterprise']),
 });
+
+// Email management validation schemas
+export const addSecondaryEmailSchema = z.object({
+    email: z.string().email('Invalid email address'),
+});
+
+export const setPrimaryEmailSchema = z.object({
+    email: z.string().email('Invalid email address'),
+});
+
+export const resendVerificationSchema = z.object({
+    email: z.string().email('Invalid email address'),
+});
+
+// Account closure validation schemas
+export const initiateAccountClosureSchema = z.object({
+    password: z.string().min(1, 'Password is required'),
+    reason: z.string().optional(),
+});
+
+export const confirmClosureSchema = z.object({
+    token: z.string().min(1, 'Token is required'),
+});
+
+// Team management validation schemas
+export const inviteMemberSchema = z.object({
+    email: z.string().email('Invalid email address'),
+    role: z.enum(['admin', 'developer', 'viewer'], {
+        errorMap: () => ({ message: 'Role must be admin, developer, or viewer' }),
+    }),
+    projectIds: z.array(z.string()).optional(),
+});
+
+export const updateMemberRoleSchema = z.object({
+    role: z.enum(['admin', 'developer', 'viewer'], {
+        errorMap: () => ({ message: 'Role must be admin, developer, or viewer' }),
+    }),
+});
+
+export const updateMemberPermissionsSchema = z.object({
+    permissions: z.object({
+        canManageBilling: z.boolean().optional(),
+        canManageTeam: z.boolean().optional(),
+        canManageProjects: z.boolean().optional(),
+        canViewAnalytics: z.boolean().optional(),
+        canManageApiKeys: z.boolean().optional(),
+        canManageIntegrations: z.boolean().optional(),
+        canExportData: z.boolean().optional(),
+    }),
+});
+
+export const updateMemberProjectsSchema = z.object({
+    projectIds: z.array(z.string()),
+});
+
+export const updateWorkspaceSettingsSchema = z.object({
+    name: z.string().min(1, 'Workspace name is required').optional(),
+    settings: z.object({
+        allowMemberInvites: z.boolean().optional(),
+        defaultProjectAccess: z.enum(['all', 'assigned']).optional(),
+        requireEmailVerification: z.boolean().optional(),
+    }).optional(),
+});
+
+export const deleteWorkspaceSchema = z.object({
+    confirmation: z.literal('DELETE', {
+        errorMap: () => ({ message: 'Type DELETE to confirm' }),
+    }),
+    password: z.string().min(1, 'Password is required'),
+});
+
+export const transferOwnershipSchema = z.object({
+    newOwnerId: z.string().min(1, 'New owner ID is required'),
+    password: z.string().min(1, 'Password is required'),
+});
+
+export const switchWorkspaceSchema = z.object({
+    workspaceId: z.string().min(1, 'Workspace ID is required'),
+});

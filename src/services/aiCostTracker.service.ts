@@ -240,7 +240,9 @@ export class AICostTrackerService {
 
         const tracking: TrackingConfig = {
             enableAutoTracking: true,
-            retentionDays: 90
+            enableSessionReplay: process.env.ENABLE_SESSION_REPLAY === 'true',
+            retentionDays: 90,
+            sessionReplayTimeout: parseInt(process.env.SESSION_REPLAY_TIMEOUT || '30')
         };
 
         this.config = {
@@ -464,6 +466,85 @@ export class AICostTrackerService {
                 Usage.create(usageRecord),
                 this.updateUserUsage(userId, estimatedCost, finalTotalTokens)
             ]);
+
+            // Handle session replay if enabled (non-blocking)
+            if (this.config?.tracking?.enableSessionReplay) {
+                setImmediate(async () => {
+                    try {
+                        const { sessionReplayService } = await import('./sessionReplay.service');
+                        
+                        // Get or create active session
+                        const sessionId = await sessionReplayService.getOrCreateActiveSession(userId, {
+                            workspaceId: metadata?.metadata?.workspace?.id,
+                            metadata: metadata?.metadata?.workspace
+                        });
+
+                        // Record tracking state
+                        const trackingState = {
+                            enabled: this.config?.tracking?.enableAutoTracking ?? false,
+                            sessionReplayEnabled: this.config?.tracking?.enableSessionReplay ?? false,
+                            timestamp: new Date(),
+                            request: { 
+                                model: request.model, 
+                                tokens: finalTotalTokens, 
+                                cost: estimatedCost 
+                            },
+                            context: {
+                                files: metadata?.metadata?.contextFiles,
+                                workspace: metadata?.metadata?.workspace
+                            }
+                        };
+
+                        // Add replay data with full AI interaction
+                        await sessionReplayService.addReplayData({
+                            sessionId,
+                            aiInteraction: {
+                                model: request.model,
+                                prompt: request.prompt || '',
+                                response: response.content || response.choices?.[0]?.message?.content || '',
+                                parameters: {
+                                    temperature: request.temperature,
+                                    maxTokens: request.maxTokens || request.max_tokens,
+                                    topP: request.topP || request.top_p,
+                                    ...request
+                                },
+                                tokens: {
+                                    input: finalPromptTokens,
+                                    output: finalCompletionTokens
+                                },
+                                cost: estimatedCost
+                            },
+                            captureSystemMetrics: true
+                        });
+
+                        // Update tracking history
+                        const { Session } = await import('../models/Session');
+                        await Session.updateOne(
+                            { sessionId },
+                            {
+                                $push: { trackingHistory: trackingState },
+                                $set: { 
+                                    trackingEnabled: trackingState.enabled,
+                                    sessionReplayEnabled: trackingState.sessionReplayEnabled,
+                                    trackingEnabledAt: new Date()
+                                }
+                            }
+                        );
+
+                        loggingService.debug('Recorded session replay data', {
+                            component: 'AICostTrackerService',
+                            sessionId,
+                            userId,
+                            model: request.model
+                        });
+                    } catch (replayError) {
+                        loggingService.warn('Failed to record session replay data', {
+                            error: replayError instanceof Error ? replayError.message : String(replayError),
+                            userId
+                        });
+                    }
+                });
+            }
 
             // Non-blocking activity tracking and real-time updates
             if (!metadata?.historicalSync) {

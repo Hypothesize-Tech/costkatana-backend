@@ -203,9 +203,11 @@ export interface BedrockConfig {
 
 export interface TrackingConfig {
     enableAutoTracking: boolean;
+    enableSessionReplay?: boolean;
     retentionDays?: number;
     storageType?: 'memory' | 'file' | 'custom';
     customStorage?: any;
+    sessionReplayTimeout?: number; // Minutes of inactivity before auto-ending session
 }
 
 export interface AlertConfig {

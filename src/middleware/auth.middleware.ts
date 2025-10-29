@@ -247,6 +247,7 @@ export const authenticate = async (
                 id: userId,
                 email: user.email,
                 role: user.role as 'user' | 'admin',
+                workspaceId: user.workspaceId?.toString(),
                 apiKeyAuth: true,
                 permissions: userApiKey.permissions,
             };
@@ -371,6 +372,7 @@ export const authenticate = async (
                     id: payload.id,
                     email: payload.email,
                     role: user.role as 'user' | 'admin',
+                    workspaceId: user.workspaceId?.toString(),
                     apiKeyAuth: !!payload.jti,
                     permissions: payload.jti ? user.dashboardApiKeys.find((key: any) => key.keyId === payload.jti)?.permissions || ['read'] : ['read', 'write', 'admin'],
                 };
@@ -521,6 +523,7 @@ export const optionalAuth = async (
                                         id: user._id.toString(),
                                         email: user.email,
                                         role: user.role as 'user' | 'admin',
+                                        workspaceId: user.workspaceId?.toString(),
                                         apiKeyAuth: true,
                                         permissions: userApiKey.permissions,
                                     };
@@ -547,6 +550,7 @@ export const optionalAuth = async (
                         id: payload.id,
                         email: payload.email,
                         role: user.role as 'user' | 'admin',
+                        workspaceId: user.workspaceId?.toString(),
                         apiKeyAuth: false,
                         permissions: ['read', 'write', 'admin'],
                     };

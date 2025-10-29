@@ -48,6 +48,9 @@ import emailTrackingRoutes from './emailTracking.routes';
 import aiCostMonitoringRoutes from './admin/aiCostMonitoring.routes';
 import ingestionRoutes from './ingestion.routes';
 import userTelemetryConfigRoutes from './userTelemetryConfig.routes';
+import sessionReplayRoutes from './sessionReplay.routes';
+import backupCodesRoutes from './backupCodes.routes';
+import teamRoutes from './team.routes';
 
 const router = Router();
 
@@ -111,5 +114,8 @@ router.use('/email', emailTrackingRoutes);
 router.use('/admin/ai-costs', aiCostMonitoringRoutes);
 router.use('/ingestion', ingestionRoutes);
 router.use('/telemetry-config', userTelemetryConfigRoutes);
+router.use('/session-replay', sessionReplayRoutes);
+router.use('/backup-codes', backupCodesRoutes);
+router.use('/team', teamRoutes);
 
 export const apiRouter = router;

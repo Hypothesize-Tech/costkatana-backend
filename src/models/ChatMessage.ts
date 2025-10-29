@@ -7,6 +7,12 @@ export interface IChatMessage extends Document {
     role: 'user' | 'assistant';
     content: string;
     modelId?: string;
+    attachedDocuments?: Array<{
+        documentId: string;
+        fileName: string;
+        chunksCount: number;
+        fileType?: string;
+    }>;
     metadata?: {
         temperature?: number;
         maxTokens?: number;
@@ -43,6 +49,21 @@ const chatMessageSchema = new Schema<IChatMessage>({
     modelId: {
         type: String
     },
+    attachedDocuments: [{
+        documentId: {
+            type: String,
+            required: true
+        },
+        fileName: {
+            type: String,
+            required: true
+        },
+        chunksCount: {
+            type: Number,
+            required: true
+        },
+        fileType: String
+    }],
     metadata: {
         temperature: {
             type: Number,

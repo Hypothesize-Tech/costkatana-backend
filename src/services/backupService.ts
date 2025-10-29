@@ -30,18 +30,28 @@ interface BackupResult {
 }
 
 export class BackupService {
-  private s3Client: S3Client;
+  private s3Client: S3Client | null = null;
   private config: BackupConfig;
 
   constructor() {
     this.config = this.loadConfig();
-    this.s3Client = new S3Client({
-      region: this.config.s3Region,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-      },
-    });
+    
+    // Only initialize S3 client if backup is enabled and credentials are present
+    if (this.config.enableBackup && process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      try {
+        this.s3Client = new S3Client({
+          region: this.config.s3Region,
+          credentials: {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+          },
+        });
+      } catch (error) {
+        loggingService.warn('Failed to initialize S3 client for backups', {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
   }
 
   private loadConfig(): BackupConfig {
@@ -147,6 +157,10 @@ export class BackupService {
    * Upload backup to S3
    */
   private async uploadToS3(localPath: string, _backupName: string): Promise<string> {
+    if (!this.s3Client) {
+      throw new Error('S3 client not initialized - check AWS credentials');
+    }
+    
     const fileName = path.basename(localPath);
     const s3Key = `${this.config.s3Prefix}/${fileName}`;
     
@@ -216,6 +230,11 @@ export class BackupService {
    * Clean up S3 backups
    */
   private async cleanupS3Backups(): Promise<void> {
+    if (!this.s3Client) {
+      loggingService.warn('S3 client not initialized - skipping S3 cleanup');
+      return;
+    }
+    
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - this.config.retentionDays);
     
@@ -225,7 +244,7 @@ export class BackupService {
         Prefix: this.config.s3Prefix,
       });
       
-      const response = await this.s3Client.send(command);
+      const response = await this.s3Client!.send(command);
       
       if (response.Contents) {
         for (const object of response.Contents) {
@@ -235,7 +254,7 @@ export class BackupService {
               Key: object.Key,
             });
             
-            await this.s3Client.send(deleteCommand);
+            await this.s3Client!.send(deleteCommand);
             loggingService.info(`Deleted old S3 backup: ${object.Key}`);
           }
         }
@@ -306,7 +325,7 @@ export class BackupService {
         Prefix: this.config.s3Prefix,
       });
       
-      const response = await this.s3Client.send(command);
+      const response = await this.s3Client!.send(command);
       stats.s3Backups = response.Contents?.length ?? 0;
       
     } catch (error) {

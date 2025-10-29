@@ -1,7 +1,7 @@
 # Cost Optimization Knowledge Base
 
 ## Overview
-Cost optimization is the core feature of AI Cost Optimizer, providing intelligent, personalized strategies for optimizing AI usage (not just prompts) across multiple providers and models. Our revolutionary Cortex system achieves 70-95% token reduction by optimizing how AI generates responses.
+Cost optimization is the core feature of CostKatana, providing intelligent, personalized strategies for optimizing AI usage (not just prompts) across multiple providers and models. Our revolutionary Cortex system achieves 70-95% token reduction by optimizing how AI generates responses.
 
 ## Core Concepts
 

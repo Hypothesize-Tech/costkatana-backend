@@ -100,6 +100,65 @@ export const initializeCronJobs = () => {
         }
     });
 
+    // Daily account deletion cleanup at 4 AM
+    cron.schedule('0 4 * * *', async () => {
+        loggingService.info('Running daily account deletion cleanup', {
+            component: 'cronJobs',
+            operation: 'accountDeletionCleanup',
+            step: 'start',
+            schedule: '0 4 * * *'
+        });
+        try {
+            const { accountClosureService } = await import('../services/accountClosure.service');
+            const result = await accountClosureService.cleanupExpiredAccounts();
+            loggingService.info('Account deletion cleanup completed', {
+                component: 'cronJobs',
+                operation: 'accountDeletionCleanup',
+                step: 'complete',
+                schedule: '0 4 * * *',
+                deletedCount: result.deletedCount,
+                finalizedCount: result.finalizedCount,
+            });
+        } catch (error) {
+            loggingService.error('Account deletion cleanup failed', {
+                component: 'cronJobs',
+                operation: 'accountDeletionCleanup',
+                step: 'error',
+                schedule: '0 4 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Weekly warning emails on Sundays at 10 AM
+    cron.schedule('0 10 * * 0', async () => {
+        loggingService.info('Running weekly account deletion warnings', {
+            component: 'cronJobs',
+            operation: 'accountDeletionWarnings',
+            step: 'start',
+            schedule: '0 10 * * 0'
+        });
+        try {
+            const { accountClosureService } = await import('../services/accountClosure.service');
+            const sentCount = await accountClosureService.sendDeletionWarnings();
+            loggingService.info('Account deletion warnings sent', {
+                component: 'cronJobs',
+                operation: 'accountDeletionWarnings',
+                step: 'complete',
+                schedule: '0 10 * * 0',
+                sentCount,
+            });
+        } catch (error) {
+            loggingService.error('Account deletion warnings failed', {
+                component: 'cronJobs',
+                operation: 'accountDeletionWarnings',
+                step: 'error',
+                schedule: '0 10 * * 0',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
     loggingService.info('Cron jobs initialized successfully', {
         component: 'cronJobs',
         operation: 'initializeCronJobs',

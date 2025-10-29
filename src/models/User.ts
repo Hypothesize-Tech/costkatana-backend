@@ -1,4 +1,4 @@
-import mongoose, { Schema } from 'mongoose';
+import mongoose, { Schema, ObjectId } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 export interface IUser {
@@ -7,6 +7,18 @@ export interface IUser {
     name: string;
     avatar?: string;
     role: 'user' | 'admin';
+    workspaceId?: ObjectId;
+    workspaceMemberships: Array<{
+        workspaceId: ObjectId;
+        role: 'owner' | 'admin' | 'developer' | 'viewer';
+        joinedAt: Date;
+    }>;
+    otherEmails: Array<{
+        email: string;
+        verified: boolean;
+        verificationToken?: string;
+        addedAt: Date;
+    }>;
     dashboardApiKeys: Array<{
         name: string;
         keyId: string;
@@ -29,6 +41,8 @@ export interface IUser {
         emailAlerts: boolean;
         alertThreshold: number;
         optimizationSuggestions: boolean;
+        enableSessionReplay?: boolean;
+        sessionReplayTimeout?: number;
         lastDigestSent?: Date;
         emailEngagement?: {
             totalSent: number;
@@ -105,6 +119,20 @@ export interface IUser {
         firstLlmCall: boolean;
         stepsCompleted: string[];
     };
+    accountClosure: {
+        status: 'active' | 'pending_deletion' | 'deleted';
+        requestedAt?: Date;
+        scheduledDeletionAt?: Date;
+        deletionToken?: string;
+        confirmationStatus: {
+            passwordConfirmed: boolean;
+            emailConfirmed: boolean;
+            cooldownCompleted: boolean;
+        };
+        cooldownStartedAt?: Date;
+        reason?: string;
+        reactivationCount: number;
+    };
     createdAt: Date;
     updatedAt: Date;
     comparePassword(candidatePassword: string): Promise<boolean>;
@@ -136,6 +164,43 @@ const userSchema = new Schema<IUser>({
         enum: ['user', 'admin'],
         default: 'user',
     },
+    workspaceId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Workspace',
+    },
+    workspaceMemberships: [{
+        workspaceId: {
+            type: Schema.Types.ObjectId,
+            ref: 'Workspace',
+            required: true,
+        },
+        role: {
+            type: String,
+            enum: ['owner', 'admin', 'developer', 'viewer'],
+            required: true,
+        },
+        joinedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    }],
+    otherEmails: [{
+        email: {
+            type: String,
+            required: true,
+            lowercase: true,
+            trim: true,
+        },
+        verified: {
+            type: Boolean,
+            default: false,
+        },
+        verificationToken: String,
+        addedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    }],
     dashboardApiKeys: [{
         name: {
             type: String,
@@ -193,6 +258,14 @@ const userSchema = new Schema<IUser>({
         emailAlerts: {
             type: Boolean,
             default: true,
+        },
+        enableSessionReplay: {
+            type: Boolean,
+            default: false,
+        },
+        sessionReplayTimeout: {
+            type: Number,
+            default: 30, // minutes
         },
         alertThreshold: {
             type: Number,
@@ -400,6 +473,36 @@ const userSchema = new Schema<IUser>({
             type: String,
         }],
     },
+    accountClosure: {
+        status: {
+            type: String,
+            enum: ['active', 'pending_deletion', 'deleted'],
+            default: 'active',
+        },
+        requestedAt: Date,
+        scheduledDeletionAt: Date,
+        deletionToken: String,
+        confirmationStatus: {
+            passwordConfirmed: {
+                type: Boolean,
+                default: false,
+            },
+            emailConfirmed: {
+                type: Boolean,
+                default: false,
+            },
+            cooldownCompleted: {
+                type: Boolean,
+                default: false,
+            },
+        },
+        cooldownStartedAt: Date,
+        reason: String,
+        reactivationCount: {
+            type: Number,
+            default: 0,
+        },
+    },
 }, {
     timestamps: true,
 });
@@ -453,6 +556,9 @@ userSchema.statics.resetAllMonthlyUsage = async function () {
 // Indexes
 userSchema.index({ 'subscription.plan': 1 });
 userSchema.index({ createdAt: -1 });
-userSchema.index({ 'dashboardApiKeys.keyId': 1, '_id': 1 }); 
+userSchema.index({ 'dashboardApiKeys.keyId': 1, '_id': 1 });
+userSchema.index({ 'otherEmails.email': 1 });
+userSchema.index({ workspaceId: 1 });
+userSchema.index({ 'workspaceMemberships.workspaceId': 1 });
 
 export const User = mongoose.model<IUser>('User', userSchema);

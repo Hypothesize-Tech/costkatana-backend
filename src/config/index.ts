@@ -3,7 +3,7 @@ import * as path from 'path';
 
 // Load environment variables
 dotenv.config({
-    path: path.resolve(process.cwd(), process.env.NODE_ENV === 'production' ? '.env.production' : '.env'),
+    path: path.resolve(process.cwd(), process.env.NODE_ENV === 'production' ? '.env' : '.env'),
 });
 
 // Validate required environment variables
@@ -25,11 +25,23 @@ export const config = {
     env: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT || '8000', 10),
     cors: {
-        origin: process.env.CORS_ORIGIN || '*', // Allow all origins for MCP compatibility
+        // Dynamic origin - reflects the request origin when credentials are needed
+        origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
+            // Allow requests with no origin (like mobile apps, Postman, curl)
+            if (!origin) {
+                return callback(null, true);
+            }
+            
+            // Allow all origins (will reflect the request origin back)
+            // This is needed because we use credentials: true
+            callback(null, origin);
+        },
         credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'Accept', 'Cache-Control'],
-        exposedHeaders: ['X-Response-Time-Priority', 'Cache-Control']
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'User-Agent', 'Accept', 'Cache-Control', 'X-Requested-With', 'X-Request-Id'],
+        exposedHeaders: ['X-Response-Time-Priority', 'Cache-Control', 'X-Request-Id', 'Content-Type', 'X-Accel-Buffering'],
+        preflightContinue: false,
+        optionsSuccessStatus: 204
     },
     jwt: {
         secret: process.env.JWT_SECRET!,

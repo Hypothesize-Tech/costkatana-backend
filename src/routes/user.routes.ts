@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { UserController } from '../controllers/user.controller';
 import { authenticate, requirePermission } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validation.middleware';
-import { updateProfileSchema } from '../utils/validators';
+import { updateProfileSchema, addSecondaryEmailSchema, setPrimaryEmailSchema, initiateAccountClosureSchema } from '../utils/validators';
 import { asyncHandler } from '../middleware/error.middleware';
 
 const router = Router();
@@ -44,5 +44,23 @@ router.get('/alerts/history', asyncHandler(UserController.getAlertHistory));
 // Subscription routes
 router.get('/subscription', asyncHandler(UserController.getSubscription));
 router.put('/subscription', asyncHandler(UserController.updateSubscription));
+
+// Preferences routes (including session replay settings)
+router.get('/preferences', asyncHandler(UserController.getPreferences));
+router.patch('/preferences', asyncHandler(UserController.updatePreferences));
+
+// Email management routes
+router.get('/emails', asyncHandler(UserController.getEmails));
+router.post('/emails/secondary', validate(addSecondaryEmailSchema), asyncHandler(UserController.addSecondaryEmail));
+router.delete('/emails/secondary/:email', asyncHandler(UserController.removeSecondaryEmail));
+router.put('/emails/primary', validate(setPrimaryEmailSchema), asyncHandler(UserController.setPrimaryEmail));
+router.post('/emails/:email/resend-verification', asyncHandler(UserController.resendVerification));
+
+// Account closure routes
+router.post('/account/closure/initiate', validate(initiateAccountClosureSchema), asyncHandler(UserController.initiateAccountClosure));
+router.post('/account/closure/confirm/:token', asyncHandler(UserController.confirmAccountClosure));
+router.post('/account/closure/cancel', asyncHandler(UserController.cancelAccountClosure));
+router.get('/account/closure/status', asyncHandler(UserController.getAccountClosureStatus));
+router.post('/account/reactivate', asyncHandler(UserController.reactivateAccount));
 
 export default router;

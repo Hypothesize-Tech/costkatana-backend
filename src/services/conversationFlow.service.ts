@@ -882,7 +882,7 @@ export class ConversationalFlowService {
             'what is cost katana',
             'what is costkatana',
             'cost optimization platform',
-            'ai cost optimizer',
+            'costkatana',
             'ai cost optimization',
             'cost optimizer platform',
             'cost optimization system',
@@ -1009,7 +1009,7 @@ export class ConversationalFlowService {
                             outcome: 'Knowledge base results retrieved with context consideration'
                         }
                     ],
-                    summary: 'Successfully retrieved contextual information from the AI Cost Optimizer knowledge base'
+                    summary: 'Successfully retrieved contextual information from the CostKatana knowledge base'
                 }
             };
             

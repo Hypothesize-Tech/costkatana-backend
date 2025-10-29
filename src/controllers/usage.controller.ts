@@ -77,6 +77,78 @@ export class UsageController {
             });
             const duration = Date.now() - startTime;
 
+            // Handle session replay if user has enabled it (non-blocking)
+            if (req.user?.preferences?.enableSessionReplay) {
+                setImmediate(async () => {
+                    try {
+                        const { sessionReplayService } = await import('../services/sessionReplay.service');
+                        
+                        // Get or create active session
+                        const sessionId = await sessionReplayService.getOrCreateActiveSession(userId, {
+                            workspaceId: validatedData.projectId,
+                            metadata: validatedData.metadata
+                        });
+
+                        // Add replay data
+                        await sessionReplayService.addReplayData({
+                            sessionId,
+                            aiInteraction: {
+                                model: validatedData.model,
+                                prompt: validatedData.prompt || '',
+                                response: validatedData.completion || '',
+                                parameters: validatedData.metadata as any,
+                                tokens: {
+                                    input: validatedData.promptTokens,
+                                    output: validatedData.completionTokens
+                                },
+                                cost: usage?.cost
+                            },
+                            captureSystemMetrics: true
+                        });
+
+                        // Update tracking history
+                        const { Session } = await import('../models/Session');
+                        await Session.updateOne(
+                            { sessionId },
+                            {
+                                $push: {
+                                    trackingHistory: {
+                                        enabled: true,
+                                        sessionReplayEnabled: true,
+                                        timestamp: new Date(),
+                                        request: {
+                                            model: validatedData.model,
+                                            tokens: validatedData.totalTokens || (validatedData.promptTokens + validatedData.completionTokens),
+                                            cost: usage?.cost || 0
+                                        },
+                                        context: {
+                                            files: [],
+                                            workspace: validatedData.metadata
+                                        }
+                                    }
+                                },
+                                $set: {
+                                    trackingEnabled: true,
+                                    sessionReplayEnabled: true,
+                                    trackingEnabledAt: new Date()
+                                }
+                            }
+                        );
+
+                        loggingService.debug('Session replay data recorded from trackUsage', {
+                            component: 'UsageController',
+                            sessionId,
+                            userId
+                        });
+                    } catch (replayError) {
+                        loggingService.warn('Failed to record session replay data from trackUsage', {
+                            error: replayError instanceof Error ? replayError.message : String(replayError),
+                            userId
+                        });
+                    }
+                });
+            }
+
             loggingService.info('Usage tracked successfully', {
                 requestId,
                 duration,
@@ -325,6 +397,83 @@ export class UsageController {
                 throw new Error('Usage creation returned null');
             }
             console.log('Usage tracked successfully:', usage._id);
+
+            // Handle session replay if user has enabled it (non-blocking)
+            if (req.user?.preferences?.enableSessionReplay) {
+                setImmediate(async () => {
+                    try {
+                        const { sessionReplayService } = await import('../services/sessionReplay.service');
+                        const { Session } = await import('../models/Session');
+                        
+                        // Get or create active session
+                        const sessionId = await sessionReplayService.getOrCreateActiveSession(userId, {
+                            workspaceId: usageData.projectId || usageData.metadata?.workspace?.id,
+                            metadata: usageData.metadata?.workspace
+                        });
+
+                        // Add replay data with full AI interaction
+                        await sessionReplayService.addReplayData({
+                            sessionId,
+                            aiInteraction: {
+                                model: usageData.model,
+                                prompt: usageData.prompt || '',
+                                response: usageData.completion || '',
+                                parameters: {
+                                    ...data.requestMetadata,
+                                    ...usageData.metadata
+                                },
+                                tokens: {
+                                    input: usageData.promptTokens,
+                                    output: usageData.completionTokens
+                                },
+                                cost: usageData.cost
+                            },
+                            captureSystemMetrics: true
+                        });
+
+                        // Update tracking history
+                        await Session.updateOne(
+                            { sessionId },
+                            {
+                                $push: {
+                                    trackingHistory: {
+                                        enabled: true,
+                                        sessionReplayEnabled: true,
+                                        timestamp: new Date(),
+                                        request: {
+                                            model: usageData.model,
+                                            tokens: usageData.totalTokens,
+                                            cost: usageData.cost
+                                        },
+                                        context: {
+                                            files: usageData.metadata?.contextFiles,
+                                            workspace: usageData.metadata?.workspace
+                                        }
+                                    }
+                                },
+                                $set: {
+                                    trackingEnabled: true,
+                                    sessionReplayEnabled: true,
+                                    trackingEnabledAt: new Date()
+                                }
+                            }
+                        );
+
+                        loggingService.debug('Session replay data recorded from SDK tracking', {
+                            component: 'UsageController',
+                            sessionId,
+                            userId,
+                            model: usageData.model
+                        });
+                    } catch (replayError) {
+                        loggingService.warn('Failed to record session replay data from SDK tracking', {
+                            error: replayError instanceof Error ? replayError.message : String(replayError),
+                            userId
+                        });
+                    }
+                });
+            }
+
             res.status(201).json({
                 success: true,
                 message: 'Usage tracked successfully from SDK',

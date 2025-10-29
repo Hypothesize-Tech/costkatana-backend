@@ -1,4 +1,3 @@
-import { Document } from '@langchain/core/documents';
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
 import { loggingService } from './logging.service';
 import * as crypto from 'crypto';
@@ -41,21 +40,21 @@ export class DocumentProcessorService {
     constructor() {
         // Standard text splitter
         this.textSplitter = new RecursiveCharacterTextSplitter({
-            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE || '1000'),
-            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP || '200'),
+            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
+            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
         });
 
         // Code-aware splitter (respects code structure)
         this.codeSplitter = new RecursiveCharacterTextSplitter({
-            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE || '1000'),
-            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP || '200'),
+            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
+            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
             separators: ['\n\nclass ', '\n\nfunction ', '\n\nexport ', '\n\nimport ', '\n\n', '\n', ' ', '']
         });
 
         // Conversation splitter (preserves message boundaries)
         this.conversationSplitter = new RecursiveCharacterTextSplitter({
-            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE || '1000'),
-            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP || '200'),
+            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
+            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
             separators: ['\n\nUser:', '\n\nAssistant:', '\n\n', '\n']
         });
     }
@@ -147,6 +146,7 @@ export class DocumentProcessorService {
                     userId: metadata.userId,
                     projectId: metadata.projectId,
                     conversationId: metadata.conversationId,
+                    documentId: metadata.documentId, 
                     fileName: metadata.fileName,
                     filePath: metadata.filePath,
                     fileSize: metadata.fileSize,
@@ -398,6 +398,293 @@ export class DocumentProcessorService {
     }
 
     /**
+     * Extract text from DOCX buffer
+     */
+    private async extractDocxText(buffer: Buffer): Promise<string> {
+        try {
+            // Try to use mammoth if available
+            try {
+                const mammoth = await import('mammoth');
+                const result = await mammoth.extractRawText({ buffer });
+                return result.value;
+            } catch (mammothError) {
+                loggingService.warn('Mammoth not available, trying alternative extraction', {
+                    component: 'DocumentProcessorService',
+                    operation: 'extractDocxText',
+                    error: mammothError instanceof Error ? mammothError.message : String(mammothError)
+                });
+            }
+
+            // Fallback: Try manual ZIP extraction
+            try {
+                const AdmZip = await import('adm-zip');
+                const zip = new AdmZip.default(buffer);
+                const zipEntries = zip.getEntries();
+                
+                // Find document.xml file in the DOCX
+                const documentXml = zipEntries.find(entry => entry.entryName === 'word/document.xml');
+                if (documentXml) {
+                    const xmlContent = documentXml.getData().toString('utf8');
+                    // Extract text from XML (simple regex-based extraction)
+                    const textMatches = xmlContent.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
+                    if (textMatches) {
+                        return textMatches
+                            .map(match => match.replace(/<w:t[^>]*>([^<]+)<\/w:t>/, '$1'))
+                            .join(' ');
+                    }
+                }
+            } catch (zipError) {
+                loggingService.warn('ZIP extraction failed', {
+                    component: 'DocumentProcessorService',
+                    operation: 'extractDocxText',
+                    error: zipError instanceof Error ? zipError.message : String(zipError)
+                });
+            }
+
+            throw new Error('Failed to extract text from DOCX file. Please install mammoth: npm install mammoth');
+        } catch (error) {
+            loggingService.error('DOCX text extraction failed', {
+                component: 'DocumentProcessorService',
+                operation: 'extractDocxText',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Extract text from PDF buffer
+     */
+    private async extractPdfText(buffer: Buffer): Promise<string> {
+        try {
+            // Try to use pdf-parse if available
+            try {
+                const pdfParse = await import('pdf-parse');
+                const data = await pdfParse.default(buffer);
+                return data.text;
+            } catch (pdfError) {
+                loggingService.error('PDF parsing failed', {
+                    component: 'DocumentProcessorService',
+                    operation: 'extractPdfText',
+                    error: pdfError instanceof Error ? pdfError.message : String(pdfError)
+                });
+                throw new Error('Failed to extract text from PDF file. Please install pdf-parse: npm install pdf-parse');
+            }
+        } catch (error) {
+            loggingService.error('PDF text extraction failed', {
+                component: 'DocumentProcessorService',
+                operation: 'extractPdfText',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Extract text from Excel buffer (xlsx, xls)
+     */
+    private async extractExcelText(buffer: Buffer): Promise<string> {
+        try {
+            const XLSX = await import('xlsx');
+            const workbook = XLSX.read(buffer, { type: 'buffer' });
+            
+            let allText = '';
+            
+            // Iterate through all sheets
+            workbook.SheetNames.forEach((sheetName) => {
+                const sheet = workbook.Sheets[sheetName];
+                
+                // Add sheet name as header
+                allText += `\n\n=== Sheet: ${sheetName} ===\n\n`;
+                
+                // Convert sheet to text (CSV format for better readability)
+                const csvText = XLSX.utils.sheet_to_csv(sheet);
+                allText += csvText;
+            });
+            
+            return allText.trim();
+        } catch (error) {
+            loggingService.error('Excel text extraction failed', {
+                component: 'DocumentProcessorService',
+                operation: 'extractExcelText',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new Error('Failed to extract text from Excel file. Please install xlsx: npm install xlsx');
+        }
+    }
+
+    /**
+     * Extract text from PowerPoint buffer (pptx)
+     */
+    private async extractPptxText(buffer: Buffer): Promise<string> {
+        try {
+            const AdmZip = await import('adm-zip');
+            const zip = new AdmZip.default(buffer);
+            const zipEntries = zip.getEntries();
+            
+            let allText = '';
+            let slideNumber = 0;
+            
+            // Find all slide XML files
+            const slideFiles = zipEntries.filter(entry => 
+                entry.entryName.match(/ppt\/slides\/slide\d+\.xml/)
+            ).sort((a, b) => {
+                const aNum = parseInt(a.entryName.match(/\d+/)?.[0] ?? '0');
+                const bNum = parseInt(b.entryName.match(/\d+/)?.[0] ?? '0');
+                return aNum - bNum;
+            });
+            
+            for (const slideFile of slideFiles) {
+                slideNumber++;
+                const xmlContent = slideFile.getData().toString('utf8');
+                
+                // Extract text from XML (p:txBody elements contain text)
+                const textMatches = xmlContent.match(/<a:t[^>]*>([^<]+)<\/a:t>/g);
+                if (textMatches) {
+                    const slideText = textMatches
+                        .map(match => match.replace(/<a:t[^>]*>([^<]+)<\/a:t>/, '$1'))
+                        .join(' ');
+                    
+                    allText += `\n\n=== Slide ${slideNumber} ===\n${slideText}`;
+                }
+            }
+            
+            return allText.trim() || 'No text content found in presentation';
+        } catch (error) {
+            loggingService.error('PowerPoint text extraction failed', {
+                component: 'DocumentProcessorService',
+                operation: 'extractPptxText',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new Error('Failed to extract text from PowerPoint file');
+        }
+    }
+
+    /**
+     * Extract text from RTF buffer using regex-based extraction
+     */
+    private async extractRtfText(buffer: Buffer): Promise<string> {
+        try {
+            const rtfContent = buffer.toString('utf-8');
+            
+            // RTF text extraction using regex patterns
+            // Remove header/font/color tables
+            let text = rtfContent
+                .replace(/\{\\fonttbl[^}]*\}/g, '')
+                .replace(/\{\\colortbl[^}]*\}/g, '')
+                .replace(/\{\\stylesheet[^}]*\}/g, '')
+                .replace(/\{\\info[^}]*\}/g, '');
+            
+            // Remove RTF control words and symbols
+            text = text
+                .replace(/\\par\b/g, '\n')              // Paragraphs to newlines
+                .replace(/\\tab\b/g, '\t')              // Tabs
+                .replace(/\\line\b/g, '\n')             // Line breaks
+                .replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) => {
+                    // Convert hex characters
+                    return String.fromCharCode(parseInt(hex, 16));
+                })
+                .replace(/\\u(\d+)\?/g, (_, code) => {
+                    // Convert Unicode characters
+                    return String.fromCharCode(parseInt(code));
+                })
+                .replace(/\\[a-z]+(-?\d+)?\s?/gi, '')  // Remove other control words
+                .replace(/[{}]/g, '')                    // Remove braces
+                .replace(/\\/g, '')                      // Remove remaining backslashes
+                .replace(/\n{3,}/g, '\n\n')             // Clean up multiple newlines
+                .trim();
+            
+            // Validate extracted text
+            if (text.length < 10) {
+                throw new Error('Extracted RTF text too short or empty');
+            }
+            
+            loggingService.info('RTF text extracted successfully', {
+                component: 'DocumentProcessorService',
+                operation: 'extractRtfText',
+                originalSize: buffer.length,
+                extractedLength: text.length
+            });
+            
+            return text;
+        } catch (error) {
+            loggingService.error('RTF text extraction failed', {
+                component: 'DocumentProcessorService',
+                operation: 'extractRtfText',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new Error('Failed to extract text from RTF file. The file may be corrupted or use an unsupported RTF version. Please convert to .docx or .txt first.');
+        }
+    }
+
+    /**
+     * Extract text from various file formats
+     */
+    private async extractTextFromBuffer(buffer: Buffer, fileExtension: string): Promise<string> {
+        loggingService.info('Starting text extraction', {
+            component: 'DocumentProcessorService',
+            operation: 'extractTextFromBuffer',
+            fileExtension,
+            bufferSize: buffer.length
+        });
+
+        let content: string;
+
+        switch (fileExtension) {
+            case 'docx':
+                content = await this.extractDocxText(buffer);
+                break;
+
+            case 'pdf':
+                content = await this.extractPdfText(buffer);
+                break;
+
+            case 'xlsx':
+            case 'xls':
+                content = await this.extractExcelText(buffer);
+                break;
+
+            case 'pptx':
+                content = await this.extractPptxText(buffer);
+                break;
+
+            case 'rtf':
+                content = await this.extractRtfText(buffer);
+                break;
+
+            case 'txt':
+            case 'md':
+            case 'markdown':
+            case 'csv':
+            case 'json':
+            case 'xml':
+            case 'html':
+            case 'htm':
+            case 'log':
+                // Plain text files - safe to use UTF-8
+                content = buffer.toString('utf-8');
+                break;
+
+            case 'doc':
+                throw new Error('Legacy .doc format not supported. Please convert to .docx first.');
+
+            case 'ppt':
+                throw new Error('Legacy .ppt format not supported. Please convert to .pptx first.');
+
+            default:
+                // Try UTF-8 as last resort with validation
+                loggingService.warn('Unknown file extension, attempting UTF-8 extraction', {
+                    component: 'DocumentProcessorService',
+                    operation: 'extractTextFromBuffer',
+                    fileExtension
+                });
+                content = buffer.toString('utf-8');
+        } 
+
+        return content;
+    }
+
+    /**
      * Process file buffer (for uploads)
      */
     async processFileBuffer(
@@ -412,9 +699,54 @@ export class DocumentProcessorService {
                 throw new Error(validation.error);
             }
 
-            // Convert buffer to string
-            const content = buffer.toString('utf-8');
             const sourceType = this.detectFileType(fileName);
+            const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
+            
+            loggingService.info('Processing file buffer', {
+                component: 'DocumentProcessorService',
+                operation: 'processFileBuffer',
+                fileName,
+                fileExtension,
+                sourceType,
+                bufferSize: buffer.length
+            });
+
+            // Extract text using centralized method
+            const content = await this.extractTextFromBuffer(buffer, fileExtension);
+
+            // Validate extracted content
+            if (!content || content.trim().length === 0) {
+                throw new Error('No text content could be extracted from the file');
+            }
+
+            if (content.length < 10) {
+                throw new Error(`Extracted content too short (${content.length} characters). File may be corrupted or empty.`);
+            }
+
+            // Check for binary corruption (contains lots of null bytes or non-printable chars)
+            const nullBytes = (content.match(/\u0000/g) || []).length;
+            const nullPercentage = (nullBytes / content.length) * 100;
+            
+            if (nullPercentage > 10) {
+                throw new Error(`File appears corrupted (${nullPercentage.toFixed(1)}% null bytes). Please check the file and try again.`);
+            }
+
+            // Check for readable text (at least 50% printable ASCII/Unicode characters)
+            const printableChars = (content.match(/[\x20-\x7E\u00A0-\uFFFF]/g) || []).length;
+            const printablePercentage = (printableChars / content.length) * 100;
+            
+            if (printablePercentage < 50) {
+                throw new Error(`File appears to contain binary data (only ${printablePercentage.toFixed(1)}% readable text). Please ensure you're uploading a text document.`);
+            }
+
+            loggingService.info('Content extracted and validated successfully', {
+                component: 'DocumentProcessorService',
+                operation: 'processFileBuffer',
+                contentLength: content.length,
+                nullPercentage: nullPercentage.toFixed(2),
+                printablePercentage: printablePercentage.toFixed(2),
+                contentPreview: content.substring(0, 100).replace(/\s+/g, ' ')
+            });
 
             // Determine chunking strategy
             const strategy = this.determineChunkingStrategy(sourceType);
@@ -432,7 +764,8 @@ export class DocumentProcessorService {
                 operation: 'processFileBuffer',
                 fileName,
                 chunksCreated: chunks.length,
-                fileSize: buffer.length
+                fileSize: buffer.length,
+                avgChunkSize: Math.round(content.length / chunks.length)
             });
 
             return chunks;
@@ -441,7 +774,8 @@ export class DocumentProcessorService {
                 component: 'DocumentProcessorService',
                 operation: 'processFileBuffer',
                 fileName,
-                error: error instanceof Error ? error.message : String(error)
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
             });
             throw error;
         }

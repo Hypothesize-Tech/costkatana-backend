@@ -7,7 +7,7 @@ import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
 export class KnowledgeBaseTool extends Tool {
     name = "knowledge_base_search";
-    description = `Search the comprehensive AI Cost Optimizer knowledge base for detailed information about:
+    description = `Search the comprehensive CostKatana knowledge base for detailed information about:
     
     CORE CAPABILITIES:
     - AI usage optimization strategies (not just prompts - complete usage patterns)
@@ -106,7 +106,7 @@ export class KnowledgeBaseTool extends Tool {
                     component: 'knowledgeBaseTool',
                     query: query
                 });
-                return `No relevant information found in the AI Cost Optimizer knowledge base for: "${query}"
+                return `No relevant information found in the CostKatana knowledge base for: "${query}"
 
 Suggestions:
 - Try rephrasing your question
@@ -196,7 +196,7 @@ Suggestions:
                 duration: duration
             });
             
-            return `❌ Error searching AI Cost Optimizer knowledge base: ${error instanceof Error ? error.message : 'Unknown error'}
+            return `❌ Error searching CostKatana knowledge base: ${error instanceof Error ? error.message : 'Unknown error'}
 
 Please try:
 - Simplifying your search query
@@ -597,7 +597,7 @@ Answer:`;
                 component: 'knowledgeBaseTool',
                 query: query
             });
-            return `No relevant information found in the AI Cost Optimizer knowledge base for: "${query}"
+            return `No relevant information found in the CostKatana knowledge base for: "${query}"
 
 Suggestions:
 - Try rephrasing your question

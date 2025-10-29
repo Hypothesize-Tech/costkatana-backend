@@ -1,4 +1,4 @@
-# AI Cost Optimizer Knowledge Base
+# CostKatana Knowledge Base
 
 ## Overview
 This knowledge base provides comprehensive information about all features and capabilities of the Costkatana. It serves as a reference for AI agents in the multiagent chat system to understand system architecture, provide accurate assistance, and make informed recommendations.
@@ -21,7 +21,7 @@ This knowledge base provides comprehensive information about all features and ca
 ## System Architecture
 
 ### High-Level Overview
-AI Cost Optimizer is a comprehensive AI usage optimization platform that combines:
+CostKatana is a comprehensive AI usage optimization platform that combines:
 - **Cortex Meta-Language System**: Revolutionary 70-95% token reduction technology
 - **Intelligent Optimization**: AI-powered usage and cost reduction strategies
 - **Impact Analytics**: Transparent justification of optimization effectiveness
@@ -277,4 +277,4 @@ This knowledge base serves as the foundation for AI agents in the multiagent cha
 4. **Troubleshooting**: Use technical details for problem resolution
 5. **Best Practices**: Share documented best practices and recommendations
 
-This knowledge base enables AI agents to provide accurate, helpful, and contextually appropriate assistance to AI Cost Optimizer users, with deep understanding of system capabilities and real-time integration with platform features.
+This knowledge base enables AI agents to provide accurate, helpful, and contextually appropriate assistance to CostKatana users, with deep understanding of system capabilities and real-time integration with platform features.

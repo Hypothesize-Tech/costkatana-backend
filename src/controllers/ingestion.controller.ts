@@ -1,16 +1,9 @@
 import { Response } from 'express';
-import { ingestionService } from '../services/ingestion.service';
+import { ingestionService, UploadProgress } from '../services/ingestion.service';
 import { DocumentModel } from '../models/Document';
 import { loggingService } from '../services/logging.service';
 import { S3Service } from '../services/s3.service';
 
-// Request interface with userId from auth middleware
-export interface AuthenticatedRequest {
-    userId?: string;
-    body: any;
-    params: any;
-    query: any;
-}
 
 // Allowed file types for document upload
 const ALLOWED_FILE_EXTENSIONS = ['.md', '.txt', '.pdf', '.json', '.csv', '.ts', '.js', '.py', '.java', '.cpp', '.go', '.rs', '.rb', '.doc', '.docx'];
@@ -64,7 +57,7 @@ function validateFileUpload(fileName: string, fileSize: number, mimeType: string
 /**
  * Trigger manual ingestion (admin only)
  */
-export const triggerIngestion = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const triggerIngestion = async (req: any, res: Response): Promise<void> => {
     try {
         const { type, userId, since } = req.body as { type?: string; userId?: string; since?: string };
 
@@ -123,7 +116,7 @@ export const triggerIngestion = async (req: AuthenticatedRequest, res: Response)
  * Upload custom document (with S3 storage)
  * Expects base64 encoded file in request body
  */
-export const uploadDocument = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const uploadDocument = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
 
@@ -195,13 +188,28 @@ export const uploadDocument = async (req: AuthenticatedRequest, res: Response): 
             }
         );
 
-        // Process and ingest file
-        const result = await ingestionService.ingestFileBuffer(
+        // Generate document ID and upload ID immediately
+        const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Emit initial progress
+        ingestionService.emitProgress({
+            uploadId,
+            stage: 'preparing',
+            progress: 10,
+            message: 'Preparing document for processing...',
+            totalChunks: 0,
+            processedChunks: 0
+        });
+
+        // Start background processing ASYNCHRONOUSLY (don't await!)
+        ingestionService.ingestFileBuffer(
             fileBuffer,
             fileName,
             userId,
             {
                 projectId,
+                documentId,
                 tags: tags ? tags.split(',').map((t: string) => t.trim()) : [],
                 customMetadata: {
                     description,
@@ -209,29 +217,87 @@ export const uploadDocument = async (req: AuthenticatedRequest, res: Response): 
                     s3Key,
                     s3Url
                 }
-            }
-        );
-
-        if (result.success) {
-            res.json({
-                success: true,
-                message: 'Document uploaded and ingested successfully',
-                data: {
-                    documentId: result.documentId,
+            },
+            uploadId
+        ).then((ingestionResult) => {
+            if (ingestionResult.success) {
+                loggingService.info('Document ingestion completed successfully (background)', {
+                    component: 'IngestionController',
+                    operation: 'uploadDocument',
+                    documentId,
+                    uploadId,
                     fileName,
-                    documentsCreated: result.documentsIngested,
-                    duration: result.duration,
-                    s3Key,
-                    s3Url
-                }
+                    chunksCreated: ingestionResult.documentsIngested,
+                    duration: ingestionResult.duration
+                });
+
+                // Emit final completion event
+                ingestionService.emitProgress({
+                    uploadId,
+                    stage: 'complete',
+                    progress: 100,
+                    message: 'Document processing complete!',
+                    totalChunks: ingestionResult.documentsIngested,
+                    processedChunks: ingestionResult.documentsIngested
+                });
+            } else {
+                loggingService.error('Document ingestion failed (background)', {
+                    component: 'IngestionController',
+                    operation: 'uploadDocument',
+                    documentId,
+                    fileName,
+                    errors: ingestionResult.errors
+                });
+
+                // Emit error event
+                ingestionService.emitProgress({
+                    uploadId,
+                    stage: 'error',
+                    progress: 0,
+                    message: 'Document processing failed',
+                    error: ingestionResult.errors.join(', ')
+                });
+            }
+        }).catch((error) => {
+            loggingService.error('Document ingestion crashed (background)', {
+                component: 'IngestionController',
+                operation: 'uploadDocument',
+                documentId,
+                fileName,
+                error: error instanceof Error ? error.message : String(error)
             });
-        } else {
-            res.status(500).json({
-                success: false,
-                message: 'Document ingestion failed',
-                errors: result.errors
+
+            // Emit error event
+            ingestionService.emitProgress({
+                uploadId,
+                stage: 'error',
+                progress: 0,
+                message: 'Document processing crashed',
+                error: error instanceof Error ? error.message : 'Unknown error'
             });
-        }
+        });
+
+        // Return response IMMEDIATELY with uploadId for SSE tracking
+        loggingService.info('Document upload initiated, processing in background', {
+            component: 'IngestionController',
+            operation: 'uploadDocument',
+            documentId,
+            uploadId,
+            fileName
+        });
+
+        res.json({
+            success: true,
+            message: 'Document uploaded successfully, processing in background',
+            data: {
+                documentId,
+                uploadId,
+                fileName,
+                status: 'processing',
+                s3Key,
+                s3Url
+            }
+        });
     } catch (error) {
         loggingService.error('Document upload failed', {
             component: 'IngestionController',
@@ -251,7 +317,7 @@ export const uploadDocument = async (req: AuthenticatedRequest, res: Response): 
 /**
  * Get user's uploaded documents
  */
-export const getUserDocuments = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getUserDocuments = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
 
@@ -325,7 +391,7 @@ export const getUserDocuments = async (req: AuthenticatedRequest, res: Response)
 /**
  * Get document preview
  */
-export const getDocumentPreview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getDocumentPreview = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
         const { documentId } = req.params as { documentId: string };
@@ -338,29 +404,65 @@ export const getDocumentPreview = async (req: AuthenticatedRequest, res: Respons
             return;
         }
 
-        // Get first few chunks of the document
+        loggingService.info('Fetching document preview', {
+            component: 'IngestionController',
+            operation: 'getDocumentPreview',
+            userId,
+            documentId
+        });
+
+        // Get ALL chunks of the document for complete preview
         const chunks = await DocumentModel.find({
             'metadata.userId': userId,
             'metadata.documentId': documentId,
             status: 'active'
         })
         .sort({ chunkIndex: 1 })
-        .limit(3)
         .select('content metadata chunkIndex totalChunks');
 
         if (!chunks || chunks.length === 0) {
+            // Log what documents exist for this user to debug
+            const userDocsCount = await DocumentModel.countDocuments({
+                'metadata.userId': userId,
+                status: 'active'
+            });
+            
+            const recentDocs = await DocumentModel.find({
+                'metadata.userId': userId,
+                status: 'active'
+            })
+            .select('metadata.documentId metadata.fileName')
+            .limit(5)
+            .sort({ createdAt: -1 });
+
+            loggingService.warn('Document not found for preview', {
+                component: 'IngestionController',
+                operation: 'getDocumentPreview',
+                userId,
+                requestedDocumentId: documentId,
+                totalUserDocs: userDocsCount,
+                recentDocuments: recentDocs.map(d => ({
+                    documentId: d.metadata.documentId,
+                    fileName: d.metadata.fileName
+                }))
+            });
+
             res.status(404).json({
                 success: false,
-                message: 'Document not found'
+                message: 'Document not found. It may still be processing.',
+                debug: {
+                    requestedDocumentId: documentId,
+                    totalDocuments: userDocsCount,
+                    suggestion: 'The document might still be processing. Please wait a moment and try again.'
+                }
             });
             return;
         }
 
-        // Combine first chunks for preview (up to 1000 chars)
+        // Combine ALL chunks to show complete document
         const previewText = chunks
             .map(chunk => chunk.content)
-            .join('\n')
-            .substring(0, 1000);
+            .join('\n\n');
 
         res.json({
             success: true,
@@ -393,7 +495,7 @@ export const getDocumentPreview = async (req: AuthenticatedRequest, res: Respons
 /**
  * Get ingestion job status
  */
-export const getJobStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getJobStatus = async (req: any, res: Response): Promise<void> => {
     try {
         const { jobId } = req.params as { jobId: string };
 
@@ -429,7 +531,7 @@ export const getJobStatus = async (req: AuthenticatedRequest, res: Response): Pr
 /**
  * Get ingestion statistics
  */
-export const getStats = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getStats = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
 
@@ -457,7 +559,7 @@ export const getStats = async (req: AuthenticatedRequest, res: Response): Promis
 /**
  * List user's uploaded documents
  */
-export const listDocuments = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const listDocuments = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
 
@@ -520,7 +622,7 @@ export const listDocuments = async (req: AuthenticatedRequest, res: Response): P
 /**
  * Delete document
  */
-export const deleteDocument = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const deleteDocument = async (req: any, res: Response): Promise<void> => {
     try {
         const userId = req.userId;
         const { id } = req.params as { id: string };
@@ -566,7 +668,7 @@ export const deleteDocument = async (req: AuthenticatedRequest, res: Response): 
 /**
  * Reindex all documents (admin only)
  */
-export const reindexAll = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const reindexAll = async (req: any, res: Response): Promise<void> => {
     try {
         loggingService.info('Full reindex initiated', {
             component: 'IngestionController',
@@ -617,6 +719,137 @@ export const reindexAll = async (req: AuthenticatedRequest, res: Response): Prom
             message: 'Reindex failed',
             error: error instanceof Error ? error.message : 'Unknown error'
         });
+    }
+};
+
+/**
+ * SSE endpoint for upload progress tracking
+ */
+export const getUploadProgress = async (req: any, res: Response): Promise<void> => {
+    try {
+        const userId = req.userId;
+        const { uploadId } = req.params as { uploadId: string };
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        if (!uploadId) {
+            res.status(400).json({
+                success: false,
+                message: 'uploadId is required'
+            });
+            return;
+        }
+
+        // Set headers for SSE with comprehensive CORS support
+        res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+        
+        // Get origin from request or use default
+        const origin = req.headers.origin || 'http://localhost:3000';
+        
+        // CORS headers for SSE - must use specific origin when credentials are true
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, User-Agent, Accept, Cache-Control, X-Requested-With');
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Cache-Control, X-Accel-Buffering');
+
+        // Send initial connection message
+        res.write(`data: ${JSON.stringify({ uploadId, stage: 'connected', progress: 0, message: 'Connected to progress stream' })}\n\n`);
+
+        // Set up keep-alive heartbeat to prevent timeout
+        const heartbeatInterval = setInterval(() => {
+            res.write(`: heartbeat ${Date.now()}\n\n`);
+        }, 15000); // Send heartbeat every 15 seconds
+
+        // Listen for progress events
+        const progressHandler = (progress: UploadProgress) => {
+            try {
+                res.write(`data: ${JSON.stringify(progress)}\n\n`);
+                
+                // Close connection when complete or error
+                if (progress.stage === 'complete' || progress.stage === 'error') {
+                    // Clear heartbeat interval
+                    clearInterval(heartbeatInterval);
+                    
+                    // Wait a bit before closing to ensure client receives the message
+                    setTimeout(() => {
+                        ingestionService.offProgress(uploadId, progressHandler);
+                        res.end();
+                    }, 500);
+                }
+            } catch (writeError) {
+                loggingService.error('Failed to write SSE progress', {
+                    component: 'IngestionController',
+                    operation: 'getUploadProgress',
+                    uploadId,
+                    error: writeError instanceof Error ? writeError.message : String(writeError)
+                });
+            }
+        };
+
+        ingestionService.onProgress(uploadId, progressHandler);
+
+        // Handle client disconnect
+        req.on('close', () => {
+            clearInterval(heartbeatInterval);
+            ingestionService.offProgress(uploadId, progressHandler);
+            
+            loggingService.info('SSE connection closed for upload progress', {
+                component: 'IngestionController',
+                operation: 'getUploadProgress',
+                uploadId,
+                userId
+            });
+            
+            if (!res.writableEnded) {
+                res.end();
+            }
+        });
+
+        // Handle response errors
+        res.on('error', (error) => {
+            clearInterval(heartbeatInterval);
+            ingestionService.offProgress(uploadId, progressHandler);
+            
+            loggingService.error('SSE response error for upload progress', {
+                component: 'IngestionController',
+                operation: 'getUploadProgress',
+                uploadId,
+                userId,
+                error: error.message
+            });
+        });
+
+        loggingService.info('SSE connection established for upload progress', {
+            component: 'IngestionController',
+            operation: 'getUploadProgress',
+            userId,
+            uploadId
+        });
+
+    } catch (error) {
+        loggingService.error('Upload progress SSE failed', {
+            component: 'IngestionController',
+            operation: 'getUploadProgress',
+            error: error instanceof Error ? error.message : String(error)
+        });
+
+        if (!res.headersSent) {
+            res.status(500).json({
+                success: false,
+                message: 'Failed to establish progress stream',
+                error: error instanceof Error ? error.message : 'Unknown error'
+            });
+        }
     }
 };
 

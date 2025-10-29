@@ -34,7 +34,7 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
     });
 
     // Skip tracing for health checks and static assets
-    if (req.path === '/' || req.path === '/health' || req.path.startsWith('/api/health')) {
+    if (req.path === '/' || req.path === '/health' || req.path.includes('/health')) {
         loggingService.info('Tracing skipped for health check endpoint', {
             component: 'TraceMiddleware',
             operation: 'traceInterceptor',
@@ -42,6 +42,54 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
             step: 'health_check_skipped',
             path: req.path,
             reason: 'health_check_endpoint'
+        });
+        return next();
+    }
+
+    // Skip static files and common bot/hacker requests
+    const staticPaths = [
+        '.env',              // Environment files (hackers/bots)
+        '.aws',              // AWS credentials (hackers/bots)
+        'favicon.ico',       // Browser requests
+        'robots.txt',        // SEO bots
+        'sitemap.xml',       // SEO bots
+        'ads.txt',           // Ad verification
+        'app-ads.txt',       // App ad verification
+        'sellers.json',      // Ad sellers
+        '.well-known',       // Security/cert verification
+        '/wp-',              // WordPress attacks
+        '/wordpress',        // WordPress attacks
+        '/phpmyadmin',       // Database attacks
+        '/admin',            // Admin panel attacks
+        '/vendor/phpunit',   // PHP unit test attacks
+        '/cgi-bin',          // CGI attacks
+        '/sites/all',        // Drupal attacks
+        'eval-stdin.php',    // PHP eval attacks
+        '/database/',        // Database folder attacks
+        '/conf/',            // Config folder attacks
+        '/audio/',           // Random folder probes
+        '/crm/',             // CRM folder probes
+        '/local/',           // Local folder probes
+        '/old/',             // Old folder probes
+        '/new/',             // New folder probes
+        '/library/',         // Library folder probes
+        '/apps/',            // Apps folder probes
+        '/src/',             // Source folder probes
+        '/base/',            // Base folder probes
+        '/core/',            // Core folder probes
+        '/protected/',       // Protected folder probes
+        '/www/',             // WWW folder probes
+        '/production/',      // Production folder probes
+        '/app/config/'       // App config probes
+    ];
+    if (staticPaths.some(path => req.path.includes(path))) {
+        loggingService.info('Tracing skipped for static/bot request', {
+            component: 'TraceMiddleware',
+            operation: 'traceInterceptor',
+            type: 'trace_interceptor',
+            step: 'static_bot_request_skipped',
+            path: req.path,
+            reason: 'static_or_bot_request'
         });
         return next();
     }
@@ -58,6 +106,121 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
         });
         return next();
     }
+
+    // Check if this is an SDK request from CostKatana users (they can trace everything)
+    // vs internal CostKatana backend requests (only trace AI APIs)
+    const isSDKRequest = req.headers['x-costkatana-sdk'] ?? req.headers['x-api-key'];
+    
+    // For internal CostKatana backend requests, only trace AI endpoints
+    if (!isSDKRequest) {
+        // Explicitly block all health check and non-AI monitoring endpoints
+        const blockedPatterns = [
+            '/health',
+            '/cursor/health',
+            '/chatgpt/health', 
+            '/telemetry/health',
+            '/gateway/health',
+            '/cursor/action',  // Cursor IDE telemetry
+            '/auth/',
+            '/user/',
+            '/users/',
+            '/settings/',
+            '/preferences/',
+            '/projects/',
+            '/teams/',
+            '/billing/',
+            '/notifications/',
+            '/analytics/',
+            '/metrics/',
+            '/status',
+            '/session-replay/',
+            '/ingestion/',
+            '/backup/',
+            '/email/'
+        ];
+
+        // Check if request matches any blocked pattern
+        const isBlocked = blockedPatterns.some(pattern => req.path.includes(pattern));
+        
+        if (isBlocked) {
+            loggingService.info('Tracing skipped for blocked endpoint', {
+                component: 'TraceMiddleware',
+                operation: 'traceInterceptor',
+                type: 'trace_interceptor',
+                step: 'blocked_endpoint_skipped',
+                path: req.path,
+                reason: 'blocked_non_ai_endpoint'
+            });
+            return next();
+        }
+
+        // Whitelist: only allow specific AI endpoints that make AI model inference calls
+        const allowedAIEndpoints = [
+            // Chat endpoints (AWS Bedrock)
+            '/api/chat/message',
+            '/api/chat/send',
+            
+            // Agent endpoints (AI reasoning)
+            '/api/agent/query',
+            '/api/agent/stream',
+            '/api/agent/feedback',
+            '/api/agent/analyze',
+            
+            // Experimentation endpoints (Model testing with Bedrock)
+            '/api/experimentation/model-comparison',
+            '/api/experimentation/real-time-comparison',
+            '/api/experimentation/real-time-simulation',
+            '/api/experimentation/what-if-scenarios',
+            
+            // Gateway endpoints (AI routing and evaluation)
+            '/api/gateway/models',
+            '/api/gateway/evaluate',
+            '/api/gateway/proxy',
+            '/api/gateway/chat',
+            '/api/gateway/completions',
+            
+            // Onboarding LLM query
+            '/api/onboarding/llm-query',
+            '/api/onboarding/execute-llm',
+            
+            // Prompt Template AI generation
+            '/api/prompt-templates/generate',
+            '/api/prompt-templates/generate-from-intent',
+            
+            // Notebook AI insights
+            '/api/notebooks/ai-insights',
+            
+            // Pricing model evaluation (Bedrock tests)
+            '/api/pricing/evaluate-model',
+            '/api/pricing/test-model-performance',
+            
+            // Intelligence AI analysis
+            '/api/intelligence/analyze',
+            '/api/intelligence/recommendations',
+            
+            // Predictive Intelligence AI
+            '/api/predictive-intelligence/predict',
+            '/api/predictive-intelligence/forecast',
+            
+            // Any generic Bedrock endpoint
+            '/api/bedrock/'
+        ];
+
+        const isAllowedAIEndpoint = allowedAIEndpoints.some(endpoint => req.path.includes(endpoint));
+        
+        if (!isAllowedAIEndpoint) {
+            loggingService.info('Tracing skipped for non-whitelisted endpoint', {
+                component: 'TraceMiddleware',
+                operation: 'traceInterceptor',
+                type: 'trace_interceptor',
+                step: 'non_whitelisted_endpoint_skipped',
+                path: req.path,
+                reason: 'not_in_ai_whitelist'
+            });
+            return next();
+        }
+    }
+    // SDK requests from users: trace everything (AI + non-AI)
 
     loggingService.info('Step 2: Extracting trace session and parent IDs', {
         component: 'TraceMiddleware',
@@ -91,6 +254,9 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
             step: 'start_root_span'
         });
 
+        // Extract userId from authenticated request
+        const userId = (req as any).user?.userId ?? (req as any).user?._id?.toString();
+
         // Start root span for this HTTP request
         const trace = await traceService.startSpan({
             sessionId,
@@ -105,7 +271,8 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
                     'user-agent': req.headers['user-agent'],
                     'content-type': req.headers['content-type']
                 },
-                ip: req.ip
+                ip: req.ip,
+                userId: userId  // Include authenticated userId
             }
         });
 
@@ -194,7 +361,7 @@ export const traceInterceptor = async (req: Request, res: Response, next: NextFu
                             responseSize: JSON.stringify(body).length
                         },
                         error: res.statusCode >= 400 ? {
-                            message: body?.error || body?.message || `HTTP ${res.statusCode}`,
+                            message: body?.error ?? body?.message ?? `HTTP ${res.statusCode}`,
                         } : undefined
                     });
 

@@ -534,6 +534,16 @@ export class VectorStoreService {
                 component: 'VectorStoreService'
             });
             
+            // If no results from vector search, try manual cosine similarity fallback
+            if (results.length === 0) {
+                loggingService.warn('⚠️ Vector search returned 0 results, attempting fallback with cosine similarity', {
+                    component: 'VectorStoreService',
+                    operation: 'searchMongoDB'
+                });
+                
+                return await this.searchMongoDBFallback(queryEmbedding, k, filters);
+            }
+            
             // Convert to LangChain Document format
             const documents = results.map((doc: any) => new Document({
                 pageContent: doc.content,
@@ -553,16 +563,135 @@ export class VectorStoreService {
             
             return documents;
         } catch (error) {
-            loggingService.error('❌ MongoDB vector search failed', {
+            loggingService.error('❌ MongoDB vector search failed, attempting fallback', {
                 component: 'VectorStoreService',
                 operation: 'searchMongoDB',
                 error: error instanceof Error ? error.message : String(error),
                 stack: error instanceof Error ? error.stack : undefined
             });
             
-            // Fallback to empty results instead of throwing
+            // Fallback to manual cosine similarity if vector search fails
+            try {
+                const { DocumentModel } = await import('../models/Document');
+                const queryEmbedding = await this.embeddings.embedQuery(query);
+                return await this.searchMongoDBFallback(queryEmbedding, k, filters);
+            } catch (fallbackError) {
+                loggingService.error('❌ Fallback search also failed', {
+                    component: 'VectorStoreService',
+                    operation: 'searchMongoDBFallback',
+                    error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+                });
+                return [];
+            }
+        }
+    }
+    
+    /**
+     * Fallback search using manual cosine similarity calculation
+     * Used when MongoDB Atlas Vector Search index is not available
+     */
+    private async searchMongoDBFallback(queryEmbedding: number[], k: number, filters: any = {}): Promise<Document[]> {
+        try {
+            loggingService.info('🔧 Using fallback cosine similarity search', {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDBFallback',
+                limit: k,
+                filters
+            });
+
+            const { DocumentModel } = await import('../models/Document');
+            
+            // Build query with filters
+            const query: any = {
+                status: 'active',
+                ...filters
+            };
+            
+            // Get all documents matching filters (limit to reasonable number for performance)
+            const candidateDocs = await DocumentModel.find(query)
+                .select('content embedding metadata')
+                .limit(1000) // Limit candidates to prevent performance issues
+                .lean();
+            
+            if (candidateDocs.length === 0) {
+                loggingService.warn('⚠️ No documents found matching filters', {
+                    component: 'VectorStoreService',
+                    operation: 'searchMongoDBFallback',
+                    filters
+                });
+                return [];
+            }
+            
+            loggingService.info(`📊 Computing cosine similarity for ${candidateDocs.length} candidates`, {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDBFallback'
+            });
+            
+            // Calculate cosine similarity for each document
+            const scoredDocs = candidateDocs
+                .filter((doc: any) => doc.embedding && doc.embedding.length > 0)
+                .map((doc: any) => {
+                    const similarity = this.cosineSimilarity(queryEmbedding, doc.embedding);
+                    return {
+                        doc,
+                        similarity
+                    };
+                })
+                .sort((a, b) => b.similarity - a.similarity) // Sort by similarity descending
+                .slice(0, k); // Take top k results
+            
+            loggingService.info(`✅ Fallback search found ${scoredDocs.length} results`, {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDBFallback',
+                topScore: scoredDocs[0]?.similarity || 0
+            });
+            
+            // Convert to LangChain Document format
+            const documents = scoredDocs.map(({ doc, similarity }) => new Document({
+                pageContent: doc.content,
+                metadata: {
+                    ...doc.metadata,
+                    score: similarity,
+                    _id: doc._id.toString(),
+                    fallbackSearch: true
+                }
+            }));
+            
+            return documents;
+        } catch (error) {
+            loggingService.error('❌ Fallback search failed', {
+                component: 'VectorStoreService',
+                operation: 'searchMongoDBFallback',
+                error: error instanceof Error ? error.message : String(error)
+            });
             return [];
         }
+    }
+    
+    /**
+     * Calculate cosine similarity between two vectors
+     */
+    private cosineSimilarity(vecA: number[], vecB: number[]): number {
+        if (vecA.length !== vecB.length) {
+            throw new Error(`Vector dimensions don't match: ${vecA.length} vs ${vecB.length}`);
+        }
+        
+        let dotProduct = 0;
+        let normA = 0;
+        let normB = 0;
+        
+        for (let i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+        
+        const denominator = Math.sqrt(normA) * Math.sqrt(normB);
+        if (denominator === 0) {
+            return 0;
+        }
+        
+        return dotProduct / denominator;
     }
     
     /**

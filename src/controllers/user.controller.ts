@@ -7,6 +7,7 @@ import { loggingService } from '../services/logging.service';
 import { AppError } from '../middleware/error.middleware';
 import { S3Service } from '../services/s3.service';
 import { AuthService } from '../services/auth.service';
+import { accountClosureService } from '../services/accountClosure.service';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 
@@ -1507,6 +1508,587 @@ export class UserController {
     }
 
     /**
+     * Update user preferences including session replay settings
+     * PATCH /api/user/preferences
+     */
+    static async updatePreferences(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id || req.userId;
+
+        try {
+            loggingService.info('User preferences update initiated', {
+                requestId,
+                userId
+            });
+
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Check circuit breaker
+            if (UserController.isDbCircuitBreakerOpen()) {
+                throw new Error('Service temporarily unavailable');
+            }
+
+            const { emailAlerts, alertThreshold, optimizationSuggestions, enableSessionReplay, sessionReplayTimeout } = req.body;
+
+            const updateData: any = {};
+            if (emailAlerts !== undefined) updateData['preferences.emailAlerts'] = emailAlerts;
+            if (alertThreshold !== undefined) updateData['preferences.alertThreshold'] = alertThreshold;
+            if (optimizationSuggestions !== undefined) updateData['preferences.optimizationSuggestions'] = optimizationSuggestions;
+            if (enableSessionReplay !== undefined) updateData['preferences.enableSessionReplay'] = enableSessionReplay;
+            if (sessionReplayTimeout !== undefined) updateData['preferences.sessionReplayTimeout'] = sessionReplayTimeout;
+
+            const user = await User.findByIdAndUpdate(
+                userId,
+                { $set: updateData },
+                { new: true, runValidators: true }
+            ).select('-password');
+
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User preferences updated successfully', {
+                requestId,
+                duration,
+                userId,
+                updatedFields: Object.keys(updateData)
+            });
+
+            // Log business event
+            loggingService.logBusiness({
+                event: 'user_preferences_updated',
+                category: 'user',
+                value: duration,
+                metadata: {
+                    userId,
+                    enableSessionReplay: user.preferences.enableSessionReplay,
+                    sessionReplayTimeout: user.preferences.sessionReplayTimeout
+                }
+            });
+
+            res.json({
+                success: true,
+                message: 'Preferences updated successfully',
+                data: {
+                    preferences: user.preferences
+                }
+            });
+        } catch (error: any) {
+            UserController.recordDbFailure();
+            const duration = Date.now() - startTime;
+
+            loggingService.error('Update user preferences failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+
+            next(error);
+        }
+    }
+
+    /**
+     * Get user preferences
+     * GET /api/user/preferences
+     */
+    static async getPreferences(req: any, res: Response, next: NextFunction): Promise<Response | void> {
+        const startTime = Date.now();
+        const requestId = req.headers['x-request-id'] as string;
+        const userId = req.user?.id || req.userId;
+
+        try {
+            loggingService.info('User preferences retrieval initiated', {
+                requestId,
+                userId
+            });
+
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            const user = await User.findById(userId).select('preferences');
+
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found'
+                });
+            }
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('User preferences retrieved successfully', {
+                requestId,
+                duration,
+                userId
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    preferences: user.preferences
+                }
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+
+            loggingService.error('Get user preferences failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+                stack: error.stack,
+                duration
+            });
+
+            next(error);
+        }
+    }
+
+    /**
+     * Get all user emails (primary + secondary)
+     * GET /api/user/emails
+     */
+    static async getEmails(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const user = await User.findById(userId).select('email emailVerified otherEmails');
+            
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Format response with primary and secondary emails
+            const emails = [
+                {
+                    email: user.email,
+                    isPrimary: true,
+                    verified: user.emailVerified,
+                    addedAt: user.createdAt,
+                },
+                ...(user.otherEmails || []).map((otherEmail: any) => ({
+                    email: otherEmail.email,
+                    isPrimary: false,
+                    verified: otherEmail.verified,
+                    addedAt: otherEmail.addedAt,
+                })),
+            ];
+
+            res.json({
+                success: true,
+                data: { emails },
+            });
+        } catch (error: any) {
+            loggingService.error('Get emails failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Add secondary email
+     * POST /api/user/emails/secondary
+     */
+    static async addSecondaryEmail(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { email } = req.body;
+            
+            const user: any = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Check if already at max limit (2 secondary emails)
+            if (user.otherEmails && user.otherEmails.length >= 2) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Maximum number of emails reached (3 total)',
+                });
+                return;
+            }
+
+            // Check if email already exists as primary
+            if (user.email.toLowerCase() === email.toLowerCase()) {
+                res.status(400).json({
+                    success: false,
+                    message: 'This email is already your primary email',
+                });
+                return;
+            }
+
+            // Check if email already exists in otherEmails
+            if (user.otherEmails && user.otherEmails.some((e: any) => e.email.toLowerCase() === email.toLowerCase())) {
+                res.status(400).json({
+                    success: false,
+                    message: 'This email is already added to your account',
+                });
+                return;
+            }
+
+            // Check if email exists for another user (primary or secondary)
+            const existingUser = await User.findOne({
+                $or: [
+                    { email: email.toLowerCase() },
+                    { 'otherEmails.email': email.toLowerCase() }
+                ]
+            });
+
+            if (existingUser) {
+                res.status(400).json({
+                    success: false,
+                    message: 'This email is already associated with another account',
+                });
+                return;
+            }
+
+            // Generate verification token
+            const { generateToken } = await import('../utils/helpers');
+            const verificationToken = generateToken();
+
+            // Add to otherEmails array
+            if (!user.otherEmails) {
+                user.otherEmails = [];
+            }
+
+            user.otherEmails.push({
+                email: email.toLowerCase(),
+                verified: false,
+                verificationToken,
+                addedAt: new Date(),
+            });
+
+            await user.save();
+
+            // Send verification email
+            const { EmailService } = await import('../services/email.service');
+            const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+            await EmailService.sendSecondaryEmailVerification(email, verificationUrl, user.name);
+
+            loggingService.logBusiness({
+                event: 'secondary_email_added',
+                category: 'user_management',
+                metadata: {
+                    userId,
+                    email,
+                }
+            });
+
+            res.status(201).json({
+                success: true,
+                message: 'Verification email sent to the address',
+                data: {
+                    email,
+                    verified: false,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Add secondary email failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Remove secondary email
+     * DELETE /api/user/emails/secondary/:email
+     */
+    static async removeSecondaryEmail(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { email } = req.params;
+
+            const user: any = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Check if trying to remove primary email
+            if (user.email.toLowerCase() === email.toLowerCase()) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Cannot remove primary email. Set another email as primary first.',
+                });
+                return;
+            }
+
+            // Find and remove the email from otherEmails
+            const initialLength = user.otherEmails?.length || 0;
+            user.otherEmails = (user.otherEmails || []).filter(
+                (e: any) => e.email.toLowerCase() !== email.toLowerCase()
+            );
+
+            if (user.otherEmails.length === initialLength) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Email not found in your account',
+                });
+                return;
+            }
+
+            await user.save();
+
+            loggingService.logBusiness({
+                event: 'secondary_email_removed',
+                category: 'user_management',
+                metadata: {
+                    userId,
+                    email,
+                }
+            });
+
+            res.json({
+                success: true,
+                message: 'Email removed successfully',
+            });
+        } catch (error: any) {
+            loggingService.error('Remove secondary email failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Set primary email (swap primary with verified secondary)
+     * PUT /api/user/emails/primary
+     */
+    static async setPrimaryEmail(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { email } = req.body;
+
+            const user: any = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Check if already primary
+            if (user.email.toLowerCase() === email.toLowerCase()) {
+                res.status(400).json({
+                    success: false,
+                    message: 'This email is already your primary email',
+                });
+                return;
+            }
+
+            // Find the email in otherEmails
+            const secondaryEmail = user.otherEmails?.find(
+                (e: any) => e.email.toLowerCase() === email.toLowerCase()
+            );
+
+            if (!secondaryEmail) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Email not found in your account',
+                });
+                return;
+            }
+
+            // Check if verified
+            if (!secondaryEmail.verified) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Email must be verified before setting as primary',
+                });
+                return;
+            }
+
+            // Swap: Move current primary to otherEmails, new email becomes primary
+            const currentPrimaryEmail = user.email;
+            const currentPrimaryVerified = user.emailVerified;
+
+            // Remove the new primary from otherEmails
+            user.otherEmails = (user.otherEmails || []).filter(
+                (e: any) => e.email.toLowerCase() !== email.toLowerCase()
+            );
+
+            // Add old primary to otherEmails
+            user.otherEmails.push({
+                email: currentPrimaryEmail,
+                verified: currentPrimaryVerified,
+                verificationToken: user.verificationToken,
+                addedAt: new Date(),
+            });
+
+            // Set new primary
+            user.email = email.toLowerCase();
+            user.emailVerified = true; // It was verified as secondary
+            user.verificationToken = undefined;
+
+            await user.save();
+
+            loggingService.logBusiness({
+                event: 'primary_email_changed',
+                category: 'user_management',
+                metadata: {
+                    userId,
+                    oldPrimary: currentPrimaryEmail,
+                    newPrimary: email,
+                }
+            });
+
+            res.json({
+                success: true,
+                message: 'Primary email updated successfully',
+                data: {
+                    primaryEmail: user.email,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Set primary email failed', {
+                requestId,
+                userId,
+                error: error.message || 'Unknown error',
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Resend verification email
+     * POST /api/user/emails/:email/resend-verification
+     */
+    static async resendVerification(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { email } = req.params;
+
+            const user: any = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            const { generateToken } = await import('../utils/helpers');
+            const { EmailService } = await import('../services/email.service');
+            const verificationToken = generateToken();
+            const verificationUrl = `${process.env.FRONTEND_URL}/verify-email/${verificationToken}`;
+
+            // Check if it's the primary email
+            if (user.email.toLowerCase() === email.toLowerCase()) {
+                if (user.emailVerified) {
+                    res.status(400).json({
+                        success: false,
+                        message: 'This email is already verified',
+                    });
+                    return;
+                }
+
+                user.verificationToken = verificationToken;
+                await user.save();
+                await EmailService.sendVerificationEmail(user, verificationUrl);
+
+                res.json({
+                    success: true,
+                    message: 'Verification email sent',
+                });
+                return;
+            }
+
+            // Check if it's a secondary email
+            const secondaryEmail = user.otherEmails?.find(
+                (e: any) => e.email.toLowerCase() === email.toLowerCase()
+            );
+
+            if (!secondaryEmail) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Email not found in your account',
+                });
+                return;
+            }
+
+            if (secondaryEmail.verified) {
+                res.status(400).json({
+                    success: false,
+                    message: 'This email is already verified',
+                });
+                return;
+            }
+
+            // Update verification token for secondary email
+            secondaryEmail.verificationToken = verificationToken;
+            await user.save();
+            await EmailService.sendSecondaryEmailVerification(email, verificationUrl, user.name);
+
+            loggingService.logBusiness({
+                event: 'verification_email_resent',
+                category: 'user_management',
+                metadata: {
+                    userId,
+                    email,
+                }
+            });
+
+            res.json({
+                success: true,
+                message: 'Verification email sent',
+            });
+        } catch (error: any) {
+            loggingService.error('Resend verification failed', {
+                requestId,
+                userId,
+                email: req.params.email,
+                error: error.message || 'Unknown error',
+            });
+            next(error);
+        }
+    }
+
+    /**
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {
@@ -1527,5 +2109,133 @@ export class UserController {
         
         // Clear ObjectId cache
         this.objectIdCache.clear();
+    }
+
+    /**
+     * Initiate account closure
+     * POST /api/user/account/closure/initiate
+     */
+    static async initiateAccountClosure(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { password, reason } = req.body;
+            const userId = req.userId;
+
+            loggingService.info('Initiating account closure', {
+                userId,
+                hasReason: !!reason,
+            });
+
+            const result = await accountClosureService.initiateAccountClosure(userId, password, reason);
+
+            res.json({
+                success: true,
+                message: 'Account closure initiated. Please check your email to confirm.',
+                data: result,
+            });
+        } catch (error: any) {
+            loggingService.error('Error initiating account closure', {
+                error: error.message,
+                userId: req.userId,
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Confirm account closure via email token
+     * POST /api/user/account/closure/confirm/:token
+     */
+    static async confirmAccountClosure(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const { token } = req.params;
+
+            loggingService.info('Confirming account closure via email', { token: token.substring(0, 10) + '...' });
+
+            const result = await accountClosureService.confirmClosureViaEmail(token);
+
+            res.json({
+                success: true,
+                message: 'Account closure confirmed. Cooldown period started.',
+                data: result,
+            });
+        } catch (error: any) {
+            loggingService.error('Error confirming account closure', {
+                error: error.message,
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Cancel account closure
+     * POST /api/user/account/closure/cancel
+     */
+    static async cancelAccountClosure(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.userId;
+
+            loggingService.info('Cancelling account closure', { userId });
+
+            await accountClosureService.cancelAccountClosure(userId);
+
+            res.json({
+                success: true,
+                message: 'Account closure cancelled successfully.',
+            });
+        } catch (error: any) {
+            loggingService.error('Error cancelling account closure', {
+                error: error.message,
+                userId: req.userId,
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get account closure status
+     * GET /api/user/account/closure/status
+     */
+    static async getAccountClosureStatus(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.userId;
+
+            const status = await accountClosureService.getAccountClosureStatus(userId);
+
+            res.json({
+                success: true,
+                data: status,
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting account closure status', {
+                error: error.message,
+                userId: req.userId,
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Reactivate account during grace period
+     * POST /api/user/account/reactivate
+     */
+    static async reactivateAccount(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.userId;
+
+            loggingService.info('Reactivating account', { userId });
+
+            await accountClosureService.reactivateAccount(userId);
+
+            res.json({
+                success: true,
+                message: 'Account reactivated successfully. Welcome back!',
+            });
+        } catch (error: any) {
+            loggingService.error('Error reactivating account', {
+                error: error.message,
+                userId: req.userId,
+            });
+            next(error);
+        }
     }
 }

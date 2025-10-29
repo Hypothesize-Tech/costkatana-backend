@@ -19,6 +19,12 @@ const ListSessionsSchema = z.object({
         const date = new Date(val);
         return !isNaN(date.getTime());
     }, { message: "Invalid date format" }),
+    status: z.enum(['active', 'completed', 'error']).optional(),
+    source: z.enum(['telemetry', 'manual', 'unified', 'in-app', 'integration']).optional(),
+    minCost: z.coerce.number().min(0).optional(),
+    maxCost: z.coerce.number().min(0).optional(),
+    minSpans: z.coerce.number().int().min(0).optional(),
+    maxSpans: z.coerce.number().int().min(0).optional(),
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().max(100).optional()
 });
@@ -109,8 +115,12 @@ class TraceController {
                 });
             }
 
+            // Override userId with authenticated user's ID
+            const authenticatedUserId = (req as any).user?.userId || (req as any).user?._id?.toString();
+            
             const filters = {
                 ...validation.data,
+                userId: authenticatedUserId, // Force filter by authenticated user
                 from: validation.data.from ? new Date(validation.data.from) : undefined,
                 to: validation.data.to ? new Date(validation.data.to) : undefined
             };
@@ -548,16 +558,23 @@ class TraceController {
      * Get sessions summary
      * GET /api/v1/sessions/summary
      */
-    async getSessionsSummary(req: Request, res: Response): Promise<Response> {
+    async getSessionsSummary(req: any, res: Response): Promise<Response> {
         const startTime = Date.now();
         const requestId = req.headers['x-request-id'] as string;
-        const { userId } = req.query;
-        const userIdStr = userId as string;
+        
+        // Always use authenticated user ID from JWT token, not query params
+        const authenticatedUserId = (req.user as any)?.id;
+        if (!authenticatedUserId) {
+            return res.status(401).json({
+                success: false,
+                error: 'User not authenticated'
+            });
+        }
 
         try {
             loggingService.info('Sessions summary retrieval initiated', {
                 requestId,
-                userId: userIdStr
+                userId: authenticatedUserId
             });
             
             // Check circuit breaker before proceeding
@@ -570,7 +587,7 @@ class TraceController {
                 setTimeout(() => reject(new Error('Summary calculation timeout')), TraceController.SUMMARY_TIMEOUT);
             });
 
-            const summaryPromise = traceService.getSessionsSummary(userIdStr);
+            const summaryPromise = traceService.getSessionsSummary(authenticatedUserId);
             const summary = await Promise.race([summaryPromise, timeoutPromise]);
             const duration = Date.now() - startTime;
             
@@ -587,7 +604,7 @@ class TraceController {
                     category: 'trace',
                     value: duration,
                     metadata: {
-                        userId: userIdStr,
+                        userId: authenticatedUserId,
                         totalSessions: summary.totalSessions,
                         activeSessions: summary.activeSessions,
                         completedSessions: summary.completedSessions,
@@ -609,7 +626,7 @@ class TraceController {
             
             loggingService.error('Sessions summary retrieval failed', {
                 requestId,
-                userId: userIdStr,
+                userId: authenticatedUserId,
                 error: error.message || 'Unknown error',
                 stack: error.stack,
                 duration

@@ -3,6 +3,7 @@ import { Session, ISession } from '../models/Session';
 import { Trace, ITrace } from '../models/Trace';
 import { Message, IMessage } from '../models/Message';
 import { loggingService } from './logging.service';
+import { sessionReplayService } from './sessionReplay.service';
 
 export interface StartSpanInput {
     sessionId?: string;
@@ -111,31 +112,16 @@ class TraceService {
     async startSpan(input: StartSpanInput): Promise<ITrace> {
         try {
             const traceId = uuidv4();
-            const sessionId = input.sessionId || uuidv4();
+            const sessionId = input.sessionId ?? uuidv4();
             
-            // Ensure session exists
-            let session = await Session.findOne({ sessionId });
-            if (!session) {
-                session = await Session.create({
-                    sessionId,
-                    startedAt: new Date(),
-                    status: 'active',
-                    metadata: this.redactSensitive(input.metadata),
-                    summary: {
-                        totalSpans: 0,
-                        totalTokens: { input: 0, output: 0 }
-                    }
-                });
-            }
+            // Check if session exists (but don't create it - only AI interactions should create sessions)
+            const [session, parentTrace] = await Promise.all([
+                Session.findOne({ sessionId }),
+                input.parentId ? Trace.findOne({ traceId: input.parentId }, { depth: 1 }) : null
+            ]);
             
-            // Calculate depth based on parent (optimized with projection)
-            let depth = 0;
-            if (input.parentId) {
-                const parent = await Trace.findOne({ traceId: input.parentId }, { depth: 1 });
-                if (parent) {
-                    depth = parent.depth + 1;
-                }
-            }
+            // Calculate depth based on parent
+            const depth = parentTrace ? parentTrace.depth + 1 : 0;
             
             // Create trace
             const trace = await Trace.create({
@@ -143,18 +129,20 @@ class TraceService {
                 sessionId,
                 parentId: input.parentId,
                 name: input.name,
-                type: input.type || 'custom',
+                type: input.type ?? 'custom',
                 startedAt: new Date(),
                 status: 'ok',
                 depth,
                 metadata: this.redactSensitive(input.metadata)
             });
             
-            // Increment span count
-            await Session.updateOne(
-                { sessionId },
-                { $inc: { 'summary.totalSpans': 1 } }
-            );
+            // Only update session span count if session exists (AI-created sessions only)
+            if (session) {
+                await Session.updateOne(
+                    { sessionId },
+                    { $inc: { 'summary.totalSpans': 1 } }
+                );
+            }
             
             return trace;
         } catch (error) {
@@ -320,6 +308,12 @@ class TraceService {
         label?: string;
         from?: Date;
         to?: Date;
+        status?: string;
+        source?: string;
+        minCost?: number;
+        maxCost?: number;
+        minSpans?: number;
+        maxSpans?: number;
         page?: number;
         limit?: number;
     }): Promise<{
@@ -333,10 +327,27 @@ class TraceService {
             
             if (filters.userId) query.userId = filters.userId;
             if (filters.label) query.label = new RegExp(filters.label, 'i');
+            if (filters.status) query.status = filters.status;
+            if (filters.source) query.source = filters.source;
+            
             if (filters.from || filters.to) {
                 query.startedAt = {};
                 if (filters.from) query.startedAt.$gte = filters.from;
                 if (filters.to) query.startedAt.$lte = filters.to;
+            }
+            
+            // Cost range filter
+            if (filters.minCost !== undefined || filters.maxCost !== undefined) {
+                query['summary.totalCost'] = {};
+                if (filters.minCost !== undefined) query['summary.totalCost'].$gte = filters.minCost;
+                if (filters.maxCost !== undefined) query['summary.totalCost'].$lte = filters.maxCost;
+            }
+            
+            // Spans range filter
+            if (filters.minSpans !== undefined || filters.maxSpans !== undefined) {
+                query['summary.totalSpans'] = {};
+                if (filters.minSpans !== undefined) query['summary.totalSpans'].$gte = filters.minSpans;
+                if (filters.maxSpans !== undefined) query['summary.totalSpans'].$lte = filters.maxSpans;
             }
             
             const page = filters.page || 1;

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { User } from '../models/User';
 import { emailTransporter, EMAIL_CONFIG } from '../config/email';
 import { loggingService } from './logging.service';
+import { BackupCodesService } from './backupCodes.service';
 
 export interface MFASetupResult {
     secret: string;
@@ -41,21 +42,24 @@ export class MFAService {
 
             // Generate secret and QR code in parallel
             const secret = speakeasy.generateSecret({
-                name: `AI Cost Optimizer (${userEmail})`,
-                issuer: 'AI Cost Optimizer',
+                name: `CostKatana (${userEmail})`,
+                issuer: 'CostKatana',
                 length: 32,
             });
 
-            const [qrCodeUrl, backupCodes] = await Promise.all([
+            // Generate backup codes using new service (8 codes, 10 characters each)
+            const plainBackupCodes = BackupCodesService.generateBackupCodes();
+            
+            const [qrCodeUrl, hashedBackupCodes] = await Promise.all([
                 qrcode.toDataURL(secret.otpauth_url!),
-                Promise.resolve(this.generateBackupCodes())
+                BackupCodesService.hashBackupCodes(plainBackupCodes)
             ]);
 
             // Atomic update using findByIdAndUpdate
             await User.findByIdAndUpdate(userId, {
                 $set: {
                     'mfa.totp.secret': secret.base32,
-                    'mfa.totp.backupCodes': backupCodes
+                    'mfa.totp.backupCodes': hashedBackupCodes
                 }
             });
 
@@ -64,7 +68,7 @@ export class MFAService {
             return {
                 secret: secret.base32!,
                 qrCodeUrl,
-                backupCodes,
+                backupCodes: plainBackupCodes, // Return plain codes for one-time display
             };
         } catch (error) {
             loggingService.error('Error setting up TOTP:', { error: error instanceof Error ? error.message : String(error) });
@@ -517,7 +521,7 @@ export class MFAService {
                 await transporter.sendMail({
                     from: EMAIL_CONFIG.from,
                     to: userEmail,
-                    subject: 'Your AI Cost Optimizer Security Code',
+                    subject: 'Your CostKatana Security Code',
                     html: `
                         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
                             <h2 style="color: #333;">Security Verification Code</h2>
@@ -528,7 +532,7 @@ export class MFAService {
                             <p>This code will expire in 10 minutes.</p>
                             <p>If you didn't request this code, please ignore this email or contact support if you have concerns.</p>
                             <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-                            <p style="color: #666; font-size: 12px;">AI Cost Optimizer Security Team</p>
+                            <p style="color: #666; font-size: 12px;">CostKatana Security Team</p>
                         </div>
                     `,
                 });

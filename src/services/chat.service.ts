@@ -1,6 +1,7 @@
 import { BedrockService } from './tracedBedrock.service';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { Conversation, IConversation, ChatMessage } from '../models';
+import { DocumentModel } from '../models/Document';
 import { Types } from 'mongoose';
 import mongoose from 'mongoose';
 // import { agentService } from './agent.service';
@@ -36,6 +37,12 @@ export interface ChatMessageResponse {
     role: 'user' | 'assistant';
     content: string;
     modelId?: string;
+    attachedDocuments?: Array<{
+        documentId: string;
+        fileName: string;
+        chunksCount: number;
+        fileType?: string;
+    }>;
     timestamp: Date;
     metadata?: {
         temperature?: number;
@@ -936,12 +943,53 @@ export class ChatService {
                         request.message.length
                     );
 
-                    // Save user message
+                    // Fetch attached document metadata if documentIds provided
+                    let attachedDocuments: Array<{
+                        documentId: string;
+                        fileName: string;
+                        chunksCount: number;
+                        fileType?: string;
+                    }> | undefined;
+                    
+                    if (request.documentIds && request.documentIds.length > 0) {
+                        const docs = await DocumentModel.aggregate<{
+                            _id: string;
+                            fileName: string;
+                            fileType?: string;
+                            chunksCount: number;
+                        }>([
+                            {
+                                $match: {
+                                    'metadata.documentId': { $in: request.documentIds },
+                                    'metadata.userId': request.userId,
+                                    status: 'active'
+                                }
+                            },
+                            {
+                                $group: {
+                                    _id: '$metadata.documentId',
+                                    fileName: { $first: '$metadata.fileName' },
+                                    fileType: { $first: '$metadata.fileType' },
+                                    chunksCount: { $sum: 1 }
+                                }
+                            }
+                        ]);
+                        
+                        attachedDocuments = docs.map((doc) => ({
+                            documentId: doc._id,
+                            fileName: doc.fileName || 'Unknown',
+                            chunksCount: doc.chunksCount,
+                            fileType: doc.fileType
+                        }));
+                    }
+
+                    // Save user message with attached documents
                     await ChatMessage.create([{
                         conversationId: conversation!._id,
                         userId: request.userId,
                         role: 'user',
-                        content: request.message
+                        content: request.message,
+                        attachedDocuments: attachedDocuments
                     }], { session });
                 });
             } finally {
@@ -1294,6 +1342,7 @@ export class ChatService {
             role: message.role,
             content: message.content,
             modelId: message.modelId,
+            attachedDocuments: message.attachedDocuments,
             timestamp: message.createdAt,
             metadata: message.metadata
         };
@@ -1639,69 +1688,5 @@ export class ChatService {
         };
 
         return descriptionMap[modelId] || 'Advanced AI model for text generation and chat';
-    }
-
-    /**
-     * Detect if a query needs web scraping using trending patterns
-     */
-    private static detectWebScrapingNeeds(message: string): boolean {
-        const trendingDetector = new TrendingDetectorService();
-        return trendingDetector.quickCheck(message);
-    }
-
-    /**
-     * Detect if a message mentions the knowledge base
-     */
-    private static detectKnowledgeBaseMention(message: string): boolean {
-        const knowledgeBaseMentions = [
-            '@knowledge-base/',
-            '@knowledge-base',
-            'knowledge base',
-            'knowledge-base',
-            'cost katana',
-            'costkatana',
-            'what is cost katana',
-            'what is costkatana',
-            'cost optimization platform',
-            'ai cost optimizer',
-            'ai cost optimization',
-            'cost optimizer platform',
-            'cost optimization system',
-            'npm packages',
-            'npm package',
-            'ai-cost-tracker',
-            'ai-cost-optimizer-cli',
-            'cost-katana',
-            'pypi package',
-            'python package'
-        ];
-        
-        const messageLower = message.toLowerCase();
-        
-        // Special handling for Cost Katana variations to prevent confusion with sword katana
-        const costKatanaPatterns = [
-            /cost\s*katana/i,
-            /costkatana/i,
-            /what\s+is\s+cost\s*katana/i,
-            /what\s+is\s+costkatana/i,
-            /tell\s+me\s+about\s+cost\s*katana/i,
-            /explain\s+cost\s*katana/i,
-            /ai\s+cost\s+optimizer/i,
-            /cost\s+optimization\s+platform/i,
-            /npm\s+packages?/i,
-            /ai-cost-tracker/i,
-            /ai-cost-optimizer-cli/i,
-            /cost-katana/i,
-            /pypi\s+package/i,
-            /python\s+package/i
-        ];
-        
-        // Check for Cost Katana specific patterns first
-        if (costKatanaPatterns.some(pattern => pattern.test(message))) {
-            return true;
-        }
-        
-        // Check for general knowledge base mentions
-        return knowledgeBaseMentions.some(mention => messageLower.includes(mention.toLowerCase()));
     }
 } 

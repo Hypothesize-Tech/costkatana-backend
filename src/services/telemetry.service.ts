@@ -247,6 +247,44 @@ export class TelemetryService {
       const telemetry = new Telemetry(telemetryData);
       await telemetry.save();
       
+      // Check for manual sessions and link them (non-blocking)
+      setImmediate(async () => {
+        try {
+          const { sessionReplayService } = await import('./sessionReplay.service');
+          const { Session } = await import('../models/Session');
+          
+          const searchWindow = 5 * 60 * 1000; // 5 minutes
+          const manualSession = await Session.findOne({
+            userId: telemetryData.user_id,
+            ...(telemetryData.workspace_id && telemetryData.workspace_id !== 'unknown' && { 
+              workspaceId: telemetryData.workspace_id 
+            }),
+            source: 'manual',
+            startedAt: {
+              $gte: new Date((telemetryData.timestamp as Date).getTime() - searchWindow),
+              $lte: new Date((telemetryData.timestamp as Date).getTime() + searchWindow)
+            }
+          }).sort({ startedAt: -1 }).limit(1);
+
+          if (manualSession) {
+            await sessionReplayService.linkWithTelemetry(
+              manualSession.sessionId,
+              spanContext.traceId
+            );
+            loggingService.info('Linked manual session with telemetry', {
+              component: 'TelemetryService',
+              sessionId: manualSession.sessionId,
+              telemetryTraceId: spanContext.traceId
+            });
+          }
+        } catch (linkError) {
+          loggingService.warn('Failed to link session with telemetry', {
+            error: linkError instanceof Error ? linkError.message : String(linkError),
+            telemetryTraceId: spanContext.traceId
+          });
+        }
+      });
+      
       return telemetry;
     } catch (error) {
       loggingService.error('Failed to store telemetry from span:', { error: error instanceof Error ? error.message : String(error) });

@@ -447,8 +447,15 @@ export const startServer = async () => {
                 step: 'rag_initialized'
             });
 
-            // Run startup ingestion (knowledge base only)
-            await ingestionJobService.runStartupIngestion();
+            // Run startup ingestion in background (non-blocking)
+            setImmediate(() => {
+                ingestionJobService.runStartupIngestion().catch(err => {
+                    loggingService.error('Startup ingestion failed (non-critical)', {
+                        component: 'Server',
+                        error: err instanceof Error ? err.message : String(err)
+                    });
+                });
+            });
             
             // Start background scheduler
             ingestionJobService.startScheduler();
@@ -579,7 +586,7 @@ export const startServer = async () => {
             config: telemetryConfig
         });
 
-        // Initialize backup scheduler
+        // Initialize backup scheduler (non-blocking)
         loggingService.info('Step 8: Initializing backup scheduler', {
             component: 'Server',
             operation: 'startServer',
@@ -587,23 +594,26 @@ export const startServer = async () => {
             step: 'init_backup_scheduler'
         });
 
-        try {
-            backupScheduler.start();
-            loggingService.info('✅ Backup scheduler started successfully', {
-                component: 'Server',
-                operation: 'startServer',
-                type: 'server_startup',
-                step: 'backup_scheduler_started'
-            });
-        } catch (error) {
-            loggingService.warn('⚠️ Backup scheduler failed to start', {
-                component: 'Server',
-                operation: 'startServer',
-                type: 'server_startup',
-                step: 'backup_scheduler_failed',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
+        // Run backup scheduler initialization in background to not block server startup
+        setImmediate(() => {
+            try {
+                backupScheduler.start();
+                loggingService.info('✅ Backup scheduler started successfully', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'backup_scheduler_started'
+                });
+            } catch (error) {
+                loggingService.warn('⚠️ Backup scheduler failed to start (non-critical)', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'backup_scheduler_failed',
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        });
 
         loggingService.info('Step 9: Starting HTTP server', {
             component: 'Server',
@@ -613,7 +623,7 @@ export const startServer = async () => {
         });
 
         const server = app.listen(PORT, () => {
-            loggingService.info('🚀 AI Cost Optimizer Backend running successfully', {
+            loggingService.info('🚀 Costkatana Backend running successfully', {
                 component: 'Server',
                 operation: 'startServer',
                 type: 'server_startup',

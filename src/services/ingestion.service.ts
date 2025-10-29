@@ -7,6 +7,7 @@ import { ChatMessage } from '../models/ChatMessage';
 import { ITelemetry, Telemetry } from '../models/Telemetry';
 import * as fs from 'fs';
 import * as path from 'path';
+import { EventEmitter } from 'events';
 
 export interface IngestionResult {
     success: boolean;
@@ -27,10 +28,23 @@ export interface IngestionJob {
     completedAt?: Date;
 }
 
+export interface UploadProgress {
+    uploadId: string;
+    stage: 'preparing' | 'extracting' | 'chunking' | 'processing' | 'embedding' | 'storing' | 'complete' | 'error';
+    progress: number;
+    message: string;
+    currentBatch?: number;
+    totalBatches?: number;
+    totalChunks?: number;
+    processedChunks?: number;
+    error?: string;
+}
+
 export class IngestionService {
     private embeddings: BedrockEmbeddings;
     private initialized = false;
     private activeJobs: Map<string, IngestionJob> = new Map();
+    private progressEmitter: EventEmitter = new EventEmitter();
 
     constructor() {
         this.embeddings = new BedrockEmbeddings({
@@ -42,6 +56,27 @@ export class IngestionService {
             },
             maxRetries: 3,
         });
+    }
+
+    /**
+     * Subscribe to upload progress events
+     */
+    onProgress(uploadId: string, callback: (progress: UploadProgress) => void): void {
+        this.progressEmitter.on(`progress:${uploadId}`, callback);
+    }
+
+    /**
+     * Unsubscribe from upload progress events
+     */
+    offProgress(uploadId: string, callback: (progress: UploadProgress) => void): void {
+        this.progressEmitter.off(`progress:${uploadId}`, callback);
+    }
+
+    /**
+     * Emit progress update
+     */
+    emitProgress(progress: UploadProgress): void {
+        this.progressEmitter.emit(`progress:${progress.uploadId}`, progress);
     }
 
     /**
@@ -77,17 +112,46 @@ export class IngestionService {
     /**
      * Ingest knowledge base documents
      */
-    async ingestKnowledgeBase(): Promise<IngestionResult> {
+    async ingestKnowledgeBase(force: boolean = false): Promise<IngestionResult> {
         const startTime = Date.now();
         const jobId = this.createJob('knowledge-base');
         const errors: string[] = [];
         let documentsIngested = 0;
 
         try {
+            // Quick check: Skip if knowledge base already populated (unless forced)
+            if (!force) {
+                const existingCount = await DocumentModel.countDocuments({
+                    'metadata.source': 'knowledge-base'
+                });
+                
+                if (existingCount > 0) {
+                    loggingService.info('✅ Knowledge base already populated, skipping ingestion', {
+                        component: 'IngestionService',
+                        operation: 'ingestKnowledgeBase',
+                        existingDocuments: existingCount
+                    });
+                    
+                    this.updateJob(jobId, {
+                        status: 'completed',
+                        completedAt: new Date(),
+                        processedItems: 0
+                    });
+                    
+                    return {
+                        success: true,
+                        documentsIngested: 0,
+                        errors: [],
+                        duration: Date.now() - startTime
+                    };
+                }
+            }
+
             loggingService.info('Starting knowledge base ingestion', {
                 component: 'IngestionService',
                 operation: 'ingestKnowledgeBase',
-                jobId
+                jobId,
+                forced: force
             });
 
             // Get knowledge base directory
@@ -434,18 +498,47 @@ export class IngestionService {
     /**
      * Ingest custom document chunks with rate limiting
      */
-    private async ingestChunks(chunks: ProcessedDocument[]): Promise<void> {
-        const BATCH_SIZE = 5; // Process 5 chunks at a time to avoid throttling
-        const DELAY_MS = 1000; // 1 second delay between batches
+    private async ingestChunks(chunks: ProcessedDocument[], uploadId?: string): Promise<void> {
+        const BATCH_SIZE = 10; // Process 10 chunks at a time (increased from 5)
+        const DELAY_MS = 200; // 200ms delay between batches (reduced from 1000ms)
         
         try {
             const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
             let totalInserted = 0;
 
+            // Emit initial processing stage if uploadId is provided
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'processing',
+                    progress: 35,
+                    message: `Starting to process ${chunks.length} chunks in ${totalBatches} batches`,
+                    currentBatch: 0,
+                    totalBatches,
+                    totalChunks: chunks.length,
+                    processedChunks: 0
+                });
+            }
+
             for (let i = 0; i < totalBatches; i++) {
                 const batchStart = i * BATCH_SIZE;
                 const batchEnd = Math.min((i + 1) * BATCH_SIZE, chunks.length);
                 const batchChunks = chunks.slice(batchStart, batchEnd);
+                
+                // Emit batch start progress (40-100% range, embedding phase takes 40-70%)
+                if (uploadId) {
+                    const progressPercentage = 40 + Math.round(((i) / totalBatches) * 30);
+                    this.emitProgress({
+                        uploadId,
+                        stage: 'embedding',
+                        progress: progressPercentage,
+                        message: `Generating embeddings for batch ${i + 1}/${totalBatches}`,
+                        currentBatch: i + 1,
+                        totalBatches,
+                        totalChunks: chunks.length,
+                        processedChunks: totalInserted
+                    });
+                }
 
                 try {
                     // Generate embeddings for this batch with retry logic
@@ -503,6 +596,21 @@ export class IngestionService {
                             inserted: result.length,
                             expectedSize: documents.length
                         });
+                        
+                        // Emit batch completion progress (70-100% range for storing phase)
+                        if (uploadId) {
+                            const progressPercentage = 70 + Math.round(((i + 1) / totalBatches) * 30);
+                            this.emitProgress({
+                                uploadId,
+                                stage: 'storing',
+                                progress: progressPercentage,
+                                message: `Stored batch ${i + 1}/${totalBatches} (${progressPercentage}% complete)`,
+                                currentBatch: i + 1,
+                                totalBatches,
+                                totalChunks: chunks.length,
+                                processedChunks: totalInserted
+                            });
+                        }
 
                         // Log warning if inserted count doesn't match
                         if (result.length !== documents.length) {
@@ -514,15 +622,31 @@ export class IngestionService {
                             });
                         }
                     } catch (insertError: any) {
-                        loggingService.error(`Insert failed for batch ${i + 1}/${totalBatches}`, {
-                            component: 'IngestionService',
-                            operation: 'ingestChunks',
-                            error: insertError.message,
-                            code: insertError.code,
-                            writeErrors: insertError.writeErrors?.length || 0,
-                            sampleError: insertError.writeErrors?.[0]
-                        });
-                        throw insertError;
+                        // Handle duplicate key errors gracefully (code 11000)
+                        if (insertError.code === 11000 || insertError.writeErrors) {
+                            const successfulInserts = documents.length - (insertError.writeErrors?.length || 0);
+                            totalInserted += successfulInserts;
+                            
+                            const duplicates = insertError.writeErrors?.filter((e: any) => e.code === 11000).length || 0;
+                            
+                            loggingService.info(`Batch ${i + 1}/${totalBatches} completed with duplicates skipped`, {
+                                component: 'IngestionService',
+                                operation: 'ingestChunks',
+                                batchSize: batchChunks.length,
+                                inserted: successfulInserts,
+                                duplicates,
+                                expectedSize: documents.length
+                            });
+                        } else {
+                            // For non-duplicate errors, log and continue
+                            loggingService.error(`Insert failed for batch ${i + 1}/${totalBatches}`, {
+                                component: 'IngestionService',
+                                operation: 'ingestChunks',
+                                error: insertError.message,
+                                code: insertError.code,
+                                writeErrors: insertError.writeErrors?.length || 0
+                            });
+                        }
                     }
 
                     // Delay between batches to avoid throttling (except for last batch)
@@ -531,23 +655,47 @@ export class IngestionService {
                     }
 
                 } catch (batchError: any) {
-                    loggingService.error(`Failed to ingest batch ${i + 1}/${totalBatches}`, {
-                        component: 'IngestionService',
-                        operation: 'ingestChunks',
-                        error: batchError instanceof Error ? batchError.message : String(batchError),
-                        batch: i + 1,
-                        totalBatches
-                    });
-                    
-                    // Continue with next batch instead of failing completely
-                    if (batchError.writeErrors) {
-                        loggingService.error('Bulk write errors during insertion', {
+                    // Only log non-duplicate errors
+                    if (batchError.code !== 11000 && !batchError.message?.includes('duplicate key')) {
+                        loggingService.error(`Failed to ingest batch ${i + 1}/${totalBatches}`, {
                             component: 'IngestionService',
-                            errorCount: batchError.writeErrors.length,
-                            firstError: batchError.writeErrors[0]
+                            operation: 'ingestChunks',
+                            error: batchError instanceof Error ? batchError.message : String(batchError),
+                            batch: i + 1,
+                            totalBatches
                         });
+                        
+                        // Emit error progress
+                        if (uploadId) {
+                            this.emitProgress({
+                                uploadId,
+                                stage: 'error',
+                                progress: Math.round(((i + 1) / totalBatches) * 100),
+                                message: `Error processing batch ${i + 1}/${totalBatches}: ${batchError.message || 'Unknown error'}`,
+                                currentBatch: i + 1,
+                                totalBatches,
+                                totalChunks: chunks.length,
+                                processedChunks: totalInserted,
+                                error: batchError.message || 'Unknown error'
+                            });
+                        }
                     }
+                    // Continue with next batch instead of failing completely
                 }
+            }
+
+            // Emit completion progress
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'complete',
+                    progress: 100,
+                    message: `Successfully processed all ${totalBatches} batches (${totalInserted} chunks stored)`,
+                    currentBatch: totalBatches,
+                    totalBatches,
+                    totalChunks: chunks.length,
+                    processedChunks: totalInserted
+                });
             }
 
             loggingService.info('Chunks ingestion completed', {
@@ -575,16 +723,41 @@ export class IngestionService {
         buffer: Buffer,
         fileName: string,
         userId: string,
-        metadata?: Partial<ProcessedDocument['metadata']>
+        metadata?: Partial<ProcessedDocument['metadata']>,
+        uploadId?: string
     ): Promise<IngestionResult & { documentId?: string }> {
         const startTime = Date.now();
 
         try {
-            // Generate unique document ID for this file
-            const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            // Use documentId from metadata if provided, otherwise generate a new one
+            const documentId = metadata?.documentId || `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            
+            // Emit initial progress - document preparation
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'preparing',
+                    progress: 0,
+                    message: 'Preparing document for processing...',
+                    totalChunks: 0,
+                    processedChunks: 0
+                });
+            }
             
             // Get file type from fileName
             const fileExtension = fileName.split('.').pop()?.toLowerCase() || 'unknown';
+            
+            // Emit progress - extracting text
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'extracting',
+                    progress: 10,
+                    message: 'Extracting text from document...',
+                    totalChunks: 0,
+                    processedChunks: 0
+                });
+            }
             
             // Process file buffer with documentId in metadata
             const chunks = await documentProcessorService.processFileBuffer(buffer, fileName, {
@@ -596,8 +769,20 @@ export class IngestionService {
                 ...metadata
             });
 
-            // Ingest chunks
-            await this.ingestChunks(chunks);
+            // Emit progress - text extracted, starting chunking
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'chunking',
+                    progress: 30,
+                    message: `Text extracted successfully. Creating ${chunks.length} chunks...`,
+                    totalChunks: chunks.length,
+                    processedChunks: 0
+                });
+            }
+
+            // Ingest chunks with progress tracking (all progress emitted from ingestChunks)
+            await this.ingestChunks(chunks, uploadId);
 
             const duration = Date.now() - startTime;
 
@@ -620,6 +805,16 @@ export class IngestionService {
             };
         } catch (error) {
             const duration = Date.now() - startTime;
+            
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'error',
+                    progress: 0,
+                    message: 'Upload failed: ' + (error instanceof Error ? error.message : 'Unknown error')
+                });
+            }
+            
             loggingService.error('File buffer ingestion failed', {
                 component: 'IngestionService',
                 operation: 'ingestFileBuffer',
