@@ -314,13 +314,19 @@ export class ProjectService {
 
                 if (!existingAlert) {
                     // Create alert
-                    await Alert.create({
+                    const newAlert = await Alert.create({
                         userId: project.ownerId,
                         title: `Budget Alert: ${project.name}`,
                         message: `Project "${project.name}" has reached ${usagePercentage.toFixed(1)}% of its ${project.budget.period} budget`,
-                        type: 'budget_threshold',
+                        type: 'cost_threshold',
                         severity: usagePercentage >= 90 ? 'critical' : usagePercentage >= 80 ? 'high' : 'medium',
                         actionRequired: usagePercentage >= 90,
+                        data: {
+                            currentValue: project.spending.current,
+                            threshold: project.budget.amount,
+                            percentage: usagePercentage,
+                            period: project.budget.period
+                        },
                         metadata: {
                             projectId: project._id,
                             usagePercentage,
@@ -330,7 +336,18 @@ export class ProjectService {
                         }
                     });
 
-                    // Send email if configured
+                    // Send to integrations (Slack, Discord, etc.)
+                    try {
+                        const { NotificationService } = await import('./notification.service');
+                        await NotificationService.sendAlert(newAlert);
+                    } catch (error: any) {
+                        loggingService.error('Failed to send budget alert to integrations', {
+                            error: error.message,
+                            alertId: newAlert._id
+                        });
+                    }
+
+                    // Legacy email support
                     if (alert.type === 'email' || alert.type === 'both') {
                         const owner = await User.findById(project.ownerId);
                         if (owner) {

@@ -51,6 +51,7 @@ import userTelemetryConfigRoutes from './userTelemetryConfig.routes';
 import sessionReplayRoutes from './sessionReplay.routes';
 import backupCodesRoutes from './backupCodes.routes';
 import teamRoutes from './team.routes';
+import integrationRoutes from './integration.routes';
 
 const router = Router();
 
@@ -117,5 +118,6 @@ router.use('/telemetry-config', userTelemetryConfigRoutes);
 router.use('/session-replay', sessionReplayRoutes);
 router.use('/backup-codes', backupCodesRoutes);
 router.use('/team', teamRoutes);
+router.use('/integrations', integrationRoutes);
 
 export const apiRouter = router;

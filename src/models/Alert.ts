@@ -32,6 +32,17 @@ export interface IAlert {
     actionTakenAt?: Date;
     actionDetails?: string;
     expiresAt?: Date;
+    
+    // Integration delivery tracking
+    deliveryChannels?: string[]; // Integration IDs that should receive this alert
+    deliveryStatus?: Map<string, {
+        status: 'pending' | 'sent' | 'failed' | 'retrying';
+        sentAt?: Date;
+        responseTime?: number;
+        attempts: number;
+        lastError?: string;
+    }>;
+    
     createdAt: Date;
     updatedAt: Date;
 }
@@ -91,6 +102,27 @@ const alertSchema = new Schema<IAlert>({
     actionTakenAt: Date,
     actionDetails: String,
     expiresAt: Date,
+    deliveryChannels: [{
+        type: String
+    }],
+    deliveryStatus: {
+        type: Map,
+        of: {
+            status: {
+                type: String,
+                enum: ['pending', 'sent', 'failed', 'retrying'],
+                default: 'pending'
+            },
+            sentAt: Date,
+            responseTime: Number,
+            attempts: {
+                type: Number,
+                default: 0
+            },
+            lastError: String
+        },
+        default: new Map()
+    }
 }, {
     timestamps: true,
 });

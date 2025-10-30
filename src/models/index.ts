@@ -22,3 +22,5 @@ export { UserMemory, IUserMemory, ConversationMemory, IConversationMemory, UserP
 export { Telemetry, ITelemetry } from './Telemetry';
 export { Notebook, INotebook } from './Notebook';
 export { NotebookExecution, INotebookExecution } from './NotebookExecution';
+export { Integration, IIntegration } from './Integration';
+export type { IntegrationType, IntegrationStatus, AlertType, AlertSeverity, AlertRoutingRule, IntegrationCredentials, DeliveryConfig, IntegrationStats } from './Integration';

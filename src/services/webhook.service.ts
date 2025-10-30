@@ -914,6 +914,162 @@ export class WebhookService {
     }
 
     /**
+     * Detect if webhook URL is a Slack or Discord webhook
+     */
+    static detectWebhookPlatform(url: string): 'slack' | 'discord' | 'generic' {
+        if (url.includes('hooks.slack.com')) {
+            return 'slack';
+        } else if (url.includes('discord.com/api/webhooks') || url.includes('discordapp.com/api/webhooks')) {
+            return 'discord';
+        }
+        return 'generic';
+    }
+
+    /**
+     * Format payload for Slack/Discord webhooks if detected
+     */
+    static async formatPlatformPayload(
+        webhookUrl: string,
+        eventData: WebhookEventData,
+        defaultPayload: string
+    ): Promise<string> {
+        const platform = this.detectWebhookPlatform(webhookUrl);
+
+        if (platform === 'slack') {
+            return this.formatSlackPayload(eventData);
+        } else if (platform === 'discord') {
+            return this.formatDiscordPayload(eventData);
+        }
+
+        return defaultPayload;
+    }
+
+    /**
+     * Format payload for Slack Block Kit
+     */
+    private static formatSlackPayload(eventData: WebhookEventData): string {
+        const severityEmoji: Record<string, string> = {
+            low: '🔵',
+            medium: '🟡',
+            high: '🟠',
+            critical: '🔴'
+        };
+
+        const severity = eventData.data?.severity || 'low';
+        const title = eventData.data?.title || 'Alert';
+        const description = eventData.data?.description || 'No description provided';
+        const emoji = severityEmoji[severity] || '⚪';
+
+        const slackPayload = {
+            text: `${emoji} ${title}`,
+            blocks: [
+                {
+                    type: 'header',
+                    text: {
+                        type: 'plain_text',
+                        text: `${emoji} ${title}`,
+                        emoji: true
+                    }
+                },
+                {
+                    type: 'section',
+                    text: {
+                        type: 'mrkdwn',
+                        text: description
+                    }
+                },
+                {
+                    type: 'section',
+                    fields: [
+                        {
+                            type: 'mrkdwn',
+                            text: `*Type:*\n${eventData.eventType}`
+                        },
+                        {
+                            type: 'mrkdwn',
+                            text: `*Severity:*\n${severity.toUpperCase()}`
+                        },
+                        {
+                            type: 'mrkdwn',
+                            text: `*Time:*\n<!date^${Math.floor(eventData.occurredAt.getTime() / 1000)}^{date_short_pretty} at {time}|${eventData.occurredAt.toISOString()}>`
+                        }
+                    ]
+                },
+                {
+                    type: 'context',
+                    elements: [
+                        {
+                            type: 'mrkdwn',
+                            text: `🤖 Cost Katana Alert System | Event ID: \`${eventData.eventId}\``
+                        }
+                    ]
+                }
+            ]
+        };
+
+        return JSON.stringify(slackPayload);
+    }
+
+    /**
+     * Format payload for Discord Embeds
+     */
+    private static formatDiscordPayload(eventData: WebhookEventData): string {
+        const severityColors: Record<string, number> = {
+            low: 0x36a64f,      // Green
+            medium: 0xffb700,   // Yellow
+            high: 0xff6b00,     // Orange
+            critical: 0xff0000  // Red
+        };
+
+        const severityEmoji: Record<string, string> = {
+            low: '🔵',
+            medium: '🟡',
+            high: '🟠',
+            critical: '🔴'
+        };
+
+        const severity = eventData.data?.severity || 'low';
+        const title = eventData.data?.title || 'Alert';
+        const description = eventData.data?.description || 'No description provided';
+        const color = severityColors[severity] || 0x808080;
+        const emoji = severityEmoji[severity] || '⚪';
+
+        const discordPayload = {
+            content: severity === 'critical' ? '⚠️ **Critical Alert**' : undefined,
+            embeds: [
+                {
+                    title: `${emoji} ${title}`,
+                    description: description,
+                    color: color,
+                    fields: [
+                        {
+                            name: '📋 Type',
+                            value: eventData.eventType,
+                            inline: true
+                        },
+                        {
+                            name: '⚠️ Severity',
+                            value: severity.toUpperCase(),
+                            inline: true
+                        },
+                        {
+                            name: '🕐 Time',
+                            value: `<t:${Math.floor(eventData.occurredAt.getTime() / 1000)}:F>`,
+                            inline: true
+                        }
+                    ],
+                    footer: {
+                        text: `Cost Katana Alert System | Event ID: ${eventData.eventId}`
+                    },
+                    timestamp: eventData.occurredAt.toISOString()
+                }
+            ]
+        };
+
+        return JSON.stringify(discordPayload);
+    }
+
+    /**
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {

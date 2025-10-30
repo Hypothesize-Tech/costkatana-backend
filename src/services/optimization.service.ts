@@ -1877,7 +1877,7 @@ REPLY FORMAT (JSON only):
 
                     // Create alert if significant savings
                     if (improvementPercentage > 30) {
-                        await Alert.create({
+                        const newAlert = await Alert.create({
                             userId: request.userId,
                             type: 'optimization_available',
                             title: 'Significant Optimization Available',
@@ -1886,10 +1886,23 @@ REPLY FORMAT (JSON only):
                             data: {
                                 optimizationId: optimization._id,
                                 savings: costSaved,
+                                potentialSavings: costSaved,
                                 percentage: improvementPercentage,
                                 optimizationType: optimizationType,
+                                recommendations: [`Apply ${optimizationType} optimization to reduce tokens by ${improvementPercentage.toFixed(1)}%`]
                             },
                         });
+
+                        // Send to integrations
+                        try {
+                            const { NotificationService } = await import('./notification.service');
+                            await NotificationService.sendAlert(newAlert);
+                        } catch (error: any) {
+                            loggingService.error('Failed to send optimization alert to integrations', {
+                                error: error.message,
+                                alertId: newAlert._id
+                            });
+                        }
                     }
                 } catch (error) {
                     loggingService.error('Background operation failed:', { 
@@ -2231,7 +2244,7 @@ REPLY FORMAT (JSON only):
             // Create alerts for top opportunities
             if (suggestions.length > 0) {
                 const topOpportunity = suggestions[0];
-                await Alert.create({
+                const newAlert = await Alert.create({
                     userId,
                     type: 'optimization_available',
                     title: 'Optimization Opportunities Found',
@@ -2240,8 +2253,23 @@ REPLY FORMAT (JSON only):
                     data: {
                         opportunitiesCount: suggestions.length,
                         topOpportunity,
+                        potentialSavings: topOpportunity.estimatedSavings,
+                        recommendations: suggestions.slice(0, 3).map((s: any, i: number) => 
+                            `${i + 1}. ${s.prompt?.substring(0, 50)}... - Save ${s.estimatedSavings.toFixed(1)}%`
+                        )
                     },
                 });
+
+                // Send to integrations
+                try {
+                    const { NotificationService } = await import('./notification.service');
+                    await NotificationService.sendAlert(newAlert);
+                } catch (error: any) {
+                    loggingService.error('Failed to send optimization alert to integrations', {
+                        error: error.message,
+                        alertId: newAlert._id
+                    });
+                }
             }
 
             return {

@@ -51,6 +51,11 @@ export interface IUser {
             lastOpened?: Date;
             consecutiveIgnored: number;
         };
+        integrations?: {
+            defaultChannels?: string[]; // Default integration IDs for all alerts
+            alertTypeRouting?: Map<string, string[]>; // Per-alert-type integration routing
+            fallbackToEmail?: boolean;
+        };
     };
     subscription: {
         plan: 'free' | 'plus' | 'pro' | 'enterprise';
@@ -293,6 +298,20 @@ const userSchema = new Schema<IUser>({
             consecutiveIgnored: {
                 type: Number,
                 default: 0
+            }
+        },
+        integrations: {
+            defaultChannels: [{
+                type: String
+            }],
+            alertTypeRouting: {
+                type: Map,
+                of: [String],
+                default: new Map()
+            },
+            fallbackToEmail: {
+                type: Boolean,
+                default: true
             }
         }
     },
