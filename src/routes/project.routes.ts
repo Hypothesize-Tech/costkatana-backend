@@ -148,34 +148,6 @@ router.delete(
     ProjectController.deleteProject
 );
 
-// Add member to project
-router.post(
-    '/:projectId/members',
-    [
-        param('projectId').isMongoId(),
-        body('email').optional().isEmail(),
-        body('memberId').optional().isMongoId(),
-        body('role').isIn(['member', 'admin']).withMessage('Invalid role')
-    ],
-    validateRequest,
-    authenticate,
-    requirePermission('write', 'admin'),
-    ProjectController.addMember
-);
-
-// Remove member from project
-router.delete(
-    '/:projectId/members/:memberId',
-    [
-        param('projectId').isMongoId(),
-        param('memberId').isMongoId()
-    ],
-    validateRequest,
-    authenticate,
-    requirePermission('admin'),
-    ProjectController.removeMember
-);
-
 // Handle approval request (needs to come before /:projectId)
 router.post(
     '/approvals/:requestId',

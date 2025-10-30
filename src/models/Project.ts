@@ -6,11 +6,7 @@ export interface IProject {
     description?: string;
     organizationId?: mongoose.Types.ObjectId;
     ownerId: mongoose.Types.ObjectId;
-    members: Array<{
-        userId: mongoose.Types.ObjectId;
-        role: 'owner' | 'admin' | 'member' | 'viewer';
-        joinedAt: Date;
-    }>;
+    workspaceId: mongoose.Types.ObjectId;
     budget: {
         amount: number;
         period: 'monthly' | 'quarterly' | 'yearly' | 'one-time';
@@ -64,22 +60,11 @@ const projectSchema = new Schema<IProject>({
         ref: 'User',
         required: true
     },
-    members: [{
-        userId: {
-            type: Schema.Types.ObjectId,
-            ref: 'User',
-            required: true
-        },
-        role: {
-            type: String,
-            enum: ['owner', 'admin', 'member', 'viewer'],
-            default: 'member'
-        },
-        joinedAt: {
-            type: Date,
-            default: Date.now
-        }
-    }],
+    workspaceId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Workspace',
+        required: true
+    },
     budget: {
         amount: {
             type: Number,
@@ -153,41 +138,11 @@ const projectSchema = new Schema<IProject>({
 
 // Indexes
 projectSchema.index({ ownerId: 1 });
-projectSchema.index({ 'members.userId': 1 });
+projectSchema.index({ workspaceId: 1 });
 projectSchema.index({ organizationId: 1 });
 projectSchema.index({ isActive: 1 });
 
-// Methods
-projectSchema.methods.isMember = function (userId: string): boolean {
-    const ownerIdString = typeof this.ownerId === 'object' && this.ownerId._id
-        ? this.ownerId._id.toString()
-        : this.ownerId.toString();
-    return this.members.some((member: any) => {
-        const memberIdString = typeof member.userId === 'object' && member.userId._id
-            ? member.userId._id.toString()
-            : member.userId.toString();
-        return memberIdString === userId;
-    }) || ownerIdString === userId;
-};
 
-projectSchema.methods.getMemberRole = function (userId: string): string | null {
-    const ownerIdString = typeof this.ownerId === 'object' && this.ownerId._id
-        ? this.ownerId._id.toString()
-        : this.ownerId.toString();
-    if (ownerIdString === userId) return 'owner';
-    const member = this.members.find((m: any) => {
-        const memberIdString = typeof m.userId === 'object' && m.userId._id
-            ? m.userId._id.toString()
-            : m.userId.toString();
-        return memberIdString === userId;
-    });
-    return member ? member.role : null;
-};
-
-projectSchema.methods.canManage = function (userId: string): boolean {
-    const role = this.getMemberRole(userId);
-    return role === 'owner' || role === 'admin';
-};
 
 projectSchema.methods.getBudgetUsagePercentage = function (): number {
     return this.budget.amount > 0 ? (this.spending.current / this.budget.amount) * 100 : 0;

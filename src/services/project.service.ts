@@ -22,10 +22,6 @@ interface CreateProjectDto {
             recipients?: string[];
         }>;
     };
-    members?: Array<{
-        userId: string;
-        role: 'admin' | 'member' | 'viewer';
-    }>;
     settings?: {
         requireApprovalAbove?: number;
         allowedModels?: string[];
@@ -74,15 +70,21 @@ export class ProjectService {
             budgetAmount: data.budget?.amount,
             budgetPeriod: data.budget?.period,
             alertsCount: data.budget?.alerts?.length,
-            membersCount: data.members?.length,
             settingsProvided: !!data.settings
          } });
 
         try {
+            // Get user's workspace
+            const user = await User.findById(ownerId).select('workspaceId');
+            if (!user || !user.workspaceId) {
+                throw new Error('User must belong to a workspace to create projects');
+            }
+
             loggingService.info('Step 1: Creating project object');
             const projectObj = {
                 ...data,
                 ownerId,
+                workspaceId: user.workspaceId,
                 budget: {
                     ...data.budget,
                     startDate: data.budget.startDate || new Date(),
@@ -93,11 +95,6 @@ export class ProjectService {
                         { threshold: 90, type: 'both' }
                     ]
                 },
-                members: data.members?.map(m => ({
-                    ...m,
-                    userId: new mongoose.Types.ObjectId(m.userId),
-                    joinedAt: new Date()
-                })) || [],
                 settings: {
                     enablePromptLibrary: true,
                     enableCostAllocation: true,
@@ -700,16 +697,20 @@ export class ProjectService {
 
     /**
      * Get user projects with usage statistics
+     * Access is now determined by workspace membership
      */
     static async getUserProjects(userId: string): Promise<IProject[]> {
+        // Get user's workspace
+        const user = await User.findById(userId).select('workspaceId');
+        if (!user || !user.workspaceId) {
+            return []; // User not in a workspace yet
+        }
+
+        // Get all projects in the user's workspace
         const projects = await Project.find({
-            $or: [
-                { ownerId: userId },
-                { 'members.userId': userId }
-            ],
+            workspaceId: user.workspaceId,
             isActive: true
         })
-        .populate('members.userId', 'name email')
         .populate('ownerId', 'name email')
         .sort({ createdAt: -1 });
 
@@ -765,69 +766,6 @@ export class ProjectService {
     }
 
     /**
-     * Add member to project
-     */
-    static async addMember(
-        projectId: string,
-        memberIdOrEmail: string,
-        role: 'admin' | 'member' | 'viewer',
-        addedBy: string
-    ): Promise<void> {
-        const project = await Project.findById(projectId);
-        if (!project) {
-            throw new Error('Project not found');
-        }
-
-        // Check if user can add members
-        const addedByRole = project.ownerId.toString() === addedBy ? 'owner' :
-            project.members.find(m => m.userId.toString() === addedBy)?.role;
-
-        if (addedByRole !== 'owner' && addedByRole !== 'admin') {
-            throw new Error('Unauthorized to add members');
-        }
-
-        // Determine if memberIdOrEmail is an email or user ID
-        let memberId: string;
-        if (memberIdOrEmail.includes('@')) {
-            // It's an email, look up the user
-            const user = await User.findOne({ email: memberIdOrEmail });
-            if (!user) {
-                throw new Error('User not found with this email');
-            }
-            memberId = user._id.toString();
-        } else {
-            // It's a user ID
-            memberId = memberIdOrEmail;
-        }
-
-        // Check if member already exists
-        const existingMember = project.members.find(m => m.userId.toString() === memberId);
-        if (existingMember || project.ownerId.toString() === memberId) {
-            throw new Error('User is already a member');
-        }
-
-        project.members.push({
-            userId: new mongoose.Types.ObjectId(memberId),
-            role,
-            joinedAt: new Date()
-        });
-
-        await project.save();
-
-        // Track activity
-        await ActivityService.trackActivity(addedBy, {
-            type: 'settings_updated',
-            title: 'Added Project Member',
-            description: `Added user to project "${project.name}" as ${role}`,
-            metadata: {
-                projectId: project._id,
-                memberId,
-                role
-            }
-        });
-    }
-
-    /**
      * Update project
      */
     static async updateProject(
@@ -840,19 +778,15 @@ export class ProjectService {
             throw new Error('Project not found');
         }
 
-        // Check permissions
+        // Check permissions using PermissionService
+        const { PermissionService } = await import('./permission.service');
+        const canManage = await PermissionService.hasPermission(userId, project.workspaceId.toString(), 'canManageProjects');
+        
         const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
             ? project.ownerId._id.toString()
             : project.ownerId.toString();
-        const role = ownerIdString === userId ? 'owner' :
-            project.members.find(m => {
-                const memberIdString = typeof m.userId === 'object' && m.userId._id
-                    ? m.userId._id.toString()
-                    : m.userId.toString();
-                return memberIdString === userId;
-            })?.role;
-
-        if (role !== 'owner' && role !== 'admin') {
+        
+        if (ownerIdString !== userId && !canManage) {
             throw new Error('Unauthorized to update project');
         }
 
@@ -872,61 +806,6 @@ export class ProjectService {
         });
 
         return project;
-    }
-
-    /**
-     * Remove member from project
-     */
-    static async removeMember(
-        projectId: string,
-        memberId: string,
-        removedBy: string
-    ): Promise<void> {
-        const project = await Project.findById(projectId);
-        if (!project) {
-            throw new Error('Project not found');
-        }
-
-        // Check permissions
-        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
-            ? project.ownerId._id.toString()
-            : project.ownerId.toString();
-        const removedByRole = ownerIdString === removedBy ? 'owner' :
-            project.members.find(m => {
-                const memberIdString = typeof m.userId === 'object' && m.userId._id
-                    ? m.userId._id.toString()
-                    : m.userId.toString();
-                return memberIdString === removedBy;
-            })?.role;
-
-        if (removedByRole !== 'owner' && removedByRole !== 'admin') {
-            throw new Error('Unauthorized to remove members');
-        }
-
-        // Cannot remove owner
-        if (ownerIdString === memberId) {
-            throw new Error('Cannot remove project owner');
-        }
-
-        project.members = project.members.filter(m => {
-            const memberIdString = typeof m.userId === 'object' && m.userId._id
-                ? m.userId._id.toString()
-                : m.userId.toString();
-            return memberIdString !== memberId;
-        });
-
-        await project.save();
-
-        // Track activity
-        await ActivityService.trackActivity(removedBy, {
-            type: 'settings_updated',
-            title: 'Removed Project Member',
-            description: `Removed user from project "${project.name}"`,
-            metadata: {
-                projectId: project._id,
-                memberId
-            }
-        });
     }
 
     /**
@@ -1083,31 +962,21 @@ export class ProjectService {
 
     /**
      * Get project by ID with access control
+     * Access is now determined by workspace membership
      */
     static async getProjectById(projectId: string, userId: string): Promise<IProject> {
         const project = await Project.findById(projectId)
-            .populate('members.userId', 'name email')
             .populate('ownerId', 'name email');
 
         if (!project || !project.isActive) {
             throw new Error('Project not found');
         }
 
-        // Check if user has access
-        // Handle both ObjectId and populated object cases
-        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
-            ? project.ownerId._id.toString()
-            : project.ownerId.toString();
+        // Check if user has access through workspace membership
+        const { PermissionService } = await import('./permission.service');
+        const canAccess = await PermissionService.canAccessProject(userId, projectId);
 
-        const hasAccess = ownerIdString === userId ||
-            project.members.some(m => {
-                const memberIdString = typeof m.userId === 'object' && m.userId._id
-                    ? m.userId._id.toString()
-                    : m.userId.toString();
-                return memberIdString === userId;
-            });
-
-        if (!hasAccess) {
+        if (!canAccess) {
             throw new Error('Access denied');
         }
 
@@ -1116,7 +985,6 @@ export class ProjectService {
 
         // Return the updated project
         const updatedProject = await Project.findById(projectId)
-            .populate('members.userId', 'name email')
             .populate('ownerId', 'name email');
 
         if (!updatedProject) {
@@ -1156,63 +1024,6 @@ export class ProjectService {
                 projectId: project._id
             }
         });
-    }
-
-    /**
-     * Update project members in bulk
-     */
-    static async updateProjectMembers(
-        projectId: string,
-        members: Array<{
-            userId: string;
-            role: 'admin' | 'member' | 'viewer';
-            status?: 'active' | 'pending' | 'inactive';
-        }>,
-        userId: string
-    ): Promise<IProject> {
-        const project = await Project.findById(projectId);
-        if (!project) {
-            throw new Error('Project not found');
-        }
-
-        // Check permissions
-        const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
-            ? project.ownerId._id.toString()
-            : project.ownerId.toString();
-        const role = ownerIdString === userId ? 'owner' :
-            project.members.find(m => {
-                const memberIdString = typeof m.userId === 'object' && m.userId._id
-                    ? m.userId._id.toString()
-                    : m.userId.toString();
-                return memberIdString === userId;
-            })?.role;
-
-        if (role !== 'owner' && role !== 'admin') {
-            throw new Error('Access denied');
-        }
-
-        // Update members
-        project.members = members.map(member => ({
-            userId: new mongoose.Types.ObjectId(member.userId),
-            role: member.role,
-            status: member.status || 'active',
-            joinedAt: new Date()
-        }));
-
-        await project.save();
-
-        // Track activity
-        await ActivityService.trackActivity(userId, {
-            type: 'settings_updated',
-            title: 'Updated Project Members',
-            description: `Updated members for project "${project.name}"`,
-            metadata: {
-                projectId: project._id,
-                memberCount: members.length
-            }
-        });
-
-        return project;
     }
 
     /**
