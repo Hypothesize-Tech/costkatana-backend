@@ -429,7 +429,7 @@ export class KeyVaultService {
             .populate('providerKeyId', 'name provider maskedKey') // Only essential fields
             .populate('projectId', 'name') // Only name needed
             .lean()
-            .sort({ createdAt: -1 });
+            .sort({ createdAt: -1 }) as any as IProxyKey[];
     }
 
     /**

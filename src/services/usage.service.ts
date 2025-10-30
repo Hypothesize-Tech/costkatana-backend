@@ -525,7 +525,7 @@ export class UsageService {
 
     /**
      * Bulk track usage for multiple requests (optimized with bulkWrite)
-     * Useful for batch processing and integration with ai-cost-tracker package
+     * Useful for batch processing and integration with cost-katana package
      */
     static async bulkTrackUsage(usageData: TrackUsageData[]): Promise<IUsage[]> {
         try {

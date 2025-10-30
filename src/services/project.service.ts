@@ -216,6 +216,12 @@ export class ProjectService {
                 throw new Error('Project not found');
             }
 
+            // Skip if project doesn't have workspaceId (legacy projects)
+            if (!project.workspaceId) {
+                loggingService.warn(`Skipping project ${projectId} - no workspaceId (legacy project)`);
+                return;
+            }
+
             // Calculate total spending from Usage data
             const usageStats = await Usage.aggregate([
                 {

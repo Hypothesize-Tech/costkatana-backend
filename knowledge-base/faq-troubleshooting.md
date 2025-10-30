@@ -67,7 +67,7 @@ if not api_key or not api_key.startswith('dak_'):
 **For CLI Package:**
 ```bash
 # Global installation (recommended)
-npm install -g ai-cost-optimizer-cli
+npm install -g cost-katana-cli
 
 # Verify installation
 cost-katana --version
@@ -75,20 +75,20 @@ cost-katana --version
 # If still not found, check PATH
 echo $PATH
 # Or use npx
-npx ai-cost-optimizer-cli --version
+npx cost-katana-cli --version
 ```
 
 **For Core Package:**
 ```bash
 # Install package
-npm install ai-cost-tracker
+npm install cost-katana
 
 # Check installation
-npm list ai-cost-tracker
+npm list cost-katana
 
 # Clear npm cache if needed
 npm cache clean --force
-npm install ai-cost-tracker
+npm install cost-katana
 ```
 
 **For Python SDK:**
@@ -111,7 +111,7 @@ pip install cost-katana
 **A:**
 ```typescript
 // For Node.js projects
-import { CostTracker } from 'ai-cost-tracker';
+import { CostTracker } from 'cost-katana';
 
 // For browser environments, ensure proper bundling
 // Make sure you have:
@@ -735,7 +735,7 @@ const response = await anthropic.messages.create({
 });
 
 // After (CostKatana)
-const { CostTracker } = require('ai-cost-tracker');
+const { CostTracker } = require('cost-katana');
 
 const tracker = new CostTracker({ apiKey: 'dak_your_key_here' });
 const response = await tracker.generateContent('Hello', {
@@ -771,7 +771,7 @@ const response = await tracker.generateContent('Hello', {
    python -c "import cost_katana as ck; ck.configure(api_key='test'); print('OK')"
 
    # JavaScript
-   node -e "const { CostTracker } = require('ai-cost-tracker'); console.log('OK')"
+   node -e "const { CostTracker } = require('cost-katana'); console.log('OK')"
    ```
 
 3. **✅ Check Network Connectivity**

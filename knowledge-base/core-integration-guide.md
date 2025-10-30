@@ -1,30 +1,29 @@
 # CostKatana Core Package Integration Guide
 
-Comprehensive guide for integrating the `ai-cost-tracker` package into your JavaScript/TypeScript applications.
+Comprehensive guide for integrating the `cost-katana` package into your JavaScript/TypeScript applications.
 
 ## 📦 Installation & Setup
 
 ### NPM Installation
 ```bash
 # For Node.js projects
-npm install ai-cost-tracker
+npm install cost-katana
 
-# For TypeScript projects (includes type definitions)
-npm install --save-dev @types/ai-cost-tracker
+# For TypeScript projects (includes built-in type definitions)
+# No additional @types package needed - types are included!
 ```
 
 ### Yarn Installation
 ```bash
 # Yarn package manager
-yarn add ai-cost-tracker
+yarn add cost-katana
 
-# For TypeScript support
-yarn add --dev @types/ai-cost-tracker
+# TypeScript support is built-in
 ```
 
 ### Verify Installation
 ```bash
-node -e "console.log('Testing import...'); const { CostTracker } = require('ai-cost-tracker'); console.log('Import successful!');"
+node -e "console.log('Testing import...'); const { ai } = require('cost-katana'); console.log('Import successful!');"
 ```
 
 ## 🚀 Quick Start Integration
@@ -32,16 +31,13 @@ node -e "console.log('Testing import...'); const { CostTracker } = require('ai-c
 ### Basic Setup
 ```javascript
 // CommonJS (Node.js)
-const { CostTracker } = require('ai-cost-tracker');
+const { ai } = require('cost-katana');
 
 // ES6 Modules (Modern JavaScript/TypeScript)
-import { CostTracker } from 'ai-cost-tracker';
+import { ai } from 'cost-katana';
 
-// Initialize with API key
-const tracker = new CostTracker({
-  apiKey: 'dak_your_key_here',
-  defaultModel: 'nova-lite'
-});
+// No initialization needed - just works!
+// Set your API key via environment variable or configure manually
 ```
 
 ### Basic Usage
@@ -49,12 +45,12 @@ const tracker = new CostTracker({
 // Generate content with cost tracking
 async function example() {
   try {
-    const response = await tracker.generateContent('Hello, world!');
+    const response = await ai('gpt-4', 'Hello, world!');
 
     console.log('Generated text:', response.text);
-    console.log('Cost:', `$${response.usage_metadata.cost}`);
-    console.log('Tokens used:', response.usage_metadata.total_tokens);
-    console.log('Latency:', `${response.usage_metadata.latency}s`);
+    console.log('Cost:', `$${response.cost}`);
+    console.log('Tokens used:', response.tokens);
+    console.log('Model:', response.model);
   } catch (error) {
     console.error('Error:', error.message);
   }
@@ -65,27 +61,17 @@ example();
 
 ### TypeScript Integration
 ```typescript
-import { CostTracker, GenerateContentResponse } from 'ai-cost-tracker';
+import { ai } from 'cost-katana';
 
-interface AppConfig {
-  apiKey: string;
-  defaultModel: string;
-  costLimit?: number;
-}
+// TypeScript types are built-in - no additional interfaces needed!
 
 class AICostManager {
-  private tracker: CostTracker;
-
-  constructor(config: AppConfig) {
-    this.tracker = new CostTracker({
-      apiKey: config.apiKey,
-      defaultModel: config.defaultModel,
-      costLimitPerDay: config.costLimit || 50.0
-    });
+  constructor() {
+    // No initialization needed - cost-katana works out of the box!
   }
 
-  async generateResponse(prompt: string): Promise<GenerateContentResponse> {
-    return await this.tracker.generateContent(prompt);
+  async generateResponse(prompt: string) {
+    return await ai('gpt-4', prompt);
   }
 
   async getUsageStats() {
@@ -218,7 +204,7 @@ console.log('Risk level:', response.usage_metadata.risk_level);
 
 ### Custom Generation Configuration
 ```javascript
-import { GenerationConfig } from 'ai-cost-tracker';
+import { GenerationConfig } from 'cost-katana';
 
 // Create custom configuration
 const config = new GenerationConfig({
@@ -365,7 +351,7 @@ const geminiResponse = await tracker.generateContent(
 
 ### Comprehensive Error Handling
 ```javascript
-import { CostLimitExceededError, ModelNotAvailableError, RateLimitError } from 'ai-cost-tracker';
+import { CostLimitExceededError, ModelNotAvailableError, RateLimitError } from 'cost-katana';
 
 async function robustAIRequest(prompt: string, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -553,20 +539,20 @@ services:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ai-cost-tracker
+  name: cost-katana
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: ai-cost-tracker
+      app: cost-katana
   template:
     metadata:
       labels:
-        app: ai-cost-tracker
+        app: cost-katana
     spec:
       containers:
-      - name: ai-cost-tracker
-        image: your-registry/ai-cost-tracker:latest
+      - name: cost-katana
+        image: your-registry/cost-katana:latest
         env:
         - name: API_KEY
           valueFrom:
@@ -586,7 +572,7 @@ spec:
 
 ## 📋 Integration Checklist
 
-- [ ] Install `ai-cost-tracker` package
+- [ ] Install `cost-katana` package
 - [ ] Set up secure API key management
 - [ ] Configure environment variables or config object
 - [ ] Test basic functionality with simple prompts
@@ -604,9 +590,9 @@ spec:
 ### Common Issues & Solutions
 
 #### 1. Module Resolution Errors
-**Problem**: `Cannot find module 'ai-cost-tracker'`
+**Problem**: `Cannot find module 'cost-katana'`
 **Solutions**:
-- Verify installation: `npm list ai-cost-tracker`
+- Verify installation: `npm list cost-katana`
 - Check Node.js version compatibility (>= 18.0.0)
 - Clear npm cache: `npm cache clean --force`
 

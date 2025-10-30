@@ -3,7 +3,6 @@ import { Session, ISession } from '../models/Session';
 import { Trace, ITrace } from '../models/Trace';
 import { Message, IMessage } from '../models/Message';
 import { loggingService } from './logging.service';
-import { sessionReplayService } from './sessionReplay.service';
 
 export interface StartSpanInput {
     sessionId?: string;
@@ -373,7 +372,7 @@ class TraceService {
             
             const totalPages = Math.ceil(total / limit);
             
-            return { sessions, total, page, totalPages };
+            return { sessions: sessions as any as ISession[], total, page, totalPages };
         } catch (error) {
             TraceService.recordDbFailure();
             loggingService.error('Error listing sessions:', { error: error instanceof Error ? error.message : String(error) });

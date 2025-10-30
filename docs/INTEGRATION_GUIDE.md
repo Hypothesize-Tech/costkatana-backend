@@ -206,7 +206,7 @@ Set these environment variables in your application:
 # Backend Configuration
 JWT_SECRET=your-jwt-secret
 ENCRYPTION_KEY=your-encryption-key-32-chars
-MONGODB_URI=mongodb://localhost:27017/ai-cost-tracker
+MONGODB_URI=mongodb://localhost:27017/costkatana
 
 # Frontend Configuration
 VITE_API_URL=http://localhost:8000

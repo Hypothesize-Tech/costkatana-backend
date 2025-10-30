@@ -55,6 +55,7 @@
     "@langchain/aws": "^0.1.12",
     "@langchain/community": "^0.3.50",
     "@langchain/langgraph": "^0.3.11",
+    "@octokit/rest": "^20.1.2",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.52.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.56.0",

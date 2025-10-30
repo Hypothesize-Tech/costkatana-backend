@@ -1,17 +1,17 @@
 # CostKatana CLI Integration Guide
 
-Comprehensive guide for integrating and using the `ai-cost-optimizer-cli` package in your development workflow.
+Comprehensive guide for integrating and using the `cost-katana-cli` package in your development workflow.
 
 ## 📦 Installation & Setup
 
 ### Global Installation (Recommended)
 ```bash
-npm install -g ai-cost-optimizer-cli
+npm install -g cost-katana-cli
 ```
 
 ### Local Installation (For Development)
 ```bash
-npm install ai-cost-optimizer-cli --save-dev
+npm install cost-katana-cli --save-dev
 ```
 
 ### Verify Installation
@@ -326,7 +326,7 @@ cost-katana list-models --filter "nova-pro,claude-3-opus,gpt-4-turbo"
 ```bash
 # Clone repository
 git clone <repository-url>
-cd ai-cost-optimizer-cli
+cd cost-katana-cli
 
 # Install dependencies
 npm install
@@ -370,7 +370,7 @@ cost-katana rewrite-prompt --prompt "Explain quantum computing" --style concise
 #### 1. Command Not Found
 **Problem**: `cost-katana: command not found`
 **Solutions**:
-- Ensure global installation: `npm install -g ai-cost-optimizer-cli`
+- Ensure global installation: `npm install -g cost-katana-cli`
 - Check PATH environment variable
 - Use `npx cost-katana` if installed locally
 
@@ -435,7 +435,7 @@ curl -H "Authorization: Bearer $API_KEY" $BASE_URL/health
 # Example CI/CD script
 
 # Install CLI
-npm install -g ai-cost-optimizer-cli
+npm install -g cost-katana-cli
 
 # Configure for CI environment
 cost-katana init --api-key $API_KEY --model nova-lite --force

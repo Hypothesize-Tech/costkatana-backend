@@ -519,7 +519,7 @@ class SessionReplayService {
 
             const totalPages = Math.ceil(total / limit);
 
-            return { sessions, total, page, totalPages };
+            return { sessions: sessions as any as ISession[], total, page, totalPages };
         } catch (error) {
             SessionReplayService.recordDbFailure();
             loggingService.error('Error listing session replays', {

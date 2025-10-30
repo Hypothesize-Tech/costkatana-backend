@@ -37,8 +37,8 @@ export class KnowledgeBaseTool extends Tool {
     - Proactive intelligence and automation
 
     PACKAGE INFORMATION:
-    - NPM Package: ai-cost-tracker (https://www.npmjs.com/package/ai-cost-tracker) - Core library for AI cost tracking
-    - NPM Package: ai-cost-optimizer-cli (https://www.npmjs.com/package/ai-cost-optimizer-cli) - Command-line interface for AI cost optimization
+    - NPM Package: cost-katana (https://www.npmjs.com/package/cost-katana) - Core library for AI cost tracking and optimization
+    - NPM Package: cost-katana-cli (https://www.npmjs.com/package/cost-katana-cli) - Command-line interface for AI cost optimization
     - PyPI Package: cost-katana (https://pypi.org/project/cost-katana/) - Python SDK with Cortex meta-language optimization
     - Official packages only - no hypothetical or non-existent packages
     - Cross-platform compatibility and deployment options
@@ -545,7 +545,7 @@ Based on this knowledge base, please provide a comprehensive and accurate answer
 
 Guidelines:
 - Be specific and factual
-- Reference the correct package names (ai-cost-tracker, ai-cost-optimizer-cli, cost-katana)
+- Reference the correct package names (cost-katana, cost-katana-cli, cost-katana)
 - Include installation commands and links when relevant
 - Do not invent or suggest non-existent packages or features
 - If the question is about specific packages, provide their exact npm/pypi links
@@ -674,12 +674,12 @@ Suggestions:
         if (lowerQuery.includes('npm') && lowerQuery.includes('package')) {
             return `📦 **CostKatana NPM Packages:**\n\n` +
                    `**Available NPM Packages:**\n` +
-                   `• **ai-cost-tracker** - Core library for AI cost tracking and optimization\n` +
-                   `  📦 Install: \`npm install ai-cost-tracker\`\n` +
-                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-tracker\n\n` +
-                   `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
-                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
-                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `• **cost-katana** - Core library for AI cost tracking and optimization\n` +
+                   `  📦 Install: \`npm install cost-katana\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/cost-katana\n\n` +
+                   `• **cost-katana-cli** - Command-line interface for AI cost optimization\n` +
+                   `  📦 Install: \`npm install -g cost-katana-cli\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/cost-katana-cli\n\n` +
                    `**Key Features:**\n` +
                    `• Provider abstraction across multiple AI services\n` +
                    `• Real-time cost tracking and analytics\n` +
@@ -692,9 +692,9 @@ Suggestions:
         if (lowerQuery.includes('cli') || lowerQuery.includes('command') && lowerQuery.includes('line')) {
             return `💻 **CostKatana CLI Tool:**\n\n` +
                    `**Available CLI Package:**\n` +
-                   `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
-                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
-                   `  🔗 Package: https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `• **cost-katana-cli** - Command-line interface for AI cost optimization\n` +
+                   `  📦 Install: \`npm install -g cost-katana-cli\`\n` +
+                   `  🔗 Package: https://www.npmjs.com/package/cost-katana-cli\n\n` +
                    `**Key CLI Features:**\n` +
                    `• Interactive chat sessions with AI models\n` +
                    `• Cost analysis and optimization workflows\n` +
@@ -708,7 +708,7 @@ Suggestions:
                    `**Quick Start:**\n` +
                    `\`\`\`bash\n` +
                    `# Install globally\n` +
-                   `npm install -g ai-cost-optimizer-cli\n\n` +
+                   `npm install -g cost-katana-cli\n\n` +
                    `# Initialize configuration\n` +
                    `cost-katana init\n\n` +
                    `# Test setup\n` +
@@ -728,9 +728,9 @@ Suggestions:
         if (lowerQuery.includes('which') && lowerQuery.includes('cli') && (lowerQuery.includes('python') || lowerQuery.includes('javascript'))) {
             return `🔍 **CostKatana CLI Tools for Python and JavaScript:**\n\n` +
                    `**JavaScript/TypeScript CLI:**\n` +
-                   `• **ai-cost-optimizer-cli** (NPM package)\n` +
-                   `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
-                   `  🔗 https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+                   `• **cost-katana-cli** (NPM package)\n` +
+                   `  📦 Install: \`npm install -g cost-katana-cli\`\n` +
+                   `  🔗 https://www.npmjs.com/package/cost-katana-cli\n\n` +
                    `**Python CLI:**\n` +
                    `• **cost-katana** (PyPI package) - Includes CLI functionality\n` +
                    `  📦 Install: \`pip install cost-katana\`\n` +
@@ -808,12 +808,12 @@ Suggestions:
         return `💡 **CostKatana Package Information:**\n\n` +
                `CostKatana provides comprehensive cost optimization solutions for AI applications through these official packages:\n\n` +
                `**📦 NPM Packages:**\n` +
-               `• **ai-cost-tracker** - Core library for AI cost tracking and optimization\n` +
-               `  📦 Install: \`npm install ai-cost-tracker\`\n` +
-               `  🔗 https://www.npmjs.com/package/ai-cost-tracker\n\n` +
-               `• **ai-cost-optimizer-cli** - Command-line interface for AI cost optimization\n` +
-               `  📦 Install: \`npm install -g ai-cost-optimizer-cli\`\n` +
-               `  🔗 https://www.npmjs.com/package/ai-cost-optimizer-cli\n\n` +
+               `• **cost-katana** - Core library for AI cost tracking and optimization\n` +
+               `  📦 Install: \`npm install cost-katana\`\n` +
+               `  🔗 https://www.npmjs.com/package/cost-katana\n\n` +
+               `• **cost-katana-cli** - Command-line interface for AI cost optimization\n` +
+               `  📦 Install: \`npm install -g cost-katana-cli\`\n` +
+               `  🔗 https://www.npmjs.com/package/cost-katana-cli\n\n` +
                `**🐍 PyPI Package:**\n` +
                `• **cost-katana** - Python SDK for AI cost optimization with Cortex meta-language\n` +
                `  📦 Install: \`pip install cost-katana\`\n` +

@@ -372,13 +372,13 @@ export class AgentService {
                 containsNpm: lowerQuery.includes('npm'),
                 containsPackage: lowerQuery.includes('package'),
                 containsAiCostTracker: lowerQuery.includes('ai-cost-tracker'),
-                containsAiCostOptimizerCli: lowerQuery.includes('ai-cost-optimizer-cli'),
+                containsCostKatanaCli: lowerQuery.includes('cost-katana-cli'),
                 containsCostKatana: lowerQuery.includes('cost-katana'),
                 containsPypi: lowerQuery.includes('pypi')
             });
             
             if (lowerQuery.includes('costkatana') || lowerQuery.includes('npm') || lowerQuery.includes('package') || 
-                lowerQuery.includes('ai-cost-tracker') || lowerQuery.includes('ai-cost-optimizer-cli') || 
+                lowerQuery.includes('ai-cost-tracker') || lowerQuery.includes('cost-katana-cli') || 
                 lowerQuery.includes('cost-katana') || lowerQuery.includes('pypi')) {
                 
                 loggingService.info('🎯 CostKatana-specific query detected, using knowledge base tool directly');

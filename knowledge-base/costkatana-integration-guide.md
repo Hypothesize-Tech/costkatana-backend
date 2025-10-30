@@ -4,14 +4,14 @@ This comprehensive guide covers integration of all CostKatana packages into your
 
 ## 📦 Package Overview
 
-### 🖥️ CLI Package (`ai-cost-optimizer-cli`)
-- **NPM Package**: `ai-cost-optimizer-cli` (available at https://www.npmjs.com/package/ai-cost-optimizer-cli)
+### 🖥️ CLI Package (`cost-katana-cli`)
+- **NPM Package**: `cost-katana-cli` (available at https://www.npmjs.com/package/cost-katana-cli)
 - **Purpose**: Command-line interface for AI cost optimization
 - **Best For**: Development workflows, batch processing, interactive sessions
 - **Key Features**: Cortex optimization, chat sessions, cost analysis, bulk operations
 
-### 🔧 Core Package (`ai-cost-tracker`)
-- **NPM Package**: `ai-cost-tracker` (available at https://www.npmjs.com/package/ai-cost-tracker)
+### 🔧 Core Package (`cost-katana`)
+- **NPM Package**: `cost-katana` (available at https://www.npmjs.com/package/cost-katana)
 - **Purpose**: Core library for AI cost tracking and optimization
 - **Best For**: JavaScript/TypeScript applications, web integrations, server-side processing
 - **Key Features**: Provider abstraction, cost tracking, intelligent routing, failover
@@ -27,7 +27,7 @@ This comprehensive guide covers integration of all CostKatana packages into your
 ### CLI Package Quick Start
 ```bash
 # Install globally
-npm install -g ai-cost-optimizer-cli
+npm install -g cost-katana-cli
 
 # Initialize configuration
 cost-katana init
@@ -41,8 +41,8 @@ cost-katana chat --model nova-lite
 
 ### Core Package Quick Start (JavaScript/TypeScript)
 ```javascript
-// npm install ai-cost-tracker
-const { CostTracker } = require('ai-cost-tracker');
+// npm install cost-katana
+const { CostTracker } = require('cost-katana');
 
 // Initialize with API key
 const tracker = new CostTracker({
@@ -74,19 +74,19 @@ print(f"Cost: ${response.usage_metadata.cost:.4f}")
 ### CLI Package Installation
 ```bash
 # Global installation (recommended)
-npm install -g ai-cost-optimizer-cli
+npm install -g cost-katana-cli
 
 # Local installation for development
-npm install ai-cost-optimizer-cli --save-dev
+npm install cost-katana-cli --save-dev
 ```
 
 ### Core Package Installation
 ```bash
 # For Node.js projects
-npm install ai-cost-tracker
+npm install cost-katana
 
 # For TypeScript projects (includes type definitions)
-npm install --save-dev @types/ai-cost-tracker
+npm install --save-dev @types/cost-katana
 ```
 
 ### Python SDK Installation
@@ -128,7 +128,7 @@ export COST_KATANA_COST_LIMIT=50.0
 
 ### Core Package Configuration
 ```javascript
-const { CostTracker } = require('ai-cost-tracker');
+const { CostTracker } = require('cost-katana');
 
 const tracker = new CostTracker({
   apiKey: process.env.API_KEY,
@@ -178,7 +178,7 @@ cost-katana optimize \
 
 ### Core Package Cortex Integration
 ```javascript
-const { CostTracker } = require('ai-cost-tracker');
+const { CostTracker } = require('cost-katana');
 
 const tracker = new CostTracker({
   apiKey: 'dak_your_key_here',
@@ -423,7 +423,7 @@ const response = await anthropic.messages.create({
 });
 
 // After (Cost Katana)
-const { CostTracker } = require('ai-cost-tracker');
+const { CostTracker } = require('cost-katana');
 
 const tracker = new CostTracker({
   apiKey: 'dak_your_key_here'

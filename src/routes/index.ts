@@ -52,6 +52,7 @@ import sessionReplayRoutes from './sessionReplay.routes';
 import backupCodesRoutes from './backupCodes.routes';
 import teamRoutes from './team.routes';
 import integrationRoutes from './integration.routes';
+import githubRoutes from './github.routes';
 
 const router = Router();
 
@@ -119,5 +120,6 @@ router.use('/session-replay', sessionReplayRoutes);
 router.use('/backup-codes', backupCodesRoutes);
 router.use('/team', teamRoutes);
 router.use('/integrations', integrationRoutes);
+router.use('/github', githubRoutes);
 
 export const apiRouter = router;

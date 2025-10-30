@@ -1,5 +1,14 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
+export interface IGitHubContext {
+    connectionId?: Types.ObjectId;
+    repositoryId?: number;
+    repositoryName?: string;
+    repositoryFullName?: string;
+    integrationId?: Types.ObjectId;
+    branchName?: string;
+}
+
 export interface IConversation extends Document {
     _id: Types.ObjectId;
     userId: string;
@@ -10,6 +19,7 @@ export interface IConversation extends Document {
     lastMessage?: string;
     lastMessageAt?: Date;
     isActive: boolean;
+    githubContext?: IGitHubContext;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -48,6 +58,17 @@ const conversationSchema = new Schema<IConversation>({
     isActive: {
         type: Boolean,
         default: true
+    },
+    githubContext: {
+        type: {
+            connectionId: Schema.Types.ObjectId,
+            repositoryId: Number,
+            repositoryName: String,
+            repositoryFullName: String,
+            integrationId: Schema.Types.ObjectId,
+            branchName: String
+        },
+        required: false
     }
 }, {
     timestamps: true,

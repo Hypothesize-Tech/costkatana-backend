@@ -161,10 +161,10 @@ console.log(response.content[0].text);
 ### After (CostKatana)
 ```javascript
 // package.json
-"ai-cost-tracker": "^1.5.0"
+"cost-katana": "^1.5.0"
 
 // Your code
-import { CostTracker } from 'ai-cost-tracker';
+import { CostTracker } from 'cost-katana';
 
 const tracker = new CostTracker({
   apiKey: 'dak_your_costkatana_key_here'
@@ -184,7 +184,7 @@ console.log(`Cost: $${response.usage_metadata.cost}`);
 
 1. **Install CostKatana Core Package**
 ```bash
-npm install ai-cost-tracker
+npm install cost-katana
 ```
 
 2. **Replace SDK Initialization**
@@ -194,7 +194,7 @@ import Anthropic from '@anthropic-ai/sdk';
 const anthropic = new Anthropic({ apiKey: 'your-key' });
 
 // After
-import { CostTracker } from 'ai-cost-tracker';
+import { CostTracker } from 'cost-katana';
 const tracker = new CostTracker({ apiKey: 'dak_your_key_here' });
 ```
 
