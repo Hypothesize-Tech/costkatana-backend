@@ -103,20 +103,12 @@ export class PromptTemplateService {
                     throw new Error('Project not found');
                 }
 
-                // Check if user is member
-                const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id 
-                    ? project.ownerId._id.toString() 
-                    : project.ownerId.toString();
-                const isMember = ownerIdString === userId ||
-                    project.members.some(m => {
-                        const memberIdString = typeof m.userId === 'object' && m.userId._id 
-                            ? m.userId._id.toString() 
-                            : m.userId.toString();
-                        return memberIdString === userId;
-                    });
+                // Check if user has access via workspace or is owner
+                const { PermissionService } = await import('./permission.service');
+                const canAccess = await PermissionService.canAccessProject(userId, data.projectId);
 
-                if (!isMember) {
-                    throw new Error('Unauthorized: Not a member of the project');
+                if (!canAccess) {
+                    throw new Error('Unauthorized: Cannot access this project');
                 }
             }
 

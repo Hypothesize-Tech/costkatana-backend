@@ -412,26 +412,20 @@ export class ProjectService {
                 }
             });
 
-            // Notify project admins
-            const admins = project.members.filter(m =>
-                m.role === 'admin' || m.role === 'owner'
-            );
-
-            for (const admin of admins) {
-                await Alert.create({
-                    userId: admin.userId,
-                    title: 'Approval Request',
-                    message: `New approval request from user for ${details.operation}`,
-                    type: 'approval_required',
-                    severity: details.urgency || 'medium',
-                    actionRequired: true,
-                    metadata: {
-                        approvalRequestId: approvalRequest._id,
-                        projectId,
-                        estimatedCost: details.estimatedCost
-                    }
-                });
-            }
+            // Notify project owner
+            await Alert.create({
+                userId: project.ownerId,
+                title: 'Approval Request',
+                message: `New approval request from user for ${details.operation}`,
+                type: 'approval_required',
+                severity: details.urgency || 'medium',
+                actionRequired: true,
+                metadata: {
+                    approvalRequestId: approvalRequest._id,
+                    projectId,
+                    estimatedCost: details.estimatedCost
+                }
+            });
 
             return approvalRequest;
         } catch (error) {

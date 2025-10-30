@@ -117,15 +117,17 @@ export class ProjectManagerTool extends Tool {
             // Generate smart defaults based on project type
             const smartDefaults = this.generateSmartDefaults(operation.projectData.type || 'custom');
 
+            // Get user's workspace
+            const userWorkspace = await User.findById(operation.userId).select('workspaceId');
+            if (!userWorkspace || !userWorkspace.workspaceId) {
+                return "User must belong to a workspace to create projects.";
+            }
+
             const projectData = {
                 name: operation.projectData.name,
                 description: operation.projectData.description || `AI project: ${operation.projectData.name}`,
                 ownerId: operation.userId,
-                members: [{ 
-                    userId: operation.userId, 
-                    role: 'owner' as const, 
-                    joinedAt: new Date() 
-                }],
+                workspaceId: userWorkspace.workspaceId,
                 budget: {
                     amount: operation.projectData.settings?.budgetLimit || smartDefaults.settings.budgetLimit,
                     period: 'monthly' as const,
@@ -192,13 +194,15 @@ export class ProjectManagerTool extends Tool {
                 return "Project not found.";
             }
 
-            // Check if user has permission to update
-            const hasPermission = project.members.some(
-                member => member.userId.toString() === operation.userId && 
-                ['owner', 'admin'].includes(member.role)
-            );
-
-            if (!hasPermission) {
+            // Check if user has permission to update (owner or workspace admin)
+            const { PermissionService } = await import('../services/permission.service');
+            const canManage = await PermissionService.hasPermission(operation.userId, project.workspaceId.toString(), 'canManageProjects');
+            
+            const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+                ? project.ownerId._id.toString()
+                : project.ownerId.toString();
+            
+            if (ownerIdString !== operation.userId && !canManage) {
                 return "You don't have permission to update this project.";
             }
 
@@ -249,12 +253,11 @@ export class ProjectManagerTool extends Tool {
                 return "Project not found.";
             }
 
-            // Check if user has access
+            // Check if user has access via workspace
             if (operation.userId) {
-                const hasAccess = project.members.some(
-                    member => member.userId.toString() === operation.userId
-                );
-                if (!hasAccess) {
+                const { PermissionService } = await import('../services/permission.service');
+                const canAccess = await PermissionService.canAccessProject(operation.userId, operation.projectId);
+                if (!canAccess) {
                     return "You don't have access to this project.";
                 }
             }
@@ -267,7 +270,8 @@ export class ProjectManagerTool extends Tool {
                     description: project.description,
                     isActive: project.isActive,
                     settings: project.settings,
-                    members: project.members,
+                    workspaceId: project.workspaceId,
+                    ownerId: project.ownerId,
                     tags: project.tags,
                     budget: project.budget,
                     createdAt: project.createdAt,
@@ -286,8 +290,19 @@ export class ProjectManagerTool extends Tool {
                 return "List projects operation requires userId.";
             }
 
+            // Get user's workspace
+            const user = await User.findById(operation.userId).select('workspaceId');
+            if (!user || !user.workspaceId) {
+                return JSON.stringify({
+                    success: true,
+                    count: 0,
+                    projects: []
+                });
+            }
+
+            // Get all projects in the user's workspace
             const projects = await Project.find({
-                'members.userId': operation.userId,
+                workspaceId: user.workspaceId,
                 isActive: true
             })
             .select('name description isActive settings createdAt updatedAt tags')
@@ -340,11 +355,11 @@ export class ProjectManagerTool extends Tool {
             }
 
             // Check if user is owner
-            const isOwner = project.members.some(
-                member => member.userId.toString() === operation.userId && member.role === 'owner'
-            );
+            const ownerIdString = typeof project.ownerId === 'object' && project.ownerId._id
+                ? project.ownerId._id.toString()
+                : project.ownerId.toString();
 
-            if (!isOwner) {
+            if (ownerIdString !== operation.userId) {
                 return "Only project owners can delete projects.";
             }
 
