@@ -165,6 +165,7 @@ export class ProjectService {
      */
     static async recalculateUserProjectSpending(userId: string): Promise<void> {
         try {
+            // Find all projects owned by user (not just active ones)
             const projects = await Project.find({
                 $or: [
                     { ownerId: userId },
@@ -175,11 +176,20 @@ export class ProjectService {
 
             let totalRecalculated = 0;
             for (const project of projects) {
-                await this.recalculateProjectSpending(project._id.toString());
-                totalRecalculated++;
+                try {
+                    await this.recalculateProjectSpending(project._id.toString());
+                    totalRecalculated++;
+                } catch (error) {
+                    loggingService.warn(`Failed to recalculate spending for project ${project._id}`, {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
             }
 
-            loggingService.info(`Recalculated spending for ${totalRecalculated} user projects`);
+            loggingService.info(`Recalculated spending for ${totalRecalculated} user projects`, {
+                userId,
+                totalProjects: projects.length
+            });
         } catch (error) {
             loggingService.error('Error recalculating user project spending:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
@@ -216,10 +226,28 @@ export class ProjectService {
                 throw new Error('Project not found');
             }
 
-            // Skip if project doesn't have workspaceId (legacy projects)
+            // Migrate workspaceId if missing
             if (!project.workspaceId) {
-                loggingService.warn(`Skipping project ${projectId} - no workspaceId (legacy project)`);
-                return;
+                const owner = await User.findById(project.ownerId).select('workspaceId');
+                if (owner?.workspaceId) {
+                    let workspaceId: mongoose.Types.ObjectId;
+                    if (owner.workspaceId instanceof mongoose.Types.ObjectId) {
+                        workspaceId = owner.workspaceId;
+                    } else if (typeof owner.workspaceId === 'object' && (owner.workspaceId as any)?._id) {
+                        workspaceId = (owner.workspaceId as any)._id;
+                    } else {
+                        workspaceId = new mongoose.Types.ObjectId(String(owner.workspaceId));
+                    }
+                    project.workspaceId = workspaceId;
+                    await project.save();
+                    loggingService.info(`Migrated workspaceId for project ${projectId}`, {
+                        projectId,
+                        workspaceId: workspaceId.toString()
+                    });
+                } else {
+                    loggingService.warn(`Skipping project ${projectId} - no workspaceId and owner has no workspace`);
+                    return;
+                }
             }
 
             // Calculate total spending from Usage data
@@ -640,49 +668,30 @@ export class ProjectService {
         }
     }
 
-    /**
-     * Helper method to aggregate spending data
-     */
-    private static aggregateSpending(data: any[], key: string): any[] {
-        const aggregated = data.reduce((acc, item) => {
-            const keyValue = item[key];
-            if (!acc[keyValue]) {
-                acc[keyValue] = 0;
-            }
-            acc[keyValue] += item.cost;
-            return acc;
-        }, {});
-
-        return Object.entries(aggregated)
-            .map(([name, cost]) => ({ name, cost }))
-            .sort((a, b) => (b.cost as number) - (a.cost as number))
-            .slice(0, 10); // Top 10
-    }
-
-    /**
+        /**
      * Helper method to calculate days remaining in budget period
      */
-    private static getDaysRemaining(budget: IProject['budget']): number {
-        const now = new Date();
-        let endDate: Date;
-
-        switch (budget.period) {
-            case 'monthly':
-                endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-                break;
-            case 'quarterly':
-                const quarter = Math.floor(now.getMonth() / 3);
-                endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
-                break;
-            case 'yearly':
-                endDate = new Date(now.getFullYear(), 11, 31);
-                break;
-            default:
-                endDate = budget.endDate || now;
+        private static getDaysRemaining(budget: IProject['budget']): number {
+            const now = new Date();
+            let endDate: Date;
+    
+            switch (budget.period) {
+                case 'monthly':
+                    endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                    break;
+                case 'quarterly':
+                    const quarter = Math.floor(now.getMonth() / 3);
+                    endDate = new Date(now.getFullYear(), (quarter + 1) * 3, 0);
+                    break;
+                case 'yearly':
+                    endDate = new Date(now.getFullYear(), 11, 31);
+                    break;
+                default:
+                    endDate = budget.endDate || now;
+            }
+    
+            return Math.max(0, Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
         }
-
-        return Math.max(0, Math.ceil((endDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)));
-    }
 
     /**
      * Helper method to project monthly spend
@@ -1037,6 +1046,11 @@ export class ProjectService {
      * Start background processor
      */
     private static startBackgroundProcessor(): void {
+        // Prevent multiple processors from running
+        if (this.backgroundProcessor) {
+            return;
+        }
+
         this.backgroundProcessor = setInterval(async () => {
             if (this.backgroundQueue.length > 0) {
                 const operation = this.backgroundQueue.shift();
@@ -1061,84 +1075,5 @@ export class ProjectService {
             this.objectIdCache.set(id, new mongoose.Types.ObjectId(id));
         }
         return this.objectIdCache.get(id)!;
-    }
-
-    /**
-     * Get cached date for period
-     */
-    private static getCachedDateForPeriod(period: string): Date {
-        const cacheKey = `${period}_${new Date().toDateString()}`;
-        if (!this.dateRangeCache.has(cacheKey)) {
-            this.dateRangeCache.set(cacheKey, this.getStartDateForPeriod(period));
-        }
-        return this.dateRangeCache.get(cacheKey)!;
-    }
-
-    /**
-     * Stream large project data processing
-     */
-    private static async streamProjectData(
-        projectIds: mongoose.Types.ObjectId[],
-        batchSize: number = 50
-    ): Promise<Map<string, any>> {
-        const resultMap = new Map<string, any>();
-        
-        for (let i = 0; i < projectIds.length; i += batchSize) {
-            const batch = projectIds.slice(i, i + batchSize);
-            
-            const batchResults = await Usage.aggregate([
-                {
-                    $match: {
-                        projectId: { $in: batch },
-                        createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$projectId',
-                        totalCost: { $sum: '$cost' },
-                        totalRequests: { $sum: 1 },
-                        totalTokens: { $sum: '$totalTokens' }
-                    }
-                }
-            ]);
-
-            batchResults.forEach(result => {
-                resultMap.set(result._id.toString(), {
-                    totalCost: result.totalCost,
-                    totalRequests: result.totalRequests,
-                    totalTokens: result.totalTokens
-                });
-            });
-        }
-
-        return resultMap;
-    }
-
-    /**
-     * Smart fallback for failed operations
-     */
-    private static async executeWithFallback<T>(
-        primaryOperation: () => Promise<T>,
-        fallbackOperation: () => Promise<T>,
-        operationName: string
-    ): Promise<T> {
-        try {
-            return await primaryOperation();
-        } catch (primaryError) {
-            loggingService.warn(`Primary ${operationName} failed, using fallback:`, {
-                error: primaryError instanceof Error ? primaryError.message : String(primaryError)
-            });
-            
-            try {
-                return await fallbackOperation();
-            } catch (fallbackError) {
-                loggingService.error(`Both primary and fallback ${operationName} failed:`, {
-                    primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
-                    fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-                });
-                throw primaryError; // Throw original error
-            }
-        }
     }
 } 

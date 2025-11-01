@@ -294,8 +294,20 @@ export class AgentService {
         try {
             loggingService.info('🤖 Initializing AIOps Agent...');
 
-            // Initialize vector store first
-            await vectorStoreService.initialize();
+            // Initialize vector store first with timeout to prevent hanging
+            try {
+                await Promise.race([
+                    vectorStoreService.initialize(),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Vector store initialization timeout')), 30000)
+                    )
+                ]);
+            } catch (vectorError) {
+                loggingService.warn('⚠️ Vector store initialization failed or timed out, continuing without it:', {
+                    error: vectorError instanceof Error ? vectorError.message : String(vectorError)
+                });
+                // Continue initialization even if vector store fails
+            }
 
             // Build user context
             const userContext = this.buildUserContext({ userId: 'system', query: '', context: {} });

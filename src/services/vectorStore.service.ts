@@ -46,11 +46,17 @@ const initializeVectorStore = async () => {
       embeddings
     );
   } catch (error) {
-    loggingService.error('❌ Failed to initialize vector store:', { error: error instanceof Error ? error.message : String(error) });
+    // Log error but don't throw - this is a non-blocking initialization
+    loggingService.warn('⚠️ Vector store initialization failed (non-blocking):', { error: error instanceof Error ? error.message : String(error) });
   }
 };
 
-void initializeVectorStore();
+// Initialize vector store in background without blocking
+setImmediate(() => {
+  initializeVectorStore().catch(() => {
+    // Ignore errors - already logged
+  });
+});
 
 export const saveEmbedding = async (key: string, embedding: number[], response: unknown) => {
   if (!vectorStore || !HNSWLib) return;

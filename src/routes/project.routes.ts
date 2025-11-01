@@ -137,6 +137,7 @@ router.put(
 );
 
 // Delete project
+// Only requires authentication - ProjectService.deleteProject checks if user is owner
 router.delete(
     '/:projectId',
     [
@@ -144,7 +145,6 @@ router.delete(
     ],
     validateRequest,
     authenticate,
-    requirePermission('admin'),
     ProjectController.deleteProject
 );
 
