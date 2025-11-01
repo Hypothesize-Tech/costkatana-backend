@@ -7,7 +7,7 @@ import { loggingService } from '../services/logging.service';
  */
 export const getUserTelemetryConfigs = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
 
         if (!userId) {
             return res.status(401).json({
@@ -50,7 +50,7 @@ export const getUserTelemetryConfigs = async (req: Request, res: Response): Prom
  */
 export const getTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { configId } = req.params;
 
         if (!userId) {
@@ -101,7 +101,7 @@ export const getTelemetryConfig = async (req: Request, res: Response): Promise<R
  */
 export const createTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { 
             endpointType, 
             endpoint, 
@@ -207,7 +207,7 @@ export const createTelemetryConfig = async (req: Request, res: Response): Promis
  */
 export const updateTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { configId } = req.params;
         const { endpoint, authToken, syncIntervalMinutes, isActive, syncEnabled } = req.body;
 
@@ -276,7 +276,7 @@ export const updateTelemetryConfig = async (req: Request, res: Response): Promis
  */
 export const deleteTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { configId } = req.params;
 
         if (!userId) {
@@ -332,7 +332,7 @@ export const deleteTelemetryConfig = async (req: Request, res: Response): Promis
  */
 export const testTelemetryEndpoint = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { endpointType, endpoint, authToken } = req.body;
 
         if (!userId) {
@@ -425,7 +425,7 @@ export const testTelemetryEndpoint = async (req: Request, res: Response): Promis
  */
 export const triggerManualSync = async (req: Request, res: Response): Promise<Response> => {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id || (req as any).userId;
         const { configId } = req.params;
 
         if (!userId) {

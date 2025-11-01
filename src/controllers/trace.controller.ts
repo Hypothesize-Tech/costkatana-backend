@@ -21,10 +21,26 @@ const ListSessionsSchema = z.object({
     }, { message: "Invalid date format" }),
     status: z.enum(['active', 'completed', 'error']).optional(),
     source: z.enum(['telemetry', 'manual', 'unified', 'in-app', 'integration']).optional(),
-    minCost: z.coerce.number().min(0).optional(),
-    maxCost: z.coerce.number().min(0).optional(),
-    minSpans: z.coerce.number().int().min(0).optional(),
-    maxSpans: z.coerce.number().int().min(0).optional(),
+    minCost: z.preprocess((val) => {
+        if (val === '' || val === null || val === undefined) return undefined;
+        const num = Number(val);
+        return isNaN(num) ? undefined : num;
+    }, z.number().min(0).optional()),
+    maxCost: z.preprocess((val) => {
+        if (val === '' || val === null || val === undefined) return undefined;
+        const num = Number(val);
+        return isNaN(num) ? undefined : num;
+    }, z.number().min(0).optional()),
+    minSpans: z.preprocess((val) => {
+        if (val === '' || val === null || val === undefined) return undefined;
+        const num = Number(val);
+        return isNaN(num) ? undefined : Math.floor(num);
+    }, z.number().int().min(0).optional()),
+    maxSpans: z.preprocess((val) => {
+        if (val === '' || val === null || val === undefined) return undefined;
+        const num = Number(val);
+        return isNaN(num) ? undefined : Math.floor(num);
+    }, z.number().int().min(0).optional()),
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().max(100).optional()
 });

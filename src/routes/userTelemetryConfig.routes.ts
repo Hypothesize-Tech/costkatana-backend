@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.middleware';
+import { asyncHandler } from '../middleware/error.middleware';
 import {
     getUserTelemetryConfigs,
     getTelemetryConfig,
@@ -13,21 +14,21 @@ import {
 const router = express.Router();
 
 // All routes require authentication
-router.use(authenticate);
+router.use(authenticate as express.RequestHandler);
 
 /**
  * @route   GET /api/telemetry-config
  * @desc    Get all telemetry configurations for the authenticated user
  * @access  Private
  */
-router.get('/', (req, res) => void getUserTelemetryConfigs(req, res));
+router.get('/', asyncHandler(getUserTelemetryConfigs));
 
 /**
  * @route   GET /api/telemetry-config/:configId
  * @desc    Get a specific telemetry configuration
  * @access  Private
  */
-router.get('/:configId', (req, res) => void getTelemetryConfig(req, res));
+router.get('/:configId', asyncHandler(getTelemetryConfig));
 
 /**
  * @route   POST /api/telemetry-config/test
@@ -35,7 +36,7 @@ router.get('/:configId', (req, res) => void getTelemetryConfig(req, res));
  * @access  Private
  * @body    { endpointType, endpoint, authToken? }
  */
-router.post('/test', (req, res) => void testTelemetryEndpoint(req, res));
+router.post('/test', asyncHandler(testTelemetryEndpoint));
 
 /**
  * @route   POST /api/telemetry-config
@@ -43,7 +44,7 @@ router.post('/test', (req, res) => void testTelemetryEndpoint(req, res));
  * @access  Private
  * @body    { endpointType, endpoint, authType?, authToken?, syncIntervalMinutes? }
  */
-router.post('/', (req, res) => void createTelemetryConfig(req, res));
+router.post('/', asyncHandler(createTelemetryConfig));
 
 /**
  * @route   PUT /api/telemetry-config/:configId
@@ -51,21 +52,21 @@ router.post('/', (req, res) => void createTelemetryConfig(req, res));
  * @access  Private
  * @body    { endpoint?, authToken?, syncIntervalMinutes?, isActive? }
  */
-router.put('/:configId', (req, res) => void updateTelemetryConfig(req, res));
+router.put('/:configId', asyncHandler(updateTelemetryConfig));
 
 /**
  * @route   DELETE /api/telemetry-config/:configId
  * @desc    Delete a telemetry configuration (soft delete)
  * @access  Private
  */
-router.delete('/:configId', (req, res) => void deleteTelemetryConfig(req, res));
+router.delete('/:configId', asyncHandler(deleteTelemetryConfig));
 
 /**
  * @route   POST /api/telemetry-config/:configId/sync
  * @desc    Trigger a manual sync for a specific configuration
  * @access  Private
  */
-router.post('/:configId/sync', (req, res) => void triggerManualSync(req, res));
+router.post('/:configId/sync', asyncHandler(triggerManualSync));
 
 export default router;
 

@@ -335,18 +335,36 @@ class TraceService {
                 if (filters.to) query.startedAt.$lte = filters.to;
             }
             
-            // Cost range filter
+            // Cost range filter - ensure summary.totalCost exists and is not null/undefined
             if (filters.minCost !== undefined || filters.maxCost !== undefined) {
-                query['summary.totalCost'] = {};
-                if (filters.minCost !== undefined) query['summary.totalCost'].$gte = filters.minCost;
-                if (filters.maxCost !== undefined) query['summary.totalCost'].$lte = filters.maxCost;
+                const costQuery: Record<string, unknown> = {
+                    $exists: true,
+                    $ne: null,
+                    $type: 'number'
+                };
+                if (filters.minCost !== undefined && filters.minCost !== null) {
+                    costQuery.$gte = filters.minCost;
+                }
+                if (filters.maxCost !== undefined && filters.maxCost !== null) {
+                    costQuery.$lte = filters.maxCost;
+                }
+                query['summary.totalCost'] = costQuery;
             }
             
-            // Spans range filter
+            // Spans range filter - ensure summary.totalSpans exists and is not null/undefined
             if (filters.minSpans !== undefined || filters.maxSpans !== undefined) {
-                query['summary.totalSpans'] = {};
-                if (filters.minSpans !== undefined) query['summary.totalSpans'].$gte = filters.minSpans;
-                if (filters.maxSpans !== undefined) query['summary.totalSpans'].$lte = filters.maxSpans;
+                const spansQuery: Record<string, unknown> = {
+                    $exists: true,
+                    $ne: null,
+                    $type: 'number'
+                };
+                if (filters.minSpans !== undefined && filters.minSpans !== null) {
+                    spansQuery.$gte = filters.minSpans;
+                }
+                if (filters.maxSpans !== undefined && filters.maxSpans !== null) {
+                    spansQuery.$lte = filters.maxSpans;
+                }
+                query['summary.totalSpans'] = spansQuery;
             }
             
             const page = filters.page || 1;
