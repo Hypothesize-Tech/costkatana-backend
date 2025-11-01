@@ -1,7 +1,7 @@
 import { GitHubService } from './github.service';
 import { GitHubAnalysisService, AnalysisResult } from './githubAnalysis.service';
 import { GitHubCodeGeneratorService, IntegrationCode } from './githubCodeGenerator.service';
-import { GitHubConnection, GitHubIntegration, IGitHubIntegration, IFeatureConfig } from '../models';
+import { GitHubConnection, GitHubIntegration, IGitHubIntegration, IFeatureConfig, IGitHubConnection } from '../models';
 import { loggingService } from './logging.service';
 import { Types } from 'mongoose';
 
@@ -11,7 +11,7 @@ export interface StartIntegrationOptions {
     repositoryId: number;
     repositoryName: string;
     repositoryFullName: string;
-    integrationType: 'npm' | 'cli' | 'python';
+    integrationType: 'npm' | 'cli' | 'python' | 'http-headers';
     selectedFeatures: IFeatureConfig[];
     conversationId?: string;
 }
@@ -71,7 +71,27 @@ export class GitHubIntegrationService {
             this.processIntegration(integration._id.toString()).catch(error => {
                 loggingService.error('Integration process failed', {
                     integrationId: integration._id.toString(),
-                    error: error.message
+                    error: error.message,
+                    stack: error.stack,
+                    repository: repositoryFullName,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Make sure status is updated to failed if process crashes
+                GitHubIntegration.findById(integration._id.toString()).then(integrationRecord => {
+                    if (integrationRecord && integrationRecord.status !== 'failed' && integrationRecord.status !== 'open') {
+                        integrationRecord.status = 'failed';
+                        integrationRecord.errorMessage = `Integration process crashed: ${error.message}`;
+                        integrationRecord.errorStack = error.stack;
+                        integrationRecord.lastActivityAt = new Date();
+                        return integrationRecord.save();
+                    }
+                    return null;
+                }).catch(saveError => {
+                    loggingService.error('Failed to update integration status after crash', {
+                        integrationId: integration._id.toString(),
+                        saveError: saveError.message
+                    });
                 });
             });
 
@@ -92,6 +112,12 @@ export class GitHubIntegrationService {
      */
     private static async processIntegration(integrationId: string): Promise<void> {
         let integration: IGitHubIntegration | null = null;
+        let connection: (IGitHubConnection & { decryptToken: () => string }) | null = null;
+
+        loggingService.info('processIntegration started', {
+            integrationId,
+            timestamp: new Date().toISOString()
+        });
 
         try {
             integration = await GitHubIntegration.findById(integrationId).populate('connectionId');
@@ -99,9 +125,41 @@ export class GitHubIntegrationService {
                 throw new Error('Integration not found');
             }
 
-            const connection = await GitHubConnection.findById(integration.connectionId).select('+accessToken');
+            loggingService.info('Integration found, starting processing', {
+                integrationId,
+                status: integration.status,
+                repository: integration.repositoryFullName,
+                integrationType: integration.integrationType
+            });
+
+            connection = await GitHubConnection.findById(integration.connectionId).select('+accessToken');
             if (!connection) {
                 throw new Error('GitHub connection not found');
+            }
+
+            // Check if token is expired
+            if (connection.expiresAt && new Date() > connection.expiresAt) {
+                integration.status = 'failed';
+                integration.errorMessage = 'GitHub access token has expired. Please reconnect your GitHub account.';
+                await integration.save();
+                loggingService.error('GitHub token expired', {
+                    integrationId,
+                    userId: connection.userId,
+                    expiresAt: connection.expiresAt
+                });
+                return;
+            }
+
+            // Validate connection is active
+            if (!connection.isActive) {
+                integration.status = 'failed';
+                integration.errorMessage = 'GitHub connection is inactive. Please reconnect your GitHub account.';
+                await integration.save();
+                loggingService.error('GitHub connection inactive', {
+                    integrationId,
+                    userId: connection.userId
+                });
+                return;
             }
 
             if (!integration.repositoryFullName) {
@@ -126,18 +184,116 @@ export class GitHubIntegrationService {
 
             // Step 2: Generate integration code
             integration.status = 'generating';
+            integration.lastActivityAt = new Date();
             await integration.save();
 
-            const generatedCode = await GitHubCodeGeneratorService.generateIntegrationCode(
-                integration.userId,
-                {
+            loggingService.info('Starting code generation step', {
+                integrationId,
+                integrationType: integration.integrationType,
+                timestamp: new Date().toISOString()
+            });
+
+            let generatedCode: IntegrationCode;
+            try {
+                // Add timeout wrapper (6 minutes max for code generation)
+                const CODE_GEN_TIMEOUT = 6 * 60 * 1000; // 6 minutes
+                const HEARTBEAT_INTERVAL = 30 * 1000; // 30 seconds - heartbeat updates
+                
+                // Update lastActivityAt before starting code generation
+                integration.lastActivityAt = new Date();
+                await integration.save();
+                
+                loggingService.info('Calling generateIntegrationCode', {
+                    integrationId,
                     integrationType: integration.integrationType,
-                    features: integration.selectedFeatures,
-                    analysis,
-                    repositoryName: integration.repositoryName,
-                    apiKey: process.env.COSTKATANA_DEFAULT_API_KEY || 'dak_your_key_here'
+                    timeout: CODE_GEN_TIMEOUT,
+                    heartbeatInterval: HEARTBEAT_INTERVAL
+                });
+
+                // Set up heartbeat mechanism to update lastActivityAt during long-running operations
+                let heartbeatIntervalId: NodeJS.Timeout | null = null;
+                const startHeartbeat = () => {
+                    heartbeatIntervalId = setInterval(() => {
+                        // Use void to explicitly ignore promise return
+                        void (async () => {
+                            try {
+                                const currentIntegration = await GitHubIntegration.findById(integrationId);
+                                if (currentIntegration && currentIntegration.status === 'generating') {
+                                    currentIntegration.lastActivityAt = new Date();
+                                    await currentIntegration.save();
+                                    loggingService.info('Code generation heartbeat - activity updated', {
+                                        integrationId,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            } catch (heartbeatError: any) {
+                                loggingService.warn('Failed to update heartbeat', {
+                                    integrationId,
+                                    error: heartbeatError instanceof Error ? heartbeatError.message : String(heartbeatError)
+                                });
+                            }
+                        })();
+                    }, HEARTBEAT_INTERVAL);
+                };
+
+                // Start heartbeat
+                startHeartbeat();
+                
+                try {
+                    generatedCode = await Promise.race([
+                        GitHubCodeGeneratorService.generateIntegrationCode(
+                            integration.userId,
+                            {
+                                integrationType: integration.integrationType,
+                                features: integration.selectedFeatures,
+                                analysis,
+                                repositoryName: integration.repositoryName,
+                                apiKey: process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here'
+                            }
+                        ),
+                        new Promise<IntegrationCode>((_, reject) => 
+                            setTimeout(() => {
+                                loggingService.error('Code generation timeout reached', {
+                                    integrationId,
+                                    timeout: CODE_GEN_TIMEOUT,
+                                    timestamp: new Date().toISOString()
+                                });
+                                reject(new Error('Code generation timed out after 6 minutes. This may be due to model unavailability or rate limiting.'));
+                            }, CODE_GEN_TIMEOUT)
+                        )
+                    ]);
+                    
+                    // Stop heartbeat on success
+                    if (heartbeatIntervalId) {
+                        clearInterval(heartbeatIntervalId);
+                        heartbeatIntervalId = null;
+                    }
+                } catch (codeGenPromiseError: any) {
+                    // Stop heartbeat on error
+                    if (heartbeatIntervalId) {
+                        clearInterval(heartbeatIntervalId);
+                        heartbeatIntervalId = null;
+                    }
+                    throw codeGenPromiseError;
                 }
-            );
+            } catch (codeGenError: any) {
+                loggingService.error('Code generation failed or timed out', {
+                    integrationId,
+                    error: codeGenError.message,
+                    stack: codeGenError.stack,
+                    timestamp: new Date().toISOString(),
+                    integrationType: integration.integrationType
+                });
+                
+                // Update status to failed with specific error message
+                integration.status = 'failed';
+                integration.errorMessage = `Code generation failed: ${codeGenError.message}. Please try again or contact support if the issue persists.`;
+                integration.errorStack = codeGenError.stack;
+                integration.lastActivityAt = new Date();
+                await integration.save();
+                
+                throw codeGenError; // Re-throw to trigger outer catch block
+            }
 
             loggingService.info('Code generation completed', {
                 integrationId,
@@ -240,20 +396,89 @@ export class GitHubIntegrationService {
             });
 
         } catch (error: any) {
+            // Check if it's a GitHub authentication error
+            const isAuthError = error.message?.includes('Bad credentials') || 
+                               error.message?.includes('Unauthorized') ||
+                               error.status === 401 ||
+                               error.response?.status === 401;
+
+            const errorMessage = isAuthError
+                ? 'GitHub authentication failed. Your access token may have expired or been revoked. Please reconnect your GitHub account from the integrations page.'
+                : error.message || 'Integration processing failed';
+
             loggingService.error('Integration processing failed', {
                 integrationId,
                 error: error.message,
-                stack: error.stack
+                stack: error.stack,
+                isAuthError,
+                status: error.status || error.response?.status
             });
 
             if (integration) {
                 integration.status = 'failed';
-                integration.errorMessage = error.message;
+                integration.errorMessage = errorMessage;
                 integration.errorStack = error.stack;
                 await integration.save();
+
+                // If it's an auth error, mark the connection as inactive
+                if (isAuthError && connection) {
+                    connection.isActive = false;
+                    await connection.save();
+                    loggingService.info('Marked GitHub connection as inactive due to auth error', {
+                        connectionId: connection._id,
+                        userId: connection.userId
+                    });
+                }
             }
 
             throw error;
+        }
+    }
+
+    /**
+     * Check and recover stuck integrations (in generating status for more than 10 minutes)
+     */
+    static async recoverStuckIntegrations(): Promise<number> {
+        const STUCK_THRESHOLD = 10 * 60 * 1000; // 10 minutes
+        const thresholdTime = new Date(Date.now() - STUCK_THRESHOLD);
+
+        try {
+            const stuckIntegrations = await GitHubIntegration.find({
+                status: 'generating',
+                $or: [
+                    { lastActivityAt: { $lt: thresholdTime } },
+                    { lastActivityAt: { $exists: false } },
+                    { updatedAt: { $lt: thresholdTime } }
+                ]
+            });
+
+            if (stuckIntegrations.length === 0) {
+                return 0;
+            }
+
+            loggingService.warn('Found stuck integrations, marking as failed', {
+                count: stuckIntegrations.length,
+                integrationIds: stuckIntegrations.map(i => i._id.toString())
+            });
+
+            for (const integration of stuckIntegrations) {
+                integration.status = 'failed';
+                integration.errorMessage = 'Integration timed out during code generation. This may be due to model unavailability. Please try again.';
+                integration.lastActivityAt = new Date();
+                await integration.save();
+
+                loggingService.info('Recovered stuck integration', {
+                    integrationId: integration._id.toString(),
+                    repository: integration.repositoryFullName
+                });
+            }
+
+            return stuckIntegrations.length;
+        } catch (error: any) {
+            loggingService.error('Failed to recover stuck integrations', {
+                error: error.message
+            });
+            return 0;
         }
     }
 
@@ -333,9 +558,31 @@ ${code.testingSteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
      * Get integration status
      */
     static async getIntegrationStatus(integrationId: string): Promise<IntegrationProgress> {
+        // First check and recover any stuck integrations
+        await this.recoverStuckIntegrations();
+
         const integration = await GitHubIntegration.findById(integrationId);
         if (!integration) {
             throw new Error('Integration not found');
+        }
+
+        // If integration is stuck (generating for > 10 minutes), mark as failed
+        if (integration.status === 'generating') {
+            const STUCK_THRESHOLD = 10 * 60 * 1000; // 10 minutes
+            const lastActivity = integration.lastActivityAt ?? integration.updatedAt;
+            const timeSinceLastActivity = Date.now() - lastActivity.getTime();
+            
+            if (timeSinceLastActivity > STUCK_THRESHOLD) {
+                integration.status = 'failed';
+                integration.errorMessage = 'Integration timed out during code generation. This may be due to model unavailability. Please try again.';
+                integration.lastActivityAt = new Date();
+                await integration.save();
+
+                loggingService.warn('Integration was stuck, marked as failed', {
+                    integrationId,
+                    timeStuck: Math.round(timeSinceLastActivity / 1000 / 60) + ' minutes'
+                });
+            }
         }
 
         const statusMap: Record<string, number> = {

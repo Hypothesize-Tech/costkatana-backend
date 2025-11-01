@@ -6,7 +6,8 @@ import {
     getUserConversations,
     createConversation,
     deleteConversation,
-    getAvailableModels
+    getAvailableModels,
+    updateConversationGitHubContext
 } from '../controllers/chat.controller';
 
 const router = Router();
@@ -30,6 +31,9 @@ router.get('/conversations', authenticate, getUserConversations);
 
 // Get conversation history
 router.get('/conversations/:conversationId/history', authenticate, getConversationHistory);
+
+// Update conversation GitHub context
+router.patch('/conversations/:conversationId/github-context', authenticate, updateConversationGitHubContext);
 
 // Delete a conversation
 router.delete('/conversations/:conversationId', authenticate, deleteConversation);

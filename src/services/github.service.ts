@@ -5,7 +5,6 @@ import jwt from 'jsonwebtoken';
 
 // Dynamic imports for ES modules
 let Octokit: any;
-let createAppAuth: any;
 
 export interface GitHubAuthConfig {
     appId?: string;
@@ -108,21 +107,26 @@ export class GitHubService {
         }
 
         try {
-            // Use @octokit/rest which is CommonJS compatible
-            const { Octokit: OctokitClass } = require('@octokit/rest');
+            // Use dynamic import() for ES Module compatibility
+            const octokitModule = await import('@octokit/rest');
+            const { Octokit: OctokitClass } = octokitModule;
             
             Octokit = OctokitClass;
-            createAppAuth = null; // We'll use token auth instead of app auth for now
+            // createAppAuth can be imported here in the future if needed for GitHub App auth
             
             this.modulesLoaded = true;
-            loggingService.info('Octokit modules loaded successfully via require');
-        } catch (error: any) {
+            loggingService.info('Octokit modules loaded successfully via dynamic import');
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            const errorName = error instanceof Error ? error.name : undefined;
+            
             loggingService.error('Failed to load Octokit modules', { 
-                error: error.message,
-                stack: error.stack,
-                name: error.name
+                error: errorMessage,
+                stack: errorStack,
+                name: errorName
             });
-            throw new Error(`Failed to load GitHub API modules: ${error?.message || 'Unknown error'}`);
+            throw new Error(`Failed to load GitHub API modules: ${errorMessage}`);
         }
     }
 
@@ -447,6 +451,138 @@ export class GitHubService {
     }
 
     /**
+     * Get all repository files recursively (excluding dependency folders)
+     */
+    static async getAllRepositoryFiles(
+        connection: IGitHubConnection & { decryptToken: () => string },
+        owner: string,
+        repo: string,
+        ref?: string,
+        options?: {
+            maxFiles?: number;
+            excludePatterns?: string[];
+        }
+    ): Promise<Array<{ path: string; size: number; type: 'file' | 'dir'; sha?: string }>> {
+        const maxFiles = options?.maxFiles || 5000;
+        const files: Array<{ path: string; size: number; type: 'file' | 'dir'; sha?: string }> = [];
+        
+        // Default exclusion patterns for dependency folders
+        const defaultExcludePatterns = [
+            'node_modules',
+            '__pycache__',
+            '.venv',
+            'venv',
+            'env',
+            '.env',
+            'dist',
+            'build',
+            '.git',
+            'coverage',
+            '.next',
+            '.nuxt',
+            '.cache',
+            '.pytest_cache',
+            '.mypy_cache',
+            '.tox',
+            'target',
+            'out',
+            '.idea',
+            '.vscode',
+            '.vs',
+            '*.min.js',
+            '*.bundle.js',
+            '*.chunk.js'
+        ];
+        
+        const excludePatterns = options?.excludePatterns || defaultExcludePatterns;
+        
+        // Helper function to check if path should be excluded
+        const shouldExclude = (path: string): boolean => {
+            const pathParts = path.split('/');
+            return excludePatterns.some(pattern => {
+                // Exact match
+                if (pathParts.includes(pattern)) return true;
+                // Wildcard match
+                if (pattern.includes('*')) {
+                    const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+                    return regex.test(path);
+                }
+                // Prefix match
+                return pathParts.some(part => part.startsWith(pattern));
+            });
+        };
+        
+        // Recursive function to traverse directory tree
+        const traverseDirectory = async (currentPath: string = ''): Promise<void> => {
+            if (files.length >= maxFiles) {
+                loggingService.warn('Reached max files limit', { maxFiles, currentPath });
+                return;
+            }
+            
+            try {
+                const contents = await this.listDirectoryContents(connection, owner, repo, currentPath, ref);
+                
+                for (const item of contents) {
+                    const fullPath = item.path;
+                    
+                    // Skip excluded paths
+                    if (shouldExclude(fullPath)) {
+                        continue;
+                    }
+                    
+                    if (item.type === 'file') {
+                        files.push({
+                            path: fullPath,
+                            size: item.size,
+                            type: 'file',
+                            sha: item.sha
+                        });
+                    } else if (item.type === 'dir') {
+                        files.push({
+                            path: fullPath,
+                            size: 0,
+                            type: 'dir'
+                        });
+                        
+                        // Recursively traverse subdirectories
+                        await traverseDirectory(fullPath);
+                        
+                        // Add small delay to respect rate limits
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
+                }
+            } catch (error: unknown) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                // Log but continue - some directories might not be accessible
+                loggingService.warn('Failed to traverse directory', {
+                    repository: `${owner}/${repo}`,
+                    path: currentPath,
+                    error: errorMessage
+                });
+            }
+        };
+        
+        try {
+            await traverseDirectory('');
+            
+            loggingService.info('Retrieved all repository files', {
+                repository: `${owner}/${repo}`,
+                fileCount: files.length,
+                maxFiles
+            });
+            
+            return files;
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            loggingService.error('Failed to get all repository files', {
+                repository: `${owner}/${repo}`,
+                error: errorMessage
+            });
+            throw error;
+        }
+    }
+
+    /**
      * Create a new branch
      */
     static async createBranch(
@@ -454,6 +590,11 @@ export class GitHubService {
         options: CreateBranchOptions
     ): Promise<string> {
         try {
+            // Verify we're using OAuth token, not App token
+            if (connection.tokenType === 'app') {
+                throw new Error('GitHub App authentication detected. Please reconnect using OAuth flow for write access.');
+            }
+
             const octokit = await this.getOctokitFromConnection(connection);
             const { owner, repo, branchName, fromBranch } = options;
 
@@ -483,13 +624,33 @@ export class GitHubService {
             });
 
             return branchName;
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorStatus = (error as any)?.status;
+            
+            // Provide user-friendly error messages
+            let userMessage = errorMessage;
+            if (errorMessage.includes('Resource not accessible by integration')) {
+                userMessage = 'GitHub token does not have write permissions. Please reconnect your GitHub account and grant all requested permissions.';
+            } else if (errorMessage.includes('Bad credentials')) {
+                userMessage = 'GitHub authentication failed. Please reconnect your GitHub account.';
+            } else if (errorMessage.includes('Not Found')) {
+                userMessage = 'Repository or branch not found. Please verify the repository exists and you have access.';
+            }
+
             loggingService.error('Failed to create branch', {
                 repository: `${options.owner}/${options.repo}`,
                 branchName: options.branchName,
-                error: error.message
+                error: errorMessage,
+                status: errorStatus,
+                tokenType: connection.tokenType,
+                isActive: connection.isActive
             });
-            throw error;
+            
+            // Throw error with user-friendly message
+            const friendlyError = new Error(userMessage);
+            (friendlyError as any).status = errorStatus;
+            throw friendlyError;
         }
     }
 

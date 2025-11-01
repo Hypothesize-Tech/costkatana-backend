@@ -80,7 +80,9 @@ export class GitHubController {
             await GitHubService.initialize();
 
             const clientId = process.env.GITHUB_CLIENT_ID;
-            const callbackUrl = process.env.GITHUB_CALLBACK_URL || 'http://localhost:3000/api/github/callback';
+            // OAuth callback must go to backend, not frontend
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.GITHUB_CALLBACK_URL ?? `${backendUrl}/api/github/callback`;
             
             // Generate state for CSRF protection
             const state = crypto.randomBytes(16).toString('hex');
@@ -423,7 +425,7 @@ export class GitHubController {
             }
 
             // Validate integration type
-            if (!['npm', 'cli', 'python'].includes(integrationType)) {
+            if (!['npm', 'cli', 'python', 'http-headers'].includes(integrationType)) {
                 res.status(400).json({
                     success: false,
                     message: 'Invalid integration type'
@@ -503,6 +505,9 @@ export class GitHubController {
                 });
                 return;
             }
+
+            // Check for stuck integrations before returning status
+            await GitHubIntegrationService.recoverStuckIntegrations();
 
             const progress = await GitHubIntegrationService.getIntegrationStatus(integrationId);
 

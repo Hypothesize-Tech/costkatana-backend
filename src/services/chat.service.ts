@@ -63,6 +63,14 @@ export interface ConversationResponse {
     messageCount: number;
     lastMessage?: string;
     totalCost?: number;
+    githubContext?: {
+        connectionId?: string;
+        repositoryId?: number;
+        repositoryName?: string;
+        repositoryFullName?: string;
+        integrationId?: string;
+        branchName?: string;
+    };
 }
 
 export interface ChatSendMessageRequest {
@@ -75,6 +83,12 @@ export interface ChatSendMessageRequest {
     chatMode?: 'fastest' | 'cheapest' | 'balanced';
     useMultiAgent?: boolean;
     documentIds?: string[]; // Document IDs for RAG context
+    githubContext?: {
+        connectionId: string;
+        repositoryId: number;
+        repositoryName: string;
+        repositoryFullName: string;
+    };
     req?: any; // Express Request object for tracing context
 }
 
@@ -101,6 +115,14 @@ export interface ChatSendMessageResponse {
     cacheHit?: boolean;
     agentPath?: string[];
     riskLevel?: string;
+    // GitHub integration data
+    githubIntegrationData?: {
+        integrationId?: string;
+        status?: string;
+        progress?: number;
+        currentStep?: string;
+        prUrl?: string;
+    };
 }
 
 export class ChatService {
@@ -1001,6 +1023,114 @@ export class ChatService {
                 throw new Error('Failed to get or create conversation');
             }
 
+            // Check if this is a GitHub-related message with repository context
+            // Use request.githubContext if provided, otherwise check conversation.githubContext
+            const githubContext = request.githubContext || (conversation!.githubContext ? {
+                connectionId: conversation!.githubContext.connectionId?.toString(),
+                repositoryId: conversation!.githubContext.repositoryId,
+                repositoryName: conversation!.githubContext.repositoryName,
+                repositoryFullName: conversation!.githubContext.repositoryFullName
+            } : null);
+
+            if (githubContext) {
+                try {
+                    const { GitHubChatAgentService } = await import('./githubChatAgent.service');
+                    const { GitHubConnection, Conversation: ConversationModel } = await import('../models');
+                    
+                    // Get GitHub connection
+                    const connectionId = typeof githubContext.connectionId === 'string' 
+                        ? githubContext.connectionId 
+                        : githubContext.connectionId;
+                    const connection = await GitHubConnection.findById(connectionId);
+                    if (!connection || !connection.isActive) {
+                        throw new Error('GitHub connection not found or inactive');
+                    }
+
+                    // Get conversation GitHub context if exists, otherwise create from request
+                    let conversationGithubContext = null;
+                    if (conversation!.githubContext) {
+                        conversationGithubContext = conversation!.githubContext;
+                    } else {
+                        // Create GitHub context from request
+                        conversationGithubContext = {
+                            connectionId: connection._id,
+                            repositoryId: githubContext.repositoryId,
+                            repositoryName: githubContext.repositoryName,
+                            repositoryFullName: githubContext.repositoryFullName
+                        };
+                        // Save to conversation
+                        await ConversationModel.findByIdAndUpdate(conversation!._id, {
+                            githubContext: conversationGithubContext
+                        });
+                    }
+
+                    // Process with GitHub chat agent
+                    const githubResponse = await GitHubChatAgentService.processChatMessage({
+                        conversationId: conversation!._id.toString(),
+                        userId: request.userId,
+                        githubContext: conversationGithubContext
+                    }, request.message);
+
+                    // Format response - include integration data for frontend polling
+                    const processingResult = {
+                        response: githubResponse.message,
+                        agentPath: ['github_agent'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low' as const,
+                        agentThinking: undefined,
+                        // Include GitHub integration data if present
+                        githubIntegrationData: githubResponse.data || undefined
+                    };
+
+                    // Save assistant response
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: githubResponse.message,
+                                modelId: request.modelId
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = githubResponse.message.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+
+                    const latency = Date.now() - startTime;
+                    const inputTokens = Math.ceil(request.message.length / 4);
+                    const outputTokens = Math.ceil(githubResponse.message.length / 4);
+                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+
+                    return {
+                        messageId: new Types.ObjectId().toString(),
+                        conversationId: conversation!._id.toString(),
+                        response: githubResponse.message,
+                        cost,
+                        latency,
+                        tokenCount: inputTokens + outputTokens,
+                        model: request.modelId,
+                        agentPath: processingResult.agentPath,
+                        optimizationsApplied: processingResult.optimizationsApplied,
+                        cacheHit: processingResult.cacheHit,
+                        riskLevel: processingResult.riskLevel,
+                        githubIntegrationData: processingResult.githubIntegrationData
+                    };
+                } catch (error) {
+                    loggingService.warn('GitHub chat agent failed, falling back to normal processing', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    // Fall through to normal processing
+                }
+            }
+
             // Optimized: Enhanced processing with circuit breaker
             const processingResult = await this.processWithFallback(request, conversation!, recentMessages);
             
@@ -1328,7 +1458,15 @@ export class ChatService {
             updatedAt: conversation.updatedAt,
             messageCount: conversation.messageCount || 0,
             lastMessage: conversation.lastMessage,
-            totalCost: conversation.totalCost || 0
+            totalCost: conversation.totalCost || 0,
+            githubContext: conversation.githubContext ? {
+                connectionId: conversation.githubContext.connectionId?.toString(),
+                repositoryId: conversation.githubContext.repositoryId,
+                repositoryName: conversation.githubContext.repositoryName,
+                repositoryFullName: conversation.githubContext.repositoryFullName,
+                integrationId: conversation.githubContext.integrationId?.toString(),
+                branchName: conversation.githubContext.branchName
+            } : undefined
         };
     }
 

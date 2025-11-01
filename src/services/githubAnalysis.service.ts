@@ -291,18 +291,35 @@ export class GitHubAnalysisService {
     ): Promise<string[]> {
         const entryPoints: string[] = [];
         const patterns = this.FILE_PATTERNS[language] || [];
+        
+        // Directories to exclude (build outputs)
+        const excludedDirs = ['dist', 'build', 'out', 'lib', '.next', '.nuxt', 'node_modules', '.cache'];
+        
+        // Helper to check if path is in excluded directory
+        const isExcludedPath = (path: string): boolean => {
+            const pathLower = path.toLowerCase();
+            return excludedDirs.some(dir => pathLower.includes(`/${dir}/`) || pathLower.startsWith(`${dir}/`));
+        };
 
         for (const content of contents) {
-            if (content.type === 'file') {
+            if (content.type === 'file' && !isExcludedPath(content.path)) {
                 for (const { pattern, type } of patterns) {
                     if (type === 'entry' && pattern.test(content.name)) {
-                        entryPoints.push(content.path);
+                        // For TypeScript projects, prefer .ts/.tsx over .js/.jsx
+                        if (language === 'typescript') {
+                            const ext = content.name.split('.').pop()?.toLowerCase();
+                            if (ext === 'ts' || ext === 'tsx') {
+                                entryPoints.push(content.path);
+                            }
+                        } else {
+                            entryPoints.push(content.path);
+                        }
                     }
                 }
             }
         }
 
-        // Check package.json for main entry
+        // Check package.json for main entry, but prefer source files
         if (language === 'javascript' || language === 'typescript') {
             try {
                 const packageJson = await GitHubService.getFileContent(
@@ -312,8 +329,28 @@ export class GitHubAnalysisService {
                     'package.json'
                 );
                 const pkg = JSON.parse(packageJson);
-                if (pkg.main && !entryPoints.includes(pkg.main)) {
-                    entryPoints.push(pkg.main);
+                
+                // If there's a main field, check if it's a source file or build output
+                if (pkg.main && !isExcludedPath(pkg.main)) {
+                    // For TypeScript, try to find corresponding .ts source file
+                    if (language === 'typescript' && pkg.main.endsWith('.js')) {
+                        // Check if corresponding .ts file exists in src/
+                        const tsPath = pkg.main.replace(/\.js$/, '.ts').replace(/^dist\//, 'src/').replace(/^build\//, 'src/').replace(/^lib\//, 'src/');
+                        if (!entryPoints.includes(tsPath)) {
+                            // Try to verify if source file exists
+                            try {
+                                await GitHubService.getFileContent(connection, owner, repo, tsPath);
+                                entryPoints.push(tsPath);
+                            } catch {
+                                // Source not found, skip main if it's in dist/build
+                                if (!pkg.main.includes('dist/') && !pkg.main.includes('build/')) {
+                                    entryPoints.push(pkg.main);
+                                }
+                            }
+                        }
+                    } else if (!entryPoints.includes(pkg.main)) {
+                        entryPoints.push(pkg.main);
+                    }
                 }
             } catch (error) {
                 // package.json not found or invalid
@@ -331,17 +368,32 @@ export class GitHubAnalysisService {
             );
             
             for (const content of srcContents) {
-                if (content.type === 'file') {
+                if (content.type === 'file' && !isExcludedPath(content.path)) {
                     for (const { pattern, type } of patterns) {
                         if (type === 'entry' && pattern.test(content.name)) {
-                            entryPoints.push(content.path);
+                            // For TypeScript projects, prefer .ts/.tsx
+                            if (language === 'typescript') {
+                                const ext = content.name.split('.').pop()?.toLowerCase();
+                                if (ext === 'ts' || ext === 'tsx') {
+                                    entryPoints.push(content.path);
+                                }
+                            } else {
+                                entryPoints.push(content.path);
+                            }
                         }
                     }
                 }
             }
         }
 
-        return entryPoints.length > 0 ? entryPoints : ['src/index.js'];
+        // Default fallback based on language
+        const defaultEntry = language === 'typescript' 
+            ? 'src/index.ts' 
+            : language === 'javascript'
+            ? 'src/index.js'
+            : 'src/index.js';
+
+        return entryPoints.length > 0 ? entryPoints : [defaultEntry];
     }
 
     /**

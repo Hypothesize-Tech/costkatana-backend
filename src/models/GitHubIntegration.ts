@@ -41,7 +41,7 @@ export interface IGitHubIntegration extends Document {
     prTitle?: string;
     prDescription?: string;
     status: 'initializing' | 'analyzing' | 'generating' | 'draft' | 'open' | 'updating' | 'merged' | 'closed' | 'failed' | 'permission_error';
-    integrationType: 'npm' | 'cli' | 'python'; // Package type
+    integrationType: 'npm' | 'cli' | 'python' | 'http-headers'; // Package type
     selectedFeatures: IFeatureConfig[];
     conversationId?: Types.ObjectId; // Link to chat conversation
     commits: IGitHubCommit[];
@@ -178,7 +178,7 @@ const githubIntegrationSchema = new Schema<IGitHubIntegration>({
     },
     integrationType: {
         type: String,
-        enum: ['npm', 'cli', 'python'],
+        enum: ['npm', 'cli', 'python', 'http-headers'],
         required: true
     },
     selectedFeatures: {

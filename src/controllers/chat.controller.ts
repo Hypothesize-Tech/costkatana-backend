@@ -12,7 +12,7 @@ export interface AuthenticatedRequest extends Request {
 export const sendMessage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
-    const { message, modelId, conversationId, temperature = 0.7, maxTokens = 2000, documentIds } = req.body;
+    const { message, modelId, conversationId, temperature = 0.7, maxTokens = 2000, documentIds, githubContext } = req.body;
 
     try {
         loggingService.info('Chat message request initiated', {
@@ -60,6 +60,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             temperature,
             maxTokens,
             documentIds,
+            githubContext,
             req
         });
 
@@ -402,6 +403,109 @@ export const createConversation = async (req: AuthenticatedRequest, res: Respons
         res.status(500).json({
             success: false,
             message: 'Failed to create conversation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Update conversation GitHub context
+ */
+export const updateConversationGitHubContext = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const userId = req.userId;
+    const { conversationId } = req.params;
+    const { githubContext } = req.body;
+
+    try {
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        if (!conversationId) {
+            res.status(400).json({
+                success: false,
+                message: 'Conversation ID is required'
+            });
+            return;
+        }
+
+        if (!githubContext || !(githubContext as { connectionId?: string; repositoryId?: number }).connectionId || !(githubContext as { connectionId?: string; repositoryId?: number }).repositoryId) {
+            res.status(400).json({
+                success: false,
+                message: 'Valid GitHub context is required'
+            });
+            return;
+        }
+
+        const { Conversation } = await import('../models');
+        const { GitHubConnection } = await import('../models');
+
+        // Verify conversation ownership
+        const conversation = await Conversation.findOne({
+            _id: conversationId,
+            userId: userId
+        });
+
+        if (!conversation) {
+            res.status(404).json({
+                success: false,
+                message: 'Conversation not found or access denied'
+            });
+            return;
+        }
+
+        const githubCtx = githubContext as { connectionId: string; repositoryId: number; repositoryName?: string; repositoryFullName?: string };
+        
+        // Verify GitHub connection exists and belongs to user
+        const connection = await GitHubConnection.findOne({
+            _id: githubCtx.connectionId,
+            userId: userId,
+            isActive: true
+        });
+
+        if (!connection) {
+            res.status(404).json({
+                success: false,
+                message: 'GitHub connection not found or inactive'
+            });
+            return;
+        }
+
+        // Update conversation with GitHub context
+        await Conversation.findByIdAndUpdate(conversationId, {
+            githubContext: {
+                connectionId: connection._id,
+                repositoryId: githubCtx.repositoryId,
+                repositoryName: githubCtx.repositoryName,
+                repositoryFullName: githubCtx.repositoryFullName
+            }
+        });
+
+        loggingService.info('Conversation GitHub context updated', {
+            userId,
+            conversationId,
+            repository: githubCtx.repositoryFullName
+        });
+
+        res.json({
+            success: true,
+            message: 'GitHub context updated successfully'
+        });
+
+    } catch (error: any) {
+        loggingService.error('Failed to update conversation GitHub context', {
+            userId,
+            conversationId,
+            error: error.message
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update GitHub context',
             error: error instanceof Error ? error.message : 'Unknown error'
         });
     }
