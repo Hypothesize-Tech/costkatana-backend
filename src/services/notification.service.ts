@@ -3,6 +3,7 @@ import { Integration, IIntegration } from '../models/Integration';
 import { User } from '../models/User';
 import { SlackService } from './slack.service';
 import { DiscordService } from './discord.service';
+import { LinearService } from './linear.service';
 import { IntegrationService } from './integration.service';
 import { loggingService } from './logging.service';
 import { EmailService } from './email.service';
@@ -259,6 +260,39 @@ export class NotificationService {
                     credentials.channelId,
                     discordBotMessage
                 );
+
+            case 'linear_oauth': {
+                if (!credentials.accessToken) {
+                    throw new Error('Linear OAuth credentials not configured');
+                }
+
+                // Check if issueId is set (Comment Mode) or autoCreateIssues is enabled (Issue Mode)
+                const autoCreateIssues = integration.metadata?.autoCreateIssues === true;
+                const linearIssueId = credentials.issueId;
+                
+                if (linearIssueId) {
+                    // Comment Mode: Post alert as comment on existing issue
+                    const result = await LinearService.sendAlertComment(
+                        credentials.accessToken,
+                        linearIssueId,
+                        alert,
+                        dashboardUrl
+                    );
+                    return { responseTime: result.responseTime };
+                } else if (autoCreateIssues && credentials.teamId) {
+                    // Issue Mode: Create new issue for alert
+                    const result = await LinearService.createIssueFromAlert(
+                        credentials.accessToken,
+                        credentials.teamId,
+                        credentials.projectId,
+                        alert,
+                        dashboardUrl
+                    );
+                    return { responseTime: result.responseTime };
+                } else {
+                    throw new Error('Linear integration not properly configured: missing issueId or teamId with autoCreateIssues');
+                }
+            }
 
             case 'custom_webhook':
                 if (!credentials.webhookUrl) {

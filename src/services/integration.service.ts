@@ -2,6 +2,7 @@ import { Integration, IIntegration, IntegrationType, IntegrationCredentials } fr
 import { loggingService } from './logging.service';
 import { SlackService } from './slack.service';
 import { DiscordService } from './discord.service';
+import { LinearService } from './linear.service';
 import mongoose from 'mongoose';
 
 export interface CreateIntegrationDto {
@@ -17,6 +18,7 @@ export interface CreateIntegrationDto {
         timeout?: number;
         batchDelay?: number;
     };
+    metadata?: Record<string, any>;
 }
 
 export interface UpdateIntegrationDto {
@@ -53,6 +55,7 @@ export class IntegrationService {
                     timeout: dto.deliveryConfig?.timeout ?? 30000,
                     batchDelay: dto.deliveryConfig?.batchDelay
                 },
+                metadata: dto.metadata || {},
                 stats: {
                     totalDeliveries: 0,
                     successfulDeliveries: 0,
@@ -281,6 +284,16 @@ export class IntegrationService {
                     );
                     break;
 
+                case 'linear_oauth':
+                    if (!credentials.accessToken || !credentials.teamId) {
+                        throw new Error('Linear OAuth credentials not configured');
+                    }
+                    result = await LinearService.testIntegration(
+                        credentials.accessToken,
+                        credentials.teamId
+                    );
+                    break;
+
                 case 'custom_webhook':
                     if (!credentials.webhookUrl) {
                         throw new Error('Webhook URL not configured');
@@ -376,6 +389,13 @@ export class IntegrationService {
                     case 'discord_oauth':
                         if (credentials.botToken) {
                             await DiscordService.listGuilds(credentials.botToken);
+                            isHealthy = true;
+                        }
+                        break;
+
+                    case 'linear_oauth':
+                        if (credentials.accessToken && credentials.teamId) {
+                            await LinearService.testIntegration(credentials.accessToken, credentials.teamId);
                             isHealthy = true;
                         }
                         break;
@@ -576,6 +596,71 @@ export class IntegrationService {
                 integrationId,
                 userId,
                 guildId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get Linear teams for OAuth integration
+     */
+    static async getLinearTeams(integrationId: string, userId: string): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'linear_oauth') {
+                throw new Error('Integration not found or not a Linear OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken) {
+                throw new Error('Access token not found');
+            }
+
+            return await LinearService.listTeams(credentials.accessToken);
+        } catch (error: any) {
+            loggingService.error('Failed to get Linear teams', {
+                error: error.message,
+                integrationId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get Linear projects for a team
+     */
+    static async getLinearProjects(
+        integrationId: string,
+        userId: string,
+        teamId: string
+    ): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'linear_oauth') {
+                throw new Error('Integration not found or not a Linear OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken) {
+                throw new Error('Access token not found');
+            }
+
+            return await LinearService.listProjects(credentials.accessToken, teamId);
+        } catch (error: any) {
+            loggingService.error('Failed to get Linear projects', {
+                error: error.message,
+                integrationId,
+                userId,
+                teamId
             });
             throw error;
         }

@@ -18,7 +18,7 @@ export class IntegrationController {
                 });
             }
 
-            const { type, name, description, credentials, alertRouting, deliveryConfig } = req.body;
+            const { type, name, description, credentials, alertRouting, deliveryConfig, metadata } = req.body;
 
             if (!type || !name || !credentials) {
                 return res.status(400).json({
@@ -34,7 +34,8 @@ export class IntegrationController {
                 description,
                 credentials,
                 alertRouting,
-                deliveryConfig
+                deliveryConfig,
+                metadata
             });
 
             return res.status(201).json({
@@ -492,6 +493,438 @@ export class IntegrationController {
                 success: false,
                 message: error.message || 'Failed to get Discord channels'
             });
+        }
+    }
+
+    /**
+     * Get Linear teams for OAuth integration
+     * GET /api/integrations/:id/linear/teams
+     */
+    static async getLinearTeams(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id } = req.params;
+
+            const teams = await IntegrationService.getLinearTeams(id, userId);
+
+            return res.status(200).json({
+                success: true,
+                data: teams
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting Linear teams', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get Linear teams'
+            });
+        }
+    }
+
+    /**
+     * Get Linear projects for a team
+     * GET /api/integrations/:id/linear/teams/:teamId/projects
+     */
+    static async getLinearProjects(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id, teamId } = req.params;
+
+            const projects = await IntegrationService.getLinearProjects(id, userId, teamId);
+
+            return res.status(200).json({
+                success: true,
+                data: projects
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting Linear projects', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get Linear projects'
+            });
+        }
+    }
+
+    /**
+     * Create Linear issue manually
+     * POST /api/integrations/:id/linear/issues
+     */
+    static async createLinearIssue(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id } = req.params;
+            const { title, description, teamId, projectId } = req.body;
+
+            if (!title || !teamId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Title and teamId are required'
+                });
+            }
+
+            const integration = await IntegrationService.getIntegrationById(id, userId);
+            if (!integration || integration.type !== 'linear_oauth') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Linear integration not found'
+                });
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Linear access token not configured'
+                });
+            }
+
+            const { LinearService } = await import('../services/linear.service');
+            const result = await LinearService.createIssueFromAlert(
+                credentials.accessToken,
+                teamId,
+                projectId,
+                {
+                    _id: '',
+                    title,
+                    message: description || title,
+                    type: 'system' as any,
+                    severity: 'medium' as any,
+                    userId: integration.userId,
+                    createdAt: new Date(),
+                    data: {}
+                } as any,
+                undefined
+            );
+
+            return res.status(201).json({
+                success: true,
+                message: 'Linear issue created successfully',
+                data: {
+                    issueId: result.issueId,
+                    issueUrl: result.issueUrl
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error creating Linear issue', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to create Linear issue'
+            });
+        }
+    }
+
+    /**
+     * Update Linear issue
+     * PUT /api/integrations/:id/linear/issues/:issueId
+     */
+    static async updateLinearIssue(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id, issueId } = req.params;
+            const updates = req.body;
+
+            const integration = await IntegrationService.getIntegrationById(id, userId);
+            if (!integration || integration.type !== 'linear_oauth') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Linear integration not found'
+                });
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Linear access token not configured'
+                });
+            }
+
+            const { LinearService } = await import('../services/linear.service');
+            const result = await LinearService.updateIssue(
+                credentials.accessToken,
+                issueId,
+                updates
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: 'Linear issue updated successfully',
+                data: {
+                    responseTime: result.responseTime
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error updating Linear issue', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to update Linear issue'
+            });
+        }
+    }
+
+    /**
+     * Validate Linear API token and fetch teams
+     * POST /api/integrations/linear/validate-token
+     */
+    static async validateLinearToken(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { accessToken } = req.body;
+
+            if (!accessToken) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Access token is required'
+                });
+            }
+
+            const { LinearService } = await import('../services/linear.service');
+
+            // Validate token by fetching user info
+            try {
+                const user = await LinearService.getAuthenticatedUser(accessToken);
+                
+                // Fetch teams
+                const teams = await LinearService.listTeams(accessToken);
+
+                // Optionally fetch projects if teamId is provided
+                const { teamId } = req.body;
+                let projects: any[] = [];
+                if (teamId) {
+                    try {
+                        projects = await LinearService.listProjects(accessToken, teamId);
+                    } catch (error) {
+                        // Projects are optional, don't fail if we can't fetch them
+                        loggingService.warn('Failed to fetch Linear projects', { error: (error as any)?.message });
+                    }
+                }
+
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        user: {
+                            id: user.id,
+                            name: user.name,
+                            email: user.email,
+                            active: user.active
+                        },
+                        teams,
+                        projects: teamId ? projects : undefined
+                    }
+                });
+            } catch (error: any) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Invalid Linear API token',
+                    error: error.message
+                });
+            }
+        } catch (error: any) {
+            loggingService.error('Failed to validate Linear token', {
+                error: error.message,
+                stack: error.stack
+            });
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to validate Linear token',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Initiate Linear OAuth flow
+     * GET /api/integrations/linear/auth
+     */
+    static async initiateLinearOAuth(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const clientId = process.env.LINEAR_CLIENT_ID;
+            if (!clientId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Linear Client ID not configured. Please set LINEAR_CLIENT_ID in environment variables.'
+                });
+            }
+
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.LINEAR_CALLBACK_URL ?? `${backendUrl}/api/integrations/linear/callback`;
+            
+            // Generate state for CSRF protection
+            const crypto = require('crypto');
+            const state = crypto.randomBytes(16).toString('hex');
+            
+            // Store state with userId
+            const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
+
+            // Linear OAuth scopes
+            const scopes = 'write read';
+            const authUrl = `https://linear.app/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${scopes}&state=${stateData}&response_type=code`;
+
+            loggingService.info('Linear OAuth flow initiated', { userId });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    authUrl,
+                    state: stateData
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to initiate Linear OAuth', {
+                error: error.message,
+                stack: error.stack
+            });
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to initiate Linear OAuth flow',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Handle Linear OAuth callback
+     * GET /api/integrations/linear/callback
+     */
+    static async handleLinearOAuthCallback(req: any, res: Response): Promise<void> {
+        try {
+            const { code, state, error } = req.query;
+
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+            // Handle error from Linear
+            if (error) {
+                loggingService.error('Linear OAuth error', { error });
+                res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent(error as string)}`);
+                return;
+            }
+
+            // Validate required parameters
+            if (!code || !state) {
+                loggingService.error('Linear OAuth callback missing parameters', { code: !!code, state: !!state });
+                res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent('Missing code or state parameter')}`);
+                return;
+            }
+
+            // Decode state
+            let stateData: { userId: string; nonce: string };
+            try {
+                stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+            } catch (error: any) {
+                loggingService.error('Failed to decode Linear OAuth state', { error: error.message });
+                res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent('Invalid state parameter')}`);
+                return;
+            }
+
+            const userId = stateData.userId;
+
+            const clientId = process.env.LINEAR_CLIENT_ID;
+            const clientSecret = process.env.LINEAR_CLIENT_SECRET;
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.LINEAR_CALLBACK_URL ?? `${backendUrl}/api/integrations/linear/callback`;
+
+            if (!clientId || !clientSecret) {
+                loggingService.error('Linear OAuth credentials not configured');
+                res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent('Linear OAuth not configured')}`);
+                return;
+            }
+
+            // Exchange code for token
+            const { LinearService } = await import('../services/linear.service');
+            const tokenResponse = await LinearService.exchangeCodeForToken(
+                code as string,
+                clientId,
+                clientSecret,
+                callbackUrl
+            );
+
+            // Get user information
+            const linearUser = await LinearService.getAuthenticatedUser(tokenResponse.access_token);
+
+            // Get teams
+            const teams = await LinearService.listTeams(tokenResponse.access_token);
+            
+            if (teams.length === 0) {
+                loggingService.error('No Linear teams found for user', { userId, linearUserId: linearUser.id });
+                res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent('No Linear teams found')}`);
+                return;
+            }
+
+            // Use the first team (or we could let user select)
+            const teamId = teams[0].id;
+
+            // Create integration with OAuth token
+            const integration = await IntegrationService.createIntegration({
+                userId,
+                type: 'linear_oauth',
+                name: `Linear - ${teams[0].name}`,
+                description: `Connected via OAuth for team: ${teams[0].name}`,
+                credentials: {
+                    accessToken: tokenResponse.access_token,
+                    teamId: teamId,
+                    teamName: teams[0].name,
+                    refreshToken: tokenResponse.refresh_token
+                }
+            });
+
+            loggingService.info('Linear OAuth integration created', {
+                userId,
+                integrationId: integration._id,
+                linearUserId: linearUser.id,
+                teamId
+            });
+
+            // Redirect to success page
+            res.redirect(`${frontendUrl}/integrations/linear/success?integrationId=${integration._id}`);
+        } catch (error: any) {
+            loggingService.error('Failed to handle Linear OAuth callback', {
+                error: error.message,
+                stack: error.stack
+            });
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent(error.message || 'Failed to connect Linear')}`);
         }
     }
 
