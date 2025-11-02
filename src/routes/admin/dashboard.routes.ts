@@ -44,5 +44,42 @@ router.delete('/users/:userId', AdminDashboardController.deleteUser);
 router.get('/analytics/activity/recent', AdminDashboardController.getRecentActivity);
 router.get('/analytics/activity/feed', AdminDashboardController.initializeActivityFeed);
 
+// Revenue & Billing Analytics
+router.get('/analytics/revenue', AdminDashboardController.getRevenueMetrics);
+router.get('/analytics/subscriptions', AdminDashboardController.getSubscriptionMetrics);
+router.get('/analytics/conversions', AdminDashboardController.getConversionMetrics);
+router.get('/analytics/renewals', AdminDashboardController.getUpcomingRenewals);
+
+// API Key Management
+router.get('/api-keys/stats', AdminDashboardController.getApiKeyStats);
+router.get('/api-keys/usage', AdminDashboardController.getApiKeyUsage);
+router.get('/api-keys/top', AdminDashboardController.getTopApiKeys);
+router.get('/api-keys/expiring', AdminDashboardController.getExpiringApiKeys);
+router.get('/api-keys/over-budget', AdminDashboardController.getApiKeysOverBudget);
+
+// Endpoint Performance
+router.get('/analytics/endpoints/performance', AdminDashboardController.getEndpointPerformance);
+router.get('/analytics/endpoints/trends', AdminDashboardController.getEndpointTrends);
+router.get('/analytics/endpoints/top', AdminDashboardController.getTopEndpoints);
+
+// Geographic & Usage Patterns
+router.get('/analytics/geographic/usage', AdminDashboardController.getGeographicUsage);
+router.get('/analytics/geographic/peak-times', AdminDashboardController.getPeakUsageTimes);
+router.get('/analytics/geographic/patterns', AdminDashboardController.getUsagePatterns);
+router.get('/analytics/geographic/regions', AdminDashboardController.getMostActiveRegions);
+router.get('/analytics/geographic/cost-distribution', AdminDashboardController.getGeographicCostDistribution);
+
+// Budget Management
+router.get('/budget/overview', AdminDashboardController.getBudgetOverview);
+router.get('/budget/alerts', AdminDashboardController.getBudgetAlerts);
+router.get('/budget/projects', AdminDashboardController.getProjectBudgetStatus);
+router.get('/budget/trends', AdminDashboardController.getBudgetTrends);
+
+// Integration Analytics
+router.get('/analytics/integrations', AdminDashboardController.getIntegrationStats);
+router.get('/analytics/integrations/trends', AdminDashboardController.getIntegrationTrends);
+router.get('/analytics/integrations/health', AdminDashboardController.getIntegrationHealth);
+router.get('/analytics/integrations/top', AdminDashboardController.getTopIntegrations);
+
 export default router;
 

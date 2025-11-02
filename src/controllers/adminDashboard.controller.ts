@@ -6,6 +6,12 @@ import { AdminFeatureAnalyticsService } from '../services/adminFeatureAnalytics.
 import { AdminProjectAnalyticsService } from '../services/adminProjectAnalytics.service';
 import { AdminUserManagementService } from '../services/adminUserManagement.service';
 import { AdminActivityFeedService } from '../services/adminActivityFeed.service';
+import { AdminRevenueAnalyticsService } from '../services/adminRevenueAnalytics.service';
+import { AdminApiKeyManagementService } from '../services/adminApiKeyManagement.service';
+import { AdminEndpointPerformanceService } from '../services/adminEndpointPerformance.service';
+import { AdminGeographicPatternsService } from '../services/adminGeographicPatterns.service';
+import { AdminBudgetManagementService } from '../services/adminBudgetManagement.service';
+import { AdminIntegrationAnalyticsService } from '../services/adminIntegrationAnalytics.service';
 import { loggingService } from '../services/logging.service';
 
 export class AdminDashboardController {
@@ -906,6 +912,884 @@ export class AdminDashboardController {
                 error: error instanceof Error ? error.message : String(error),
                 component: 'AdminDashboardController',
                 operation: 'initializeActivityFeed',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ Revenue & Billing Analytics ============
+
+    /**
+     * Get revenue metrics
+     * GET /api/admin/analytics/revenue
+     */
+    static async getRevenueMetrics(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const metrics = await AdminRevenueAnalyticsService.getRevenueMetrics(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Revenue metrics retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getRevenueMetrics',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: metrics
+            });
+        } catch (error) {
+            loggingService.error('Error getting revenue metrics:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getRevenueMetrics',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get subscription metrics
+     * GET /api/admin/analytics/subscriptions
+     */
+    static async getSubscriptionMetrics(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const metrics = await AdminRevenueAnalyticsService.getSubscriptionMetrics(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Subscription metrics retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getSubscriptionMetrics',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: metrics
+            });
+        } catch (error) {
+            loggingService.error('Error getting subscription metrics:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getSubscriptionMetrics',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get conversion metrics
+     * GET /api/admin/analytics/conversions
+     */
+    static async getConversionMetrics(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const metrics = await AdminRevenueAnalyticsService.getConversionMetrics(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Conversion metrics retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getConversionMetrics',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: metrics
+            });
+        } catch (error) {
+            loggingService.error('Error getting conversion metrics:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getConversionMetrics',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get upcoming renewals
+     * GET /api/admin/analytics/renewals
+     */
+    static async getUpcomingRenewals(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const days = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+
+            const renewals = await AdminRevenueAnalyticsService.getUpcomingRenewals(days);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Upcoming renewals retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getUpcomingRenewals',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: renewals
+            });
+        } catch (error) {
+            loggingService.error('Error getting upcoming renewals:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getUpcomingRenewals',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ API Key Management ============
+
+    /**
+     * Get API key statistics
+     * GET /api/admin/api-keys/stats
+     */
+    static async getApiKeyStats(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const stats = await AdminApiKeyManagementService.getApiKeyStats();
+
+            const duration = Date.now() - startTime;
+            loggingService.info('API key stats retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getApiKeyStats',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: stats
+            });
+        } catch (error) {
+            loggingService.error('Error getting API key stats:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getApiKeyStats',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get API key usage
+     * GET /api/admin/api-keys/usage
+     */
+    static async getApiKeyUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const usage = await AdminApiKeyManagementService.getApiKeyUsage(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('API key usage retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getApiKeyUsage',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: usage
+            });
+        } catch (error) {
+            loggingService.error('Error getting API key usage:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getApiKeyUsage',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get top API keys
+     * GET /api/admin/api-keys/top
+     */
+    static async getTopApiKeys(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+            const topKeys = await AdminApiKeyManagementService.getTopApiKeys(limit);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Top API keys retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getTopApiKeys',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: topKeys
+            });
+        } catch (error) {
+            loggingService.error('Error getting top API keys:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getTopApiKeys',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get expiring API keys
+     * GET /api/admin/api-keys/expiring
+     */
+    static async getExpiringApiKeys(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const days = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+
+            const expiringKeys = await AdminApiKeyManagementService.getExpiringApiKeys(days);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Expiring API keys retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getExpiringApiKeys',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: expiringKeys
+            });
+        } catch (error) {
+            loggingService.error('Error getting expiring API keys:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getExpiringApiKeys',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get API keys over budget
+     * GET /api/admin/api-keys/over-budget
+     */
+    static async getApiKeysOverBudget(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const overBudgetKeys = await AdminApiKeyManagementService.getApiKeysOverBudget();
+
+            const duration = Date.now() - startTime;
+            loggingService.info('API keys over budget retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getApiKeysOverBudget',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: overBudgetKeys
+            });
+        } catch (error) {
+            loggingService.error('Error getting API keys over budget:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getApiKeysOverBudget',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ Endpoint Performance ============
+
+    /**
+     * Get endpoint performance
+     * GET /api/admin/analytics/endpoints/performance
+     */
+    static async getEndpointPerformance(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const performance = await AdminEndpointPerformanceService.getEndpointPerformance(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Endpoint performance retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getEndpointPerformance',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: performance
+            });
+        } catch (error) {
+            loggingService.error('Error getting endpoint performance:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getEndpointPerformance',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get endpoint trends
+     * GET /api/admin/analytics/endpoints/trends
+     */
+    static async getEndpointTrends(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const endpoint = req.query.endpoint as string | undefined;
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const trends = await AdminEndpointPerformanceService.getEndpointTrends(endpoint, startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Endpoint trends retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getEndpointTrends',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: trends
+            });
+        } catch (error) {
+            loggingService.error('Error getting endpoint trends:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getEndpointTrends',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get top endpoints
+     * GET /api/admin/analytics/endpoints/top
+     */
+    static async getTopEndpoints(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const metric = (req.query.metric as 'requests' | 'cost' | 'responseTime' | 'errors') || 'requests';
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+            const topEndpoints = await AdminEndpointPerformanceService.getTopEndpoints(metric, limit);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Top endpoints retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getTopEndpoints',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: topEndpoints
+            });
+        } catch (error) {
+            loggingService.error('Error getting top endpoints:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getTopEndpoints',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ Geographic & Usage Patterns ============
+
+    /**
+     * Get geographic usage
+     * GET /api/admin/analytics/geographic/usage
+     */
+    static async getGeographicUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const usage = await AdminGeographicPatternsService.getGeographicUsage(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Geographic usage retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getGeographicUsage',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: usage
+            });
+        } catch (error) {
+            loggingService.error('Error getting geographic usage:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getGeographicUsage',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get peak usage times
+     * GET /api/admin/analytics/geographic/peak-times
+     */
+    static async getPeakUsageTimes(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const peakTimes = await AdminGeographicPatternsService.getPeakUsageTimes(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Peak usage times retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getPeakUsageTimes',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: peakTimes
+            });
+        } catch (error) {
+            loggingService.error('Error getting peak usage times:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getPeakUsageTimes',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get usage patterns
+     * GET /api/admin/analytics/geographic/patterns
+     */
+    static async getUsagePatterns(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const patterns = await AdminGeographicPatternsService.getUsagePatterns(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Usage patterns retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getUsagePatterns',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: patterns
+            });
+        } catch (error) {
+            loggingService.error('Error getting usage patterns:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getUsagePatterns',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get most active regions
+     * GET /api/admin/analytics/geographic/regions
+     */
+    static async getMostActiveRegions(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+            const regions = await AdminGeographicPatternsService.getMostActiveRegions(limit);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Most active regions retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getMostActiveRegions',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: regions
+            });
+        } catch (error) {
+            loggingService.error('Error getting most active regions:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getMostActiveRegions',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get geographic cost distribution
+     * GET /api/admin/analytics/geographic/cost-distribution
+     */
+    static async getGeographicCostDistribution(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const distribution = await AdminGeographicPatternsService.getGeographicCostDistribution(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Geographic cost distribution retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getGeographicCostDistribution',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: distribution
+            });
+        } catch (error) {
+            loggingService.error('Error getting geographic cost distribution:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getGeographicCostDistribution',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ Budget Management ============
+
+    /**
+     * Get budget overview
+     * GET /api/admin/budget/overview
+     */
+    static async getBudgetOverview(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const overview = await AdminBudgetManagementService.getBudgetOverview(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Budget overview retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getBudgetOverview',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: overview
+            });
+        } catch (error) {
+            loggingService.error('Error getting budget overview:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getBudgetOverview',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get budget alerts
+     * GET /api/admin/budget/alerts
+     */
+    static async getBudgetAlerts(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const alerts = await AdminBudgetManagementService.getBudgetAlerts(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Budget alerts retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getBudgetAlerts',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: alerts
+            });
+        } catch (error) {
+            loggingService.error('Error getting budget alerts:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getBudgetAlerts',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get project budget status
+     * GET /api/admin/budget/projects
+     */
+    static async getProjectBudgetStatus(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const projectId = req.query.projectId as string | undefined;
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const status = await AdminBudgetManagementService.getProjectBudgetStatus(projectId, startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Project budget status retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getProjectBudgetStatus',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: status
+            });
+        } catch (error) {
+            loggingService.error('Error getting project budget status:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getProjectBudgetStatus',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get budget trends
+     * GET /api/admin/budget/trends
+     */
+    static async getBudgetTrends(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const projectId = req.query.projectId as string | undefined;
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const trends = await AdminBudgetManagementService.getBudgetTrends(projectId, startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Budget trends retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getBudgetTrends',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: trends
+            });
+        } catch (error) {
+            loggingService.error('Error getting budget trends:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getBudgetTrends',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    // ============ Integration Analytics ============
+
+    /**
+     * Get integration statistics
+     * GET /api/admin/analytics/integrations
+     */
+    static async getIntegrationStats(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const stats = await AdminIntegrationAnalyticsService.getIntegrationStats(startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Integration stats retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationStats',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: stats
+            });
+        } catch (error) {
+            loggingService.error('Error getting integration stats:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationStats',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get integration trends
+     * GET /api/admin/analytics/integrations/trends
+     */
+    static async getIntegrationTrends(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const service = req.query.service as string | undefined;
+            const startDate = req.query.startDate ? new Date(req.query.startDate) : undefined;
+            const endDate = req.query.endDate ? new Date(req.query.endDate) : undefined;
+
+            const trends = await AdminIntegrationAnalyticsService.getIntegrationTrends(service, startDate, endDate);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Integration trends retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationTrends',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: trends
+            });
+        } catch (error) {
+            loggingService.error('Error getting integration trends:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationTrends',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get integration health
+     * GET /api/admin/analytics/integrations/health
+     */
+    static async getIntegrationHealth(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const health = await AdminIntegrationAnalyticsService.getIntegrationHealth();
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Integration health retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationHealth',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: health
+            });
+        } catch (error) {
+            loggingService.error('Error getting integration health:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getIntegrationHealth',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Get top integrations
+     * GET /api/admin/analytics/integrations/top
+     */
+    static async getTopIntegrations(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const metric = (req.query.metric as 'requests' | 'cost' | 'errors') || 'requests';
+            const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 10;
+
+            const topIntegrations = await AdminIntegrationAnalyticsService.getTopIntegrations(metric, limit);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Top integrations retrieved', {
+                component: 'AdminDashboardController',
+                operation: 'getTopIntegrations',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: topIntegrations
+            });
+        } catch (error) {
+            loggingService.error('Error getting top integrations:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getTopIntegrations',
                 adminUserId: req.user?.id
             });
             next(error);
