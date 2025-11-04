@@ -110,13 +110,22 @@ export interface JiraCreateIssueRequest {
 export class JiraService {
     /**
      * Create a REST API client for JIRA
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    private static createClient(siteUrl: string, accessToken: string): AxiosInstance {
-        // Remove trailing slash from siteUrl if present
-        const baseUrl = siteUrl.endsWith('/') ? siteUrl.slice(0, -1) : siteUrl;
+    private static createClient(siteUrlOrCloudId: string, accessToken: string, useCloudId: boolean = false): AxiosInstance {
+        let baseURL: string;
+        
+        if (useCloudId) {
+            // For JIRA Cloud OAuth 2.0, use the cloud ID API endpoint
+            baseURL = `https://api.atlassian.com/ex/jira/${siteUrlOrCloudId}/rest/api/3`;
+        } else {
+            // For API token authentication, use the site URL directly
+            const baseUrl = siteUrlOrCloudId.endsWith('/') ? siteUrlOrCloudId.slice(0, -1) : siteUrlOrCloudId;
+            baseURL = `${baseUrl}/rest/api/3`;
+        }
         
         return axios.create({
-            baseURL: `${baseUrl}/rest/api/3`,
+            baseURL,
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
                 'Content-Type': 'application/json',
@@ -175,16 +184,21 @@ export class JiraService {
 
     /**
      * Get authenticated user information
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    static async getAuthenticatedUser(siteUrl: string, accessToken: string): Promise<JiraUser> {
+    static async getAuthenticatedUser(siteUrlOrCloudId: string, accessToken: string, useCloudId: boolean = false): Promise<JiraUser> {
         try {
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             const response = await client.get('/myself');
             return response.data;
         } catch (error: any) {
             loggingService.error('Failed to get JIRA authenticated user', { 
                 error: error.message,
-                siteUrl 
+                siteUrlOrCloudId,
+                useCloudId,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data
             });
             throw error;
         }
@@ -192,16 +206,21 @@ export class JiraService {
 
     /**
      * List accessible projects
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    static async listProjects(siteUrl: string, accessToken: string): Promise<JiraProject[]> {
+    static async listProjects(siteUrlOrCloudId: string, accessToken: string, useCloudId: boolean = false): Promise<JiraProject[]> {
         try {
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             const response = await client.get('/project');
             return response.data || [];
         } catch (error: any) {
             loggingService.error('Failed to list JIRA projects', { 
                 error: error.message,
-                siteUrl 
+                siteUrlOrCloudId,
+                useCloudId,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data
             });
             throw error;
         }
@@ -209,10 +228,11 @@ export class JiraService {
 
     /**
      * Get issue types for a project
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    static async getIssueTypes(siteUrl: string, accessToken: string, projectKey: string): Promise<JiraIssueType[]> {
+    static async getIssueTypes(siteUrlOrCloudId: string, accessToken: string, projectKey: string, useCloudId: boolean = false): Promise<JiraIssueType[]> {
         try {
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             const response = await client.get(`/issue/createmeta?projectKeys=${projectKey}&expand=projects.issuetypes`);
             
             if (response.data.projects && response.data.projects.length > 0) {
@@ -224,8 +244,12 @@ export class JiraService {
         } catch (error: any) {
             loggingService.error('Failed to get JIRA issue types', { 
                 error: error.message,
-                siteUrl,
-                projectKey 
+                siteUrlOrCloudId,
+                useCloudId,
+                projectKey,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data
             });
             throw error;
         }
@@ -233,16 +257,18 @@ export class JiraService {
 
     /**
      * List priorities
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    static async listPriorities(siteUrl: string, accessToken: string): Promise<JiraPriority[]> {
+    static async listPriorities(siteUrlOrCloudId: string, accessToken: string, useCloudId: boolean = false): Promise<JiraPriority[]> {
         try {
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             const response = await client.get('/priority');
             return response.data || [];
         } catch (error: any) {
             loggingService.error('Failed to list JIRA priorities', { 
                 error: error.message,
-                siteUrl 
+                siteUrlOrCloudId,
+                useCloudId
             });
             throw error;
         }

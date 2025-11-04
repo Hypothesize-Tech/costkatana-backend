@@ -720,7 +720,10 @@ export class IntegrationService {
             }
 
             const { JiraService } = await import('./jira.service');
-            return await JiraService.listProjects(credentials.siteUrl, credentials.accessToken);
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.listProjects(identifier, credentials.accessToken, useCloudId);
         } catch (error: any) {
             loggingService.error('Failed to get JIRA projects', {
                 error: error.message,
@@ -754,7 +757,10 @@ export class IntegrationService {
             }
 
             const { JiraService } = await import('./jira.service');
-            return await JiraService.getIssueTypes(credentials.siteUrl, credentials.accessToken, projectKey);
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.getIssueTypes(identifier, credentials.accessToken, projectKey, useCloudId);
         } catch (error: any) {
             loggingService.error('Failed to get JIRA issue types', {
                 error: error.message,
@@ -785,7 +791,10 @@ export class IntegrationService {
             }
 
             const { JiraService } = await import('./jira.service');
-            return await JiraService.listPriorities(credentials.siteUrl, credentials.accessToken);
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.listPriorities(identifier, credentials.accessToken, useCloudId);
         } catch (error: any) {
             loggingService.error('Failed to get JIRA priorities', {
                 error: error.message,

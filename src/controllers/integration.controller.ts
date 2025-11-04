@@ -970,8 +970,7 @@ export class IntegrationController {
             // Store state with userId
             const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
 
-            // JIRA OAuth scopes - read and write issues
-            const scopes = 'read:jira-work write:jira-work';
+            const scopes = 'read:jira-work write:jira-work offline_access read:jira-user';
             const authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${stateData}&response_type=code&prompt=consent`;
 
             loggingService.info('JIRA OAuth flow initiated', { userId });
@@ -1078,12 +1077,19 @@ export class IntegrationController {
             // Use the first site (or we could let user select)
             const site = resources[0];
             const siteUrl = site.url;
+            const cloudId = site.id; // Cloud ID is required for OAuth 2.0 API calls
 
-            // Get user information
-            const jiraUser = await JiraService.getAuthenticatedUser(siteUrl, tokenResponse.access_token);
+            if (!cloudId) {
+                loggingService.error('Cloud ID not found in JIRA resources', { userId, site });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('Cloud ID not found')}`);
+                return;
+            }
 
-            // Get projects
-            const projects = await JiraService.listProjects(siteUrl, tokenResponse.access_token);
+            // Get user information using cloud ID (required for OAuth 2.0)
+            const jiraUser = await JiraService.getAuthenticatedUser(cloudId, tokenResponse.access_token, true);
+
+            // Get projects using cloud ID (required for OAuth 2.0)
+            const projects = await JiraService.listProjects(cloudId, tokenResponse.access_token, true);
             
             if (projects.length === 0) {
                 loggingService.error('No JIRA projects found for user', { userId, jiraUserId: jiraUser.accountId });
@@ -1103,6 +1109,7 @@ export class IntegrationController {
                 credentials: {
                     accessToken: tokenResponse.access_token,
                     siteUrl: siteUrl,
+                    cloudId: cloudId, // Store cloud ID for OAuth 2.0 API calls
                     projectKey: projectKey,
                     refreshToken: tokenResponse.refresh_token
                 }

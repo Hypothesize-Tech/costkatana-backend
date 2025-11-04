@@ -47,8 +47,8 @@ export interface IntegrationCredentials {
     projectId?: string;
     issueId?: string;
     scope?: string;
-    // JIRA-specific
     siteUrl?: string;
+    cloudId?: string; 
     projectKey?: string;
     issueTypeId?: string;
     priorityId?: string;
