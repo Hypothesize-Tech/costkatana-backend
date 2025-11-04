@@ -294,6 +294,46 @@ export class NotificationService {
                 }
             }
 
+            case 'jira_oauth': {
+                if (!credentials.accessToken || !credentials.siteUrl) {
+                    throw new Error('JIRA OAuth credentials not configured');
+                }
+
+                // Check if issueKey is set (Comment Mode) or autoCreateIssues is enabled (Issue Mode)
+                const autoCreateIssues = integration.metadata?.autoCreateIssues === true;
+                const jiraIssueKey = credentials.issueKey;
+                
+                if (jiraIssueKey) {
+                    // Comment Mode: Post alert as comment on existing issue
+                    const { JiraService } = await import('./jira.service');
+                    const result = await JiraService.sendAlertComment(
+                        credentials.siteUrl,
+                        credentials.accessToken,
+                        jiraIssueKey,
+                        alert,
+                        dashboardUrl
+                    );
+                    return { responseTime: result.responseTime };
+                } else if (autoCreateIssues && credentials.projectKey && credentials.issueTypeId) {
+                    // Issue Mode: Create new issue for alert
+                    const { JiraService } = await import('./jira.service');
+                    const result = await JiraService.createIssueFromAlert(
+                        credentials.siteUrl,
+                        credentials.accessToken,
+                        credentials.projectKey,
+                        credentials.issueTypeId,
+                        alert,
+                        dashboardUrl,
+                        credentials.priorityId,
+                        credentials.labels,
+                        credentials.components
+                    );
+                    return { responseTime: result.responseTime };
+                } else {
+                    throw new Error('JIRA integration not properly configured: missing issueKey or projectKey/issueTypeId with autoCreateIssues');
+                }
+            }
+
             case 'custom_webhook':
                 if (!credentials.webhookUrl) {
                     throw new Error('Custom webhook URL not configured');

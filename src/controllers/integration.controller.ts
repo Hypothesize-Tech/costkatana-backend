@@ -1,4 +1,5 @@
 import { Response } from 'express';
+import axios from 'axios';
 import { IntegrationService } from '../services/integration.service';
 import { NotificationService } from '../services/notification.service';
 import { loggingService } from '../services/logging.service';
@@ -181,9 +182,18 @@ export class IntegrationController {
             }
 
             const { id } = req.params;
-            const updates = req.body;
+            const { metadata, ...updates } = req.body;
 
             const integration = await IntegrationService.updateIntegration(id, userId, updates);
+            
+            // Handle metadata update separately if provided
+            if (metadata && integration) {
+                integration.metadata = {
+                    ...(integration.metadata || {}),
+                    ...metadata
+                };
+                await integration.save();
+            }
 
             if (!integration) {
                 return res.status(404).json({
@@ -925,6 +935,480 @@ export class IntegrationController {
             });
             const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
             res.redirect(`${frontendUrl}/integrations/linear/error?message=${encodeURIComponent(error.message || 'Failed to connect Linear')}`);
+        }
+    }
+
+    /**
+     * Initiate JIRA OAuth flow
+     * GET /api/integrations/jira/auth
+     */
+    static async initiateJiraOAuth(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const clientId = process.env.JIRA_CLIENT_ID;
+            if (!clientId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'JIRA Client ID not configured. Please set JIRA_CLIENT_ID in environment variables.'
+                });
+            }
+
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.JIRA_CALLBACK_URL ?? `${backendUrl}/api/integrations/jira/callback`;
+            
+            // Generate state for CSRF protection
+            const crypto = require('crypto');
+            const state = crypto.randomBytes(16).toString('hex');
+            
+            // Store state with userId
+            const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
+
+            // JIRA OAuth scopes - read and write issues
+            const scopes = 'read:jira-work write:jira-work';
+            const authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${encodeURIComponent(scopes)}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${stateData}&response_type=code&prompt=consent`;
+
+            loggingService.info('JIRA OAuth flow initiated', { userId });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    authUrl,
+                    state: stateData
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to initiate JIRA OAuth', {
+                error: error.message,
+                stack: error.stack
+            });
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to initiate JIRA OAuth flow'
+            });
+        }
+    }
+
+    /**
+     * Handle JIRA OAuth callback
+     * GET /api/integrations/jira/callback
+     */
+    static async handleJiraOAuthCallback(req: any, res: Response): Promise<void> {
+        try {
+            const { code, state, error } = req.query;
+
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+            // Handle error from JIRA
+            if (error) {
+                loggingService.error('JIRA OAuth error', { error });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent(error as string)}`);
+                return;
+            }
+
+            // Validate required parameters
+            if (!code || !state) {
+                loggingService.error('JIRA OAuth callback missing parameters', { code: !!code, state: !!state });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('Missing code or state parameter')}`);
+                return;
+            }
+
+            // Decode state
+            let stateData: { userId: string; nonce: string };
+            try {
+                stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+            } catch (error: any) {
+                loggingService.error('Failed to decode JIRA OAuth state', { error: error.message });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('Invalid state parameter')}`);
+                return;
+            }
+
+            const userId = stateData.userId;
+
+            const clientId = process.env.JIRA_CLIENT_ID;
+            const clientSecret = process.env.JIRA_CLIENT_SECRET;
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.JIRA_CALLBACK_URL ?? `${backendUrl}/api/integrations/jira/callback`;
+
+            if (!clientId || !clientSecret) {
+                loggingService.error('JIRA OAuth credentials not configured');
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('JIRA OAuth not configured')}`);
+                return;
+            }
+
+            // Exchange code for token
+            const { JiraService } = await import('../services/jira.service');
+            const tokenResponse = await JiraService.exchangeCodeForToken(
+                code as string,
+                clientId,
+                clientSecret,
+                callbackUrl
+            );
+
+            // Get cloud ID and site URL - we need to get the accessible sites first
+            // For now, we'll require the user to provide the site URL during setup
+            // Or we can fetch it from the token response if available
+            // Note: JIRA Cloud OAuth requires an additional step to get the cloud ID
+            
+            // For initial implementation, we'll store the token and let user configure site URL in the setup modal
+            // Get user information using a temporary site URL (will be updated during setup)
+            // Actually, we need the site URL first. Let's fetch accessible resources
+            
+            // Get accessible resources to find the site
+            const resourcesResponse = await axios.get('https://api.atlassian.com/oauth/token/accessible-resources', {
+                headers: {
+                    'Authorization': `Bearer ${tokenResponse.access_token}`,
+                    'Accept': 'application/json'
+                }
+            });
+
+            const resources = resourcesResponse.data || [];
+            if (resources.length === 0) {
+                loggingService.error('No JIRA sites found for user', { userId });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('No JIRA sites found')}`);
+                return;
+            }
+
+            // Use the first site (or we could let user select)
+            const site = resources[0];
+            const siteUrl = site.url;
+
+            // Get user information
+            const jiraUser = await JiraService.getAuthenticatedUser(siteUrl, tokenResponse.access_token);
+
+            // Get projects
+            const projects = await JiraService.listProjects(siteUrl, tokenResponse.access_token);
+            
+            if (projects.length === 0) {
+                loggingService.error('No JIRA projects found for user', { userId, jiraUserId: jiraUser.accountId });
+                res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent('No JIRA projects found')}`);
+                return;
+            }
+
+            // Use the first project (or we could let user select)
+            const projectKey = projects[0].key;
+
+            // Create integration with OAuth token
+            const integration = await IntegrationService.createIntegration({
+                userId,
+                type: 'jira_oauth',
+                name: `JIRA - ${projects[0].name}`,
+                description: `Connected via OAuth for site: ${siteUrl}`,
+                credentials: {
+                    accessToken: tokenResponse.access_token,
+                    siteUrl: siteUrl,
+                    projectKey: projectKey,
+                    refreshToken: tokenResponse.refresh_token
+                }
+            });
+
+            loggingService.info('JIRA OAuth integration created', {
+                userId,
+                integrationId: integration._id,
+                jiraUserId: jiraUser.accountId,
+                siteUrl,
+                projectKey
+            });
+
+            // Redirect to success page
+            res.redirect(`${frontendUrl}/integrations/jira/success?integrationId=${integration._id}`);
+        } catch (error: any) {
+            loggingService.error('Failed to handle JIRA OAuth callback', {
+                error: error.message,
+                stack: error.stack
+            });
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            res.redirect(`${frontendUrl}/integrations/jira/error?message=${encodeURIComponent(error.message || 'Failed to connect JIRA')}`);
+        }
+    }
+
+    /**
+     * Validate JIRA API token and fetch projects
+     * POST /api/integrations/jira/validate-token
+     */
+    static async validateJiraToken(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { accessToken, siteUrl } = req.body;
+
+            if (!accessToken || !siteUrl) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Access token and site URL are required'
+                });
+            }
+
+            const { JiraService } = await import('../services/jira.service');
+
+            // Validate token by fetching user info
+            try {
+                const user = await JiraService.getAuthenticatedUser(siteUrl, accessToken);
+                
+                // Fetch projects
+                const projects = await JiraService.listProjects(siteUrl, accessToken);
+
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        user,
+                        projects
+                    }
+                });
+            } catch (error: any) {
+                loggingService.error('Failed to validate JIRA token', { error: error.message });
+                return res.status(401).json({
+                    success: false,
+                    message: error.message || 'Invalid JIRA token or site URL'
+                });
+            }
+        } catch (error: any) {
+            loggingService.error('Error validating JIRA token', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to validate JIRA token'
+            });
+        }
+    }
+
+    /**
+     * Get JIRA projects for OAuth integration
+     * GET /api/integrations/:id/jira/projects
+     */
+    static async getJiraProjects(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id } = req.params;
+
+            const projects = await IntegrationService.getJiraProjects(id, userId);
+
+            return res.status(200).json({
+                success: true,
+                data: projects
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting JIRA projects', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get JIRA projects'
+            });
+        }
+    }
+
+    /**
+     * Get JIRA issue types for a project
+     * GET /api/integrations/:id/jira/projects/:projectKey/issue-types
+     */
+    static async getJiraIssueTypes(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id, projectKey } = req.params;
+
+            const issueTypes = await IntegrationService.getJiraIssueTypes(id, userId, projectKey);
+
+            return res.status(200).json({
+                success: true,
+                data: issueTypes
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting JIRA issue types', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get JIRA issue types'
+            });
+        }
+    }
+
+    /**
+     * Get JIRA priorities
+     * GET /api/integrations/:id/jira/priorities
+     */
+    static async getJiraPriorities(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id } = req.params;
+
+            const priorities = await IntegrationService.getJiraPriorities(id, userId);
+
+            return res.status(200).json({
+                success: true,
+                data: priorities
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting JIRA priorities', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get JIRA priorities'
+            });
+        }
+    }
+
+    /**
+     * Create JIRA issue manually
+     * POST /api/integrations/:id/jira/issues
+     */
+    static async createJiraIssue(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id } = req.params;
+            const { title, description, projectKey, issueTypeId, priorityId, labels, components } = req.body;
+
+            if (!title || !projectKey || !issueTypeId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Title, projectKey, and issueTypeId are required'
+                });
+            }
+
+            const integration = await IntegrationService.getIntegrationById(id, userId);
+            if (!integration || integration.type !== 'jira_oauth') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'JIRA integration not found'
+                });
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'JIRA access token or site URL not configured'
+                });
+            }
+
+            const { JiraService } = await import('../services/jira.service');
+            const result = await JiraService.createIssueFromAlert(
+                credentials.siteUrl,
+                credentials.accessToken,
+                projectKey,
+                issueTypeId,
+                {
+                    _id: '',
+                    title,
+                    message: description || title,
+                    type: 'system' as any,
+                    severity: 'medium' as any,
+                    userId: integration.userId,
+                    createdAt: new Date(),
+                    data: {}
+                } as any,
+                undefined,
+                priorityId,
+                labels,
+                components
+            );
+
+            return res.status(201).json({
+                success: true,
+                message: 'JIRA issue created successfully',
+                data: {
+                    issueKey: result.issueKey,
+                    issueUrl: result.issueUrl
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error creating JIRA issue', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to create JIRA issue'
+            });
+        }
+    }
+
+    /**
+     * Update JIRA issue
+     * PUT /api/integrations/:id/jira/issues/:issueKey
+     */
+    static async updateJiraIssue(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { id, issueKey } = req.params;
+            const updates = req.body;
+
+            const integration = await IntegrationService.getIntegrationById(id, userId);
+            if (!integration || integration.type !== 'jira_oauth') {
+                return res.status(404).json({
+                    success: false,
+                    message: 'JIRA integration not found'
+                });
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'JIRA access token or site URL not configured'
+                });
+            }
+
+            const { JiraService } = await import('../services/jira.service');
+            const result = await JiraService.updateIssue(
+                credentials.siteUrl,
+                credentials.accessToken,
+                issueKey,
+                updates
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: 'JIRA issue updated successfully',
+                data: {
+                    responseTime: result.responseTime
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error updating JIRA issue', { error: error.message });
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to update JIRA issue'
+            });
         }
     }
 

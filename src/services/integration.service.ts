@@ -55,7 +55,7 @@ export class IntegrationService {
                     timeout: dto.deliveryConfig?.timeout ?? 30000,
                     batchDelay: dto.deliveryConfig?.batchDelay
                 },
-                metadata: dto.metadata || {},
+                metadata: dto.metadata ?? {},
                 stats: {
                     totalDeliveries: 0,
                     successfulDeliveries: 0,
@@ -178,6 +178,14 @@ export class IntegrationService {
                 };
             }
 
+            // Update metadata if provided (for OAuth integrations that need to update autoCreateIssues, etc.)
+            if ((updates as unknown as { metadata?: Record<string, unknown> }).metadata) {
+                integration.metadata = {
+                    ...(integration.metadata ?? {}),
+                    ...(updates as unknown as { metadata?: Record<string, unknown> }).metadata
+                };
+            }
+
             await integration.save();
 
             loggingService.info('Integration updated successfully', {
@@ -294,6 +302,19 @@ export class IntegrationService {
                     );
                     break;
 
+                case 'jira_oauth': {
+                    if (!credentials.accessToken || !credentials.siteUrl || !credentials.projectKey) {
+                        throw new Error('JIRA OAuth credentials not configured');
+                    }
+                    const { JiraService } = await import('./jira.service');
+                    result = await JiraService.testIntegration(
+                        credentials.siteUrl,
+                        credentials.accessToken,
+                        credentials.projectKey
+                    );
+                    break;
+                }
+
                 case 'custom_webhook':
                     if (!credentials.webhookUrl) {
                         throw new Error('Webhook URL not configured');
@@ -399,6 +420,19 @@ export class IntegrationService {
                             isHealthy = true;
                         }
                         break;
+
+                    case 'jira_oauth': {
+                        if (credentials.accessToken && credentials.siteUrl && credentials.projectKey) {
+                            const { JiraService } = await import('./jira.service');
+                            await JiraService.testIntegration(
+                                credentials.siteUrl,
+                                credentials.accessToken,
+                                credentials.projectKey
+                            );
+                            isHealthy = true;
+                        }
+                        break;
+                    }
 
                     case 'custom_webhook':
                         isHealthy = !!credentials.webhookUrl;
@@ -661,6 +695,101 @@ export class IntegrationService {
                 integrationId,
                 userId,
                 teamId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA projects for OAuth integration
+     */
+    static async getJiraProjects(integrationId: string, userId: string): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            return await JiraService.listProjects(credentials.siteUrl, credentials.accessToken);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA projects', {
+                error: error.message,
+                integrationId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA issue types for a project
+     */
+    static async getJiraIssueTypes(
+        integrationId: string,
+        userId: string,
+        projectKey: string
+    ): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            return await JiraService.getIssueTypes(credentials.siteUrl, credentials.accessToken, projectKey);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA issue types', {
+                error: error.message,
+                integrationId,
+                projectKey
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA priorities
+     */
+    static async getJiraPriorities(integrationId: string, userId: string): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            return await JiraService.listPriorities(credentials.siteUrl, credentials.accessToken);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA priorities', {
+                error: error.message,
+                integrationId
             });
             throw error;
         }

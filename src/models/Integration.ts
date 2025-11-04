@@ -7,6 +7,7 @@ export type IntegrationType =
     | 'discord_webhook' 
     | 'discord_oauth' 
     | 'linear_oauth'
+    | 'jira_oauth'
     | 'custom_webhook';
 
 export type IntegrationStatus = 'active' | 'inactive' | 'error' | 'pending';
@@ -46,6 +47,14 @@ export interface IntegrationCredentials {
     projectId?: string;
     issueId?: string;
     scope?: string;
+    // JIRA-specific
+    siteUrl?: string;
+    projectKey?: string;
+    issueTypeId?: string;
+    priorityId?: string;
+    labels?: string[];
+    components?: Array<{ id: string; name?: string }>;
+    issueKey?: string;
 }
 
 export interface DeliveryConfig {
@@ -107,7 +116,7 @@ const integrationSchema = new Schema<IIntegration>({
     },
     type: {
         type: String,
-        enum: ['slack_webhook', 'slack_oauth', 'discord_webhook', 'discord_oauth', 'linear_oauth', 'custom_webhook'],
+        enum: ['slack_webhook', 'slack_oauth', 'discord_webhook', 'discord_oauth', 'linear_oauth', 'jira_oauth', 'custom_webhook'],
         required: true
     },
     name: {
