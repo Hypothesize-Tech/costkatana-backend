@@ -102,6 +102,7 @@
     "lru-cache": "^11.2.2",
     "mammoth": "^1.11.0",
     "mixpanel": "^0.18.1",
+    "mongodb": "^6.19.0",
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",
     "node-cron": "^4.2.1",

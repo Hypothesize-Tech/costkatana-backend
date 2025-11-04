@@ -1,5 +1,5 @@
 import { createClient, RedisClientType } from 'redis';
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 import * as crypto from 'crypto';
 import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from '@langchain/aws';

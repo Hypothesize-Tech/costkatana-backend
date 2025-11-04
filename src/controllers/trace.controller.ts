@@ -407,9 +407,15 @@ class TraceController {
             if (data.endedAt) {
                 await traceService.endSpan(trace.traceId, {
                     status: data.status,
-                    error: data.error,
+                    error: data.error && data.error.message ? {
+                        message: data.error.message,
+                        stack: data.error.stack
+                    } : undefined,
                     aiModel: data.aiModel,
-                    tokens: data.tokens,
+                    tokens: data.tokens && typeof data.tokens.input === 'number' && typeof data.tokens.output === 'number' ? {
+                        input: data.tokens.input,
+                        output: data.tokens.output
+                    } : undefined,
                     costUSD: data.costUSD,
                     tool: data.tool,
                     resourceIds: data.resourceIds,
