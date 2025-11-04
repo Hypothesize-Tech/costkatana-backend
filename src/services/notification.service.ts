@@ -476,7 +476,13 @@ export class NotificationService {
 
                 const deliveryLogs: any[] = [];
                 const deliveryStatusMap = alert.deliveryStatus as any;
-                deliveryStatusMap.forEach((status: any, intId: string) => {
+                
+                // Handle both Map (from normal queries) and plain object (from .lean() queries)
+                const entries = deliveryStatusMap instanceof Map 
+                    ? Array.from(deliveryStatusMap.entries())
+                    : Object.entries(deliveryStatusMap || {});
+                
+                entries.forEach(([intId, status]: [string, any]) => {
                     if (!integrationId || intId === integrationId) {
                         if (!filters?.status || status.status === filters.status) {
                             deliveryLogs.push({

@@ -276,19 +276,249 @@ export class JiraService {
 
     /**
      * Get issue details
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
      */
-    static async getIssue(siteUrl: string, accessToken: string, issueKey: string): Promise<JiraIssue | null> {
+    static async getIssue(siteUrlOrCloudId: string, accessToken: string, issueKey: string, useCloudId: boolean = false): Promise<JiraIssue | null> {
         try {
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             const response = await client.get(`/issue/${issueKey}`);
             return response.data;
         } catch (error: any) {
             loggingService.error('Failed to get JIRA issue', { 
                 error: error.message,
-                siteUrl,
-                issueKey 
+                siteUrlOrCloudId,
+                issueKey,
+                useCloudId
             });
             return null;
+        }
+    }
+
+    /**
+     * Create JIRA issue
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
+     */
+    static async createIssue(
+        siteUrlOrCloudId: string,
+        accessToken: string,
+        options: {
+            projectKey: string;
+            title: string;
+            description?: string;
+            issueTypeId: string;
+            priorityId?: string;
+            labels?: string[];
+            components?: Array<{ id: string }>;
+            useCloudId?: boolean;
+        }
+    ): Promise<JiraIssue> {
+        const startTime = Date.now();
+        const useCloudId = options.useCloudId || false;
+        
+        try {
+            // Convert description to ADF format
+            const descriptionContent: any[] = [];
+            if (options.description) {
+                const descriptionLines = options.description.split('\n');
+                descriptionLines.forEach((line) => {
+                    if (line.trim()) {
+                        descriptionContent.push({
+                            type: 'paragraph',
+                            content: [{ type: 'text', text: line }]
+                        });
+                    } else {
+                        descriptionContent.push({
+                            type: 'paragraph',
+                            content: []
+                        });
+                    }
+                });
+            }
+
+            const createRequest: JiraCreateIssueRequest = {
+                fields: {
+                    project: {
+                        key: options.projectKey
+                    },
+                    summary: options.title,
+                    issuetype: {
+                        id: options.issueTypeId
+                    }
+                }
+            };
+
+            if (options.description) {
+                createRequest.fields.description = {
+                    type: 'doc',
+                    version: 1,
+                    content: descriptionContent.length > 0 ? descriptionContent : [
+                        {
+                            type: 'paragraph',
+                            content: [{ type: 'text', text: options.description }]
+                        }
+                    ]
+                };
+            }
+
+            if (options.priorityId) {
+                createRequest.fields.priority = { id: options.priorityId };
+            }
+
+            if (options.labels && options.labels.length > 0) {
+                createRequest.fields.labels = options.labels;
+            }
+
+            if (options.components && options.components.length > 0) {
+                createRequest.fields.components = options.components;
+            }
+
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
+            const response = await client.post('/issue', createRequest);
+
+            const responseTime = Date.now() - startTime;
+            const issue = response.data;
+
+            loggingService.info('JIRA issue created successfully', {
+                projectKey: options.projectKey,
+                issueKey: issue.key,
+                responseTime,
+                useCloudId
+            });
+
+            return issue;
+        } catch (error: any) {
+            const responseTime = Date.now() - startTime;
+            loggingService.error('Failed to create JIRA issue', {
+                error: error.message,
+                projectKey: options.projectKey,
+                responseTime,
+                useCloudId,
+                data: error.response?.data
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * List issues for a project
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
+     */
+    static async listIssues(
+        siteUrlOrCloudId: string,
+        accessToken: string,
+        projectKey: string,
+        filters?: {
+            status?: string;
+            assignee?: string;
+            maxResults?: number;
+            startAt?: number;
+        },
+        useCloudId: boolean = false
+    ): Promise<{ issues: JiraIssue[]; total: number }> {
+        try {
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
+            
+            let jql = `project = ${projectKey}`;
+            if (filters?.status) {
+                jql += ` AND status = "${filters.status}"`;
+            }
+            if (filters?.assignee) {
+                jql += ` AND assignee = "${filters.assignee}"`;
+            }
+
+            const params: any = {
+                jql,
+                maxResults: filters?.maxResults || 50,
+                startAt: filters?.startAt || 0,
+                fields: ['summary', 'status', 'priority', 'assignee', 'created', 'updated']
+            };
+
+            const response = await client.get('/search', { params });
+            
+            return {
+                issues: response.data.issues || [],
+                total: response.data.total || 0
+            };
+        } catch (error: any) {
+            loggingService.error('Failed to list JIRA issues', {
+                error: error.message,
+                siteUrlOrCloudId,
+                projectKey,
+                useCloudId,
+                status: error.response?.status
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Add comment to JIRA issue
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
+     */
+    static async addComment(
+        siteUrlOrCloudId: string,
+        accessToken: string,
+        issueKey: string,
+        comment: string,
+        useCloudId: boolean = false
+    ): Promise<{ success: boolean; commentId?: string; responseTime: number }> {
+        const startTime = Date.now();
+        
+        try {
+            // Convert plain text to JIRA ADF format
+            const lines = comment.split('\n');
+            const content: any[] = [];
+            
+            lines.forEach((line) => {
+                if (line.trim()) {
+                    content.push({
+                        type: 'paragraph',
+                        content: [{ type: 'text', text: line }]
+                    });
+                } else {
+                    content.push({
+                        type: 'paragraph',
+                        content: []
+                    });
+                }
+            });
+
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
+            const response = await client.post(`/issue/${issueKey}/comment`, {
+                body: {
+                    type: 'doc',
+                    version: 1,
+                    content: content.length > 0 ? content : [
+                        {
+                            type: 'paragraph',
+                            content: [{ type: 'text', text: comment }]
+                        }
+                    ]
+                }
+            });
+
+            const responseTime = Date.now() - startTime;
+
+            loggingService.info('JIRA comment added successfully', {
+                issueKey,
+                commentId: response.data.id,
+                responseTime
+            });
+
+            return {
+                success: true,
+                commentId: response.data.id,
+                responseTime
+            };
+        } catch (error: any) {
+            const responseTime = Date.now() - startTime;
+            loggingService.error('Failed to add JIRA comment', {
+                error: error.message,
+                issueKey,
+                responseTime,
+                status: error.response?.status
+            });
+            throw error;
         }
     }
 
@@ -476,7 +706,7 @@ export class JiraService {
      * Update JIRA issue
      */
     static async updateIssue(
-        siteUrl: string,
+        siteUrlOrCloudId: string,
         accessToken: string,
         issueKey: string,
         updates: {
@@ -484,7 +714,8 @@ export class JiraService {
             description?: string;
             priorityId?: string;
             labels?: string[];
-        }
+        },
+        useCloudId: boolean = false
     ): Promise<{ success: boolean; responseTime: number }> {
         const startTime = Date.now();
         
@@ -509,7 +740,7 @@ export class JiraService {
                 updateRequest.fields.labels = updates.labels;
             }
 
-            const client = this.createClient(siteUrl, accessToken);
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
             await client.put(`/issue/${issueKey}`, updateRequest);
 
             const responseTime = Date.now() - startTime;
@@ -528,7 +759,8 @@ export class JiraService {
             loggingService.error('Failed to update JIRA issue', {
                 error: error.message,
                 issueKey,
-                responseTime
+                responseTime,
+                useCloudId
             });
             throw error;
         }

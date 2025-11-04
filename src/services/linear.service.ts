@@ -261,6 +261,74 @@ export class LinearService {
     }
 
     /**
+     * List issues for a team
+     */
+    static async listIssues(
+        accessToken: string,
+        teamId: string,
+        filters?: {
+            state?: string;
+            assigneeId?: string;
+            limit?: number;
+        }
+    ): Promise<{ issues: LinearIssue[]; total: number }> {
+        const limit = filters?.limit || 50;
+        
+        const query = `
+            query($teamId: String!, $first: Int!) {
+                issues(
+                    filter: { 
+                        team: { id: { eq: $teamId } }
+                        ${filters?.state ? `state: { name: { eq: "${filters.state}" } }` : ''}
+                    }
+                    first: $first
+                ) {
+                    nodes {
+                        id
+                        title
+                        description
+                        identifier
+                        url
+                        state {
+                            id
+                            name
+                            type
+                        }
+                    }
+                    pageInfo {
+                        hasNextPage
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ 
+                issues: { 
+                    nodes: LinearIssue[];
+                    pageInfo: { hasNextPage: boolean };
+                } 
+            }>(
+                accessToken,
+                query,
+                { teamId, first: limit }
+            );
+            
+            return {
+                issues: data.issues.nodes || [],
+                total: data.issues.nodes.length
+            };
+        } catch (error: any) {
+            loggingService.error('Failed to list Linear issues', { 
+                error: error.message, 
+                teamId,
+                filters 
+            });
+            throw error;
+        }
+    }
+
+    /**
      * Search issues
      */
     static async searchIssues(accessToken: string, teamId: string, query: string): Promise<LinearIssue[]> {
@@ -372,6 +440,82 @@ export class LinearService {
                 issueId,
                 alertId: alert._id,
                 responseTime
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Create Linear issue
+     */
+    static async createIssue(
+        accessToken: string,
+        options: {
+            teamId: string;
+            title: string;
+            description?: string;
+            projectId?: string;
+        }
+    ): Promise<LinearIssue> {
+        const mutation = `
+            mutation($teamId: String!, $title: String!, $description: String, $projectId: String) {
+                issueCreate(
+                    input: {
+                        teamId: $teamId
+                        title: $title
+                        description: $description
+                        projectId: $projectId
+                    }
+                ) {
+                    success
+                    issue {
+                        id
+                        title
+                        description
+                        identifier
+                        url
+                        state {
+                            id
+                            name
+                            type
+                        }
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ 
+                issueCreate: { 
+                    success: boolean; 
+                    issue: LinearIssue | null;
+                } 
+            }>(
+                accessToken,
+                mutation,
+                {
+                    teamId: options.teamId,
+                    title: options.title,
+                    description: options.description,
+                    projectId: options.projectId
+                }
+            );
+
+            if (!data.issueCreate.success || !data.issueCreate.issue) {
+                throw new Error('Failed to create Linear issue');
+            }
+
+            loggingService.info('Linear issue created successfully', {
+                teamId: options.teamId,
+                issueId: data.issueCreate.issue.id,
+                identifier: data.issueCreate.issue.identifier
+            });
+
+            return data.issueCreate.issue;
+        } catch (error: any) {
+            loggingService.error('Failed to create Linear issue', {
+                error: error.message,
+                teamId: options.teamId
             });
             throw error;
         }

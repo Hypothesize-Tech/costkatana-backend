@@ -10,6 +10,7 @@ export interface CreateIntegrationDto {
     type: IntegrationType;
     name: string;
     description?: string;
+    status?: 'active' | 'inactive' | 'error' | 'pending';
     credentials: IntegrationCredentials;
     alertRouting?: Record<string, any>;
     deliveryConfig?: {
@@ -46,7 +47,7 @@ export class IntegrationService {
                 type: dto.type,
                 name: dto.name,
                 description: dto.description,
-                status: 'pending',
+                status: dto.status || 'active', // Default to 'active' instead of 'pending'
                 encryptedCredentials: '', // Will be set by setCredentials
                 alertRouting: dto.alertRouting ? new Map(Object.entries(dto.alertRouting)) : new Map(),
                 deliveryConfig: {
@@ -105,6 +106,9 @@ export class IntegrationService {
 
             const integrations = await Integration.find(query)
                 .sort({ createdAt: -1 });
+
+            // Also check total integrations for this user without filters
+            const totalCount = await Integration.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
 
             return integrations;
         } catch (error: any) {

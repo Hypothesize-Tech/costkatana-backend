@@ -7,9 +7,11 @@ import mongoose from 'mongoose';
 // import { agentService } from './agent.service';
 // import { conversationalFlowService } from './conversationFlow.service';
 // import { multiAgentFlowService } from './multiAgentFlow.service';
-import { TrendingDetectorService } from './trendingDetector.service';
+// import { TrendingDetectorService } from './trendingDetector.service';
 import { retrievalService } from './retrieval.service';
 import { loggingService } from './logging.service';
+import { IntegrationChatService, ParsedMention } from './integrationChat.service';
+import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
 
 // Conversation Context Types
 export interface ConversationContext {
@@ -1021,6 +1023,116 @@ export class ChatService {
             // Ensure conversation is assigned
             if (!conversation!) {
                 throw new Error('Failed to get or create conversation');
+            }
+
+            // Check for integration mentions in the message
+            // Pattern 1: @integration:entityType:entityId:subEntityType:subEntityId (original format)
+            // Pattern 2: @integration:command (e.g., @linear:list-issues, @linear:list-projects)
+            // Pattern to match @integration:command-with-dashes or @integration:entityType:entityId
+            const mentionPattern = /@([a-z]+)(?::([a-z]+(?:-[a-z]+)*)(?::([a-zA-Z0-9_-]+))?(?::([a-z]+):([a-zA-Z0-9_-]+))?)?/g;
+            const mentions: ParsedMention[] = [];
+            let match;
+            
+            while ((match = mentionPattern.exec(request.message)) !== null) {
+                const [, integration, part1, part2, subEntityType, subEntityId] = match;
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
+                    // If part2 exists, it's entityId (Pattern 1: @integration:entityType:entityId)
+                    // If part2 doesn't exist but part1 exists, it might be a command (Pattern 2: @integration:command)
+                    // Commands with dashes (like list-issues) will be in part1
+                    // We'll let the parseCommand function handle command detection
+                    mentions.push({
+                        integration,
+                        entityType: part1 && part2 ? part1 : undefined,
+                        entityId: part2 || undefined,
+                        subEntityType: subEntityType || undefined,
+                        subEntityId: subEntityId || undefined
+                    });
+                }
+            }
+            
+            // Also detect simple @integration format (without colon)
+            const simpleMentionPattern = /@([a-z]+)(?![:\w])/g;
+            let simpleMatch;
+            while ((simpleMatch = simpleMentionPattern.exec(request.message)) !== null) {
+                const [, integration] = simpleMatch;
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
+                    // Check if this integration is already in mentions
+                    if (!mentions.some(m => m.integration === integration)) {
+                        mentions.push({
+                            integration,
+                            entityType: undefined,
+                            entityId: undefined,
+                            subEntityType: undefined,
+                            subEntityId: undefined
+                        });
+                    }
+                }
+            }
+
+            // If mentions found, try to execute integration command
+            if (mentions.length > 0) {
+                try {
+                    const command = await IntegrationChatService.parseCommand(request.message, mentions);
+                    if (command) {
+                        // Execute via MCP handler
+                        const result = await MCPIntegrationHandler.handleIntegrationOperation({
+                            userId: request.userId,
+                            command,
+                            context: {
+                                message: request.message,
+                                mentions
+                            }
+                        });
+
+                        if (result.success && result.result.success) {
+                            // Sanitize response for display (remove MongoDB IDs, etc.)
+                            const { formatIntegrationResultForDisplay } = await import('../utils/responseSanitizer');
+                            const sanitizedMessage = formatIntegrationResultForDisplay(result.result);
+
+                            // Save assistant response with integration result
+                            const session2 = await mongoose.startSession();
+                            try {
+                                await session2.withTransaction(async () => {
+                                    await ChatMessage.create([{
+                                        conversationId: conversation._id,
+                                        userId: request.userId,
+                                        role: 'assistant',
+                                        content: sanitizedMessage,
+                                        modelId: request.modelId
+                                    }], { session: session2 });
+
+                                    conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                                    conversation!.lastMessage = sanitizedMessage.substring(0, 100);
+                                    conversation!.lastMessageAt = new Date();
+                                    await conversation!.save({ session: session2 });
+                                });
+                            } finally {
+                                await session2.endSession();
+                            }
+
+                            const latency = Date.now() - startTime;
+                            return {
+                                messageId: new Types.ObjectId().toString(),
+                                conversationId: conversation!._id.toString(),
+                                response: sanitizedMessage,
+                                cost: 0, // Integration operations don't cost tokens
+                                latency,
+                                tokenCount: 0,
+                                model: request.modelId,
+                                agentPath: ['integration_handler'],
+                                optimizationsApplied: [],
+                                cacheHit: false,
+                                riskLevel: 'low' as const
+                            };
+                        }
+                    }
+                } catch (error) {
+                    loggingService.warn('Integration command failed, continuing with normal processing', {
+                        error: error instanceof Error ? error.message : String(error),
+                        userId: request.userId
+                    });
+                    // Continue with normal processing if integration command fails
+                }
             }
 
             // Check if this is a GitHub-related message with repository context

@@ -8,6 +8,7 @@ export type IntegrationType =
     | 'discord_oauth' 
     | 'linear_oauth'
     | 'jira_oauth'
+    | 'github_oauth'
     | 'custom_webhook';
 
 export type IntegrationStatus = 'active' | 'inactive' | 'error' | 'pending';
@@ -116,7 +117,7 @@ const integrationSchema = new Schema<IIntegration>({
     },
     type: {
         type: String,
-        enum: ['slack_webhook', 'slack_oauth', 'discord_webhook', 'discord_oauth', 'linear_oauth', 'jira_oauth', 'custom_webhook'],
+        enum: ['slack_webhook', 'slack_oauth', 'discord_webhook', 'discord_oauth', 'linear_oauth', 'jira_oauth', 'github_oauth', 'custom_webhook'],
         required: true
     },
     name: {
