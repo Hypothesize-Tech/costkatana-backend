@@ -495,5 +495,111 @@ export class DiscordService {
             throw error;
         }
     }
+
+    /**
+     * List channels in a Discord guild
+     */
+    static async listChannels(botToken: string, guildId: string): Promise<any[]> {
+        try {
+            const response = await axios.get(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/channels`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    }
+                }
+            );
+
+            return response.data || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Discord channels', { error: error.message, guildId });
+            throw error;
+        }
+    }
+
+    /**
+     * Create a new Discord channel
+     */
+    static async createChannel(
+        botToken: string,
+        guildId: string,
+        name: string,
+        type: number = 0 // 0 = text channel, 2 = voice channel
+    ): Promise<{ success: boolean; channelId?: string }> {
+        try {
+            const response = await axios.post(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/channels`,
+                {
+                    name,
+                    type
+                },
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Discord channel created successfully', {
+                channelId: response.data.id,
+                name,
+                guildId
+            });
+
+            return {
+                success: true,
+                channelId: response.data.id
+            };
+        } catch (error: any) {
+            loggingService.error('Failed to create Discord channel', {
+                error: error.message,
+                name,
+                guildId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Send a simple message to Discord channel
+     */
+    static async sendMessage(botToken: string, channelId: string, message: string): Promise<{ success: boolean; messageId?: string }> {
+        return await this.sendBotMessage(botToken, channelId, { content: message });
+    }
+
+    /**
+     * Send a direct message to a Discord user
+     */
+    static async sendDirectMessage(botToken: string, userId: string, message: string): Promise<{ success: boolean; messageId?: string }> {
+        try {
+            // Create a DM channel
+            const dmResponse = await axios.post(
+                `${this.DISCORD_API_BASE}/users/@me/channels`,
+                {
+                    recipient_id: userId
+                },
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            const channelId = dmResponse.data.id;
+
+            // Send message to the DM channel
+            return await this.sendMessage(botToken, channelId, message);
+        } catch (error: any) {
+            loggingService.error('Failed to send Discord direct message', {
+                error: error.message,
+                userId
+            });
+            throw error;
+        }
+    }
 }
 

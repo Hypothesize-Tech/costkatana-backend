@@ -85,6 +85,7 @@ interface OptimizationRequest {
     service: string;
     model: string;
     context?: string;
+    useCortex?: boolean;  // Enable Cortex meta-language optimization
     conversationHistory?: Array<{
         role: 'user' | 'assistant' | 'system';
         content: string;

@@ -10,6 +10,7 @@ export interface CreateIntegrationDto {
     type: IntegrationType;
     name: string;
     description?: string;
+    status?: 'active' | 'inactive' | 'error' | 'pending';
     credentials: IntegrationCredentials;
     alertRouting?: Record<string, any>;
     deliveryConfig?: {
@@ -46,7 +47,7 @@ export class IntegrationService {
                 type: dto.type,
                 name: dto.name,
                 description: dto.description,
-                status: 'pending',
+                status: dto.status || 'active', // Default to 'active' instead of 'pending'
                 encryptedCredentials: '', // Will be set by setCredentials
                 alertRouting: dto.alertRouting ? new Map(Object.entries(dto.alertRouting)) : new Map(),
                 deliveryConfig: {
@@ -55,7 +56,7 @@ export class IntegrationService {
                     timeout: dto.deliveryConfig?.timeout ?? 30000,
                     batchDelay: dto.deliveryConfig?.batchDelay
                 },
-                metadata: dto.metadata || {},
+                metadata: dto.metadata ?? {},
                 stats: {
                     totalDeliveries: 0,
                     successfulDeliveries: 0,
@@ -105,6 +106,9 @@ export class IntegrationService {
 
             const integrations = await Integration.find(query)
                 .sort({ createdAt: -1 });
+
+            // Also check total integrations for this user without filters
+            const totalCount = await Integration.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
 
             return integrations;
         } catch (error: any) {
@@ -175,6 +179,14 @@ export class IntegrationService {
                 integration.deliveryConfig = {
                     ...integration.deliveryConfig,
                     ...updates.deliveryConfig
+                };
+            }
+
+            // Update metadata if provided (for OAuth integrations that need to update autoCreateIssues, etc.)
+            if ((updates as unknown as { metadata?: Record<string, unknown> }).metadata) {
+                integration.metadata = {
+                    ...(integration.metadata ?? {}),
+                    ...(updates as unknown as { metadata?: Record<string, unknown> }).metadata
                 };
             }
 
@@ -294,6 +306,19 @@ export class IntegrationService {
                     );
                     break;
 
+                case 'jira_oauth': {
+                    if (!credentials.accessToken || !credentials.siteUrl || !credentials.projectKey) {
+                        throw new Error('JIRA OAuth credentials not configured');
+                    }
+                    const { JiraService } = await import('./jira.service');
+                    result = await JiraService.testIntegration(
+                        credentials.siteUrl,
+                        credentials.accessToken,
+                        credentials.projectKey
+                    );
+                    break;
+                }
+
                 case 'custom_webhook':
                     if (!credentials.webhookUrl) {
                         throw new Error('Webhook URL not configured');
@@ -399,6 +424,19 @@ export class IntegrationService {
                             isHealthy = true;
                         }
                         break;
+
+                    case 'jira_oauth': {
+                        if (credentials.accessToken && credentials.siteUrl && credentials.projectKey) {
+                            const { JiraService } = await import('./jira.service');
+                            await JiraService.testIntegration(
+                                credentials.siteUrl,
+                                credentials.accessToken,
+                                credentials.projectKey
+                            );
+                            isHealthy = true;
+                        }
+                        break;
+                    }
 
                     case 'custom_webhook':
                         isHealthy = !!credentials.webhookUrl;
@@ -661,6 +699,110 @@ export class IntegrationService {
                 integrationId,
                 userId,
                 teamId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA projects for OAuth integration
+     */
+    static async getJiraProjects(integrationId: string, userId: string): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.listProjects(identifier, credentials.accessToken, useCloudId);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA projects', {
+                error: error.message,
+                integrationId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA issue types for a project
+     */
+    static async getJiraIssueTypes(
+        integrationId: string,
+        userId: string,
+        projectKey: string
+    ): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.getIssueTypes(identifier, credentials.accessToken, projectKey, useCloudId);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA issue types', {
+                error: error.message,
+                integrationId,
+                projectKey
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get JIRA priorities
+     */
+    static async getJiraPriorities(integrationId: string, userId: string): Promise<any[]> {
+        try {
+            const integration = await Integration.findOne({
+                _id: new mongoose.Types.ObjectId(integrationId),
+                userId: new mongoose.Types.ObjectId(userId)
+            });
+
+            if (!integration || integration.type !== 'jira_oauth') {
+                throw new Error('Integration not found or not a JIRA OAuth integration');
+            }
+
+            const credentials = integration.getCredentials();
+            if (!credentials.accessToken || !credentials.siteUrl) {
+                throw new Error('Access token or site URL not found');
+            }
+
+            const { JiraService } = await import('./jira.service');
+            // Use cloudId for OAuth 2.0, fallback to siteUrl for API token
+            const useCloudId = !!credentials.cloudId;
+            const identifier = credentials.cloudId || credentials.siteUrl;
+            return await JiraService.listPriorities(identifier, credentials.accessToken, useCloudId);
+        } catch (error: any) {
+            loggingService.error('Failed to get JIRA priorities', {
+                error: error.message,
+                integrationId
             });
             throw error;
         }

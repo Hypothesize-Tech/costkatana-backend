@@ -73,7 +73,15 @@ export class KeyVaultController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const providerKey = await KeyVaultService.createProviderKey(userId, validatedData);
+            // Ensure all required fields are present
+            const providerKeyRequest = {
+                name: validatedData.name,
+                provider: validatedData.provider,
+                apiKey: validatedData.apiKey,
+                description: validatedData.description
+            };
+
+            const providerKey = await KeyVaultService.createProviderKey(userId, providerKeyRequest);
 
             // Return the created provider key without the encrypted key
             const response = {
@@ -206,10 +214,20 @@ export class KeyVaultController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            // Convert expiresAt string to Date if provided
+            // Convert expiresAt string to Date if provided and ensure required fields
             const requestData: CreateProxyKeyRequest = {
-                ...validatedData,
-                expiresAt: validatedData.expiresAt ? new Date(validatedData.expiresAt) : undefined
+                name: validatedData.name,
+                providerKeyId: validatedData.providerKeyId,
+                description: validatedData.description,
+                projectId: validatedData.projectId,
+                permissions: validatedData.permissions,
+                budgetLimit: validatedData.budgetLimit,
+                dailyBudgetLimit: validatedData.dailyBudgetLimit,
+                monthlyBudgetLimit: validatedData.monthlyBudgetLimit,
+                rateLimit: validatedData.rateLimit,
+                allowedIPs: validatedData.allowedIPs,
+                allowedDomains: validatedData.allowedDomains,
+                expiresAt: validatedData.expiresAt ? new Date(validatedData.expiresAt) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) // Default to 1 year
             };
 
             const proxyKey = await KeyVaultService.createProxyKey(userId, requestData);

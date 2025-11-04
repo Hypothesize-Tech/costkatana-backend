@@ -9,6 +9,7 @@ import {
     getAvailableModels,
     updateConversationGitHubContext
 } from '../controllers/chat.controller';
+import { IntegrationChatController } from '../controllers/integrationChat.controller';
 
 const router = Router();
 
@@ -37,5 +38,22 @@ router.patch('/conversations/:conversationId/github-context', authenticate, upda
 
 // Delete a conversation
 router.delete('/conversations/:conversationId', authenticate, deleteConversation);
+
+/**
+ * Integration Chat Routes
+ * Routes for @ mention-based integration management
+ */
+
+// Execute integration command
+router.post('/integrations/execute', authenticate, IntegrationChatController.executeCommand);
+
+// Get autocomplete suggestions
+router.get('/integrations/autocomplete', authenticate, IntegrationChatController.getAutocomplete);
+
+// List entities for an integration type
+router.get('/integrations/:type/entities', authenticate, IntegrationChatController.listEntities);
+
+// Get sub-entities for a parent entity
+router.get('/integrations/:type/:entityId/subentities', authenticate, IntegrationChatController.getSubEntities);
 
 export default router; 

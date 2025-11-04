@@ -513,5 +513,85 @@ export class SlackService {
             throw error;
         }
     }
+
+    /**
+     * Send a simple message to Slack channel (OAuth)
+     */
+    static async sendMessage(accessToken: string, channelId: string, message: string): Promise<{ success: boolean; messageTs?: string }> {
+        return await this.sendOAuthMessage(accessToken, channelId, { text: message });
+    }
+
+    /**
+     * Create a new Slack channel
+     */
+    static async createChannel(accessToken: string, name: string, isPrivate: boolean = false): Promise<{ success: boolean; channelId?: string }> {
+        try {
+            const response = await axios.post(
+                `${this.SLACK_API_BASE}/conversations.create`,
+                {
+                    name,
+                    is_private: isPrivate
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            if (!response.data.ok) {
+                throw new Error(`Slack API error: ${response.data.error}`);
+            }
+
+            loggingService.info('Slack channel created successfully', { 
+                channelId: response.data.channel?.id,
+                name 
+            });
+
+            return {
+                success: true,
+                channelId: response.data.channel?.id
+            };
+        } catch (error: any) {
+            loggingService.error('Failed to create Slack channel', { error: error.message, name });
+            throw error;
+        }
+    }
+
+    /**
+     * Send a direct message to a Slack user
+     */
+    static async sendDirectMessage(accessToken: string, userId: string, message: string): Promise<{ success: boolean; messageTs?: string }> {
+        try {
+            // Open a DM conversation
+            const openResponse = await axios.post(
+                `${this.SLACK_API_BASE}/conversations.open`,
+                {
+                    users: userId
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            if (!openResponse.data.ok || !openResponse.data.channel?.id) {
+                throw new Error(`Failed to open DM: ${openResponse.data.error}`);
+            }
+
+            const channelId = openResponse.data.channel.id;
+
+            // Send message to the DM channel
+            return await this.sendMessage(accessToken, channelId, message);
+        } catch (error: any) {
+            loggingService.error('Failed to send Slack direct message', { error: error.message, userId });
+            throw error;
+        }
+    }
 }
 

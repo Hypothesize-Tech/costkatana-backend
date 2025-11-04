@@ -1,6 +1,47 @@
 import { ModelPricing, PricingUnit } from './types';
 
 export const AWS_BEDROCK_PRICING: ModelPricing[] = [
+    // Amazon Nova Models
+    {
+        modelId: 'amazon.nova-pro-v1:0',
+        modelName: 'Nova Pro',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.80,
+        outputPrice: 3.20,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['text', 'image', 'video', 'multimodal', 'reasoning'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Amazon Nova Pro - Best value multimodal model'
+    },
+    {
+        modelId: 'amazon.nova-lite-v1:0',
+        modelName: 'Nova Lite',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.60,
+        outputPrice: 2.40,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['text', 'image', 'multimodal', 'fast'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Amazon Nova Lite - Fast and efficient'
+    },
+    {
+        modelId: 'amazon.nova-micro-v1:0',
+        modelName: 'Nova Micro',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.35,
+        outputPrice: 1.40,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'fast', 'efficient'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Amazon Nova Micro - Ultra fast for simple tasks'
+    },
+    
     // AI21 Labs Models
     {
         modelId: 'ai21.jamba-1-5-large-v1:0',
