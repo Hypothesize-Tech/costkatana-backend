@@ -299,5 +299,59 @@ export const COHERE_PRICING: ModelPricing[] = [
         category: 'multimodal',
         isLatest: true,
         notes: 'State-of-the-art multimodal model excelling at language, text, and image capabilities, 32B variant focused on state-of-art multilingual performance'
+    },
+
+    // === Cohere Models on AWS Bedrock ===
+    {
+        modelId: 'cohere.command-r-plus-v1:0',
+        modelName: 'Command R+ (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.50,
+        outputPrice: 10.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'multilingual', 'enterprise'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Cohere Command R+ via AWS Bedrock - advanced AI model for text generation and chat'
+    },
+    {
+        modelId: 'cohere.command-r-v1:0',
+        modelName: 'Command R (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 0.60,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'multilingual', 'rag', 'tools'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Cohere Command R via AWS Bedrock - advanced AI model for text generation and chat'
+    },
+    {
+        modelId: 'cohere.embed-english-v3',
+        modelName: 'Embed English v3 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.10,
+        outputPrice: 0.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 512,
+        capabilities: ['embedding'],
+        category: 'embedding',
+        isLatest: true,
+        notes: 'Cohere Embed English v3 via AWS Bedrock - advanced AI model for text generation and chat'
+    },
+    {
+        modelId: 'cohere.embed-multilingual-v3',
+        modelName: 'Embed Multilingual v3 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.10,
+        outputPrice: 0.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 512,
+        capabilities: ['embedding', 'multilingual'],
+        category: 'embedding',
+        isLatest: true,
+        notes: 'Cohere Embed Multilingual v3 via AWS Bedrock - advanced AI model for text generation and chat'
     }
 ]; 

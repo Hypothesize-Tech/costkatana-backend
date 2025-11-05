@@ -29,6 +29,32 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Our frontier-class multimodal model released August 2025. Improving tone and performance.'
     },
     {
+        modelId: 'magistral-medium-2509',
+        modelName: 'Magistral Medium 1.2',
+        provider: 'Mistral AI',
+        inputPrice: 2.0,
+        outputPrice: 5.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 40000,
+        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        category: 'reasoning',
+        isLatest: true,
+        notes: 'Our frontier-class multimodal reasoning model released September 2025 (v25.09).'
+    },
+    {
+        modelId: 'magistral-medium-latest',
+        modelName: 'Magistral Medium 1.2',
+        provider: 'Mistral AI',
+        inputPrice: 2.0,
+        outputPrice: 5.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 40000,
+        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        category: 'reasoning',
+        isLatest: true,
+        notes: 'Our frontier-class multimodal reasoning model released September 2025 (v25.09).'
+    },
+    {
         modelId: 'magistral-medium-2507',
         modelName: 'Magistral Medium 1.1',
         provider: 'Mistral AI',
@@ -38,21 +64,8 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         contextWindow: 40000,
         capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual'],
         category: 'reasoning',
-        isLatest: true,
-        notes: 'Our frontier-class reasoning model released July 2025.'
-    },
-    {
-        modelId: 'magistral-medium-latest',
-        modelName: 'Magistral Medium 1.1',
-        provider: 'Mistral AI',
-        inputPrice: 2.0,
-        outputPrice: 5.0,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 40000,
-        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual'],
-        category: 'reasoning',
-        isLatest: true,
-        notes: 'Our frontier-class reasoning model released July 2025.'
+        isLatest: false,
+        notes: 'Our frontier-class reasoning model released July 2025 (v25.07). Deprecated October 31, 2025, retirement November 30, 2025. Use Magistral Medium 1.2 instead.'
     },
     {
         modelId: 'codestral-2508',
@@ -108,29 +121,29 @@ export const MISTRAL_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'devstral-medium-2507',
-        modelName: 'Devstral Medium',
+        modelName: 'Devstral Medium 1.0',
         provider: 'Mistral AI',
         inputPrice: 0.4,
         outputPrice: 2.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing'],
+        capabilities: ['code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing', 'swe'],
         category: 'code',
         isLatest: true,
-        notes: 'An enterprise grade text model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.'
+        notes: 'An enterprise grade text model that excels at SWE use cases, released July 2025 (v25.07).'
     },
     {
         modelId: 'devstral-medium-latest',
-        modelName: 'Devstral Medium',
+        modelName: 'Devstral Medium 1.0',
         provider: 'Mistral AI',
         inputPrice: 0.4,
         outputPrice: 2.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing'],
+        capabilities: ['code', 'agents', 'advanced-coding', 'codebase-exploration', 'multi-file-editing', 'swe'],
         category: 'code',
         isLatest: true,
-        notes: 'An enterprise grade text model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.'
+        notes: 'An enterprise grade text model that excels at SWE use cases, released July 2025 (v25.07).'
     },
     {
         modelId: 'mistral-ocr-2505',
@@ -159,6 +172,32 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.'
     },
     {
+        modelId: 'ministral-3b',
+        modelName: 'Ministral 3B',
+        provider: 'Mistral AI',
+        inputPrice: 0.0, // Pricing varies by provider
+        outputPrice: 0.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 32000,
+        capabilities: ['text', 'edge', 'mobile', 'open-source'],
+        category: 'text',
+        isLatest: true,
+        notes: 'World\'s best edge model released October 2024 (v24.1).'
+    },
+    {
+        modelId: 'ministral-8b',
+        modelName: 'Ministral 8B',
+        provider: 'Mistral AI',
+        inputPrice: 0.0, // Pricing varies by provider
+        outputPrice: 0.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 32000,
+        capabilities: ['text', 'edge', 'mobile', 'open-source', 'high-performance'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Powerful edge model with extremely high performance/price ratio, released October 2024 (v24.1).'
+    },
+    {
         modelId: 'mistral-large-2411',
         modelName: 'Mistral Large 2.1',
         provider: 'Mistral AI',
@@ -169,7 +208,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'reasoning', 'complex-tasks', 'high-complexity'],
         category: 'text',
         isLatest: true,
-        notes: 'Our top-tier large model for high-complexity tasks with the latest version released November 2024.'
+        notes: 'Our top-tier large model for high-complexity tasks with the latest version released November 2024 (v24.11).'
     },
     {
         modelId: 'mistral-large-latest',
@@ -211,6 +250,19 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'Our first frontier-class multimodal model released November 2024.'
     },
     {
+        modelId: 'mistral-small-2409',
+        modelName: 'Mistral Small 2.0',
+        provider: 'Mistral AI',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 32000,
+        capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
+        category: 'multimodal',
+        isLatest: false,
+        notes: 'An update to our efficient small model with open weights under an MRL license, released September 2024 (v24.09).'
+    },
+    {
         modelId: 'mistral-small-2407',
         modelName: 'Mistral Small 2',
         provider: 'Mistral AI',
@@ -221,7 +273,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
         category: 'multimodal',
         isLatest: false,
-        notes: 'Our updated small version, released September 2024.'
+        notes: 'Our updated small version, released September 2024 (v24.07).'
     },
     {
         modelId: 'mistral-embed',
@@ -278,6 +330,32 @@ export const MISTRAL_PRICING: ModelPricing[] = [
     
     // Open Models
     {
+        modelId: 'magistral-small-2509',
+        modelName: 'Magistral Small 1.2',
+        provider: 'Mistral AI',
+        inputPrice: 0.5,
+        outputPrice: 1.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 40000,
+        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        category: 'reasoning',
+        isLatest: true,
+        notes: 'Our small multimodal reasoning model released September 2025 (v25.09).'
+    },
+    {
+        modelId: 'magistral-small-latest',
+        modelName: 'Magistral Small 1.2',
+        provider: 'Mistral AI',
+        inputPrice: 0.5,
+        outputPrice: 1.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 40000,
+        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        category: 'reasoning',
+        isLatest: true,
+        notes: 'Our small multimodal reasoning model released September 2025 (v25.09).'
+    },
+    {
         modelId: 'magistral-small-2507',
         modelName: 'Magistral Small 1.1',
         provider: 'Mistral AI',
@@ -287,21 +365,8 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         contextWindow: 40000,
         capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual'],
         category: 'reasoning',
-        isLatest: true,
-        notes: 'Our small reasoning model released July 2025.'
-    },
-    {
-        modelId: 'magistral-small-latest',
-        modelName: 'Magistral Small 1.1',
-        provider: 'Mistral AI',
-        inputPrice: 0.5,
-        outputPrice: 1.5,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 40000,
-        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual'],
-        category: 'reasoning',
-        isLatest: true,
-        notes: 'Our small reasoning model released July 2025.'
+        isLatest: false,
+        notes: 'Our small reasoning model released July 2025 (v25.07). Deprecated October 31, 2025, retirement November 30, 2025. Use Magistral Small 1.2 instead.'
     },
     {
         modelId: 'voxtral-small-2507',
@@ -366,7 +431,33 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'An update to our previous small model, released June 2025.'
+        notes: 'An update to our previous small model, released June 2025 (v25.06).'
+    },
+    {
+        modelId: 'mistral-small-2503',
+        modelName: 'Mistral Small 3.1',
+        provider: 'Mistral AI',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'multimodal', 'multilingual', 'open-source', 'image-understanding'],
+        category: 'multimodal',
+        isLatest: false,
+        notes: 'A new leader in the small models category with image understanding capabilities, released March 2025 (v25.03).'
+    },
+    {
+        modelId: 'mistral-small-2501',
+        modelName: 'Mistral Small 3.0',
+        provider: 'Mistral AI',
+        inputPrice: 0.1,
+        outputPrice: 0.3,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
+        category: 'multimodal',
+        isLatest: false,
+        notes: 'A small efficient and powerful 24B open model for personal or commercial use, released January 2025 (v25.01).'
     },
     {
         modelId: 'mistral-small-latest',
@@ -383,7 +474,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'magistral-small-2506',
-        modelName: 'Magistral Small 1',
+        modelName: 'Magistral Small 1.0',
         provider: 'Mistral AI',
         inputPrice: 0.5,
         outputPrice: 1.5,
@@ -392,7 +483,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual'],
         category: 'reasoning',
         isLatest: false,
-        notes: 'Our first small reasoning model released June 2025.'
+        notes: 'Our first small reasoning model released June 2025 (v25.06). Deprecated October 31, 2025, retirement November 30, 2025. Use Magistral Small 1.2 instead.'
     },
     {
         modelId: 'devstral-small-2507',
@@ -421,43 +512,17 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         notes: 'An update to our open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.'
     },
     {
-        modelId: 'mistral-small-2503',
-        modelName: 'Mistral Small 3.1',
-        provider: 'Mistral AI',
-        inputPrice: 0.1,
-        outputPrice: 0.3,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 128000,
-        capabilities: ['text', 'multimodal', 'multilingual', 'open-source', 'image-understanding'],
-        category: 'multimodal',
-        isLatest: false,
-        notes: 'A new leader in the small models category with image understanding capabilities, released March 2025.'
-    },
-    {
-        modelId: 'mistral-small-2501',
-        modelName: 'Mistral Small 3',
-        provider: 'Mistral AI',
-        inputPrice: 0.1,
-        outputPrice: 0.3,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 32000,
-        capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
-        category: 'multimodal',
-        isLatest: false,
-        notes: 'A new leader in the small models category, released January 2025.'
-    },
-    {
         modelId: 'devstral-small-2505',
-        modelName: 'Devstral Small 1',
+        modelName: 'Devstral Small 1.0',
         provider: 'Mistral AI',
         inputPrice: 0.1,
         outputPrice: 0.3,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['code', 'agents', 'open-source', '24b-parameter'],
+        capabilities: ['code', 'agents', 'open-source', '24b-parameter', 'swe'],
         category: 'code',
         isLatest: false,
-        notes: 'A 24B text model, open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.'
+        notes: 'A 24B text model, open source model that excels at SWE use cases, released May 2025 (v25.05). Deprecated October 31, 2025, retirement November 30, 2025. Use Devstral Small 1.1 instead.'
     },
     {
         modelId: 'pixtral-12b-2409',

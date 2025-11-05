@@ -45,7 +45,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     // AI21 Labs Models
     {
         modelId: 'ai21.jamba-1-5-large-v1:0',
-        modelName: 'Jamba 1.5 Large',
+        modelName: 'Jamba',
         provider: 'AWS Bedrock',
         inputPrice: 2.0,
         outputPrice: 8.0,
@@ -54,11 +54,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'long-context'],
         category: 'text',
         isLatest: true,
-        notes: 'AI21 Labs Jamba 1.5 Large on AWS Bedrock'
+        notes: 'AI21 Labs Jamba 1.5 Large - advanced AI model for text generation and chat'
     },
     {
         modelId: 'ai21.jamba-1-5-mini-v1:0',
-        modelName: 'Jamba 1.5 Mini',
+        modelName: 'Jamba',
         provider: 'AWS Bedrock',
         inputPrice: 0.2,
         outputPrice: 0.4,
@@ -67,11 +67,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'long-context', 'efficient'],
         category: 'text',
         isLatest: true,
-        notes: 'AI21 Labs Jamba 1.5 Mini on AWS Bedrock'
+        notes: 'AI21 Labs Jamba 1.5 Mini - advanced AI model for text generation and chat'
     },
     {
         modelId: 'ai21.jamba-instruct-v1:0',
-        modelName: 'Jamba-Instruct',
+        modelName: 'Jamba Instruct',
         provider: 'AWS Bedrock',
         inputPrice: 0.5,
         outputPrice: 0.7,
@@ -80,7 +80,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'long-context'],
         category: 'text',
         isLatest: true,
-        notes: 'AI21 Labs Jamba-Instruct on AWS Bedrock'
+        notes: 'AI21 Labs Jamba-Instruct - hybrid architecture for long context tasks'
     },
 
     // Amazon Nova Models
@@ -125,7 +125,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'amazon.nova-premier-v1:0',
-        modelName: 'Amazon Nova Premier',
+        modelName: 'Nova Premier',
         provider: 'AWS Bedrock',
         inputPrice: 2.5,
         outputPrice: 12.5,
@@ -134,11 +134,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multimodal', 'advanced-reasoning'],
         category: 'text',
         isLatest: true,
-        notes: 'Amazon Nova Premier with cache read support ($0.625/1M cache read tokens)'
+        notes: 'Amazon Nova Premier - advanced AI model for text generation and chat with cache read support'
     },
     {
         modelId: 'amazon.nova-canvas-v1:0',
-        modelName: 'Amazon Nova Canvas',
+        modelName: 'Nova Canvas',
         provider: 'AWS Bedrock',
         inputPrice: 0.04,
         outputPrice: 0.04,
@@ -147,11 +147,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['image-generation'],
         category: 'image',
         isLatest: true,
-        notes: 'Amazon Nova Canvas via AWS Bedrock. Standard: $0.04-$0.06, Premium: $0.06-$0.08 per image'
+        notes: 'Amazon Nova Canvas via AWS Bedrock - image generation model'
     },
     {
         modelId: 'amazon.nova-reel-v1:0',
-        modelName: 'Amazon Nova Reel',
+        modelName: 'Nova Reel',
         provider: 'AWS Bedrock',
         inputPrice: 0.08,
         outputPrice: 0.08,
@@ -160,7 +160,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['video-generation'],
         category: 'video',
         isLatest: true,
-        notes: 'Amazon Nova Reel via AWS Bedrock. $0.08 per second of 720p, 24fps video'
+        notes: 'Amazon Nova Reel via AWS Bedrock - video generation model'
     },
     {
         modelId: 'amazon.nova-sonic-v1:0',
@@ -179,7 +179,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     // Amazon Titan Models
     {
         modelId: 'amazon.titan-text-express-v1',
-        modelName: 'Amazon Titan Text Express',
+        modelName: 'Titan Text Express',
         provider: 'AWS Bedrock',
         inputPrice: 0.8,
         outputPrice: 1.6,
@@ -188,7 +188,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text'],
         category: 'text',
         isLatest: true,
-        notes: "Amazon's own text generation model via Bedrock"
+        notes: "Amazon Titan Text Express - advanced AI model for text generation and chat"
     },
     {
         modelId: 'amazon.titan-text-lite-v1',
@@ -205,7 +205,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'amazon.titan-embed-text-v2:0',
-        modelName: 'Amazon Titan Text Embeddings V2',
+        modelName: 'Titan Embeddings V2',
         provider: 'AWS Bedrock',
         inputPrice: 0.02,
         outputPrice: 0.02,
@@ -214,13 +214,39 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['embedding'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Amazon Titan Text Embeddings V2 via Bedrock'
+        notes: 'Amazon Titan Text Embeddings V2 - advanced AI model for text generation and chat'
     },
 
     // Anthropic Models on AWS Bedrock
     {
+        modelId: 'anthropic.claude-sonnet-4-5-v1:0',
+        modelName: 'Claude Sonnet 4.5',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.00,
+        outputPrice: 15.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Sonnet 4.5 on AWS Bedrock - latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta)'
+    },
+    {
+        modelId: 'anthropic.claude-haiku-4-5-v1:0',
+        modelName: 'Claude Haiku 4.5',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.00,
+        outputPrice: 5.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Haiku 4.5 on AWS Bedrock - latest Claude Haiku model with improved performance'
+    },
+    {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
-        modelName: 'Claude Opus 4.1',
+        modelName: 'Claude 4 Opus',
         provider: 'AWS Bedrock',
         inputPrice: 15.00,
         outputPrice: 75.00,
@@ -229,7 +255,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Opus 4.1 on AWS Bedrock - most capable and intelligent Claude model yet'
+        notes: 'Claude Opus 4.1 on AWS Bedrock - most powerful model for complex reasoning'
     },
     {
         modelId: 'anthropic.claude-opus-4-20250514-v1:0',
@@ -267,8 +293,8 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Claude Sonnet 3.7 on AWS Bedrock - high-performance model with early extended thinking'
+        isLatest: false,
+        notes: 'Claude Sonnet 3.7 on AWS Bedrock - high-performance model with early extended thinking (deprecated)'
     },
     {
         modelId: 'anthropic.claude-3-5-sonnet-20241022-v1:0',
@@ -285,7 +311,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-        modelName: 'Claude Sonnet 3.5',
+        modelName: 'Claude 3.5 Sonnet',
         provider: 'AWS Bedrock',
         inputPrice: 3.00,
         outputPrice: 15.00,
@@ -294,11 +320,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude 3.5 Sonnet on AWS Bedrock (previous version)'
+        notes: 'Claude 3.5 Sonnet on AWS Bedrock - advanced reasoning and analysis capabilities'
     },
     {
         modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        modelName: 'Claude Haiku 3.5',
+        modelName: 'Claude 3.5 Haiku',
         provider: 'AWS Bedrock',
         inputPrice: 0.80,
         outputPrice: 4.00,
@@ -306,8 +332,8 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Claude Haiku 3.5 on AWS Bedrock - fastest Claude model'
+        isLatest: false,
+        notes: 'Claude 3.5 Haiku on AWS Bedrock - fast and intelligent for quick responses (superseded by Haiku 4.5)'
     },
     {
         modelId: 'anthropic.claude-3-opus-20240229-v1:0',
@@ -348,7 +374,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multilingual', 'enterprise'],
         category: 'text',
         isLatest: true,
-        notes: 'Cohere Command R+ on AWS Bedrock - updated pricing'
+        notes: 'Cohere Command R+ - advanced AI model for text generation and chat'
     },
     {
         modelId: 'cohere.command-r-v1:0',
@@ -361,7 +387,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multilingual', 'rag', 'tools'],
         category: 'text',
         isLatest: true,
-        notes: 'Cohere Command R on AWS Bedrock - updated pricing'
+        notes: 'Cohere Command R - advanced AI model for text generation and chat'
     },
     {
         modelId: 'cohere.embed-english-v3',
@@ -374,7 +400,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['embedding'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Cohere Embed English v3 on AWS Bedrock'
+        notes: 'Cohere Embed English v3 - advanced AI model for text generation and chat'
     },
     {
         modelId: 'cohere.embed-multilingual-v3',
@@ -387,13 +413,13 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['embedding', 'multilingual'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Cohere Embed Multilingual v3 on AWS Bedrock'
+        notes: 'Cohere Embed Multilingual v3 - advanced AI model for text generation and chat'
     },
 
     // Meta Models on AWS Bedrock
     {
         modelId: 'meta.llama3-70b-instruct-v1:0',
-        modelName: 'Llama 3 70B Instruct',
+        modelName: 'Llama 3 70B',
         provider: 'AWS Bedrock',
         inputPrice: 0.59,
         outputPrice: 0.79,
@@ -402,11 +428,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Meta Llama 3 70B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 3 70B - advanced AI model for text generation and chat'
     },
     {
         modelId: 'meta.llama3-8b-instruct-v1:0',
-        modelName: 'Llama 3 8B Instruct',
+        modelName: 'Llama 3 8B',
         provider: 'AWS Bedrock',
         inputPrice: 0.05,
         outputPrice: 0.10,
@@ -415,11 +441,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Meta Llama 3 8B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 3 8B - advanced AI model for text generation and chat'
     },
     {
         modelId: 'meta.llama3-2-11b-instruct-v1:0',
-        modelName: 'Llama 3.2 11B Instruct',
+        modelName: 'Llama 3.2 11B',
         provider: 'AWS Bedrock',
         inputPrice: 0.16,
         outputPrice: 0.16,
@@ -428,11 +454,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 3.2 11B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 3.2 11B - advanced AI model for text generation and chat'
     },
     {
         modelId: 'meta.llama3-2-90b-instruct-v1:0',
-        modelName: 'Llama 3.2 90B Instruct',
+        modelName: 'Llama 3.2 90B',
         provider: 'AWS Bedrock',
         inputPrice: 0.72,
         outputPrice: 0.72,
@@ -441,11 +467,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 3.2 90B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 3.2 90B - advanced AI model for text generation and chat'
     },
     {
         modelId: 'meta.llama4-scout-17b-instruct-v1:0',
-        modelName: 'Llama 4 Scout 17B Instruct',
+        modelName: 'Llama 4 Scout',
         provider: 'AWS Bedrock',
         inputPrice: 0.17,
         outputPrice: 0.66,
@@ -454,11 +480,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 4 Scout 17B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 4 Scout 17B - advanced AI model for text generation and chat'
     },
     {
         modelId: 'meta.llama4-maverick-17b-instruct-v1:0',
-        modelName: 'Llama 4 Maverick 17B Instruct',
+        modelName: 'Llama 4 Maverick',
         provider: 'AWS Bedrock',
         inputPrice: 0.24,
         outputPrice: 0.97,
@@ -467,7 +493,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 4 Maverick 17B Instruct on AWS Bedrock'
+        notes: 'Meta Llama 4 Maverick 17B - advanced AI model for text generation and chat'
     },
 
     // Mistral AI Models on AWS Bedrock
@@ -512,7 +538,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'mistral.mistral-small-2402-v1:0',
-        modelName: 'Mistral Small (24.02)',
+        modelName: 'Mistral Small',
         provider: 'AWS Bedrock',
         inputPrice: 2.00,
         outputPrice: 6.00,
@@ -521,11 +547,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Mistral Small on AWS Bedrock'
+        notes: 'Mistral Small - advanced AI model for text generation and chat'
     },
     {
         modelId: 'mistral.pixtral-large-2502-v1:0',
-        modelName: 'Pixtral Large (25.02)',
+        modelName: 'Pixtral Large',
         provider: 'AWS Bedrock',
         inputPrice: 2.0,
         outputPrice: 6.0,
@@ -534,13 +560,13 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['vision', 'multimodal', 'reasoning'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Mistral Pixtral Large via AWS Bedrock'
+        notes: 'Mistral Pixtral Large - advanced AI model for text generation and chat'
     },
 
     // DeepSeek Models
     {
         modelId: 'deepseek.r1-v1:0',
-        modelName: 'DeepSeek-R1',
+        modelName: 'DeepSeek R1',
         provider: 'AWS Bedrock',
         inputPrice: 1.35,
         outputPrice: 5.4,
@@ -549,13 +575,13 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'reasoning', 'cot'],
         category: 'reasoning',
         isLatest: true,
-        notes: 'DeepSeek-R1 reasoning model via AWS Bedrock'
+        notes: 'DeepSeek R1 - advanced AI model for text generation and chat'
     },
 
     // Stability AI Models
     {
         modelId: 'stability.stable-diffusion-xl-v1:0',
-        modelName: 'Stable Diffusion XL 1.0',
+        modelName: 'Stable Diffusion XL',
         provider: 'AWS Bedrock',
         inputPrice: 0.18,
         outputPrice: 0.18,
@@ -564,7 +590,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['image-generation'],
         category: 'image',
         isLatest: true,
-        notes: 'Stability AI Stable Diffusion XL via AWS Bedrock'
+        notes: 'Stability AI Stable Diffusion XL - advanced AI model for text generation and chat'
     },
 
     // TwelveLabs Models
@@ -579,7 +605,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'video', 'multimodal'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'TwelveLabs Pegasus v1.2 via AWS Bedrock - video understanding model'
+        notes: 'TwelveLabs Pegasus v1.2 - advanced AI model for text generation and chat'
     },
     {
         modelId: 'twelvelabs.marengo-embed-2-7-v1:0',
@@ -592,6 +618,6 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['embedding', 'multimodal'],
         category: 'embedding',
         isLatest: true,
-        notes: 'TwelveLabs Marengo Embed v2.7 via AWS Bedrock - multimodal embeddings'
+        notes: 'TwelveLabs Marengo Embed v2.7 - advanced AI model for text generation and chat'
     }
 ]; 
