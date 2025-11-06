@@ -10,6 +10,10 @@ declare global {
         interface Request {
             user?: UserPayload;
             userId?: string;
+            traceContext?: {
+                traceId?: string;
+                sessionId?: string;
+            };
             gatewayContext?: {
                 startTime: number;
                 requestId?: string;

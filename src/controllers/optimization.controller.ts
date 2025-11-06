@@ -87,8 +87,8 @@ export class OptimizationController {
                     enableRequestFusion: req.body.enableRequestFusion !== false,
                     
                     // 🚀 CORTEX OPTIONS
-                    enableCortex: req.body.enableCortex === true,
-                    cortexConfig: req.body.enableCortex === true ? {
+                    enableCortex: req.body.useCortex === true || req.body.enableCortex === true,
+                    cortexConfig: (req.body.useCortex === true || req.body.enableCortex === true) ? {
                         encodingModel: mapToFullModelId(req.body.cortexEncodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default
                         coreProcessingModel: mapToFullModelId(req.body.cortexCoreModel) || 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 default
                         decodingModel: mapToFullModelId(req.body.cortexDecodingModel) || 'amazon.nova-pro-v1:0', // Nova Pro default

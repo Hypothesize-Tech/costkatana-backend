@@ -594,7 +594,7 @@ export class ExperimentationService {
             });
 
             // Parse evaluation results
-            const evaluationData = this.parseEvaluationResponse(evaluationResponse, results);
+            const evaluationData = await this.parseEvaluationResponse(evaluationResponse, results);
 
             // Apply evaluation scores to results
             return results.map((result, index) => ({
@@ -753,7 +753,7 @@ export class ExperimentationService {
                 );
             }
 
-            const extractedJson = BedrockService.extractJson(analysisResponse);
+            const extractedJson = await BedrockService.extractJson(analysisResponse);
             try {
                 return JSON.parse(extractedJson);
             } catch (parseError) {
@@ -994,9 +994,9 @@ export class ExperimentationService {
         `;
     }
 
-    private static parseEvaluationResponse(response: string, results: RealTimeComparisonResult[]): any[] {
+    private static async parseEvaluationResponse(response: string, results: RealTimeComparisonResult[]): Promise<any[]> {
         try {
-            let cleanedResponse = BedrockService.extractJson(response);
+            let cleanedResponse = await BedrockService.extractJson(response);
             
             // Additional cleaning for control characters and invalid JSON
             cleanedResponse = cleanedResponse
@@ -2492,7 +2492,7 @@ Return a JSON object with this structure:
 Make the data realistic and consistent with the scenario type.`;
 
             const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
-            const jsonResponse = BedrockService.extractJson(response);
+            const jsonResponse = await BedrockService.extractJson(response);
             
             try {
                 const analysis = JSON.parse(jsonResponse);
@@ -2551,7 +2551,7 @@ Return a JSON object with this structure:
 Base your analysis on real-world AI cost optimization patterns and industry best practices.`;
 
             const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
-            const jsonResponse = BedrockService.extractJson(response);
+            const jsonResponse = await BedrockService.extractJson(response);
             
             try {
                 const analysis = JSON.parse(jsonResponse);

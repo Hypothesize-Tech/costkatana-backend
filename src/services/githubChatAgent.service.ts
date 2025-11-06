@@ -4,6 +4,9 @@ import { GitHubConnection, GitHubIntegration, Conversation, IGitHubContext, IGit
 import { loggingService } from './logging.service';
 import { GitHubService } from './github.service';
 import { VectorStoreService } from './vectorStore.service';
+import { TreeSitterService, ASTAnalysis, SymbolLocation } from './treeSitter.service';
+import { MultiRepoIntelligenceService } from './multiRepoIntelligence.service';
+import { MultiRepoIndex } from '../models/MultiRepoIndex';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,6 +27,20 @@ export interface GitHubChatResponse {
     suggestions?: string[];
     requiresAction?: boolean;
     action?: GitHubCommand;
+}
+
+export interface DependencyEdge {
+    from: string;
+    to: string;
+    type: 'import' | 'export' | 'extends' | 'implements' | 'calls';
+    line: number;
+}
+
+export interface CallGraphNode {
+    functionName: string;
+    filePath: string;
+    calls: string[];
+    calledBy: string[];
 }
 
 export interface CodebaseIndex {
@@ -48,6 +65,11 @@ export interface CodebaseIndex {
         framework?: string;
         packageManager?: string;
     };
+    // Enhanced AST metadata
+    astMetadata?: Map<string, ASTAnalysis>;
+    symbolTable?: Map<string, SymbolLocation[]>;
+    dependencyGraph?: DependencyEdge[];
+    callGraph?: CallGraphNode[];
 }
 
 export class GitHubChatAgentService {
@@ -335,12 +357,15 @@ Return a JSON array of example file paths that are most relevant:
     }
 
     /**
-     * Find semantically relevant files using embeddings (Cursor-like semantic search)
+     * Find semantically relevant files using embeddings with multi-repo awareness (Cursor-like semantic search)
      */
     private static async findSemanticallyRelevantFiles(
         userRequest: string,
-        codebaseIndex: CodebaseIndex
+        codebaseIndex: CodebaseIndex,
+        userId?: string
     ): Promise<string[]> {
+        const relevantPaths: string[] = [];
+        
         try {
             // Use vector store for semantic search
             const vectorStoreService = new VectorStoreService();
@@ -353,19 +378,86 @@ Return a JSON array of example file paths that are most relevant:
             const results = await vectorStoreService.search(searchQuery, 20);
             
             // Extract file paths from results
-            const relevantPaths = results
+            const vectorPaths = results
                 .map(r => r.metadata?.source || r.metadata?.filePath)
                 .filter((path): path is string => typeof path === 'string')
                 .filter(path => codebaseIndex.files.some(f => f.path === path));
             
-            // If vector search found results, return them
-            if (relevantPaths.length > 0) {
-                return relevantPaths;
-            }
+            relevantPaths.push(...vectorPaths);
         } catch (error) {
             loggingService.warn('Semantic search failed, using fallback', {
                 error: error instanceof Error ? error.message : 'Unknown'
             });
+        }
+
+        // Multi-repo awareness: Use MultiRepoIntelligenceService for intelligent recommendations
+        if (userId) {
+            try {
+                // Use MultiRepoIntelligenceService to find integration points and shared utilities
+                const integrationPoints = await MultiRepoIntelligenceService.findIntegrationPoints(
+                    userId,
+                    userRequest
+                );
+
+                // Add recommended integration points
+                for (const point of integrationPoints.slice(0, 5)) {
+                    if (point.filePath && !relevantPaths.includes(point.filePath)) {
+                        relevantPaths.push(point.filePath);
+                    }
+                }
+
+                // Also check shared utilities from MultiRepoIndex
+                const multiRepoIndex = await MultiRepoIndex.findOne({ userId });
+                if (multiRepoIndex && multiRepoIndex.sharedUtilities.length > 0) {
+                    // Find shared utilities that match the request
+                    const requestLower = userRequest.toLowerCase();
+                    const matchingUtilities = multiRepoIndex.sharedUtilities.filter(util => {
+                        const nameMatch = requestLower.includes(util.name.toLowerCase());
+                        const typeMatch = requestLower.includes(util.type);
+                        return nameMatch || typeMatch;
+                    });
+
+                    // Add shared utility files from other repos
+                    for (const util of matchingUtilities.slice(0, 5)) {
+                        if (util.repoFullName && util.filePath) {
+                            const fullPath = `${util.repoFullName}:${util.filePath}`;
+                            if (!relevantPaths.includes(fullPath)) {
+                                relevantPaths.push(fullPath);
+                            }
+                        }
+                    }
+
+                    loggingService.info('Multi-repo intelligence applied', {
+                        integrationPoints: integrationPoints.length,
+                        sharedUtilities: matchingUtilities.length,
+                        utilities: matchingUtilities.map(u => u.name)
+                    });
+                }
+            } catch (error) {
+                loggingService.warn('Multi-repo intelligence search failed', {
+                    error: error instanceof Error ? error.message : 'Unknown'
+                });
+            }
+        }
+
+        // Use symbol table for exact matches (if available)
+        if (codebaseIndex.symbolTable) {
+            const requestWords = userRequest.toLowerCase().split(/\s+/);
+            for (const word of requestWords) {
+                if (word.length > 3 && codebaseIndex.symbolTable.has(word)) {
+                    const symbols = codebaseIndex.symbolTable.get(word) || [];
+                    for (const symbol of symbols.slice(0, 3)) {
+                        if (!relevantPaths.includes(symbol.filePath)) {
+                            relevantPaths.push(symbol.filePath);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we have results from vector search or multi-repo, return them
+        if (relevantPaths.length > 0) {
+            return relevantPaths.slice(0, 20);
         }
         
         // Fallback: AI-powered relevance detection
@@ -410,7 +502,7 @@ Return a JSON object with the most relevant file paths (top 20):
     }
 
     /**
-     * Analyze code structure (AST-like analysis) for key files
+     * Analyze code structure using Tree-Sitter AST parsing
      */
     private static analyzeCodeStructure(
         files: Record<string, string>,
@@ -420,34 +512,39 @@ Return a JSON object with the most relevant file paths (top 20):
         
         for (const [path, content] of Object.entries(files)) {
             const fileInfo = codebaseIndex.files.find(f => f.path === path);
-            if (!fileInfo || fileInfo.type !== 'file') continue;
+            if (!fileInfo || fileInfo.type !== 'file' || !fileInfo.language) continue;
             
             try {
-                // Extract key structural elements (AST-like parsing via regex for speed)
-                const language = fileInfo.language || '';
-                let structureInfo = '';
+                // Use Tree-Sitter for precise AST parsing
+                const astAnalysis = TreeSitterService.parseCode(content, fileInfo.language, path);
                 
-                if (language === 'typescript' || language === 'javascript') {
-                    // Extract functions, classes, exports
-                    const functions = (content.match(/(?:export\s+)?(?:async\s+)?function\s+\w+|const\s+\w+\s*=\s*(?:async\s+)?\([^)]*\)\s*=>/g) || []).length;
-                    const classes = (content.match(/class\s+\w+/g) || []).length;
-                    const imports = (content.match(/import\s+.*from/g) || []).length;
-                    const exports = (content.match(/export\s+(?:const|function|class|default)/g) || []).length;
-                    
-                    structureInfo = `${functions} functions, ${classes} classes, ${imports} imports, ${exports} exports`;
-                } else if (language === 'python') {
-                    const functions = (content.match(/def\s+\w+/g) || []).length;
-                    const classes = (content.match(/class\s+\w+/g) || []).length;
-                    const imports = (content.match(/^import\s+|^from\s+/gm) || []).length;
-                    
-                    structureInfo = `${functions} functions, ${classes} classes, ${imports} imports`;
+                const parts: string[] = [];
+                if (astAnalysis.functions.length > 0) {
+                    parts.push(`${astAnalysis.functions.length} function${astAnalysis.functions.length > 1 ? 's' : ''}`);
+                }
+                if (astAnalysis.classes.length > 0) {
+                    parts.push(`${astAnalysis.classes.length} class${astAnalysis.classes.length > 1 ? 'es' : ''}`);
+                }
+                if (astAnalysis.imports.length > 0) {
+                    parts.push(`${astAnalysis.imports.length} import${astAnalysis.imports.length > 1 ? 's' : ''}`);
+                }
+                if (astAnalysis.exports.length > 0) {
+                    parts.push(`${astAnalysis.exports.length} export${astAnalysis.exports.length > 1 ? 's' : ''}`);
+                }
+                if (astAnalysis.interfaces.length > 0) {
+                    parts.push(`${astAnalysis.interfaces.length} interface${astAnalysis.interfaces.length > 1 ? 's' : ''}`);
                 }
                 
-                if (structureInfo) {
-                    structure[path] = structureInfo;
+                if (parts.length > 0) {
+                    structure[path] = parts.join(', ');
                 }
             } catch (error) {
-                // Skip if analysis fails
+                // Fallback to basic info if Tree-Sitter fails
+                loggingService.warn('Tree-Sitter analysis failed, using fallback', {
+                    path,
+                    error: error instanceof Error ? error.message : 'Unknown'
+                });
+                structure[path] = 'Structure analysis unavailable';
             }
         }
         
@@ -583,7 +680,11 @@ Return a JSON object with the most relevant file paths (top 20):
                 languages: [],
                 framework: undefined,
                 packageManager: undefined
-            }
+            },
+            astMetadata: new Map(),
+            symbolTable: new Map(),
+            dependencyGraph: [],
+            callGraph: []
         };
         
         const detectedLanguages = new Set<string>();
@@ -670,12 +771,121 @@ Return a JSON object with the most relevant file paths (top 20):
         } else if (configContent.includes('flask')) {
             index.summary.framework = 'Flask';
         }
+
+        // Initialize Tree-Sitter for AST parsing
+        TreeSitterService.initialize();
+
+        // Parse source files with Tree-Sitter (limit to first 100 files for performance)
+        const sourceFilesToParse = index.structure.sourceFiles.slice(0, 100);
+        loggingService.info('Parsing source files with Tree-Sitter', {
+            repository: `${owner}/${repo}`,
+            fileCount: sourceFilesToParse.length
+        });
+
+        for (const filePath of sourceFilesToParse) {
+            try {
+                const fileInfo = index.files.find(f => f.path === filePath);
+                if (!fileInfo || !fileInfo.language) continue;
+
+                // Fetch file content
+                const content = await this.getFileContentWithCache(connection, owner, repo, filePath, ref || 'main');
+                if (!content) continue;
+
+                // Parse with Tree-Sitter
+                const astAnalysis = TreeSitterService.parseCode(content, fileInfo.language, filePath);
+                
+                // Store AST metadata
+                index.astMetadata!.set(filePath, astAnalysis);
+
+                // Build symbol table
+                for (const symbol of astAnalysis.symbols) {
+                    if (!index.symbolTable!.has(symbol.name)) {
+                        index.symbolTable!.set(symbol.name, []);
+                    }
+                    index.symbolTable!.get(symbol.name)!.push(symbol);
+                }
+
+                // Build dependency graph from imports
+                for (const imp of astAnalysis.imports) {
+                    index.dependencyGraph!.push({
+                        from: filePath,
+                        to: imp.source,
+                        type: 'import',
+                        line: imp.line
+                    });
+                }
+
+                // Build dependency graph from exports
+                for (const exp of astAnalysis.exports) {
+                    index.dependencyGraph!.push({
+                        from: filePath,
+                        to: exp.name,
+                        type: 'export',
+                        line: exp.line
+                    });
+                }
+
+                // Build dependency graph from class inheritance
+                for (const cls of astAnalysis.classes) {
+                    if (cls.extends) {
+                        index.dependencyGraph!.push({
+                            from: filePath,
+                            to: cls.extends,
+                            type: 'extends',
+                            line: cls.line
+                        });
+                    }
+                    if (cls.implements && cls.implements.length > 0) {
+                        for (const impl of cls.implements) {
+                            index.dependencyGraph!.push({
+                                from: filePath,
+                                to: impl,
+                                type: 'implements',
+                                line: cls.line
+                            });
+                        }
+                    }
+                }
+
+                // Build call graph (simplified - track function calls within same file)
+                for (const func of astAnalysis.functions) {
+                    const callGraphNode: CallGraphNode = {
+                        functionName: func.name,
+                        filePath: filePath,
+                        calls: [],
+                        calledBy: []
+                    };
+
+                    // Find function calls within the same file (simplified approach)
+                    // This would be enhanced with more sophisticated analysis
+                    const functionCalls = content.match(new RegExp(`\\b${func.name}\\s*\\(`, 'g'));
+                    if (functionCalls && functionCalls.length > 0) {
+                        // Extract called functions from content (simplified)
+                        const calledFunctions = astAnalysis.functions
+                            .filter(f => f.name !== func.name && content.includes(`${f.name}(`))
+                            .map(f => f.name);
+                        callGraphNode.calls = calledFunctions;
+                    }
+
+                    index.callGraph!.push(callGraphNode);
+                }
+            } catch (error) {
+                loggingService.warn('Failed to parse file with Tree-Sitter', {
+                    filePath,
+                    error: error instanceof Error ? error.message : 'Unknown'
+                });
+                // Continue with other files
+            }
+        }
         
-        loggingService.info('Built codebase index', {
+        loggingService.info('Built codebase index with AST metadata', {
             repository: `${owner}/${repo}`,
             totalFiles: index.summary.totalFiles,
             sourceCount: index.summary.sourceCount,
-            languages: index.summary.languages
+            languages: index.summary.languages,
+            astFilesParsed: index.astMetadata!.size,
+            symbolsFound: index.symbolTable!.size,
+            dependenciesFound: index.dependencyGraph!.length
         });
         
         // Cache the index
@@ -1074,6 +1284,32 @@ Return a JSON object with this structure:
             };
         }
 
+        // Use MultiRepoIntelligenceService to find best integration points
+        let integrationRecommendations: string[] = [];
+        try {
+            const integrationPoints = await MultiRepoIntelligenceService.findIntegrationPoints(
+                context.userId,
+                `CostKatana ${integrationType} integration`,
+                connection as any
+            );
+            
+            // Filter for current repository
+            integrationRecommendations = integrationPoints
+                .filter(point => point.repoFullName === repository.fullName)
+                .map(point => point.filePath);
+            
+            if (integrationRecommendations.length > 0) {
+                loggingService.info('Integration points found for CostKatana integration', {
+                    repository: repository.fullName,
+                    points: integrationRecommendations
+                });
+            }
+        } catch (error) {
+            loggingService.warn('Failed to get integration points for CostKatana', {
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+        }
+
         // Start integration
         const integration = await GitHubIntegrationService.startIntegration({
             userId: context.userId,
@@ -1279,28 +1515,84 @@ Return a JSON object with this structure:
             
             const codebaseIndex = await this.buildCodebaseIndex(connection as any, owner, repoName, defaultBranch);
             
+            // Optionally trigger multi-repo indexing in background (non-blocking)
+            try {
+                // Schedule multi-repo indexing if not recently done
+                const multiRepoIndex = await MultiRepoIndex.findOne({ userId: context.userId });
+                const shouldIndex = !multiRepoIndex || 
+                    (Date.now() - multiRepoIndex.lastSyncedAt.getTime()) > 24 * 60 * 60 * 1000; // 24 hours
+                
+                if (shouldIndex) {
+                    // Schedule in background (don't await)
+                    MultiRepoIntelligenceService.indexUserRepositories(
+                        connection as any,
+                        context.userId
+                    ).catch(error => {
+                        loggingService.warn('Background multi-repo indexing failed', {
+                            error: error instanceof Error ? error.message : 'Unknown'
+                        });
+                    });
+                }
+            } catch (error) {
+                // Non-critical, continue
+                loggingService.debug('Multi-repo indexing check failed', {
+                    error: error instanceof Error ? error.message : 'Unknown'
+                });
+            }
+            
             // Load relevant examples from costkatana-examples
             const relevantExamples = await this.findRelevantExamples(changeRequest, codebaseIndex);
             
-            // Use semantic search to find most relevant files for the request
+            // Use semantic search to find most relevant files for the request (with multi-repo awareness)
             const semanticallyRelevantFiles = await this.findSemanticallyRelevantFiles(
                 changeRequest,
-                codebaseIndex
+                codebaseIndex,
+                context.userId
             );
+            
+            // Use MultiRepoIntelligenceService to find integration points and recommendations
+            let integrationRecommendations: string[] = [];
+            try {
+                const integrationPoints = await MultiRepoIntelligenceService.findIntegrationPoints(
+                    context.userId,
+                    changeRequest,
+                    connection as any
+                );
+                
+                // Extract file paths from recommendations
+                integrationRecommendations = integrationPoints
+                    .filter(point => point.repoFullName === repositoryFullName)
+                    .map(point => point.filePath)
+                    .slice(0, 5);
+                
+                if (integrationRecommendations.length > 0) {
+                    loggingService.info('Integration points found via MultiRepoIntelligenceService', {
+                        count: integrationRecommendations.length,
+                        points: integrationRecommendations
+                    });
+                }
+            } catch (error) {
+                loggingService.warn('Failed to get integration points', {
+                    error: error instanceof Error ? error.message : 'Unknown'
+                });
+            }
 
             // Fetch file contents intelligently - prioritize semantically relevant files
             const filesToFetch: string[] = [];
             
-            // Priority 1: Semantically relevant files (most important)
+            // Priority 1: Integration points from MultiRepoIntelligenceService (highest priority)
+            filesToFetch.push(...integrationRecommendations);
+            
+            // Priority 2: Semantically relevant files (most important)
             filesToFetch.push(...semanticallyRelevantFiles.slice(0, 30));
             
-            // Priority 2: Entry points (always important)
+            // Priority 3: Entry points (always important)
             filesToFetch.push(...codebaseIndex.structure.entryPoints);
             
-            // Priority 3: Source files (limit to prevent overload)
+            // Priority 4: Source files (limit to prevent overload)
             filesToFetch.push(...codebaseIndex.structure.sourceFiles.slice(0, 70));
             
-            // Priority 4: Config files (needed for dependency updates)
+            // Priority 5: Config files (needed for dependency updates)
             filesToFetch.push(...codebaseIndex.structure.configFiles.slice(0, 20));
             
             // Remove duplicates and limit total
@@ -1404,8 +1696,9 @@ Codebase Summary:
                         const fileInfo = codebaseIndex.files.find(f => f.path === path);
                         const language = fileInfo?.language ? ` (${fileInfo.language})` : '';
                         const isSemantic = semanticallyRelevantFiles.includes(path) ? ' 🔍 [SEMANTICALLY RELEVANT]' : '';
+                        const isIntegrationPoint = integrationRecommendations.includes(path) ? ' ⭐ [RECOMMENDED INTEGRATION POINT]' : '';
                         const structureInfo = codeStructure[path] ? `\n[Structure: ${codeStructure[path]}]` : '';
-                        return `\n=== FILE: ${path}${language}${isSemantic}${structureInfo} ===\n${content}\n`;
+                        return `\n=== FILE: ${path}${language}${isSemantic}${isIntegrationPoint}${structureInfo} ===\n${content}\n`;
                     }).join('\n')
                 : '';
 
@@ -1437,7 +1730,7 @@ ${changeRequest}
    - Understand function and class dependencies
    - Identify architectural patterns and conventions
 
-2. **Semantic Understanding**: Use the semantically relevant files (marked with 🔍) as your primary focus, but maintain context of the entire codebase
+2. **Semantic Understanding**: Use the semantically relevant files (marked with 🔍) and recommended integration points (marked with ⭐) as your primary focus, but maintain context of the entire codebase
 
 3. **Pattern Matching**: Follow existing code patterns, styling, and conventions
    - Match indentation and formatting

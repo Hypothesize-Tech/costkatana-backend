@@ -710,6 +710,9 @@ export class GitHubController {
                 case 'pull_request':
                     await this.handlePullRequestEvent(req.body);
                     break;
+                case 'push':
+                    await this.handlePushEvent(req.body);
+                    break;
                 case 'installation':
                     await this.handleInstallationEvent(req.body);
                     break;
@@ -762,6 +765,63 @@ export class GitHubController {
             action,
             prNumber: pull_request.number
         });
+    }
+
+    /**
+     * Handle push events for cache invalidation
+     */
+    private static async handlePushEvent(payload: any): Promise<void> {
+        try {
+            const repo = payload.repository?.full_name;
+            const branch = payload.ref?.replace('refs/heads/', '');
+            const commits = payload.commits || [];
+
+            if (!repo) {
+                loggingService.warn('Push event missing repository information');
+                return;
+            }
+
+            loggingService.info('GitHub push event received', {
+                repo,
+                branch,
+                commitCount: commits.length,
+                headCommit: payload.head_commit?.id
+            });
+
+            // Import CacheInvalidationService dynamically to avoid circular dependencies
+            const { CacheInvalidationService } = await import('../services/cacheInvalidation.service');
+            
+            // Invalidate caches for this repo
+            await CacheInvalidationService.invalidateRepo(repo, branch);
+
+            // Schedule background reindex if significant changes
+            if (commits.length > 0) {
+                const { ReindexQueue } = await import('../queues/reindex.queue');
+                
+                // Find user connection for this repo (simplified - would need proper lookup)
+                // For now, schedule with high priority
+                try {
+                    await ReindexQueue.addReindexJob({
+                        repoFullName: repo,
+                        branch,
+                        userId: '', // Would need to lookup from repo
+                        connectionId: '', // Would need to lookup from repo
+                        priority: 'high'
+                    });
+                } catch (error) {
+                    // Queue might not be available, log and continue
+                    loggingService.warn('Failed to schedule reindex job', {
+                        repo,
+                        error: error instanceof Error ? error.message : 'Unknown'
+                    });
+                }
+            }
+        } catch (error) {
+            loggingService.error('Push event handling failed', {
+                error: error instanceof Error ? error.message : 'Unknown',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
     }
 
     /**

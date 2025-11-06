@@ -19,6 +19,7 @@ import { calculateCost } from '../../utils/pricing';
 import { BedrockModelFormatter } from '../utils/bedrockModelFormatter';
 import { primitiveLearner } from '../learning/primitiveLearner';
 import { ModelRouter, modelRouter } from './modelRouter';
+import { encodeToTOON, decodeFromTOON, extractStructuredData } from '../../utils/toon.utils';
 
 export class CortexRelayEngine {
   private bedrockClient: BedrockRuntimeClient;
@@ -116,7 +117,7 @@ export class CortexRelayEngine {
             return {
               response: `Response quality predicted to be insufficient (${qualityPrediction.score.toFixed(2)}). ${qualityPrediction.reason}`,
               metrics: {
-                ...this.calculateMetrics(input, cortexQuery, { frame: 'error', roles: {}, status: 'error' } as CortexResponse, modelSelection, startTime),
+                ...(await this.calculateMetrics(input, cortexQuery, { frame: 'error', roles: {}, status: 'error' } as CortexResponse, modelSelection, startTime)),
                 earlyTermination: true,
                 qualityPrediction
               }
@@ -163,7 +164,7 @@ export class CortexRelayEngine {
       this.addTrace('decoding_complete');
       
       // Calculate metrics
-      const metrics = this.calculateMetrics(
+      const metrics = await this.calculateMetrics(
         input,
         cortexQuery,
         cortexResponse,
@@ -207,7 +208,7 @@ export class CortexRelayEngine {
     query: CortexQuery,
     modelSelection: ModelSelection
   ): Promise<CortexResponse> {
-    const prompt = this.buildProcessingPrompt(query);
+    const prompt = await this.buildProcessingPrompt(query);
     
     // Use the formatter to create the correct request format for each model
     const isClaude = modelSelection.modelId.includes('anthropic.claude');
@@ -255,34 +256,38 @@ export class CortexRelayEngine {
       responseBody
     );
     
-    // Parse the Cortex response
-    return this.parseCortexResponse(cortexResponseText);
+    // Parse the Cortex response (handles both TOON and JSON)
+    return await this.parseCortexResponse(cortexResponseText);
   }
   
   /**
    * Build the system prompt for core processing
    */
   private buildSystemPrompt(): string {
-    return `You are a Cortex processor. Process structured queries and generate structured responses.
+    return `You are a Cortex processor. Process structured queries and generate structured responses in TOON format ONLY.
 
 Rules:
 1. Process the semantic intent
-2. Generate valid JSON response
+2. Generate valid TOON format response (NO JSON)
 3. Use appropriate frames (answer, list, etc.)
 4. Be concise and accurate
+5. Use TOON format for all structured data to reduce tokens by 30-60%
 
-Response format:
-{
-  "frame": "answer",
-  "roles": { "content": "your response" },
-  "status": "success"
-}`;
+Response format (TOON ONLY):
+frame[1]{frame,roles,status}:
+  answer,{content:your_response},success
+
+For arrays:
+items[3]{id,name,value}:
+  1,item1,value1
+  2,item2,value2
+  3,item3,value3`;
   }
   
   /**
    * Build the processing prompt
    */
-  private buildProcessingPrompt(query: CortexQuery): string {
+  private async buildProcessingPrompt(query: CortexQuery): Promise<string> {
     // Simplify prompt for all Bedrock models to avoid "Malformed input request"
     const simplifiedQuery = {
       frame: query.frame,
@@ -299,11 +304,14 @@ Response format:
 Provide a structured analysis.`;
     }
     
-    return `Process this Cortex query:
+    // Convert to TOON format
+    const queryString = await encodeToTOON(simplifiedQuery);
+    
+    return `Process this Cortex query in TOON format:
 
-${JSON.stringify(simplifiedQuery)}
+${queryString}
 
-Generate a structured response.`;
+Generate a structured response in TOON format ONLY (NO JSON).`;
   }
   
   /**
@@ -440,10 +448,11 @@ Generate a structured response.`;
       // Use a lightweight model for prediction
       const predictionModel = process.env.CORTEX_QUALITY_PREDICTOR_MODEL || 'amazon.nova-lite-v1:0';
       
-      const predictionPrompt = `Predict the likely quality of response for this Cortex query:
+      const queryTOON = await encodeToTOON(query);
+      const predictionPrompt = `Predict the likely quality of response for this Cortex query in TOON format:
 
 QUERY:
-${JSON.stringify(query, null, 2)}
+${queryTOON}
 
 MODEL: ${modelSelection.modelId}
 
@@ -499,13 +508,21 @@ Provide prediction in JSON:
       
       // Parse prediction
       try {
-        const jsonMatch = predictionText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
+        // Try TOON decode first
+        try {
+          const parsed = await decodeFromTOON(predictionText);
           return {
             score: parsed.score || 0.8,
             reason: parsed.reason || 'No specific reason provided',
             confidence: parsed.confidence || 0.7
+          };
+        } catch {
+          // Fallback: try to extract score from text
+          const scoreMatch = predictionText.match(/score[:\s]+([\d.]+)/i);
+          return {
+            score: scoreMatch ? parseFloat(scoreMatch[1]) : 0.8,
+            reason: 'Prediction parsed from text',
+            confidence: 0.7
           };
         }
       } catch (error) {
@@ -535,7 +552,7 @@ Provide prediction in JSON:
       this.addTrace(`critique_iteration_${iteration}_start`);
       
       // Build critique prompt
-      const critiquePrompt = this.buildCritiquePrompt(query, currentResponse);
+      const critiquePrompt = await this.buildCritiquePrompt(query, currentResponse);
       
       // Get critique from LLM
       const critiqueRequest = BedrockModelFormatter.formatRequestBody({
@@ -574,7 +591,7 @@ Provide prediction in JSON:
       );
       
       // Parse critique result
-      const critique = this.parseCritique(critiqueText);
+      const critique = await this.parseCritique(critiqueText);
       
       // If response is good enough, stop
       if (critique.qualityScore >= (parseFloat(process.env.CORTEX_QUALITY_THRESHOLD || '0.85'))) {
@@ -606,14 +623,16 @@ Provide prediction in JSON:
   /**
    * Build critique prompt
    */
-  private buildCritiquePrompt(query: CortexQuery, response: CortexResponse): string {
-    return `Analyze the following Cortex query and response for quality and completeness:
+  private async buildCritiquePrompt(query: CortexQuery, response: CortexResponse): Promise<string> {
+    const queryTOON = await encodeToTOON(query);
+    const responseTOON = await encodeToTOON(response);
+    return `Analyze the following Cortex query and response for quality and completeness (both in TOON format):
 
 ORIGINAL QUERY:
-${JSON.stringify(query, null, 2)}
+${queryTOON}
 
 GENERATED RESPONSE:
-${JSON.stringify(response, null, 2)}
+${responseTOON}
 
 Evaluate the response on these criteria:
 1. Completeness: Does it fully address the query?
@@ -657,25 +676,23 @@ Be critical but fair. Focus on actionable improvements.`;
   /**
    * Parse critique response
    */
-  private parseCritique(text: string): {
+  private async parseCritique(text: string): Promise<{
     qualityScore: number;
     strengths?: string[];
     weaknesses?: string[];
     improvements?: string[];
     recommendRefinement: boolean;
-  } {
+  }> {
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          qualityScore: parsed.qualityScore || 0.5,
-          strengths: parsed.strengths,
-          weaknesses: parsed.weaknesses,
-          improvements: parsed.improvements,
-          recommendRefinement: parsed.recommendRefinement !== false
-        };
-      }
+      // Try TOON decode
+      const parsed = await decodeFromTOON(text);
+      return {
+        qualityScore: parsed.qualityScore || 0.5,
+        strengths: parsed.strengths,
+        weaknesses: parsed.weaknesses,
+        improvements: parsed.improvements,
+        recommendRefinement: parsed.recommendRefinement !== false
+      };
     } catch (error) {
       loggingService.warn('Failed to parse critique', { error });
     }
@@ -695,13 +712,15 @@ Be critical but fair. Focus on actionable improvements.`;
     improvements: string[],
     modelSelection: ModelSelection
   ): Promise<CortexResponse> {
-    const refinementPrompt = `Refine the following Cortex response based on these improvements:
+    const queryTOON = await encodeToTOON(query);
+    const responseTOON = await encodeToTOON(response);
+    const refinementPrompt = `Refine the following Cortex response based on these improvements (all in TOON format):
 
 ORIGINAL QUERY:
-${JSON.stringify(query, null, 2)}
+${queryTOON}
 
 CURRENT RESPONSE:
-${JSON.stringify(response, null, 2)}
+${responseTOON}
 
 REQUIRED IMPROVEMENTS:
 ${improvements.map((imp, i) => `${i + 1}. ${imp}`).join('\n')}
@@ -743,42 +762,138 @@ Generate an improved Cortex response that addresses these issues:`;
       refinementBody
     );
     
-    return this.parseCortexResponse(refinedText);
+    return await this.parseCortexResponse(refinedText);
   }
   
   /**
    * Parse Cortex response from LLM output
    */
-  private parseCortexResponse(text: string): CortexResponse {
+  private async parseCortexResponse(text: string): Promise<CortexResponse> {
+    // Edge case: null/undefined/empty input
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      loggingService.warn('Empty or invalid text in parseCortexResponse');
+      return {
+        frame: 'error',
+        roles: {
+          code: 'EMPTY_INPUT',
+          message: 'Empty or invalid input text'
+        },
+        status: 'error'
+      } as CortexResponse;
+    }
+
+    // Edge case: very large text (potential DoS)
+    const MAX_PARSE_SIZE = 5 * 1024 * 1024; // 5MB limit
+    if (text.length > MAX_PARSE_SIZE) {
+      loggingService.warn('Text too large for parsing, truncating', {
+        size: text.length,
+        maxSize: MAX_PARSE_SIZE
+      });
+      text = text.substring(0, MAX_PARSE_SIZE);
+    }
+
     try {
-      // Extract JSON from the response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        
-        // Ensure it has required fields
-        return {
-          frame: parsed.frame || 'answer',
-          roles: parsed.roles || { content: text },
-          status: parsed.status || 'success',
-          metadata: parsed.metadata
-        } as CortexResponse;
+      // Extract TOON format data with enhanced error handling
+      const structuredData = await extractStructuredData(text);
+      if (structuredData && typeof structuredData === 'object') {
+        // Edge case: Handle decode errors
+        if ('_decodeError' in structuredData) {
+          loggingService.warn('Decode error in structured data, using fallback');
+        } else {
+          const parsed = structuredData;
+          // Ensure it has required fields
+          return {
+            frame: parsed.frame || 'answer',
+            roles: parsed.roles || { content: text },
+            status: parsed.status || 'success',
+            metadata: parsed.metadata
+          } as CortexResponse;
+        }
       }
       
-      // Fallback to basic response
+      // Try direct TOON decode with timeout protection
+      try {
+        const decodePromise = decodeFromTOON(text);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('TOON decode timeout')), 3000)
+        );
+        
+        const parsed = await Promise.race([decodePromise, timeoutPromise]) as any;
+        
+        // Edge case: Handle decode errors
+        if (parsed && typeof parsed === 'object' && '_decodeError' in parsed) {
+          throw new Error('Decode error detected');
+        }
+        
+        if (parsed && typeof parsed === 'object') {
+          return {
+            frame: parsed.frame || 'answer',
+            roles: parsed.roles || { content: text },
+            status: parsed.status || 'success',
+            metadata: parsed.metadata
+          } as CortexResponse;
+        }
+      } catch (toonError) {
+        // Edge case: Timeout or decode error
+        const isTimeout = toonError instanceof Error && toonError.message.includes('timeout');
+        if (isTimeout) {
+          loggingService.warn('TOON decode timeout, trying pattern matching', {
+            textLength: text.length
+          });
+        }
+
+        // If TOON decode fails, try to find TOON pattern with multiple patterns
+        const toonPatterns = [
+          /(\w+\[\d+\]\{[^}]+\}:[\s\S]*?)(?=\n\n|\n\w+\[|$)/,
+          /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/
+        ];
+
+        for (const pattern of toonPatterns) {
+          const toonMatch = text.match(pattern);
+          if (toonMatch?.[1]) {
+            try {
+              const parsed = await decodeFromTOON(toonMatch[1]);
+              if (parsed && typeof parsed === 'object' && !('_decodeError' in parsed)) {
+                return {
+                  frame: parsed.frame || 'answer',
+                  roles: parsed.roles || { content: text },
+                  status: parsed.status || 'success',
+                  metadata: parsed.metadata
+                } as CortexResponse;
+              }
+            } catch (patternError) {
+              // Continue to next pattern
+              loggingService.debug('Pattern match decode failed', {
+                error: patternError instanceof Error ? patternError.message : String(patternError)
+              });
+            }
+          }
+        }
+      }
+      
+      // Fallback to basic response if TOON parsing fails
+      loggingService.warn('Failed to parse TOON format, using fallback', { 
+        text: text.substring(0, 200),
+        textLength: text.length
+      });
       return {
         frame: 'answer',
         roles: { content: text },
         status: 'success'
       } as CortexResponse;
     } catch (error) {
-      loggingService.error('Failed to parse Cortex response', { text, error });
+      loggingService.error('Failed to parse Cortex response', { 
+        text: text.substring(0, 500), 
+        textLength: text.length,
+        error: error instanceof Error ? error.message : String(error)
+      });
       
       return {
         frame: 'error',
         roles: {
           code: 'PARSE_ERROR',
-          message: 'Failed to parse Cortex response'
+          message: 'Failed to parse Cortex response',
+          error: error instanceof Error ? error.message : String(error)
         },
         status: 'error'
       } as CortexResponse;
@@ -788,16 +903,16 @@ Generate an improved Cortex response that addresses these issues:`;
   /**
    * Calculate execution metrics
    */
-  private calculateMetrics(
+  private async calculateMetrics(
     originalInput: string,
     cortexQuery: CortexQuery,
     cortexResponse: CortexResponse,
     modelSelection: ModelSelection,
     startTime: number
-  ): ResponseMetrics {
+  ): Promise<ResponseMetrics> {
     const originalTokens = this.estimateTokens(originalInput);
-    const cortexTokens = this.estimateTokens(JSON.stringify(cortexQuery));
-    const responseTokens = this.estimateTokens(JSON.stringify(cortexResponse));
+    const cortexTokens = this.estimateTokens(await encodeToTOON(cortexQuery));
+    const responseTokens = this.estimateTokens(await encodeToTOON(cortexResponse));
     
     const tokenReduction = 1 - (cortexTokens / originalTokens);
     const processingTime = Date.now() - startTime;
