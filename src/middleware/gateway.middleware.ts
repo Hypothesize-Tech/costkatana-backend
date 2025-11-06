@@ -79,6 +79,8 @@ declare global {
                 cortexHybridExecution?: boolean;
                 cortexFragmentCache?: boolean;
                 cortexMetadata?: any;
+                // Auto-track configuration
+                autoTrack?: boolean;
             };
         }
     }
@@ -946,6 +948,14 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     context.securityEnabled = req.headers['costkatana-llm-security-enabled'] === 'true';
     context.omitRequest = req.headers['costkatana-omit-request'] === 'true';
     context.omitResponse = req.headers['costkatana-omit-response'] === 'true';
+    
+    // Process auto-track header (default: true for backward compatibility)
+    const autoTrackHeader = req.headers['costkatana-auto-track'] as string;
+    if (autoTrackHeader !== undefined) {
+        context.autoTrack = autoTrackHeader === 'true';
+    } else {
+        context.autoTrack = true; // Default to true
+    }
 
     // 🚀 CORTEX PROCESSING HEADERS
     context.cortexEnabled = req.headers['costkatana-enable-cortex'] === 'true';
