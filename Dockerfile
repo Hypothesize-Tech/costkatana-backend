@@ -24,10 +24,23 @@ ENV npm_config_build_from_source=true
 ENV npm_config_cache=/tmp/.npm
 ENV CXX=g++
 ENV CC=gcc
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Install dependencies
+# Configure npm for better reliability
+RUN npm config set fetch-retries 5 && \
+    npm config set fetch-retry-mintimeout 20000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm config set fetch-timeout 300000
+
+# Install dependencies with better error handling
 COPY package*.json ./
-RUN npm ci || npm install
+RUN if [ -f package-lock.json ]; then \
+      npm ci --prefer-offline --no-audit || \
+      (echo "npm ci failed, trying npm install..." && \
+       npm install --prefer-offline --no-audit --legacy-peer-deps); \
+    else \
+      npm install --prefer-offline --no-audit --legacy-peer-deps; \
+    fi
 
 # Rebuild native modules specifically for this container architecture
 RUN npm rebuild hnswlib-node --build-from-source || echo "Warning: hnswlib-node rebuild failed"
@@ -38,12 +51,12 @@ RUN npm run build
 
 # Keep only production deps for the final image
 RUN npm prune --omit=dev && npm cache clean --force
-    
-    # --- Production stage ---
-    FROM node:20-slim
-    
-    WORKDIR /app
-    
+
+# --- Production stage ---
+FROM node:20-slim
+
+WORKDIR /app
+
 # Runtime deps for Puppeteer + native addons + hnswlib-node
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dumb-init \
@@ -88,11 +101,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libstdc++6 \
   && rm -rf /var/lib/apt/lists/*
-    
-    # Non-root user
-    RUN addgroup --gid 1001 nodejs && \
-        adduser --uid 1001 --gid 1001 --shell /bin/bash --disabled-password nodejs
-    
+
+# Non-root user
+RUN addgroup --gid 1001 nodejs && \
+    adduser --uid 1001 --gid 1001 --shell /bin/bash --disabled-password nodejs
+
 # Copy built app and production node_modules from builder
 COPY --from=builder --chown=nodejs:nodejs /app/dist ./dist
 COPY --from=builder --chown=nodejs:nodejs /app/node_modules ./node_modules
@@ -120,22 +133,23 @@ RUN npm rebuild hnswlib-node --build-from-source && \
 RUN apt-get purge -y build-essential python3 cmake g++ && \
     apt-get autoremove -y && \
     apt-get clean
-    
+
 # App env
 ENV NODE_ENV=production
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 # Redis connection settings
 ENV REDIS_CONNECTION_TIMEOUT=5000
 ENV REDIS_RETRY_DELAY=1000
 ENV REDIS_MAX_RETRIES=3
-    
-    # Logs dir
-    RUN mkdir -p logs && chown nodejs:nodejs logs
-    
-    USER nodejs
-    EXPOSE 8000
-    
-    ENTRYPOINT ["dumb-init", "--"]
-    CMD ["node", "dist/server.js"]
+
+# Logs dir
+RUN mkdir -p logs && chown nodejs:nodejs logs
+
+USER nodejs
+EXPOSE 8000
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/server.js"]
     
