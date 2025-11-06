@@ -397,6 +397,39 @@ Completes the magic link onboarding process.
 }
 ```
 
+## 🌐 **Gateway Headers**
+
+The Cost Katana Gateway supports various headers for controlling request behavior. All gateway requests should include the `CostKatana-Auth` header for authentication.
+
+### **CostKatana-Auto-Track** Header
+
+Controls whether gateway requests are automatically tracked in the database.
+
+**Values:**
+- `true` (default): Enable automatic tracking - all requests are logged and tracked
+- `false`: Disable tracking - gateway still proxies requests but skips database tracking
+
+**Example:**
+```http
+POST /api/gateway/v1/chat/completions
+CostKatana-Auth: Bearer dak_your_key
+CostKatana-Target-Url: https://api.openai.com
+CostKatana-Auto-Track: false
+Content-Type: application/json
+
+{
+  "model": "gpt-4",
+  "messages": [{"role": "user", "content": "Hello"}]
+}
+```
+
+**Use Cases:**
+- Disable tracking for test/development requests
+- Reduce database load for high-volume proxy-only scenarios
+- Privacy-sensitive requests where tracking is not desired
+
+**Note:** When `autoTrack: false`, the gateway will still proxy requests to AI providers, handle caching, retries, and other gateway features, but will skip all tracking operations.
+
 ## 📊 **Usage Tracking**
 
 ### **POST** `/usage/track` - Track AI Usage with Intelligence

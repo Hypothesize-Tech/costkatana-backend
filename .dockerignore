@@ -1,0 +1,72 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Build outputs
+dist
+build
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+.github
+
+# Testing
+coverage
+.nyc_output
+test-results
+allure-results
+playwright-report
+
+# Logs
+logs
+*.log
+
+# Documentation (will be copied explicitly)
+# docs
+# knowledge-base
+
+# CI/CD
+.github
+
+# Misc
+*.md
+!README.md
+!API_DOCUMENTATION.md
+
+# Backups
+backups
+
+# Config files that shouldn't be in image
+nodemon.json
+jest.config.js
+.eslintrc.js
+tsconfig.tsbuildinfo
+
+# Examples
+examples
+
+# Scripts (not needed in production)
+scripts
+
+# Vector index (will be generated)
+vector-index.json
+
