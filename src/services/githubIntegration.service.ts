@@ -195,9 +195,9 @@ export class GitHubIntegrationService {
 
             let generatedCode: IntegrationCode;
             try {
-                // Add timeout wrapper (6 minutes max for code generation)
-                const CODE_GEN_TIMEOUT = 6 * 60 * 1000; // 6 minutes
-                const HEARTBEAT_INTERVAL = 30 * 1000; // 30 seconds - heartbeat updates
+                // Add timeout wrapper (10 minutes max for code generation - allow for retries and fallbacks)
+                const CODE_GEN_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+                const HEARTBEAT_INTERVAL = 20 * 1000; // 20 seconds - frequent heartbeat updates
                 
                 // Update lastActivityAt before starting code generation
                 integration.lastActivityAt = new Date();
@@ -253,12 +253,14 @@ export class GitHubIntegrationService {
                         ),
                         new Promise<IntegrationCode>((_, reject) => 
                             setTimeout(() => {
-                                loggingService.error('Code generation timeout reached', {
+                                loggingService.error('[TIMEOUT] Code generation timeout reached', {
                                     integrationId,
                                     timeout: CODE_GEN_TIMEOUT,
-                                    timestamp: new Date().toISOString()
+                                    timeoutMinutes: CODE_GEN_TIMEOUT / 60000,
+                                    timestamp: new Date().toISOString(),
+                                    recommendation: 'Try again in a few moments or check AWS Bedrock status'
                                 });
-                                reject(new Error('Code generation timed out after 6 minutes. This may be due to model unavailability or rate limiting.'));
+                                reject(new Error('Code generation timed out after 10 minutes. This may be due to AWS Bedrock throttling, model unavailability, or high project complexity. Please try again in a few moments.'));
                             }, CODE_GEN_TIMEOUT)
                         )
                     ]);
@@ -277,17 +279,28 @@ export class GitHubIntegrationService {
                     throw codeGenPromiseError;
                 }
             } catch (codeGenError: any) {
-                loggingService.error('Code generation failed or timed out', {
+                loggingService.error('[ERROR] Code generation failed or timed out', {
                     integrationId,
                     error: codeGenError.message,
                     stack: codeGenError.stack,
                     timestamp: new Date().toISOString(),
-                    integrationType: integration.integrationType
+                    integrationType: integration.integrationType,
+                    language: analysis.language,
+                    framework: analysis.framework
                 });
                 
-                // Update status to failed with specific error message
+                // Update status to failed with specific, user-friendly error message
                 integration.status = 'failed';
-                integration.errorMessage = `Code generation failed: ${codeGenError.message}. Please try again or contact support if the issue persists.`;
+                
+                // Provide context-specific error messages
+                if (codeGenError.message.includes('timeout') || codeGenError.message.includes('timed out')) {
+                    integration.errorMessage = `⏱️ Code generation timed out. This usually happens due to:\n• AWS Bedrock API throttling or rate limits\n• High project complexity\n• Temporary model unavailability\n\n💡 Try again in 2-3 minutes. If the issue persists, contact support.`;
+                } else if (codeGenError.message.includes('throttl')) {
+                    integration.errorMessage = `🚦 AWS Bedrock is currently throttling requests. Please wait 2-3 minutes and try again.`;
+                } else {
+                    integration.errorMessage = `❌ Code generation failed: ${codeGenError.message}\n\nPlease try again or contact support if the issue persists.`;
+                }
+                
                 integration.errorStack = codeGenError.stack;
                 integration.lastActivityAt = new Date();
                 await integration.save();

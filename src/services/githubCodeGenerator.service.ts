@@ -235,6 +235,12 @@ export class GitHubCodeGeneratorService {
     ): Promise<IntegrationCode> {
         const { analysis, features, repositoryName, apiKey } = options;
 
+        const fileExtension = analysis.language === 'typescript' ? 'ts' : 'js';
+        const mainEntryPoint = analysis.entryPoints[0]?.replace(/\.js$/, `.${fileExtension}`) || `src/index.${fileExtension}`;
+        const serverEntryPoint = analysis.framework === 'express' || analysis.projectType === 'api' 
+            ? `src/server.${fileExtension}` 
+            : null;
+
         const prompt = `You are an expert software engineer helping integrate CostKatana (cost-katana npm package) into a ${analysis.language} project.
 
 Repository: ${repositoryName}
@@ -254,10 +260,37 @@ Integration Context:
 ${context}
 
 Your task:
-1. Generate a complete integration file that wraps CostKatana initialization and exports a configured instance
-2. Update the main entry point (${analysis.entryPoints[0] || (analysis.language === 'typescript' ? 'src/index.ts' : 'src/index.js')}) to import and use CostKatana
+1. Generate a NEW integration file: src/costkatana.${fileExtension} (NOT .js, MUST be .${fileExtension})
+2. UPDATE the main entry point (${mainEntryPoint}) to ADD CostKatana import and initialization
 3. Create a comprehensive .env.example with all required CostKatana variables
 4. Generate a detailed setup guide (COSTKATANA_SETUP.md)
+
+🚨 CRITICAL RULES - READ CAREFULLY:
+
+FILE NAMING (MANDATORY):
+- This is a ${analysis.language.toUpperCase()} project - ALL source files MUST use .${fileExtension}
+- Main integration file MUST be: src/costkatana.${fileExtension} (NOT costkatana.js)
+- Entry point file: ${mainEntryPoint} (NOT ${mainEntryPoint.replace(/\.ts$/, '.js')})
+${serverEntryPoint ? `- Server file: ${serverEntryPoint} (NOT ${serverEntryPoint.replace(/\.ts$/, '.js')})` : ''}
+- NEVER generate .js files for TypeScript projects - ALWAYS use .ts
+- NEVER generate .ts files for JavaScript projects - ALWAYS use .js
+- NEVER generate files in dist/, build/, out/, lib/, .next/, or node_modules/
+
+CODE PRESERVATION (MANDATORY):
+- DO NOT DELETE any existing code, routes, or functionality
+- DO NOT REMOVE any imports, middleware, or configurations
+- DO NOT MODIFY existing function implementations
+- ONLY ADD CostKatana-related code:
+  * Import statement at the top: import costKatanaService from './costkatana.${fileExtension}';
+  * Initialization call: costKatanaService.initialize();
+  * Optional: Add middleware if auto-tracking is enabled
+- PRESERVE ALL existing:
+  * Routes and route handlers
+  * Middleware configurations
+  * Database connections
+  * Error handlers
+  * Event listeners
+  * All existing imports and exports
 
 Requirements:
 - Use modern ES6/TypeScript syntax
@@ -266,20 +299,18 @@ Requirements:
 - Add TypeScript types if project uses TypeScript
 - Generate production-ready, well-documented code
 - Include example usage for each selected feature
-- CRITICAL: For TypeScript projects (language is 'typescript'), ONLY generate .ts files. Do NOT generate .js files.
-- CRITICAL: The entry point file extension must match the project language (TypeScript = .ts, JavaScript = .js)
-- CRITICAL: Only generate source files, never generate files in dist/, build/, or other output directories
+- TRIPLE-CHECK: All file paths use .${fileExtension} extension (NOT .js for TypeScript)
 
 Return a JSON object with this exact structure:
 {
   "files": [
     {
-      "path": "src/costkatana.${analysis.language === 'typescript' ? 'ts' : 'js'}",
+      "path": "src/costkatana.${fileExtension}",
       "content": "// file content here",
       "description": "CostKatana configuration and initialization"
     },
     {
-      "path": "${analysis.entryPoints[0]?.replace(/\.js$/, analysis.language === 'typescript' ? '.ts' : '.js') || (analysis.language === 'typescript' ? 'src/index.ts' : 'src/index.js')}",
+      "path": "${mainEntryPoint}",
       "content": "// updated entry point with CostKatana import",
       "description": "Main entry point updated with CostKatana integration"
     }
@@ -293,18 +324,37 @@ Return a JSON object with this exact structure:
   "testingSteps": ["Step 1", "Step 2"]
 }`;
 
-        // Add timeout wrapper for code generation (5 minutes max)
-        const CODE_GENERATION_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+        // Add timeout wrapper for code generation (8 minutes max - increased for complex projects)
+        const CODE_GENERATION_TIMEOUT = 8 * 60 * 1000; // 8 minutes
+        const PROGRESS_INTERVALS = [20, 40, 60, 80]; // Log progress at 20%, 40%, 60%, 80%
         
-        loggingService.info('Calling Claude Opus 4.1 for code generation', {
+        loggingService.info('[0%] Starting code generation with Claude Opus 4.1', {
             userId,
             integrationType: 'npm',
             promptLength: prompt.length,
+            language: analysis.language,
+            features: features.map(f => f.name),
             timestamp: new Date().toISOString()
         });
         
         let response: string;
         const startTime = Date.now();
+        
+        // Set up progress tracking
+        const progressIntervalId = setInterval(() => {
+            const elapsed = Date.now() - startTime;
+            const percentComplete = Math.min(Math.floor((elapsed / CODE_GENERATION_TIMEOUT) * 100), 95);
+            
+            if (PROGRESS_INTERVALS.includes(percentComplete)) {
+                loggingService.info(`[${percentComplete}%] Code generation in progress`, {
+                    userId,
+                    elapsedMs: elapsed,
+                    percentComplete,
+                    integrationType: 'npm'
+                });
+            }
+        }, 30000); // Check every 30 seconds
+        
         try {
             response = await Promise.race([
                 BedrockService.invokeModel(
@@ -315,31 +365,39 @@ Return a JSON object with this exact structure:
                 new Promise<string>((_, reject) => 
                     setTimeout(() => {
                         const elapsed = Date.now() - startTime;
-                        loggingService.error('Code generation timeout', {
+                        loggingService.error('[TIMEOUT] Code generation timeout reached', {
                             userId,
                             elapsedMs: elapsed,
-                            timeout: CODE_GENERATION_TIMEOUT
+                            timeout: CODE_GENERATION_TIMEOUT,
+                            integrationType: 'npm',
+                            suggestion: 'This may be due to AWS Bedrock throttling or model unavailability. Consider retrying or using a simpler model.'
                         });
-                        reject(new Error('Code generation timeout after 5 minutes'));
+                        reject(new Error('Code generation timed out after 8 minutes. This may be due to AWS Bedrock throttling, model unavailability, or high complexity. Please try again in a few moments.'));
                     }, CODE_GENERATION_TIMEOUT)
                 )
             ]);
             
+            clearInterval(progressIntervalId);
+            
             const elapsed = Date.now() - startTime;
-            loggingService.info('Claude Opus 4.1 response received', {
+            loggingService.info('[100%] Claude Opus 4.1 response received successfully', {
                 userId,
                 elapsedMs: elapsed,
-                responseLength: response?.length ?? 0
+                responseLength: response?.length ?? 0,
+                integrationType: 'npm'
             });
         } catch (error: any) {
+            clearInterval(progressIntervalId); // Clean up progress tracking
+            
             const elapsed = Date.now() - startTime;
             // Fallback to Claude 3.5 Sonnet if Opus 4.1 fails or times out
-            loggingService.warn('Claude Opus 4.1 failed, falling back to Claude 3.5 Sonnet', {
+            loggingService.warn('[FALLBACK] Claude Opus 4.1 failed, attempting Claude 3.5 Sonnet', {
                 userId,
                 error: error.message,
                 errorStack: error.stack,
                 elapsedMs: elapsed,
-                willRetry: true
+                willRetry: true,
+                integrationType: 'npm'
             });
             
             const fallbackStartTime = Date.now();
@@ -531,52 +589,168 @@ Return a JSON object with this exact structure:
                 return this.generateNPMTemplate(options, apiKey);
             }
             
-            // Post-process files for TypeScript projects
+            // Post-process files for TypeScript projects - ensure correct extensions
             if (analysis.language === 'typescript') {
+                loggingService.info('Post-processing files for TypeScript project', {
+                    userId,
+                    originalFileCount: result.files.length,
+                    files: result.files.map(f => f.path)
+                });
+
                 // Filter out .js files in build directories and convert .js to .ts for source files
                 result.files = result.files
                     .filter(file => {
                         const path = file.path.toLowerCase();
+                        
                         // Exclude files in build/output directories
-                        if (path.includes('/dist/') || path.includes('/build/') || 
-                            path.includes('/out/') || path.includes('/lib/') ||
-                            path.includes('/.next/') || path.includes('/node_modules/')) {
+                        const buildDirs = ['/dist/', '/build/', '/out/', '/lib/', '/.next/', '/node_modules/', '/coverage/', '/__tests__/'];
+                        if (buildDirs.some(dir => path.includes(dir))) {
                             loggingService.warn('Filtered out build output file', {
                                 userId,
-                                path: file.path
+                                path: file.path,
+                                reason: 'build directory'
                             });
                             return false;
                         }
-                        // Convert .js to .ts for source files in src/
-                        if (path.endsWith('.js') && !path.includes('/dist/') && !path.includes('/build/')) {
-                            const originalPath = file.path;
-                            file.path = file.path.replace(/\.js$/, '.ts');
-                            loggingService.info('Converted .js to .ts for TypeScript project', {
-                                userId,
-                                originalPath,
-                                newPath: file.path
-                            });
-                        }
+                        
                         return true;
                     })
                     .map(file => {
-                        // Ensure TypeScript files have .ts extension
-                        if (!file.path.endsWith('.ts') && !file.path.endsWith('.tsx') && 
-                            !file.path.endsWith('.json') && !file.path.endsWith('.md') &&
-                            !file.path.endsWith('.example') && !file.path.endsWith('.env')) {
-                            // Only change if it's a code file (not config/doc)
-                            if (file.path.match(/\.(js|jsx)$/i)) {
-                                file.path = file.path.replace(/\.(js|jsx)$/i, '.ts');
+                        const originalPath = file.path;
+                        const lowerPath = file.path.toLowerCase();
+                        
+                        // CRITICAL: Convert costkatana.js to costkatana.ts (check both includes and endsWith)
+                        if (lowerPath.includes('costkatana') && (lowerPath.endsWith('.js') || lowerPath.includes('costkatana.js'))) {
+                            file.path = file.path.replace(/costkatana\.js$/i, 'costkatana.ts');
+                            if (file.path === originalPath) {
+                                // Try alternative patterns
+                                file.path = file.path.replace(/\/costkatana\.js$/i, '/costkatana.ts');
+                                file.path = file.path.replace(/costkatana\.js$/i, 'costkatana.ts');
+                            }
+                            loggingService.warn('CRITICAL FIX: Converted costkatana.js to costkatana.ts', {
+                                userId,
+                                originalPath,
+                                newPath: file.path,
+                                wasFixed: file.path !== originalPath
+                            });
+                        }
+                        
+                        // Convert server.js to server.ts
+                        if (lowerPath.includes('server') && (lowerPath.endsWith('.js') || lowerPath.includes('server.js'))) {
+                            file.path = file.path.replace(/server\.js$/i, 'server.ts');
+                            if (file.path !== originalPath) {
+                                loggingService.info('Converted server.js to server.ts', {
+                                    userId,
+                                    originalPath,
+                                    newPath: file.path
+                                });
                             }
                         }
+                        
+                        // Convert index.js to index.ts (main entry points)
+                        if (lowerPath.includes('index') && lowerPath.endsWith('.js') && !lowerPath.includes('node_modules')) {
+                            file.path = file.path.replace(/index\.js$/i, 'index.ts');
+                            if (file.path !== originalPath) {
+                                loggingService.info('Converted index.js to index.ts', {
+                                    userId,
+                                    originalPath,
+                                    newPath: file.path
+                                });
+                            }
+                        }
+                        
+                        // Handle any remaining .js/.jsx files in src/ directories
+                        if ((lowerPath.endsWith('.js') || lowerPath.endsWith('.jsx')) && lowerPath.includes('/src/')) {
+                            const newPath = file.path.replace(/\.(js|jsx)$/i, '.ts');
+                            if (newPath !== file.path) {
+                                file.path = newPath;
+                                loggingService.warn('Converted source file .js/.jsx to .ts', {
+                                    userId,
+                                    originalPath,
+                                    newPath: file.path
+                                });
+                            }
+                        }
+                        
+                        // FINAL PASS: Ensure ALL code files (except config) use .ts extension
+                        const isConfigFile = lowerPath.endsWith('.json') || 
+                                           lowerPath.endsWith('.md') || 
+                                           lowerPath.endsWith('.example') || 
+                                           lowerPath.endsWith('.env') ||
+                                           lowerPath.endsWith('.gitignore') ||
+                                           lowerPath.includes('.env.') ||
+                                           lowerPath.includes('package.json') ||
+                                           lowerPath.includes('tsconfig.json');
+                        
+                        if (!isConfigFile && 
+                            !file.path.endsWith('.ts') && 
+                            !file.path.endsWith('.tsx') && 
+                            file.path.match(/\.(js|jsx)$/i)) {
+                            const newPath = file.path.replace(/\.(js|jsx)$/i, '.ts');
+                            loggingService.error('CRITICAL: Final pass converting .js file to .ts', {
+                                userId,
+                                originalPath: file.path,
+                                newPath,
+                                filePath: file.path,
+                                warning: 'AI generated wrong extension - this should not happen!'
+                            });
+                            file.path = newPath;
+                        }
+                        
                         return file;
                     });
+                
+                loggingService.info('Post-processing complete', {
+                    userId,
+                    finalFileCount: result.files.length,
+                    files: result.files.map(f => f.path)
+                });
             }
             
             // Replace placeholder API key with actual key
             result.files.forEach(file => {
                 file.content = file.content.replace(/your-costkatana-api-key/gi, apiKey);
                 file.content = file.content.replace(/YOUR_API_KEY_HERE/gi, apiKey);
+            });
+
+            // CRITICAL VALIDATION: Check for code deletion in server.ts/server.js files
+            result.files.forEach(file => {
+                const lowerPath = file.path.toLowerCase();
+                if (lowerPath.includes('server') && (lowerPath.endsWith('.ts') || lowerPath.endsWith('.js'))) {
+                    const content = file.content;
+                    const lineCount = content.split('\n').length;
+                    
+                    // Check for suspicious patterns indicating code deletion
+                    const suspiciousPatterns = [
+                        { pattern: /app\.use\(['"]\/api\//g, name: 'API routes', minOccurrences: 1 },
+                        { pattern: /app\.listen\(/g, name: 'Server listen', minOccurrences: 1 },
+                        { pattern: /mongoose\.connect\(/g, name: 'MongoDB connection', minOccurrences: 0 }, // Optional
+                        { pattern: /express\(\)/g, name: 'Express app', minOccurrences: 1 },
+                        { pattern: /import.*from/g, name: 'Import statements', minOccurrences: 3 }
+                    ];
+                    
+                    const missingPatterns: string[] = [];
+                    suspiciousPatterns.forEach(({ pattern, name, minOccurrences }) => {
+                        const matches = content.match(pattern);
+                        const count = matches ? matches.length : 0;
+                        if (count < minOccurrences) {
+                            missingPatterns.push(`${name} (expected ${minOccurrences}, found ${count})`);
+                        }
+                    });
+                    
+                    // If file is suspiciously short or missing critical patterns, log warning
+                    if (lineCount < 50 || missingPatterns.length > 0) {
+                        loggingService.error('⚠️ CRITICAL: Generated server file may have deleted existing code!', {
+                            userId,
+                            filePath: file.path,
+                            lineCount,
+                            missingPatterns,
+                            contentLength: content.length,
+                            warning: 'The generated file appears to be missing critical code. This should be investigated!',
+                            recommendation: 'The AI may have deleted existing routes or middleware. Check the generated file carefully.'
+                        });
+                    }
+                }
             });
 
             // Ensure env vars include the actual API key
@@ -676,6 +850,8 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
     ): Promise<IntegrationCode> {
         const { analysis, features, apiKey } = options;
 
+        const mainEntryPoint = analysis.entryPoints[0] || 'main.py';
+
         const prompt = `You are an expert helping integrate CostKatana Python SDK (cost-katana) into a Python project.
 
 Repository Analysis:
@@ -690,11 +866,41 @@ ${features.map(f => `- ${f.name}`).join('\n')}
 Integration Context:
 ${context}
 
-Generate:
-1. CostKatana configuration module (costkatana_config.py)
-2. Updated main entry point with integration
-3. requirements.txt additions
-4. Setup guide with examples
+Your task:
+1. Generate a NEW configuration module: costkatana_config.py
+2. UPDATE the main entry point (${mainEntryPoint}) to ADD CostKatana import and initialization
+3. Create/update requirements.txt with cost-katana dependency
+4. Generate a detailed setup guide (COSTKATANA_SETUP.md)
+
+🚨 CRITICAL RULES - READ CAREFULLY:
+
+FILE NAMING (MANDATORY):
+- This is a PYTHON project - ALL Python files MUST use .py extension
+- Configuration module MUST be: costkatana_config.py (NOT .ts or .js)
+- Entry point file: ${mainEntryPoint}
+- NEVER generate wrong file extensions for Python projects
+
+CODE PRESERVATION (MANDATORY):
+- DO NOT DELETE any existing code, routes, or functionality
+- DO NOT REMOVE any imports, middleware, or configurations
+- DO NOT MODIFY existing function implementations
+- ONLY ADD CostKatana-related code:
+  * Import statement at the top: from costkatana_config import cost_katana
+  * Initialization call: cost_katana.initialize()
+  * Optional: Add middleware/decorator if framework supports it
+- PRESERVE ALL existing:
+  * Routes and route handlers
+  * Flask/Django/FastAPI configurations
+  * Database connections
+  * Error handlers
+  * All existing imports and exports
+
+Requirements:
+- Follow PEP 8 style guidelines
+- Include proper type hints
+- Add comprehensive error handling
+- Generate production-ready, well-documented code
+- Include example usage for each selected feature
 
 Return JSON with files, envVars, installCommands, setupInstructions, and testingSteps.`;
 
@@ -726,7 +932,82 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
             if (!jsonMatch) {
                 throw new Error('Invalid AI response format');
             }
-            return JSON.parse(jsonMatch[0]) as IntegrationCode;
+            const result = JSON.parse(jsonMatch[0]) as IntegrationCode;
+            
+            // Validate and fix file extensions for Python
+            if (result.files) {
+                loggingService.info('Validating Python integration files', {
+                    userId,
+                    fileCount: result.files.length,
+                    files: result.files.map(f => f.path)
+                });
+                
+                result.files = result.files.map(file => {
+                    const originalPath = file.path;
+                    
+                    // Ensure Python files have .py extension
+                    if (!file.path.endsWith('.py') && 
+                        !file.path.endsWith('.txt') && 
+                        !file.path.endsWith('.md') && 
+                        !file.path.endsWith('.example') &&
+                        !file.path.endsWith('.json') &&
+                        !file.path.endsWith('.yaml') &&
+                        !file.path.endsWith('.yml')) {
+                        
+                        // Check if it's a Python config file
+                        if (file.path.includes('costkatana')) {
+                            file.path = file.path.replace(/\.(ts|js)$/i, '.py');
+                            if (!file.path.endsWith('.py')) {
+                                file.path = file.path + '.py';
+                            }
+                            loggingService.warn('Fixed Python file extension', {
+                                userId,
+                                originalPath,
+                                newPath: file.path
+                            });
+                        }
+                    }
+                    
+                    return file;
+                });
+                
+                // Validate for code deletion
+                result.files.forEach(file => {
+                    const lowerPath = file.path.toLowerCase();
+                    if (lowerPath.includes('app.py') || lowerPath.includes('main.py') || lowerPath.includes('server.py')) {
+                        const content = file.content;
+                        const lineCount = content.split('\n').length;
+                        
+                        const suspiciousPatterns = [
+                            { pattern: /from\s+flask\s+import|from\s+fastapi\s+import|from\s+django/g, name: 'Framework imports', minOccurrences: 0 },
+                            { pattern: /def\s+\w+\(/g, name: 'Function definitions', minOccurrences: 2 },
+                            { pattern: /import\s+\w+|from\s+\w+\s+import/g, name: 'Import statements', minOccurrences: 3 },
+                            { pattern: /@app\.route|@router\.get|@router\.post/g, name: 'Route decorators', minOccurrences: 0 }
+                        ];
+                        
+                        const missingPatterns: string[] = [];
+                        suspiciousPatterns.forEach(({ pattern, name, minOccurrences }) => {
+                            const matches = content.match(pattern);
+                            const count = matches ? matches.length : 0;
+                            if (count < minOccurrences) {
+                                missingPatterns.push(`${name} (expected ${minOccurrences}, found ${count})`);
+                            }
+                        });
+                        
+                        if (lineCount < 30 || missingPatterns.length > 1) {
+                            loggingService.error('⚠️ CRITICAL: Generated Python file may have deleted existing code!', {
+                                userId,
+                                filePath: file.path,
+                                lineCount,
+                                missingPatterns,
+                                warning: 'The generated Python file appears to be missing critical code!'
+                            });
+                        }
+                    }
+                });
+            }
+            
+            return result;
         } catch (error) {
             return this.generatePythonTemplate(options, apiKey);
         }
@@ -741,6 +1022,17 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
         context: string
     ): Promise<IntegrationCode> {
         const { analysis, features, repositoryName, apiKey } = options;
+
+        const fileExtension = analysis.language === 'typescript' ? 'ts' : 
+                             analysis.language === 'javascript' ? 'js' :
+                             analysis.language === 'python' ? 'py' :
+                             analysis.language === 'java' ? 'java' :
+                             analysis.language === 'go' ? 'go' : 'js';
+        const configFileName = analysis.language === 'typescript' || analysis.language === 'javascript' 
+            ? `costkatana-headers.${fileExtension}` 
+            : analysis.language === 'python' ? 'costkatana_headers.py'
+            : analysis.language === 'java' ? 'CostKatanaHeaders.java'
+            : `costkatana-headers.${fileExtension}`;
 
         const prompt = `You are an expert helping integrate CostKatana via HTTP headers into a ${analysis.language} project.
 
@@ -759,6 +1051,20 @@ ${features.map(f => `- ${f.name}${f.config ? ': ' + JSON.stringify(f.config) : '
 
 Integration Context:
 ${context}
+
+🚨 CRITICAL RULES - READ CAREFULLY:
+
+FILE NAMING (MANDATORY):
+- This is a ${analysis.language.toUpperCase()} project
+- ALL source files MUST use .${fileExtension} extension
+- Configuration helper file: ${configFileName}
+- NEVER generate wrong file extensions (e.g., .js for TypeScript, .ts for Python)
+
+CODE PRESERVATION (MANDATORY):
+- DO NOT DELETE any existing code
+- DO NOT REMOVE any existing HTTP client code or API integrations
+- ONLY ADD helper functions/classes for CostKatana headers
+- PRESERVE ALL existing functionality
 
 Your task:
 Generate code examples showing how to add CostKatana tracking headers to HTTP requests for making AI API calls. The integration should:
