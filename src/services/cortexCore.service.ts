@@ -28,6 +28,7 @@ import {
     generateCortexHash, 
     serializeCortexFrame
 } from '../utils/cortex.utils';
+import { encodeToTOON } from '../utils/toon.utils';
 
 // ============================================================================
 // INTERFACES AND TYPES
@@ -227,7 +228,7 @@ export class CortexCoreService {
             // Cache the result
             await this.cacheProcessingResult(cacheKey, result, startTime);
             
-            this.updateStats(true, result.processingTime, result);
+            await this.updateStats(true, result.processingTime, result);
 
             loggingService.info('✅ Cortex core processing completed successfully', {
                 processingTime: result.processingTime,
@@ -239,7 +240,7 @@ export class CortexCoreService {
 
         } catch (error) {
             const processingTime = Date.now() - startTime;
-            this.updateStats(false, processingTime, null);
+            await this.updateStats(false, processingTime, null);
 
             loggingService.error('❌ Cortex core processing failed', {
                 processingTime,
@@ -312,13 +313,14 @@ export class CortexCoreService {
         }
     }
 
-    private updateStats(success: boolean, processingTime: number, result: CortexProcessingResult | null): void {
+    private async updateStats(success: boolean, processingTime: number, result: CortexProcessingResult | null): Promise<void> {
         this.stats.averageProcessingTime = (this.stats.averageProcessingTime + processingTime) / 2;
         
         if (success && result) {
             this.stats.successfulAnswers++;
             // Estimate tokens saved by using LISP instead of natural language
-            const lispSize = JSON.stringify(result.output).length / 4;
+            // Use TOON for more accurate token estimation
+            const lispSize = (await encodeToTOON(result.output)).length / 4;
             const estimatedNaturalSize = lispSize * 7; // Estimate 7x larger in natural language
             const tokensSaved = Math.max(0, estimatedNaturalSize - lispSize);
             this.stats.totalTokensSaved += tokensSaved;

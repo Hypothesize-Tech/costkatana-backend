@@ -7,6 +7,7 @@ import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
 import { loggingService } from './logging.service';
 import { AICostTrackingService } from './aiCostTracking.service';
+import { decodeFromTOON, extractStructuredData } from '../utils/toon.utils';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -126,23 +127,67 @@ export class BedrockService {
         return modelMappings[modelId] || modelId;
     }
 
-    public static extractJson(text: string): string {
-        if (!text) {
+    public static async extractJson(text: string): Promise<string> {
+        // Edge case: null/undefined/empty input
+        if (!text || typeof text !== 'string' || text.trim().length === 0) {
             return '';
         }
 
-        // First, try to find JSON within code blocks
-        const jsonBlockRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+        // Edge case: very large text (potential DoS)
+        const MAX_EXTRACT_SIZE = 5 * 1024 * 1024; // 5MB limit
+        if (text.length > MAX_EXTRACT_SIZE) {
+            loggingService.warn('Text too large for extraction, truncating', {
+                size: text.length,
+                maxSize: MAX_EXTRACT_SIZE
+            });
+            text = text.substring(0, MAX_EXTRACT_SIZE);
+        }
+
+        // First, try to extract TOON format (for Cortex responses)
+        // Enhanced pattern matching for malformed TOON
+        const toonPatterns = [
+            /(\w+\[\d+\]\{[^}]+\}:[\s\S]*?)(?=\n\n|\n\w+\[|$)/,
+            /(\w+\s*\[\s*\d+\s*\]\s*\{[^}]+\}\s*:[\s\S]*?)(?=\n\n|\n\w+\s*\[|$)/
+        ];
+
+        for (const pattern of toonPatterns) {
+            const toonMatch = text.match(pattern);
+            if (toonMatch && toonMatch[1]) {
+                try {
+                    // Validate TOON can be decoded (with timeout)
+                    const decodePromise = decodeFromTOON(toonMatch[1]);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('TOON validation timeout')), 2000)
+                    );
+                    await Promise.race([decodePromise, timeoutPromise]);
+                    // Return as TOON string (caller will handle decoding)
+                    return toonMatch[1];
+                } catch (e) {
+                    // Not valid TOON, continue to next pattern or JSON extraction
+                    loggingService.debug('TOON validation failed, trying next method', {
+                        error: e instanceof Error ? e.message : String(e)
+                    });
+                }
+            }
+        }
+
+        // Try to find JSON within code blocks
+        const jsonBlockRegex = /```(?:json|toon)?\s*([\s\S]*?)\s*```/;
         const jsonBlockMatch = text.match(jsonBlockRegex);
         
         if (jsonBlockMatch && jsonBlockMatch[1]) {
             const extracted = jsonBlockMatch[1].trim();
-            // Validate that it's actually JSON
+            // Try TOON first, then JSON
             try {
-                JSON.parse(extracted);
+                await decodeFromTOON(extracted);
                 return extracted;
-            } catch (e) {
-                // If it's not valid JSON, continue to other methods
+            } catch {
+                try {
+                    JSON.parse(extracted);
+                    return extracted;
+                } catch (e) {
+                    // Continue to other methods
+                }
             }
         }
 
@@ -538,7 +583,7 @@ Format your response as a single valid JSON object:
 }`;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = this.extractJson(response);
+            const cleanedResponse = await this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
             loggingService.info('Prompt optimization completed', { value:  { 
@@ -592,7 +637,7 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = this.extractJson(response);
+            const cleanedResponse = await this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
             loggingService.info('Usage analysis completed', { value:  { 
@@ -645,7 +690,7 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = this.extractJson(response);
+            const cleanedResponse = await this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
             loggingService.info('Model alternatives suggested', { value:  { 
@@ -692,7 +737,7 @@ Format your response as JSON:
             } `;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = this.extractJson(response);
+            const cleanedResponse = await this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
             loggingService.info('Prompt template generated', { value:  {  objective  } });
@@ -748,7 +793,7 @@ Format your response as JSON:
                     }`;
 
             const response = await this.invokeModel(systemPrompt, AWS_CONFIG.bedrock.modelId);
-            const cleanedResponse = this.extractJson(response);
+            const cleanedResponse = await this.extractJson(response);
             const result = JSON.parse(cleanedResponse);
 
             // Convert timestamp strings back to Date objects

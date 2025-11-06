@@ -12,6 +12,7 @@ import {
 import { PrimitiveIds } from './primitives';
 import { loggingService } from '../../services/logging.service';
 import { RetryWithBackoff } from '../../utils/retryWithBackoff';
+import { encodeToTOON } from '../../utils/toon.utils';
 import { BedrockModelFormatter } from '../utils/bedrockModelFormatter';
 
 export class CortexDecoder {
@@ -77,7 +78,7 @@ export class CortexDecoder {
     response: CortexResponse,
     options: DecodeOptions
   ): Promise<string> {
-    const prompt = this.buildDecodingPrompt(response, options);
+    const prompt = await this.buildDecodingPrompt(response, options);
     
     // Use model override if provided
     const modelId = options.modelOverride || this.decoderModelId;
@@ -170,10 +171,10 @@ Your output must be natural, fluent text that accurately represents the Cortex e
   /**
    * Build the decoding prompt
    */
-  private buildDecodingPrompt(
+  private async buildDecodingPrompt(
     response: CortexResponse,
     options: DecodeOptions
-  ): string {
+  ): Promise<string> {
     // Expand any shortened primitives first
     const expandedResponse = this.expandPrimitives(response);
     
@@ -181,15 +182,19 @@ Your output must be natural, fluent text that accurately represents the Cortex e
     const modelId = options.modelOverride || this.decoderModelId;
     const isNova = modelId.includes('amazon.nova');
     
+    // Convert Cortex structure to TOON format for LLM
+    const toonStructure = await encodeToTOON(expandedResponse);
+    
     if (isNova) {
-      // Ultra-simple prompt for Nova
-      return `Convert to natural language: ${JSON.stringify(expandedResponse)}`;
+      // Ultra-simple prompt for Nova with TOON
+      return `Convert to natural language (input in TOON format):
+${toonStructure}`;
     }
     
-    let prompt = `Convert the following Cortex expression into natural language:
+    let prompt = `Convert the following Cortex expression into natural language (input in TOON format):
 
 CORTEX EXPRESSION:
-${JSON.stringify(expandedResponse, null, 2)}
+${toonStructure}
 
 REQUIREMENTS:`;
     

@@ -27,6 +27,7 @@ import {
     serializeCortexFrame,
     resolveAllReferences
 } from '../utils/cortex.utils';
+import { encodeToTOON } from '../utils/toon.utils';
 
 // ============================================================================
 // DECODER TEMPLATES AND PROMPTS
@@ -383,7 +384,7 @@ export class CortexDecoderService {
                 loggingService.warn('⚠️ Cortex structure validation failed, attempting to process anyway', {
                     frameType: request.cortexStructure.frameType,
                     errors: validation.errors,
-                    structure: JSON.stringify(request.cortexStructure, null, 2)
+                    structure: await encodeToTOON(request.cortexStructure)
                 });
                 
                 // For answer frames, try to process even if validation fails
@@ -400,7 +401,7 @@ export class CortexDecoderService {
             const preprocessedStructure = await this.preprocessCortex(request.cortexStructure);
             
             // Step 2: Determine decoding strategy based on frame type
-            const decodingStrategy = this.determineDecodingStrategy(request);
+            const decodingStrategy = await this.determineDecodingStrategy(request);
             
             // Step 3: Generate natural language text
             const decodedText = await this.generateText(
@@ -471,13 +472,13 @@ export class CortexDecoderService {
     /**
      * Select appropriate decoding strategy based on frame type and context
      */
-    private determineDecodingStrategy(request: CortexDecodingRequest): DecodingStrategy {
+    private async determineDecodingStrategy(request: CortexDecodingRequest): Promise<DecodingStrategy> {
         const frameType = request.cortexStructure.frameType;
         const style = request.style || 'conversational';
         const format = request.format || 'plain';
 
         return {
-            approach: this.needsAIDecoding(request.cortexStructure) ? 'ai_assisted' : 'rule_based',
+            approach: await this.needsAIDecoding(request.cortexStructure) ? 'ai_assisted' : 'rule_based',
             frameType,
             style,
             format,
@@ -552,7 +553,7 @@ PRESERVATION CHECKLIST:
 ✅ Original intent and completeness maintained`;
 
         // Create the prompt with enhanced preservation instructions
-        const userPrompt = this.buildDecodingPrompt(cortexStructure, strategy, enhancedSystemPrompt);
+        const userPrompt = await this.buildDecodingPrompt(cortexStructure, strategy, enhancedSystemPrompt);
 
         // Get decoding configuration
         const decodingConfig = { ...DEFAULT_CORTEX_CONFIG.decoding, ...request.config?.decoding };
@@ -577,7 +578,7 @@ PRESERVATION CHECKLIST:
             if (informationLoss.hasLoss) {
                 loggingService.warn('🚨 Information loss detected in AI decoding', {
                     lossReasons: informationLoss.reasons,
-                    originalStructure: JSON.stringify(cortexStructure, null, 2),
+                    originalStructure: await encodeToTOON(cortexStructure),
                     decodedText: decodedText.substring(0, 200)
                 });
 
@@ -635,7 +636,7 @@ NO SUMMARIZATION. NO OMISSIONS. COMPLETE INFORMATION TRANSFER.
         reasons: string[];
     }> {
         try {
-            const structureText = JSON.stringify(cortexStructure, null, 2);
+            const structureText = await encodeToTOON(cortexStructure);
 
             // Use more context for validation and be more lenient 
             const cortexText = structureText.length > 1000 ? structureText.substring(0, 1000) + '...' : structureText;
@@ -687,7 +688,7 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
 
         } catch (error) {
             loggingService.error('Information preservation validation error', { error });
-            return this.fallbackValidation(cortexStructure, decodedText);
+            return await this.fallbackValidation(cortexStructure, decodedText);
         }
     }
 
@@ -735,12 +736,9 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
     /**
      * Fallback manual validation when LLM is unavailable
      */
-    private fallbackValidation(cortexStructure: CortexFrame, decodedText: string): {
-        hasLoss: boolean;
-        reasons: string[];
-    } {
+    private async fallbackValidation(cortexStructure: CortexFrame, decodedText: string): Promise<ValidationResult> {
         const reasons: string[] = [];
-        const structureText = JSON.stringify(cortexStructure, null, 2);
+        const structureText = await encodeToTOON(cortexStructure);
 
         // Be more lenient - only check for extremely obvious issues
 
@@ -799,6 +797,7 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
 
     private expandPrimitives(cortexStructure: CortexFrame): Promise<CortexFrame> {
         // Deep copy and expand primitives to human-readable form
+        // Keep as object structure for internal processing
         const expanded = JSON.parse(JSON.stringify(cortexStructure));
         
         const expandValue = (value: any): any => {
@@ -819,7 +818,7 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
         return Promise.resolve(expandValue(expanded));
     }
 
-    private needsAIDecoding(cortexStructure: CortexFrame): boolean {
+    private async needsAIDecoding(cortexStructure: CortexFrame): Promise<boolean> {
         // Validate that we have a valid Cortex structure
         if (!cortexStructure || typeof cortexStructure !== 'object') {
             loggingService.warn('Invalid Cortex structure for decoding', { 
@@ -855,7 +854,7 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
         const hasComplexContent = this.hasNestedStructures(cortexStructure) || propertyCount > 3;
         
         // Check for domain-specific content that needs semantic understanding
-        const contentStr = JSON.stringify(cortexStructure).toLowerCase();
+        const contentStr = (await encodeToTOON(cortexStructure)).toLowerCase();
         const hasDomainSpecificContent = /(?:technology|startup|price|currency|prototype|model|company|location|date|percentage|technical|specific)/i.test(contentStr);
         
         // Check for proper nouns, numbers, or technical terms that need preservation
@@ -937,15 +936,16 @@ Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
         return contextParts.join('\n');
     }
 
-    private buildDecodingPrompt(
+    private async buildDecodingPrompt(
         cortexStructure: CortexFrame,
         strategy: string,
         context: string
-    ): string {
-        const cortexString = serializeCortexFrame(cortexStructure);
-        return `Convert this Cortex structure to natural language:
+    ): Promise<string> {
+        // Convert Cortex structure to TOON format for token efficiency
+        const toonStructure = await encodeToTOON(cortexStructure);
+        return `Convert this Cortex structure (in TOON format) to natural language:
 
-${cortexString}
+${toonStructure}
 
 CONTEXT:
 ${context}
@@ -1266,4 +1266,9 @@ interface DecodingStrategy {
     style: string;
     format: string;
     complexity: number;
+}
+
+interface ValidationResult {
+    hasLoss: boolean;
+    reasons: string[];
 }

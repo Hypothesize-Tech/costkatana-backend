@@ -340,6 +340,57 @@ export class VectorStoreService {
     }
 
     /**
+     * Search code snippets with filters
+     */
+    async searchCodeSnippets(
+        query: string,
+        filters: {
+            language?: string;
+            repo?: string;
+            type?: 'function' | 'class';
+        } = {},
+        k: number = 10
+    ): Promise<Document[]> {
+        try {
+            // Get all results first
+            const allResults = await this.search(query, k * 2); // Get more to filter
+
+            // Apply filters
+            let filtered = allResults;
+
+            if (filters.language) {
+                filtered = filtered.filter(doc => 
+                    doc.metadata?.language === filters.language ||
+                    doc.metadata?.filePath?.endsWith(`.${filters.language}`)
+                );
+            }
+
+            if (filters.repo) {
+                filtered = filtered.filter(doc => 
+                    doc.metadata?.repo === filters.repo ||
+                    doc.metadata?.source?.includes(filters.repo)
+                );
+            }
+
+            if (filters.type) {
+                filtered = filtered.filter(doc => 
+                    doc.metadata?.astType === filters.type ||
+                    doc.metadata?.type === filters.type
+                );
+            }
+
+            return filtered.slice(0, k);
+        } catch (error) {
+            loggingService.error('Code snippet search failed', {
+                query,
+                filters,
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+            return [];
+        }
+    }
+
+    /**
      * Test if embeddings are working
      */
     async testEmbeddings(): Promise<boolean> {

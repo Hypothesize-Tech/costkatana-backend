@@ -193,7 +193,7 @@ Return ONLY a JSON object with these exact fields:
                 'anthropic.claude-3-5-haiku-20241022-v1:0'
             );
             
-            const analysis = JSON.parse(BedrockService.extractJson(response));
+            const analysis = JSON.parse(await BedrockService.extractJson(response));
             
             return {
                 clarityScore: analysis.clarityScore || 85,

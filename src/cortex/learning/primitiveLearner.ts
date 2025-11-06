@@ -9,6 +9,7 @@ import { loggingService } from '../../services/logging.service';
 import { cacheService } from '../../services/cache.service';
 import { BedrockModelFormatter } from '../utils/bedrockModelFormatter';
 import { RetryWithBackoff } from '../../utils/retryWithBackoff';
+import { encodeToTOON, decodeFromTOON } from '../../utils/toon.utils';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 
 interface LearnedPrimitive {
@@ -164,12 +165,19 @@ export class PrimitiveLearner {
     response: CortexResponse
   ): Promise<LearnedPrimitive | null> {
     try {
+      const queryTOON = encodeToTOON(query);
+      const responseTOON = encodeToTOON(response);
+      const queryTOONString = await queryTOON;
+      const responseTOONString = await responseTOON;
+      
       const analysisPrompt = `Analyze this term for potential inclusion as a Cortex primitive:
 
 TERM: "${term}"
 CONTEXT: "${context}"
-QUERY: ${JSON.stringify(query, null, 2)}
-RESPONSE: ${JSON.stringify(response, null, 2)}
+QUERY (TOON format):
+${queryTOONString}
+RESPONSE (TOON format):
+${responseTOONString}
 
 Determine:
 1. Is this a meaningful semantic primitive?
@@ -177,14 +185,12 @@ Determine:
 3. Definition in one sentence
 4. Confidence score (0.0-1.0)
 
-Response format:
-{
-  "isPrimitive": true/false,
-  "type": "action|concept|property|modifier",
-  "definition": "...",
-  "confidence": 0.0-1.0,
-  "examples": ["example usage 1", "example usage 2"]
-}`;
+Response format (TOON ONLY):
+result[1]{isPrimitive,type,definition,confidence}:
+  true,action,definition_text,0.9
+examples[2]{example}:
+  example_usage_1
+  example_usage_2`;
       
       const modelId = process.env.CORTEX_LEARNING_MODEL || 'amazon.nova-lite-v1:0';
       
@@ -220,13 +226,19 @@ Response format:
       const responseBody = JSON.parse(new TextDecoder().decode(analysisResponse.result.body));
       const analysisText = BedrockModelFormatter.parseResponseBody(modelId, responseBody);
       
-      // Parse analysis result
-      const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return null;
+      // Parse analysis result (try TOON first, then fallback to JSON)
+      let analysis: any;
+      try {
+        // Try TOON decode
+        analysis = await decodeFromTOON(analysisText);
+      } catch {
+        // Fallback to JSON parsing
+        const jsonMatch = analysisText.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          return null;
+        }
+        analysis = JSON.parse(jsonMatch[0]);
       }
-      
-      const analysis = JSON.parse(jsonMatch[0]);
       
       if (!analysis.isPrimitive || analysis.confidence < this.minConfidenceThreshold) {
         return null;
