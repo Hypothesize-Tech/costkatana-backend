@@ -30,7 +30,8 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN npm config set fetch-retries 5 && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    npm config set fetch-timeout 300000
+    npm config set fetch-timeout 300000 && \
+    npm config set legacy-peer-deps true
 
 # Install dependencies with better error handling
 COPY package*.json ./
@@ -50,7 +51,9 @@ COPY . .
 RUN npm run build
 
 # Keep only production deps for the final image
-RUN npm prune --omit=dev && npm cache clean --force
+# Use install --production instead of prune to avoid peer dependency conflicts
+RUN npm install --production --legacy-peer-deps --no-audit && \
+    npm cache clean --force
 
 # --- Production stage ---
 FROM node:20-slim
@@ -124,6 +127,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake \
     g++ \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure npm for legacy peer deps (needed for tree-sitter packages)
+RUN npm config set legacy-peer-deps true
 
 # Rebuild hnswlib-node for this container's architecture
 RUN npm rebuild hnswlib-node --build-from-source && \
