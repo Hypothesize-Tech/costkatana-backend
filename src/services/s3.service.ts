@@ -85,6 +85,19 @@ export class S3Service {
     }
 
     /**
+     * Convert S3 URL to S3 key
+     */
+    static s3UrlToKey(s3Url: string): string {
+        // Convert s3://bucket-name/path/to/file to path/to/file
+        const match = s3Url.match(/^s3:\/\/[^/]+\/(.+)$/);
+        if (match) {
+            return match[1];
+        }
+        // If it's already a key (no s3:// prefix), return as-is
+        return s3Url;
+    }
+
+    /**
      * Get presigned download URL for a document
      */
     static async getPresignedDocumentUrl(

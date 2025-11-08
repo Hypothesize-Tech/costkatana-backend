@@ -596,14 +596,28 @@ Return ONLY the LISP format, nothing else.`;
       
       const cacheKey = `compliance:${request.industry}:${refHash}:${evidHash}:${criteriaHash}`;
 
+      loggingService.debug('Checking compliance cache', {
+        cacheKey,
+        redisConnected: redisService.isConnected,
+        industry: request.industry,
+        refHash: refHash.substring(0, 8),
+        evidHash: evidHash.substring(0, 8),
+        criteriaHash
+      });
+
       if (redisService.isConnected) {
         const cached = await redisService.get(cacheKey);
         if (cached) {
+          loggingService.info('✅ Visual compliance cache HIT', { cacheKey });
           return {
             data: cached as ComplianceResponse,
             strategy: 'exact_match'
           };
+        } else {
+          loggingService.info('❌ Visual compliance cache MISS', { cacheKey });
         }
+      } else {
+        loggingService.warn('Redis not connected, skipping cache check');
       }
 
       return null;
@@ -632,7 +646,14 @@ Return ONLY the LISP format, nothing else.`;
 
       if (redisService.isConnected) {
         await redisService.set(cacheKey, result, cacheTTL);
-        loggingService.debug('Compliance result cached', { key: cacheKey });
+        loggingService.info('💾 Visual compliance result cached', { 
+          cacheKey,
+          ttl: cacheTTL,
+          score: result.compliance_score,
+          passFail: result.pass_fail
+        });
+      } else {
+        loggingService.warn('Redis not connected, cannot cache result');
       }
     } catch (error) {
       loggingService.warn('Failed to cache result', {

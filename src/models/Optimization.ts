@@ -16,6 +16,18 @@ export interface IOptimization {
     service: string;
     model: string;
     category: 'prompt_reduction' | 'context_optimization' | 'response_formatting' | 'batch_processing' | 'model_selection';
+    // New field for optimization type
+    optimizationType: 'text' | 'visual_compliance';
+    // Visual compliance specific fields
+    visualComplianceData?: {
+        referenceImageUrl?: string;
+        evidenceImageUrl?: string;
+        complianceScore: number;
+        passFail: boolean;
+        feedbackMessage: string;
+        industry: string;
+        complianceCriteria: string[];
+    };
     suggestions: Array<{
         type: string;
         description: string;
@@ -139,6 +151,21 @@ const optimizationSchema = new Schema<IOptimization>({
         type: String,
         enum: ['prompt_reduction', 'context_optimization', 'response_formatting', 'batch_processing', 'model_selection'],
         required: true
+    },
+    optimizationType: {
+        type: String,
+        enum: ['text', 'visual_compliance'],
+        default: 'text',
+        required: true
+    },
+    visualComplianceData: {
+        referenceImageUrl: String,
+        evidenceImageUrl: String,
+        complianceScore: Number,
+        passFail: Boolean,
+        feedbackMessage: String,
+        industry: String,
+        complianceCriteria: [String]
     },
     suggestions: [{
         type: {

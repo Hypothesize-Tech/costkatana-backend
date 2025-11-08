@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { OptimizationService } from '../services/optimization.service';
 import { optimizationRequestSchema, paginationSchema } from '../utils/validators';
 import { loggingService } from '../services/logging.service';
+import { S3Service } from '../services/s3.service';
 
 /**
  * Model mapping from short names to full AWS Bedrock model IDs
@@ -219,6 +220,41 @@ export class OptimizationController {
                 order,
             });
 
+            // Generate pre-signed URLs for visual compliance images
+            const dataWithPresignedUrls = await Promise.all(
+                result.data.map(async (opt: any) => {
+                    if (opt.optimizationType === 'visual_compliance' && opt.visualComplianceData) {
+                        try {
+                            const presignedData: any = { ...opt.visualComplianceData };
+                            
+                            // Generate pre-signed URL for reference image
+                            if (opt.visualComplianceData.referenceImageUrl) {
+                                const refKey = S3Service.s3UrlToKey(opt.visualComplianceData.referenceImageUrl);
+                                presignedData.referenceImagePresignedUrl = await S3Service.getPresignedDocumentUrl(refKey, 3600);
+                            }
+                            
+                            // Generate pre-signed URL for evidence image
+                            if (opt.visualComplianceData.evidenceImageUrl) {
+                                const evidKey = S3Service.s3UrlToKey(opt.visualComplianceData.evidenceImageUrl);
+                                presignedData.evidenceImagePresignedUrl = await S3Service.getPresignedDocumentUrl(evidKey, 3600);
+                            }
+                            
+                            return {
+                                ...opt.toObject ? opt.toObject() : opt,
+                                visualComplianceData: presignedData
+                            };
+                        } catch (error) {
+                            loggingService.warn('Failed to generate pre-signed URLs', {
+                                optimizationId: opt._id,
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                            return opt;
+                        }
+                    }
+                    return opt;
+                })
+            );
+
             const duration = Date.now() - startTime;
 
             loggingService.info('Optimizations retrieved successfully', {
@@ -257,7 +293,7 @@ export class OptimizationController {
 
             res.json({
                 success: true,
-                data: result.data,
+                data: dataWithPresignedUrls,
                 pagination: result.pagination,
             });
         } catch (error: any) {
