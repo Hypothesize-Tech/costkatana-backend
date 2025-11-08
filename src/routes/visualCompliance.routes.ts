@@ -1,0 +1,23 @@
+import { Router } from 'express';
+import { VisualComplianceController } from '../controllers/visualCompliance.controller';
+import { authenticate } from '../middleware/auth.middleware';
+
+const router = Router();
+
+// All routes require authentication
+router.use(authenticate);
+
+// Single compliance check (ultra-optimized)
+router.post('/check-optimized', VisualComplianceController.checkComplianceOptimized);
+
+// Batch compliance checks
+router.post('/batch', VisualComplianceController.batchCheck);
+
+// Get available quality presets
+router.get('/presets', VisualComplianceController.getPresets);
+
+// Get cost comparison dashboard data
+router.get('/cost-comparison', VisualComplianceController.getCostComparison);
+
+export default router;
+

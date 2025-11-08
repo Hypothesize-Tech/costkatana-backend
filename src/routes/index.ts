@@ -55,6 +55,7 @@ import backupCodesRoutes from './backupCodes.routes';
 import teamRoutes from './team.routes';
 import integrationRoutes from './integration.routes';
 import githubRoutes from './github.routes';
+import visualComplianceRoutes from './visualCompliance.routes';
 
 const router = Router();
 
@@ -125,5 +126,6 @@ router.use('/backup-codes', backupCodesRoutes);
 router.use('/team', teamRoutes);
 router.use('/integrations', integrationRoutes);
 router.use('/github', githubRoutes);
+router.use('/visual-compliance', visualComplianceRoutes);
 
 export const apiRouter = router;
