@@ -133,8 +133,7 @@ export class EmailService {
               font-size: 14px;
               background: #f9fafb;
             }
-            .icon {
-              font-size: 48px;
+            .icon-container {
               margin-bottom: 10px;
             }
             .info-box {
@@ -143,6 +142,9 @@ export class EmailService {
               padding: 16px;
               margin: 20px 0;
               border-radius: 8px;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
             }
             .info-box p {
               margin: 0;
@@ -155,18 +157,29 @@ export class EmailService {
               padding: 16px;
               margin: 20px 0;
               border-radius: 8px;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
             }
             .warning-box p {
               margin: 0;
               color: #78350f;
               font-size: 14px;
             }
+            .icon-inline {
+              flex-shrink: 0;
+              margin-top: 2px;
+            }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">✉️</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4ZM20 8L12 13L4 8V6L12 11L20 6V8Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Welcome to Cost Katana!</h1>
             </div>
             <div class="content">
@@ -174,7 +187,11 @@ export class EmailService {
               <p>Thank you for signing up! We're excited to help you optimize your AI costs and maximize your ROI.</p>
               
               <div class="info-box">
-                <p><strong>🚀 Get Started:</strong> Verify your email to unlock full access to Cost Katana's powerful AI cost optimization features.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#8b5cf6"/>
+                  <path d="M2 17L12 22L22 17V12L12 17L2 12V17Z" fill="#8b5cf6"/>
+                </svg>
+                <p><strong>Get Started:</strong> Verify your email to unlock full access to Cost Katana's powerful AI cost optimization features.</p>
               </div>
               
               <p>Click the button below to verify your email address:</p>
@@ -187,7 +204,10 @@ export class EmailService {
               <div class="link-box">${verificationUrl}</div>
               
               <div class="warning-box">
-                <p><strong>⏰ This link will expire in 24 hours</strong> for security reasons.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#f59e0b"/>
+                </svg>
+                <p><strong>This link will expire in 24 hours</strong> for security reasons.</p>
               </div>
 
               <p><strong>Didn't create an account?</strong> If you didn't sign up for Cost Katana, you can safely ignore this email.</p>
@@ -203,7 +223,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: user.email,
-      subject: '✉️ Verify your Cost Katana account',
+      subject: 'Verify your Cost Katana account',
       html,
     });
   }
@@ -219,7 +239,7 @@ export class EmailService {
               font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
               line-height: 1.6;
               color: #1f2937;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
               margin: 0;
               padding: 40px 20px;
             }
@@ -294,8 +314,7 @@ export class EmailService {
               font-size: 14px;
               background: #f9fafb;
             }
-            .icon {
-              font-size: 48px;
+            .icon-container {
               margin-bottom: 10px;
             }
             .info-box {
@@ -304,6 +323,9 @@ export class EmailService {
               padding: 16px;
               margin: 20px 0;
               border-radius: 8px;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
             }
             .info-box p {
               margin: 0;
@@ -316,25 +338,40 @@ export class EmailService {
               padding: 16px;
               margin: 20px 0;
               border-radius: 8px;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
             }
             .warning-box p {
               margin: 0;
               color: #78350f;
               font-size: 14px;
             }
+            .icon-inline {
+              flex-shrink: 0;
+              margin-top: 2px;
+            }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">📧</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 4H4C2.9 4 2 4.9 2 6V18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4ZM20 8L12 13L4 8V6L12 11L20 6V8Z" fill="white"/>
+                  <path d="M12 16C13.1 16 14 15.1 14 14C14 12.9 13.1 12 12 12C10.9 12 10 12.9 10 14C10 15.1 10.9 16 12 16Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Verify Secondary Email</h1>
             </div>
             <div class="content">
               <h2>Hi ${userName},</h2>
               <p>You've added this email address as a secondary email for your Cost Katana account.</p>
               <div class="info-box">
-                <p><strong>ℹ️ Why verify?</strong> Verifying this email allows you to use it as a backup and potentially set it as your primary email.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V11H13V17ZM13 9H11V7H13V9Z" fill="#3b82f6"/>
+                </svg>
+                <p><strong>Why verify?</strong> Verifying this email allows you to use it as a backup and potentially set it as your primary email.</p>
               </div>
               <p>Click the button below to verify this email address:</p>
               <div class="button-container">
@@ -343,7 +380,10 @@ export class EmailService {
               <p>Or copy and paste this link into your browser:</p>
               <div class="link-box">${verificationUrl}</div>
               <div class="warning-box">
-                <p><strong>⏰ This link will expire in 24 hours</strong> for security reasons.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#f59e0b"/>
+                </svg>
+                <p><strong>This link will expire in 24 hours</strong> for security reasons.</p>
               </div>
               <p><strong>Didn't add this email?</strong> If you didn't request this, you can safely ignore this email. The email won't be added to your account without verification.</p>
             </div>
@@ -482,7 +522,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">🔐</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M18 8H17V6C17 3.24 14.76 1 12 1C9.24 1 7 3.24 7 6V8H6C4.9 8 4 8.9 4 10V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V10C20 8.9 19.1 8 18 8ZM12 17C10.9 17 10 16.1 10 15C10 13.9 10.9 13 12 13C13.1 13 14 13.9 14 15C14 16.1 13.1 17 12 17ZM15 8H9V6C9 4.34 10.34 3 12 3C13.66 3 15 4.34 15 6V8Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Password Reset Request</h1>
             </div>
             <div class="content">
@@ -499,11 +543,17 @@ export class EmailService {
               <div class="link-box">${resetUrl}</div>
               
               <div class="warning-box">
-                <p><strong>⏰ This link will expire in 1 hour</strong> for security reasons.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#f59e0b"/>
+                </svg>
+                <p><strong>This link will expire in 1 hour</strong> for security reasons.</p>
               </div>
 
               <div class="danger-box">
-                <p><strong>⚠️ Didn't request this?</strong> If you didn't request a password reset, please ignore this email and ensure your account is secure. Your password will not change unless you click the link above.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2L1 21H23L12 2ZM13 18H11V16H13V18ZM13 14H11V10H13V14Z" fill="#dc2626"/>
+                </svg>
+                <p><strong>Didn't request this?</strong> If you didn't request a password reset, please ignore this email and ensure your account is secure. Your password will not change unless you click the link above.</p>
               </div>
             </div>
             <div class="footer">
@@ -517,7 +567,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: user.email,
-      subject: '🔐 Password Reset - Cost Katana',
+      subject: 'Password Reset - Cost Katana',
       html,
     });
   }
@@ -546,7 +596,10 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>⚠️ Cost Alert</h1>
+              <svg width="64" height="64" style="margin-bottom: 10px;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M1 21H23L12 2L1 21ZM13 18H11V16H13V18ZM13 14H11V10H13V14Z" fill="white"/>
+              </svg>
+              <h1>Cost Alert</h1>
             </div>
             <div class="content">
               <h2>Hi ${user.name},</h2>
@@ -614,7 +667,10 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <h1>💡 Optimization Opportunity</h1>
+              <svg width="64" height="64" style="margin-bottom: 10px;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C10.34 2 9 3.34 9 5C9 6.1 9.5 7.07 10.29 7.71L11 18H13L13.71 7.71C14.5 7.07 15 6.1 15 5C15 3.34 13.66 2 12 2ZM12 20C10.9 20 10 20.9 10 22H14C14 20.9 13.1 20 12 20Z" fill="white"/>
+              </svg>
+              <h1>Optimization Opportunity</h1>
             </div>
             <div class="content">
               <h2>Hi ${user.name},</h2>
@@ -839,7 +895,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">⚠️</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 21H23L12 2L1 21ZM13 18H11V16H13V18ZM13 14H11V10H13V14Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Confirm Account Closure</h1>
             </div>
             <div class="content">
@@ -847,7 +907,10 @@ export class EmailService {
               <p>We received a request to close your Cost Katana account. This is a serious action that will permanently delete your account after a grace period.</p>
               
               <div class="danger-box">
-                <p><strong>⚠️ Important: What happens next?</strong></p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 21H23L12 2L1 21ZM13 18H11V16H13V18ZM13 14H11V10H13V14Z" fill="#dc2626"/>
+                </svg>
+                <p><strong>Important: What happens next?</strong></p>
                 <ul>
                   <li><strong>24-hour cooldown:</strong> After confirming, there's a 24-hour waiting period</li>
                   <li><strong>30-day grace period:</strong> After cooldown, you have 30 days to change your mind</li>
@@ -866,7 +929,10 @@ export class EmailService {
               <div class="link-box">${confirmationUrl}</div>
               
               <div class="warning-box">
-                <p><strong>⏰ This link will expire in 24 hours</strong> for security reasons.</p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#f59e0b"/>
+                </svg>
+                <p><strong>This link will expire in 24 hours</strong> for security reasons.</p>
               </div>
 
               <p><strong>Didn't request this?</strong> If you didn't try to close your account, please ignore this email and your account will remain active. We recommend changing your password immediately.</p>
@@ -882,7 +948,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: email,
-      subject: '⚠️ Confirm Account Closure - Cost Katana',
+      subject: 'Confirm Account Closure - Cost Katana',
       html,
     });
   }
@@ -999,14 +1065,18 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">⏰</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Account Deletion Warning</h1>
             </div>
             <div class="content">
               <h2>Hi ${userName},</h2>
               
               <div class="warning-box">
-                <h3>⚠️ ${daysRemaining} Days Remaining</h3>
+                <h3>${daysRemaining} Days Remaining</h3>
                 <p>Your account will be permanently deleted in ${daysRemaining} days</p>
               </div>
 
@@ -1031,7 +1101,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: email,
-      subject: `⏰ Account Deletion in ${daysRemaining} Days - Cost Katana`,
+      subject: `Account Deletion in ${daysRemaining} Days - Cost Katana`,
       html,
     });
   }
@@ -1107,25 +1177,42 @@ export class EmailService {
               padding: 16px;
               margin: 20px 0;
               border-radius: 8px;
+              display: flex;
+              align-items: flex-start;
+              gap: 12px;
             }
             .success-box p {
               margin: 0;
               color: #065f46;
               font-size: 14px;
             }
+            .icon-inline {
+              flex-shrink: 0;
+              margin-top: 2px;
+            }
+            .icon-container {
+              margin-bottom: 10px;
+            }
           </style>
         </head>
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">🎉</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.2L4.8 12L3.4 13.4L9 19L21 7L19.6 5.6L9 16.2Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Account Reactivated!</h1>
             </div>
             <div class="content">
               <h2>Welcome back, ${userName}!</h2>
               
               <div class="success-box">
-                <p><strong>✅ Your account has been successfully reactivated!</strong></p>
+                <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.2L4.8 12L3.4 13.4L9 19L21 7L19.6 5.6L9 16.2Z" fill="#059669"/>
+                </svg>
+                <p><strong>Your account has been successfully reactivated!</strong></p>
               </div>
 
               <p>Great news! Your Cost Katana account is now active again, and all your data has been fully restored.</p>
@@ -1145,7 +1232,7 @@ export class EmailService {
 
     await this.sendEmail({
       to: email,
-      subject: '🎉 Account Reactivated - Welcome Back! - Cost Katana',
+      subject: 'Account Reactivated - Welcome Back! - Cost Katana',
       html,
     });
   }
@@ -1220,7 +1307,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">👋</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 1V3H5V5H19V3H15V1H9ZM7 7V19C7 20.1 7.9 21 9 21H15C16.1 21 17 20.1 17 19V7H7Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Account Deleted</h1>
             </div>
             <div class="content">
@@ -1367,7 +1458,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">👥</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M16 11C17.66 11 18.99 9.66 18.99 8C18.99 6.34 17.66 5 16 5C14.34 5 13 6.34 13 8C13 9.66 14.34 11 16 11ZM8 11C9.66 11 10.99 9.66 10.99 8C10.99 6.34 9.66 5 8 5C6.34 5 5 6.34 5 8C5 9.66 6.34 11 8 11ZM8 13C5.67 13 1 14.17 1 16.5V19H15V16.5C15 14.17 10.33 13 8 13ZM16 13C15.71 13 15.38 13.02 15.03 13.05C16.19 13.89 17 15.02 17 16.5V19H23V16.5C23 14.17 18.33 13 16 13Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Team Invitation</h1>
             </div>
             <div class="content">
@@ -1469,8 +1564,7 @@ export class EmailService {
               font-size: 14px;
               background: #f9fafb;
             }
-            .icon {
-              font-size: 48px;
+            .icon-container {
               margin-bottom: 10px;
             }
           </style>
@@ -1478,7 +1572,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">👋</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M14.5 14C12.67 14 9 14.92 9 16.75V18H20V16.75C20 14.92 16.33 14 14.5 14ZM7 13C5.62 13 2.88 13.69 2.88 15.07V17H7V14.89C7 13.98 6.6 13.38 6.27 12.91C6.4 12.97 6.54 13 6.67 13H7ZM14.5 12C15.88 12 17 10.88 17 9.5C17 8.12 15.88 7 14.5 7C13.12 7 12 8.12 12 9.5C12 10.88 13.12 12 14.5 12ZM6.67 11C7.86 11 8.83 10.03 8.83 8.83C8.83 7.64 7.86 6.67 6.67 6.67C5.47 6.67 4.5 7.64 4.5 8.83C4.5 10.03 5.47 11 6.67 11Z" fill="white"/><path d="M21 7L19 9V8H11V10H19V9L21 11L23 9L21 7Z" fill="white" opacity="0.7"/>
+                </svg>
+              </div>
               <h1>Team Access Removed</h1>
             </div>
             <div class="content">
@@ -1595,8 +1693,7 @@ export class EmailService {
               font-size: 14px;
               background: #f9fafb;
             }
-            .icon {
-              font-size: 48px;
+            .icon-container {
               margin-bottom: 10px;
             }
           </style>
@@ -1604,7 +1701,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">🔄</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 4V1L8 5L12 9V6C15.31 6 18 8.69 18 12C18 13.01 17.75 13.97 17.3 14.8L18.76 16.26C19.54 15.03 20 13.57 20 12C20 7.58 16.42 4 12 4ZM12 18C8.69 18 6 15.31 6 12C6 10.99 6.25 10.03 6.7 9.2L5.24 7.74C4.46 8.97 4 10.43 4 12C4 16.42 7.58 20 12 20V23L16 19L12 15V18Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Role Updated</h1>
             </div>
             <div class="content">
@@ -1716,8 +1817,7 @@ export class EmailService {
               font-size: 14px;
               background: #f9fafb;
             }
-            .icon {
-              font-size: 48px;
+            .icon-container {
               margin-bottom: 10px;
             }
           </style>
@@ -1725,7 +1825,11 @@ export class EmailService {
         <body>
           <div class="container">
             <div class="header">
-              <div class="icon">📁</div>
+              <div class="icon-container">
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 6H12L10 4H4C2.9 4 2.01 4.9 2.01 6L2 18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V8C22 6.9 21.1 6 20 6ZM14 16H10V14H14V16ZM17 12H7V10H17V12Z" fill="white"/>
+                </svg>
+              </div>
               <h1>Projects Assigned</h1>
             </div>
             <div class="content">

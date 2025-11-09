@@ -521,19 +521,134 @@ export class MFAService {
                 await transporter.sendMail({
                     from: EMAIL_CONFIG.from,
                     to: userEmail,
-                    subject: 'Your CostKatana Security Code',
+                    subject: 'Your Cost Katana Security Code',
                     html: `
-                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                            <h2 style="color: #333;">Security Verification Code</h2>
-                            <p>Your verification code is:</p>
-                            <div style="background: #f5f5f5; padding: 20px; text-align: center; margin: 20px 0;">
-                                <h1 style="color: #4F46E5; font-size: 32px; margin: 0; letter-spacing: 5px;">${code}</h1>
+                        <!DOCTYPE html>
+                        <html>
+                          <head>
+                            <style>
+                              body {
+                                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                                line-height: 1.6;
+                                color: #1f2937;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                margin: 0;
+                                padding: 40px 20px;
+                              }
+                              .container {
+                                max-width: 600px;
+                                margin: 0 auto;
+                                background: rgba(255, 255, 255, 0.95);
+                                backdrop-filter: blur(10px);
+                                border-radius: 24px;
+                                overflow: hidden;
+                                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+                              }
+                              .header {
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                padding: 40px 30px;
+                                text-align: center;
+                              }
+                              .header h1 {
+                                margin: 0;
+                                font-size: 32px;
+                                font-weight: 700;
+                                letter-spacing: -0.5px;
+                              }
+                              .content {
+                                padding: 40px 30px;
+                                background: white;
+                              }
+                              .content h2 {
+                                color: #1f2937;
+                                font-size: 24px;
+                                font-weight: 600;
+                                margin: 0 0 20px 0;
+                              }
+                              .content p {
+                                color: #4b5563;
+                                margin: 16px 0;
+                                font-size: 16px;
+                              }
+                              .code-box {
+                                background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+                                padding: 32px;
+                                text-align: center;
+                                margin: 24px 0;
+                                border-radius: 16px;
+                                border: 2px solid #667eea;
+                              }
+                              .code {
+                                color: #667eea;
+                                font-size: 48px;
+                                font-weight: 700;
+                                margin: 0;
+                                letter-spacing: 8px;
+                                font-family: 'Courier New', monospace;
+                              }
+                              .footer {
+                                text-align: center;
+                                padding: 30px;
+                                color: #6b7280;
+                                font-size: 14px;
+                                background: #f9fafb;
+                              }
+                              .icon-container {
+                                margin-bottom: 10px;
+                              }
+                              .warning-box {
+                                background: #fef3c7;
+                                border-left: 4px solid #f59e0b;
+                                padding: 16px;
+                                margin: 20px 0;
+                                border-radius: 8px;
+                                display: flex;
+                                align-items: flex-start;
+                                gap: 12px;
+                              }
+                              .warning-box p {
+                                margin: 0;
+                                color: #78350f;
+                                font-size: 14px;
+                              }
+                              .icon-inline {
+                                flex-shrink: 0;
+                                margin-top: 2px;
+                              }
+                            </style>
+                          </head>
+                          <body>
+                            <div class="container">
+                              <div class="header">
+                                <div class="icon-container">
+                                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 1C8.69 1 6 3.69 6 7V10C4.9 10 4 10.9 4 12V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V12C20 10.9 19.1 10 18 10V7C18 3.69 15.31 1 12 1ZM12 3C14.21 3 16 4.79 16 7V10H8V7C8 4.79 9.79 3 12 3ZM12 17C10.9 17 10 16.1 10 15C10 13.9 10.9 13 12 13C13.1 13 14 13.9 14 15C14 16.1 13.1 17 12 17Z" fill="white"/>
+                                  </svg>
+                                </div>
+                                <h1>Security Verification</h1>
+                              </div>
+                              <div class="content">
+                                <h2>Your Verification Code</h2>
+                                <p>Use this code to complete your multi-factor authentication:</p>
+                                <div class="code-box">
+                                  <div class="code">${code}</div>
+                                </div>
+                                <div class="warning-box">
+                                  <svg class="icon-inline" width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM13 17H11V15H13V17ZM13 13H11V7H13V13Z" fill="#f59e0b"/>
+                                  </svg>
+                                  <p><strong>This code will expire in 10 minutes</strong> for security reasons.</p>
+                                </div>
+                                <p>If you didn't request this code, please ignore this email or contact support if you have concerns.</p>
+                              </div>
+                              <div class="footer">
+                                <p><strong>Cost Katana</strong> - AI Cost Optimization Platform</p>
+                                <p>© ${new Date().getFullYear()} Cost Katana. All rights reserved.</p>
+                              </div>
                             </div>
-                            <p>This code will expire in 10 minutes.</p>
-                            <p>If you didn't request this code, please ignore this email or contact support if you have concerns.</p>
-                            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
-                            <p style="color: #666; font-size: 12px;">CostKatana Security Team</p>
-                        </div>
+                          </body>
+                        </html>
                     `,
                 });
                 this.debugLog(`Email sent successfully to: ${userEmail}`);
