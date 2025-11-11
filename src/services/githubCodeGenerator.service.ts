@@ -24,6 +24,7 @@ export interface CodeGenerationOptions {
     analysis: AnalysisResult;
     repositoryName: string;
     apiKey: string;
+    existingFileContents?: Record<string, string>; // Existing file contents for code preservation
 }
 
 export class GitHubCodeGeneratorService {
@@ -252,6 +253,24 @@ Repository Analysis:
 - Entry Points: ${analysis.entryPoints.join(', ')}
 - Existing AI Integrations: ${analysis.existingAIIntegrations.join(', ') ?? 'None'}
 - Package Manager: ${analysis.packageManager ?? 'npm'}
+
+${Object.keys(options.existingFileContents || {}).length > 0 ? `
+EXISTING FILE CONTENTS TO PRESERVE:
+The following files already exist in the repository. You MUST preserve their existing code and ONLY ADD CostKatana integration:
+
+${Object.entries(options.existingFileContents || {}).map(([path, content]) => `
+--- File: ${path} (${content.length} characters) ---
+${content.substring(0, 3000)}${content.length > 3000 ? '\n... (truncated for brevity, but you MUST preserve ALL content)' : ''}
+--- End of ${path} ---
+`).join('\n')}
+
+⚠️ CRITICAL: When updating these files, you MUST:
+1. Keep ALL existing code exactly as is
+2. Only ADD new CostKatana-related imports at the top
+3. Only ADD initialization calls where appropriate
+4. Do NOT remove, modify, or replace ANY existing functionality
+5. Do NOT change existing imports, middleware, routes, or handlers
+` : ''}
 
 Selected Features:
 ${features.map(f => `- ${f.name}${f.config ? ': ' + JSON.stringify(f.config) : ''}`).join('\n')}
@@ -859,6 +878,24 @@ Repository Analysis:
 - Entry Points: ${analysis.entryPoints.join(', ')}
 - Existing AI Integrations: ${analysis.existingAIIntegrations.join(', ') ?? 'None'}
 - Package Manager: ${analysis.packageManager ?? 'pip'}
+
+${Object.keys(options.existingFileContents || {}).length > 0 ? `
+EXISTING FILE CONTENTS TO PRESERVE:
+The following files already exist in the repository. You MUST preserve their existing code and ONLY ADD CostKatana integration:
+
+${Object.entries(options.existingFileContents || {}).map(([path, content]) => `
+--- File: ${path} (${content.length} characters) ---
+${content.substring(0, 3000)}${content.length > 3000 ? '\n... (truncated for brevity, but you MUST preserve ALL content)' : ''}
+--- End of ${path} ---
+`).join('\n')}
+
+⚠️ CRITICAL: When updating these files, you MUST:
+1. Keep ALL existing code exactly as is
+2. Only ADD new CostKatana-related imports at the top
+3. Only ADD initialization calls where appropriate
+4. Do NOT remove, modify, or replace ANY existing functionality
+5. Do NOT change existing imports, routes, or handlers
+` : ''}
 
 Selected Features:
 ${features.map(f => `- ${f.name}`).join('\n')}

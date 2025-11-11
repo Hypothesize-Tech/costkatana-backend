@@ -20,7 +20,10 @@ export class VisualComplianceController {
         evidenceImage,
         complianceCriteria,
         industry,
-        useUltraCompression = true
+        useUltraCompression = true,
+        mode = 'optimized',
+        metaPrompt,
+        metaPromptPresetId
       } = req.body;
 
       // Validation
@@ -62,13 +65,21 @@ export class VisualComplianceController {
         industry,
         userId,
         projectId,
-        useUltraCompression
+        useUltraCompression,
+        mode,
+        metaPrompt,
+        metaPromptPresetId
       });
 
       // Use cost breakdown from service if available, otherwise calculate
       const costBreakdown = result.metadata.costBreakdown;
       const baselineCost = costBreakdown?.baseline.totalCost ?? 0.0043;
       const costSavings = costBreakdown?.savings.percentage ?? ((1 - result.metadata.cost / baselineCost) * 100);
+      
+      // For standard mode, we're not optimizing for cost but for accuracy
+      // So we need to handle the case where actual cost is higher than baseline
+      const actualCostSaved = costBreakdown?.savings.amount ?? (baselineCost - result.metadata.cost);
+      const actualImprovementPercentage = costSavings;
 
       // Upload images to S3
       let referenceImageUrl = '';
@@ -117,28 +128,30 @@ export class VisualComplianceController {
       }
 
       // Save to Optimization model for tracking
+      // Only save if it's actually an optimization (positive savings) or force positive values for tracking
       try {
         const optimizationRecord = await Optimization.create({
           userId: userId === 'anonymous' ? new mongoose.Types.ObjectId() : new mongoose.Types.ObjectId(userId),
-          userQuery: `Visual Compliance Check: ${industry}`,
+          userQuery: `Visual Compliance Check (${mode}): ${industry}`,
           generatedAnswer: `${result.pass_fail ? 'PASS' : 'FAIL'} - Score: ${result.compliance_score}% - ${result.feedback_message}`,
           optimizationTechniques: [
-            'feature_extraction',
-            'toon_encoding',
-            'cortex_compression',
+            mode === 'optimized' ? 'feature_extraction' : 'full_image_analysis',
+            mode === 'optimized' ? 'toon_encoding' : 'claude_35_sonnet',
+            mode === 'optimized' ? 'cortex_compression' : 'meta_prompt',
             result.metadata.technique
           ],
           originalTokens: costBreakdown?.baseline.inputTokens ?? 4500,
           optimizedTokens: result.metadata.inputTokens + result.metadata.outputTokens,
-          tokensSaved: (costBreakdown?.baseline.inputTokens ?? 4500) - (result.metadata.inputTokens + result.metadata.outputTokens),
+          tokensSaved: Math.max(0, (costBreakdown?.baseline.inputTokens ?? 4500) - (result.metadata.inputTokens + result.metadata.outputTokens)),
           originalCost: costBreakdown?.baseline.totalCost ?? baselineCost,
           optimizedCost: result.metadata.cost,
-          costSaved: costBreakdown?.savings.amount ?? (baselineCost - result.metadata.cost),
-          improvementPercentage: costSavings,
+          // For standard mode, set minimum of 0 for costSaved and improvementPercentage since it's not optimizing for cost
+          costSaved: Math.max(0, actualCostSaved),
+          improvementPercentage: Math.max(0, actualImprovementPercentage),
           service: 'visual-compliance',
-          model: 'amazon.nova-pro-v1:0',
+          model: mode === 'optimized' ? 'amazon.nova-pro-v1:0' : 'anthropic.claude-3-5-sonnet-20241022-v2:0',
           category: 'response_formatting',
-          optimizationType: 'visual_compliance',
+          optimizationType: mode === 'optimized' ? 'visual_compliance' : 'visual_compliance_standard',
           visualComplianceData: {
             referenceImageUrl,
             evidenceImageUrl,
@@ -160,35 +173,43 @@ export class VisualComplianceController {
             tokenReduction: {
               withoutCortex: costBreakdown?.baseline.inputTokens ?? 4500,
               withCortex: result.metadata.inputTokens,
-              absoluteSavings: (costBreakdown?.baseline.inputTokens ?? 4500) - result.metadata.inputTokens,
-              percentageSavings: result.metadata.compressionRatio
+              absoluteSavings: Math.max(0, (costBreakdown?.baseline.inputTokens ?? 4500) - result.metadata.inputTokens),
+              percentageSavings: Math.max(0, result.metadata.compressionRatio)
             },
             qualityMetrics: {
               clarityScore: result.compliance_score / 100,
               completenessScore: result.pass_fail ? 1.0 : 0.5,
-              relevanceScore: 0.95,
-              ambiguityReduction: 0.85,
-              redundancyRemoval: 0.90
+              relevanceScore: mode === 'standard' ? 0.98 : 0.95, // Higher relevance for full image analysis
+              ambiguityReduction: mode === 'standard' ? 0.95 : 0.85,
+              redundancyRemoval: mode === 'standard' ? 0.80 : 0.90
             },
             performanceMetrics: {
               processingTime: result.metadata.latency,
               responseLatency: result.metadata.latency,
-              compressionRatio: result.metadata.compressionRatio
+              compressionRatio: Math.max(0, result.metadata.compressionRatio)
             },
             costImpact: {
               estimatedCostWithoutCortex: costBreakdown?.baseline.totalCost ?? baselineCost,
               actualCostWithCortex: result.metadata.cost,
-              costSavings: costBreakdown?.savings.amount ?? (baselineCost - result.metadata.cost),
-              savingsPercentage: costSavings
+              costSavings: Math.max(0, costBreakdown?.savings.amount ?? (baselineCost - result.metadata.cost)),
+              savingsPercentage: Math.max(0, costSavings)
             },
             justification: {
-              optimizationTechniques: ['Feature Extraction', 'TOON Encoding', 'Cortex LISP Output'],
-              keyImprovements: [
-                `${costSavings.toFixed(1)}% cost reduction`,
-                `${result.metadata.compressionRatio.toFixed(1)}% token reduction`,
-                'Image feature extraction instead of raw pixels'
-              ],
-              confidenceScore: 0.95
+              optimizationTechniques: mode === 'optimized' 
+                ? ['Feature Extraction', 'TOON Encoding', 'Cortex LISP Output']
+                : ['Full Image Analysis', 'Claude 3.5 Sonnet', 'Custom Meta Prompts'],
+              keyImprovements: mode === 'optimized'
+                ? [
+                    `${Math.max(0, costSavings).toFixed(1)}% cost reduction`,
+                    `${Math.max(0, result.metadata.compressionRatio).toFixed(1)}% token reduction`,
+                    'Image feature extraction instead of raw pixels'
+                  ]
+                : [
+                    'Full image context for detailed analysis',
+                    'Customizable meta prompts for industry-specific verification',
+                    'Claude 3.5 Sonnet for highest accuracy'
+                  ],
+              confidenceScore: mode === 'standard' ? 0.98 : 0.95
             }
           },
           tags: ['visual-compliance', 'cortex', 'toon', industry]
@@ -353,7 +374,7 @@ export class VisualComplianceController {
    * GET /api/visual-compliance/presets
    * Get available quality presets and their characteristics
    */
-  static async getPresets(_req: any, res: Response): Promise<Response> {
+  static getPresets(_req: any, res: Response): Response {
     return res.status(200).json({
       success: true,
       presets: {
@@ -564,6 +585,74 @@ export class VisualComplianceController {
             note: 'Using estimated values due to database query error'
           }
         }
+      });
+    }
+  }
+
+  /**
+   * GET /api/visual-compliance/meta-prompt-presets
+   * Get available meta prompt presets
+   */
+  static async getMetaPromptPresets(_req: any, res: Response): Promise<Response> {
+    try {
+      const { MetaPromptPresetsService } = await import('../services/metaPromptPresets.service');
+      
+      const presets = MetaPromptPresetsService.getAllPresets();
+      
+      // Return presets with minimal information (don't send full prompts in list)
+      const presetsInfo = presets.map(preset => ({
+        id: preset.id,
+        name: preset.name,
+        industry: preset.industry,
+        description: preset.description
+      }));
+
+      return res.status(200).json({
+        success: true,
+        presets: presetsInfo
+      });
+    } catch (error) {
+      loggingService.error('Failed to get meta prompt presets', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: 'Internal server error'
+      });
+    }
+  }
+
+  /**
+   * GET /api/visual-compliance/meta-prompt-presets/:id
+   * Get a specific meta prompt preset with full prompt text
+   */
+  static async getMetaPromptPresetById(req: any, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const { MetaPromptPresetsService } = await import('../services/metaPromptPresets.service');
+      
+      const preset = MetaPromptPresetsService.getPresetById(id);
+      
+      if (!preset) {
+        return res.status(404).json({
+          success: false,
+          error: `Preset not found: ${id}`
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        preset
+      });
+    } catch (error) {
+      loggingService.error('Failed to get meta prompt preset', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      return res.status(500).json({
+        success: false,
+        error: 'Internal server error'
       });
     }
   }

@@ -3,6 +3,7 @@ import { GitHubService, OAuthTokenResponse, GitHubUser } from '../services/githu
 import { GitHubIntegrationService, StartIntegrationOptions } from '../services/githubIntegration.service';
 import { GitHubConnection, GitHubIntegration } from '../models';
 import { loggingService } from '../services/logging.service';
+import { GitHubErrors } from '../utils/githubErrors';
 import crypto from 'crypto';
 
 export class GitHubController {
@@ -14,30 +15,38 @@ export class GitHubController {
         try {
             const userId = req.userId;
             if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+                const error = GitHubErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
             const appId = process.env.GITHUB_APP_ID;
             if (!appId) {
-                res.status(500).json({
-                    success: false,
-                    message: 'GitHub App ID not configured'
-                });
+                const error = GitHubErrors.APP_NOT_CONFIGURED;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
-            // Generate state for security
-            const state = Buffer.from(JSON.stringify({ userId, timestamp: Date.now() })).toString('base64');
+            // Generate secure state for CSRF protection
+            const nonce = crypto.randomBytes(32).toString('hex');
+            const timestamp = Date.now();
+            const state = Buffer.from(JSON.stringify({ userId, nonce, timestamp, type: 'app' })).toString('base64');
             
             // Store state in session for validation
-            req.session = req.session || {};
-            req.session.githubState = state;
+            if (!req.session) {
+                const error = GitHubErrors.SESSION_NOT_CONFIGURED;
+                loggingService.error(error.message, { code: error.code });
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
+                return;
+            }
+            req.session.githubAppState = { state, nonce, timestamp, userId };
 
             const installUrl = `https://github.com/apps/${process.env.GITHUB_APP_SLUG || 'costkatana'}/installations/new?state=${state}`;
+
+            loggingService.info('GitHub App installation initiated', {
+                userId,
+                hasSession: !!req.session
+            });
 
             res.json({
                 success: true,
@@ -69,10 +78,8 @@ export class GitHubController {
         try {
             const userId = req.userId;
             if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
+                const error = GitHubErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -84,18 +91,26 @@ export class GitHubController {
             const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
             const callbackUrl = process.env.GITHUB_CALLBACK_URL ?? `${backendUrl}/api/github/callback`;
             
-            // Generate state for CSRF protection
-            const state = crypto.randomBytes(16).toString('hex');
+            // Generate secure state for CSRF protection
+            const nonce = crypto.randomBytes(32).toString('hex');
+            const timestamp = Date.now();
+            const stateData = Buffer.from(JSON.stringify({ userId, nonce, timestamp })).toString('base64');
             
-            // Store state in session or temporary cache
-            // For now, we'll include userId in state
-            const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
+            // Store state in session for validation
+            if (!req.session) {
+                const error = GitHubErrors.SESSION_NOT_CONFIGURED;
+                loggingService.error(error.message, { code: error.code });
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
+                return;
+            }
+            req.session.githubOAuthState = { state: stateData, nonce, timestamp, userId };
 
             const scopes = 'repo,read:user,user:email';
             const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${scopes}&state=${stateData}`;
 
             loggingService.info('GitHub OAuth flow initiated', {
-                userId
+                userId,
+                hasSession: !!req.session
             });
 
             res.json({
@@ -144,9 +159,50 @@ export class GitHubController {
             // Initialize GitHub service first
             await GitHubService.initialize();
 
-            // Decode state
+            // Validate state parameter (CSRF protection)
+            const storedState = req.session?.githubOAuthState;
+            if (!storedState || storedState.state !== state) {
+                const error = GitHubErrors.OAUTH_STATE_INVALID;
+                loggingService.warn(error.message, {
+                    hasStoredState: !!storedState,
+                    statesMatch: storedState?.state === state,
+                    code: error.code
+                });
+                const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+                res.redirect(`${frontendUrl}/github/error?message=${encodeURIComponent(error.actionable)}`);
+                return;
+            }
+
+            // Check state timestamp (prevent replay attacks - 10 minute window)
+            const stateAge = Date.now() - storedState.timestamp;
+            if (stateAge > 10 * 60 * 1000) {
+                const error = GitHubErrors.OAUTH_STATE_EXPIRED;
+                loggingService.warn(error.message, {
+                    stateAgeMs: stateAge,
+                    code: error.code
+                });
+                const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+                res.redirect(`${frontendUrl}/github/error?message=${encodeURIComponent(error.actionable)}`);
+                return;
+            }
+
+            // Decode and validate state
             const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
             const userId = stateData.userId;
+
+            // Verify userId matches stored state
+            if (userId !== storedState.userId) {
+                loggingService.error('OAuth userId mismatch', {
+                    stateUserId: userId,
+                    storedUserId: storedState.userId
+                });
+                const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+                res.redirect(`${frontendUrl}/github/error?message=${encodeURIComponent('Authentication error. Please try again.')}`);
+                return;
+            }
+
+            // Clear used state
+            delete req.session.githubOAuthState;
 
             // Exchange code for token
             const tokenResponse: OAuthTokenResponse = await GitHubService.exchangeCodeForToken(code as string);
@@ -158,29 +214,52 @@ export class GitHubController {
             let connection = await GitHubConnection.findOne({
                 userId,
                 githubUserId: githubUser.id
-            }).select('+accessToken');
+            }).select('+accessToken +refreshToken');
+
+            // Calculate token expiration
+            const expiresAt = tokenResponse.expires_in 
+                ? new Date(Date.now() + tokenResponse.expires_in * 1000)
+                : undefined;
 
             if (connection) {
                 // Update existing connection
                 connection.accessToken = tokenResponse.access_token; // Will be encrypted by pre-save hook
+                if (tokenResponse.refresh_token) {
+                    connection.refreshToken = tokenResponse.refresh_token; // Will be encrypted by pre-save hook
+                }
                 connection.tokenType = 'oauth';
                 connection.scope = tokenResponse.scope;
+                connection.expiresAt = expiresAt;
                 connection.isActive = true;
                 connection.lastSyncedAt = new Date();
                 await connection.save();
+                
+                loggingService.info('GitHub OAuth connection updated', {
+                    userId,
+                    hasRefreshToken: !!tokenResponse.refresh_token,
+                    expiresAt
+                });
             } else {
                 // Create new connection
                 connection = await GitHubConnection.create({
                     userId,
                     accessToken: tokenResponse.access_token,
+                    refreshToken: tokenResponse.refresh_token,
                     tokenType: 'oauth',
                     scope: tokenResponse.scope,
+                    expiresAt,
                     githubUserId: githubUser.id,
                     githubUsername: githubUser.login,
                     avatarUrl: githubUser.avatar_url,
                     isActive: true,
                     repositories: [],
                     lastSyncedAt: new Date()
+                });
+                
+                loggingService.info('GitHub OAuth connection created', {
+                    userId,
+                    hasRefreshToken: !!tokenResponse.refresh_token,
+                    expiresAt
                 });
             }
 
@@ -214,21 +293,70 @@ export class GitHubController {
 
     /**
      * Handle GitHub App installation
-     * GET /api/github/callback?installation_id=xxx&setup_action=install
+     * GET /api/github/callback?installation_id=xxx&setup_action=install&state=xxx
      */
     static async handleGitHubAppInstallation(req: any, res: Response, installationId: string): Promise<void> {
         try {
             // Initialize GitHub service first
             await GitHubService.initialize();
 
-            // For GitHub App installations, we need to get the user ID from the session or request
-            // Since this is an app installation, we'll need to handle it differently
-            const userId = req.userId || req.session?.userId;
+            const { state } = req.query;
+            let userId: string | undefined;
+
+            // Try to get userId from state parameter first
+            if (state) {
+                try {
+                    const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+                    
+                    // Validate state if stored in session
+                    const storedState = req.session?.githubAppState;
+                    if (storedState && storedState.state === state) {
+                        // Validate timestamp (10 minute window)
+                        const stateAge = Date.now() - storedState.timestamp;
+                        if (stateAge <= 10 * 60 * 1000) {
+                            userId = storedState.userId;
+                            // Clear used state
+                            delete req.session.githubAppState;
+                            
+                            loggingService.info('GitHub App state validated successfully', {
+                                userId,
+                                installationId
+                            });
+                        } else {
+                            loggingService.warn('GitHub App state expired', {
+                                stateAge,
+                                installationId
+                            });
+                        }
+                    } else if (stateData.userId) {
+                        // Fallback: Use userId from state if session not available
+                        userId = stateData.userId;
+                        loggingService.info('Using userId from state (no session validation)', {
+                            userId,
+                            installationId
+                        });
+                    }
+                } catch (error) {
+                    loggingService.warn('Failed to parse GitHub App state', {
+                        error: error instanceof Error ? error.message : 'Unknown',
+                        installationId
+                    });
+                }
+            }
+
+            // Fallback to session userId
+            if (!userId) {
+                userId = req.userId || req.session?.userId;
+            }
             
             if (!userId) {
-                // If no user ID, redirect to frontend with error
+                // No userId found - store installation for later linking
+                loggingService.warn('GitHub App installation without userId, storing for later linking', {
+                    installationId
+                });
+                
                 const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-                res.redirect(`${frontendUrl}/github/error?message=${encodeURIComponent('User session not found. Please try again.')}`);
+                res.redirect(`${frontendUrl}/github/link-installation?installationId=${installationId}`);
                 return;
             }
 
@@ -252,6 +380,9 @@ export class GitHubController {
                     userId,
                     installationId,
                     tokenType: 'app',
+                    githubUserId: installation.account?.id,
+                    githubUsername: installation.account?.login,
+                    avatarUrl: installation.account?.avatar_url,
                     isActive: true,
                     lastSyncedAt: new Date()
                 });
@@ -346,10 +477,8 @@ export class GitHubController {
             });
 
             if (!connection) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Connection not found'
-                });
+                const error = GitHubErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -499,10 +628,8 @@ export class GitHubController {
             });
 
             if (!integration) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Integration not found'
-                });
+                const error = GitHubErrors.INTEGRATION_NOT_FOUND;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -599,10 +726,8 @@ export class GitHubController {
             });
 
             if (!integration) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Integration not found'
-                });
+                const error = GitHubErrors.INTEGRATION_NOT_FOUND;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -648,10 +773,8 @@ export class GitHubController {
             });
 
             if (!connection) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Connection not found'
-                });
+                const error = GitHubErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -687,14 +810,19 @@ export class GitHubController {
     static async handleWebhook(req: Request, res: Response): Promise<void> {
         try {
             const signature = req.headers['x-hub-signature-256'] as string;
-            const payload = JSON.stringify(req.body);
+            // Use raw body if available, otherwise stringify (should always have rawBody)
+            const payload = (req as any).rawBody || JSON.stringify(req.body);
 
             // Verify webhook signature
             if (!GitHubService.verifyWebhookSignature(payload, signature)) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Invalid webhook signature'
+                const error = GitHubErrors.WEBHOOK_SIGNATURE_INVALID;
+                loggingService.warn(error.message, {
+                    hasSignature: !!signature,
+                    hasRawBody: !!(req as any).rawBody,
+                    path: req.path,
+                    code: error.code
                 });
+                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
                 return;
             }
 
@@ -796,23 +924,36 @@ export class GitHubController {
 
             // Schedule background reindex if significant changes
             if (commits.length > 0) {
-                const { ReindexQueue } = await import('../queues/reindex.queue');
+                // Look up user and connection for this repository
+                const { RepositoryUserMapping } = await import('../models');
+                const mapping = await RepositoryUserMapping.findOne({ repositoryFullName: repo });
                 
-                // Find user connection for this repo (simplified - would need proper lookup)
-                // For now, schedule with high priority
-                try {
-                    await ReindexQueue.addReindexJob({
-                        repoFullName: repo,
-                        branch,
-                        userId: '', // Would need to lookup from repo
-                        connectionId: '', // Would need to lookup from repo
-                        priority: 'high'
-                    });
-                } catch (error) {
-                    // Queue might not be available, log and continue
-                    loggingService.warn('Failed to schedule reindex job', {
-                        repo,
-                        error: error instanceof Error ? error.message : 'Unknown'
+                if (mapping) {
+                    const { ReindexQueue } = await import('../queues/reindex.queue');
+                    
+                    try {
+                        await ReindexQueue.addReindexJob({
+                            repoFullName: repo,
+                            branch,
+                            userId: mapping.userId,
+                            connectionId: mapping.connectionId,
+                            priority: 'high'
+                        });
+                        
+                        loggingService.info('Scheduled reindex job for push event', {
+                            repo,
+                            userId: mapping.userId,
+                            commitCount: commits.length
+                        });
+                    } catch (error) {
+                        loggingService.warn('Failed to schedule reindex job', {
+                            repo,
+                            error: error instanceof Error ? error.message : 'Unknown'
+                        });
+                    }
+                } else {
+                    loggingService.info('No user mapping found for repository, skipping reindex', {
+                        repo
                     });
                 }
             }

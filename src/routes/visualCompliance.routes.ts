@@ -19,5 +19,11 @@ router.get('/presets', VisualComplianceController.getPresets);
 // Get cost comparison dashboard data
 router.get('/cost-comparison', VisualComplianceController.getCostComparison);
 
+// Get meta prompt presets (list)
+router.get('/meta-prompt-presets', VisualComplianceController.getMetaPromptPresets);
+
+// Get specific meta prompt preset by ID
+router.get('/meta-prompt-presets/:id', VisualComplianceController.getMetaPromptPresetById);
+
 export default router;
 

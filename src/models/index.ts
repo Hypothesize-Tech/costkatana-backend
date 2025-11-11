@@ -26,3 +26,4 @@ export { Integration, IIntegration } from './Integration';
 export type { IntegrationType, IntegrationStatus, AlertType, AlertSeverity, AlertRoutingRule, IntegrationCredentials, DeliveryConfig, IntegrationStats } from './Integration';
 export { GitHubConnection, IGitHubConnection, IGitHubRepository } from './GitHubConnection';
 export { GitHubIntegration, IGitHubIntegration, IGitHubCommit, IAISuggestion, IFeatureConfig } from './GitHubIntegration';
+export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserMapping';

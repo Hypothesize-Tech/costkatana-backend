@@ -22,6 +22,9 @@ interface VisualComplianceRequest {
   userId: string;
   projectId?: string;
   useUltraCompression?: boolean;
+  mode?: 'optimized' | 'standard';
+  metaPrompt?: string;
+  metaPromptPresetId?: string;
 }
 
 interface ImageFeatures {
@@ -38,6 +41,12 @@ interface ComplianceResponse {
   compliance_score: number;
   pass_fail: boolean;
   feedback_message: string;
+  items: Array<{
+    itemNumber: number;
+    itemName: string;
+    status: boolean;
+    message: string;
+  }>;
   metadata: {
     inputTokens: number;
     outputTokens: number;
@@ -99,8 +108,11 @@ export class VisualComplianceOptimizedService {
     const startTime = Date.now();
 
     try {
-      // Check cache first
-      if (request.useUltraCompression !== false) {
+      // Determine mode: default to optimized for backward compatibility
+      const mode = request.mode || 'optimized';
+
+      // Check cache first (only for optimized mode)
+      if (mode === 'optimized' && request.useUltraCompression !== false) {
         const cacheResult = await this.checkComplianceCache(request);
         if (cacheResult) {
           return {
@@ -114,11 +126,16 @@ export class VisualComplianceOptimizedService {
         }
       }
 
-      // Use feature extraction strategy
-      const result = await this.processWithFeatureExtraction(request);
+      // Choose processing strategy based on mode
+      let result: ComplianceResponse;
+      if (mode === 'standard') {
+        result = await this.processWithStandardMode(request);
+      } else {
+        result = await this.processWithFeatureExtraction(request);
+      }
 
-      // Cache the result
-      if (request.useUltraCompression !== false) {
+      // Cache the result (only for optimized mode)
+      if (mode === 'optimized' && request.useUltraCompression !== false) {
         await this.cacheComplianceResult(request, result);
       }
 
@@ -141,53 +158,57 @@ export class VisualComplianceOptimizedService {
   }
 
   /**
-   * Strategy 1: Feature Extraction (Best Compression)
-   * Extract visual features instead of sending full images
+   * Strategy 1: Optimized with Full Images (Nova Pro - Accurate & Cheap)
+   * Uses actual images with Amazon Nova Pro for semantic understanding
    */
   private static async processWithFeatureExtraction(
     request: VisualComplianceRequest
   ): Promise<ComplianceResponse> {
     const startTime = Date.now();
 
-    // Extract features from both images (parallel)
-    const [refFeatures, evidFeatures] = await Promise.all([
-      this.extractImageFeatures(request.referenceImage, 'reference', request.industry),
-      this.extractImageFeatures(request.evidenceImage, 'evidence', request.industry)
-    ]);
+    // Get meta prompt (from preset or custom)
+    let metaPrompt: string;
+    if (request.metaPrompt) {
+      metaPrompt = request.metaPrompt;
+    } else {
+      const { MetaPromptPresetsService } = await import('./metaPromptPresets.service');
+      const preset = request.metaPromptPresetId
+        ? MetaPromptPresetsService.getPresetById(request.metaPromptPresetId)
+        : MetaPromptPresetsService.getDefaultPreset();
+      metaPrompt = preset?.prompt ?? MetaPromptPresetsService.getDefaultPreset().prompt;
+    }
 
-    // Encode features as TOON
-    const featuresInTOON = await this.encodeFeaturesAsTOON(refFeatures, evidFeatures);
+    // Substitute criteria into meta prompt
+    const { MetaPromptPresetsService } = await import('./metaPromptPresets.service');
+    const finalPrompt = MetaPromptPresetsService.substituteCriteria(metaPrompt, request.complianceCriteria);
 
-    // Encode compliance criteria as Cortex LISP
-    const criteriaInCortex = await this.encodeCriteriaAsCortex(request.complianceCriteria);
+    // Build optimized prompt with Cortex LISP output format
+    const systemPrompt = this.buildOptimizedPromptWithCortex(finalPrompt, request.complianceCriteria);
 
-    // Build ultra-compressed prompt
-    const compressedPrompt = this.buildFeatureBasedPrompt(
-      featuresInTOON,
-      criteriaInCortex,
-      request.industry
-    );
-
-    // Call LLM with minimal tokens
-    const result = await this.invokeLLMWithCompressedInput(
-      compressedPrompt,
-      request.userId
+    // Call Nova Pro with actual images for accurate semantic analysis
+    const result = await this.invokeNovaProWithImages(
+      request.referenceImage.toString(),
+      request.evidenceImage.toString(),
+      systemPrompt
     );
 
     const latency = Date.now() - startTime;
-    const baselineInputTokens = 4500; // Baseline unoptimized input tokens (2 images at ~2000 each + prompt)
-    const baselineOutputTokens = 400; // Baseline unoptimized output tokens (JSON response)
-    const compressionRatio = ((1 - result.metadata.inputTokens / baselineInputTokens) * 100);
-
+    
+    // Baseline: Verbose prompts with Nova Pro (unoptimized)
+    const baselineInputTokens = 4500; // Verbose prompts + 2 images
+    const baselineOutputTokens = 800; // Verbose JSON response
+    
     // Calculate baseline cost (Nova Pro: $0.80 input, $3.20 output per 1M tokens)
     const baselineInputCost = (baselineInputTokens / 1_000_000) * 0.80;
     const baselineOutputCost = (baselineOutputTokens / 1_000_000) * 3.20;
     const baselineTotalCost = baselineInputCost + baselineOutputCost;
 
-    // Calculate optimized costs (already in result.metadata.cost)
+    // Optimized costs (with Cortex LISP - ultra-compressed output format)
     const optimizedInputCost = (result.metadata.inputTokens / 1_000_000) * 0.80;
     const optimizedOutputCost = (result.metadata.outputTokens / 1_000_000) * 3.20;
     const optimizedTotalCost = result.metadata.cost;
+    
+    const compressionRatio = ((1 - result.metadata.outputTokens / baselineOutputTokens) * 100);
 
     // Calculate savings
     const savingsAmount = baselineTotalCost - optimizedTotalCost;
@@ -208,7 +229,7 @@ export class VisualComplianceOptimizedService {
       metadata: {
         ...result.metadata,
         compressionRatio,
-        technique: 'feature_extraction_toon_cortex',
+        technique: 'nova_pro_cortex_lisp',
         latency,
         costBreakdown: {
           optimized: {
@@ -231,6 +252,153 @@ export class VisualComplianceOptimizedService {
             tokenReduction: tokenReduction
           }
         }
+      }
+    };
+  }
+
+  /**
+   * Strategy 2: Standard Mode with Full Images
+   * Send full images to Claude 3.5 Sonnet with customizable meta prompt
+   */
+  private static async processWithStandardMode(
+    request: VisualComplianceRequest
+  ): Promise<ComplianceResponse> {
+    const startTime = Date.now();
+
+    // Import meta prompt service
+    const { MetaPromptPresetsService } = await import('./metaPromptPresets.service');
+
+    // Get meta prompt (from preset or custom)
+    let metaPrompt: string;
+    if (request.metaPromptPresetId) {
+      const preset = MetaPromptPresetsService.getPresetById(request.metaPromptPresetId);
+      if (!preset) {
+        throw new Error(`Meta prompt preset not found: ${request.metaPromptPresetId}`);
+      }
+      metaPrompt = preset.prompt;
+    } else if (request.metaPrompt) {
+      // Validate custom meta prompt
+      const validation = MetaPromptPresetsService.validateMetaPrompt(request.metaPrompt);
+      if (!validation.valid) {
+        throw new Error(`Invalid meta prompt: ${validation.error}`);
+      }
+      metaPrompt = request.metaPrompt;
+    } else {
+      // Use default preset
+      const defaultPreset = MetaPromptPresetsService.getDefaultPreset();
+      metaPrompt = defaultPreset.prompt;
+    }
+
+    // Substitute criteria into meta prompt
+    metaPrompt = MetaPromptPresetsService.substituteCriteria(metaPrompt, request.complianceCriteria);
+
+    // Convert images to base64 if needed
+    const refBase64 = typeof request.referenceImage === 'string' 
+      ? (request.referenceImage.includes(',') ? request.referenceImage.split(',')[1] : request.referenceImage)
+      : request.referenceImage.toString('base64');
+    
+    const evidBase64 = typeof request.evidenceImage === 'string'
+      ? (request.evidenceImage.includes(',') ? request.evidenceImage.split(',')[1] : request.evidenceImage)
+      : request.evidenceImage.toString('base64');
+
+    // Use Claude 3.5 Sonnet for standard mode (via inference profile)
+    // Use the cross-region inference profile for better availability
+    const modelId = process.env.CLAUDE_SONNET_MODEL_ID ?? 'us.anthropic.claude-3-5-sonnet-20241022-v2:0';
+
+    const requestBody = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: refBase64
+              }
+            },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/jpeg',
+                data: evidBase64
+              }
+            },
+            {
+              type: 'text',
+              text: metaPrompt
+            }
+          ]
+        }
+      ],
+      max_tokens: 2000,
+      temperature: 0.1,
+      anthropic_version: 'bedrock-2023-05-31'
+    };
+
+    const command = new InvokeModelCommand({
+      modelId,
+      contentType: 'application/json',
+      accept: 'application/json',
+      body: JSON.stringify(requestBody)
+    });
+
+    const response = await this.bedrockClient.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+    const responseText = responseBody.content?.[0]?.text || '';
+    const inputTokens = responseBody.usage?.input_tokens || 4000; // Estimate for 2 images
+    const outputTokens = responseBody.usage?.output_tokens || Math.ceil(responseText.length / 4);
+
+    loggingService.info('Standard mode LLM response', {
+      responseLength: responseText.length,
+      inputTokens,
+      outputTokens,
+      hasResponse: !!responseText
+    });
+
+    // Parse Cortex response (standard mode also uses Cortex for consistency)
+    const complianceData = this.parseCortexResponse(responseText);
+
+    // Calculate cost (Claude 3.5 Sonnet: $3.00 input, $15.00 output per 1M tokens)
+    const cost = (inputTokens / 1_000_000) * 3.00 + (outputTokens / 1_000_000) * 15.00;
+
+    // Track cost
+    AICostTrackingService.trackCall({
+      service: 'visual-compliance',
+      operation: 'check-compliance-standard',
+      model: modelId,
+      inputTokens,
+      outputTokens,
+      estimatedCost: cost,
+      latency: Date.now() - startTime,
+      success: true,
+      userId: request.userId
+    });
+
+    loggingService.info('Standard mode compliance completed', {
+      inputTokens,
+      outputTokens,
+      cost: `$${cost.toFixed(6)}`,
+      latency: `${Date.now() - startTime}ms`
+    });
+
+    return {
+      compliance_score: complianceData.score,
+      pass_fail: complianceData.pass,
+      feedback_message: complianceData.msg,
+      items: complianceData.items,
+      metadata: {
+        inputTokens,
+        outputTokens,
+        cost,
+        latency: Date.now() - startTime,
+        cacheHit: false,
+        optimizationSavings: 0,
+        compressionRatio: 0,
+        technique: 'standard_full_images'
       }
     };
   }
@@ -354,20 +522,88 @@ export class VisualComplianceOptimizedService {
   }
 
   /**
-   * Infer objects from histogram (simplified)
+   * Infer objects from histogram
+   * Uses color distribution and brightness patterns to detect industry-specific objects
    */
   private static inferObjectsFromHistogram(histogram: number[], industry: string): string[] {
+    // Calculate histogram metrics
     const avgBrightness = histogram.reduce((a, b) => a + b, 0) / histogram.length;
+    const maxValue = Math.max(...histogram);
+    const minValue = Math.min(...histogram);
+    const contrast = maxValue - minValue;
     
-    const industryObjects: Record<string, string[]> = {
-      retail: ['shelf', 'products', 'labels'],
-      jewelry: ['display_case', 'jewelry_items', 'lighting'],
-      grooming: ['salon_chair', 'equipment', 'workspace'],
-      fmcg: ['packaging', 'shelf', 'brand_logos'],
-      documents: ['paper', 'text', 'formatting']
+    // Calculate color variance (indicates color diversity)
+    const mean = avgBrightness;
+    const variance = histogram.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / histogram.length;
+    const colorDiversity = Math.sqrt(variance);
+    
+    // Base objects for each industry
+    const baseObjects: Record<string, string[]> = {
+      retail: ['shelf', 'products'],
+      jewelry: ['display_case', 'jewelry_items'],
+      grooming: ['salon_chair', 'equipment'],
+      fmcg: ['packaging', 'products'],
+      documents: ['paper', 'text']
     };
-
-    return industryObjects[industry] || ['generic_objects'];
+    
+    const detectedObjects = [...(baseObjects[industry] || ['generic_objects'])];
+    
+    // Add conditional objects based on histogram analysis
+    
+    // High brightness suggests good lighting or light-colored objects
+    if (avgBrightness > 180) {
+      if (industry === 'jewelry') detectedObjects.push('spotlight', 'reflective_surfaces');
+      if (industry === 'grooming') detectedObjects.push('mirrors', 'white_surfaces');
+      if (industry === 'documents') detectedObjects.push('white_background');
+      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('bright_lighting');
+    }
+    
+    // Low brightness suggests poor lighting or dark objects
+    if (avgBrightness < 100) {
+      if (industry === 'jewelry') detectedObjects.push('dark_velvet_backing');
+      if (industry === 'documents') detectedObjects.push('text_content', 'printed_material');
+    }
+    
+    // High contrast suggests clear edges and defined objects
+    if (contrast > 150) {
+      detectedObjects.push('clear_edges', 'well_defined_objects');
+      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('labels', 'brand_logos');
+      if (industry === 'documents') detectedObjects.push('formatted_content');
+    }
+    
+    // High color diversity suggests multiple products or colorful scene
+    if (colorDiversity > 50) {
+      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('multiple_products', 'varied_packaging');
+      if (industry === 'jewelry') detectedObjects.push('gemstones', 'colored_items');
+      if (industry === 'grooming') detectedObjects.push('product_bottles', 'colorful_equipment');
+    }
+    
+    // Low color diversity suggests uniform or monochrome scene
+    if (colorDiversity < 30) {
+      if (industry === 'documents') detectedObjects.push('uniform_format');
+      if (industry === 'jewelry') detectedObjects.push('monochrome_display');
+    }
+    
+    // Analyze RGB distribution patterns (histogram bins represent R, G, B statistics)
+    if (histogram.length >= 12) {
+      // Extract R, G, B mean values (indices 1, 5, 9 based on our histogram structure)
+      const rMean = histogram[1] || 128;
+      const gMean = histogram[5] || 128;
+      const bMean = histogram[9] || 128;
+      
+      // Detect dominant color tones
+      if (rMean > gMean + 20 && rMean > bMean + 20) {
+        detectedObjects.push('red_tones'); // Warm colors, possibly sale tags or branding
+      }
+      if (bMean > rMean + 20 && bMean > gMean + 20) {
+        detectedObjects.push('blue_tones'); // Cool colors, possibly professional setting
+      }
+      if (Math.abs(rMean - gMean) < 15 && Math.abs(gMean - bMean) < 15) {
+        detectedObjects.push('neutral_tones'); // Grayscale or neutral colors
+      }
+    }
+    
+    return detectedObjects;
   }
 
   /**
@@ -421,7 +657,7 @@ export class VisualComplianceOptimizedService {
   /**
    * Encode compliance criteria as Cortex LISP
    */
-  private static async encodeCriteriaAsCortex(criteria: string[]): Promise<string> {
+  private static encodeCriteriaAsCortex(criteria: string[]): string {
     const cortexCriteria = criteria.map((c, i) => {
       const compressed = c
         .toLowerCase()
@@ -437,41 +673,49 @@ export class VisualComplianceOptimizedService {
   }
 
   /**
-   * Build ultra-compressed prompt using TOON features + Cortex criteria
+   * Build optimized prompt with Cortex LISP output (for Nova Pro with images)
    */
-  private static buildFeatureBasedPrompt(
-    featuresInTOON: string,
-    criteriaInCortex: string,
-    industry: string
-  ): string {
-    return `You are a visual compliance analyzer. Analyze the image features against compliance criteria.
+  private static buildOptimizedPromptWithCortex(metaPrompt: string, criteria: string[]): string {
+    return `${metaPrompt}
 
-Industry: ${industry}
-Features: ${featuresInTOON}
-Criteria: ${criteriaInCortex}
+You MUST respond in this EXACT Cortex LISP format with per-item breakdown:
+(result (score 85.5) (pass t) (msg "Overall summary") (items (i1 (name "Item 1: First criterion description") (pass t) (msg "Explanation")) (i2 (name "Item 2: Second criterion description") (pass f) (msg "Issue found"))))
 
-You MUST respond in this EXACT Cortex LISP format:
-(result (score 85.5) (pass t) (msg "Products facing forward, shelves stocked"))
+CRITICAL RULES:
+1. Create one item (i1, i2, i3, i4...) for EACH of the ${criteria.length} verification criteria
+2. Item names must start with "Item N:" followed by the FULL criterion text
+3. Use (pass t) for pass/true, (pass f) for fail/false based on ACTUAL visual evidence
+4. Be strict and accurate - only use (pass t) if the criterion is CLEARLY met in the images
+5. Return ONLY the LISP format, nothing else - NO markdown, NO explanation
 
-Rules:
-- score: 0-100 (compliance percentage)
-- pass: t (true) or f (false)
-- msg: Brief feedback explaining compliance status
-
-Return ONLY the LISP format, nothing else.`;
+The ${criteria.length} criteria to verify are:
+${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
   }
 
   /**
-   * Invoke LLM with ultra-compressed input
+   * Invoke Amazon Nova Pro with actual images for accurate semantic analysis
    */
-  private static async invokeLLMWithCompressedInput(
-    compressedPrompt: string,
-    userId: string
+  private static async invokeNovaProWithImages(
+    referenceImage: string,
+    evidenceImage: string,
+    prompt: string
   ): Promise<ComplianceResponse> {
     const startTime = Date.now();
 
-    // Use Nova Pro (cheapest multimodal model)
+    // Use Nova Pro (multimodal vision model - cheap and accurate)
     const modelId = process.env.VISUAL_COMPLIANCE_DEFAULT_MODEL || 'amazon.nova-pro-v1:0';
+
+    // Convert base64 to proper format (remove data URL prefix if present)
+    const refImageData = referenceImage.includes('base64,') 
+      ? referenceImage.split('base64,')[1] 
+      : referenceImage;
+    const evidImageData = evidenceImage.includes('base64,')
+      ? evidenceImage.split('base64,')[1]
+      : evidenceImage;
+
+    // Determine image format
+    const refFormat = referenceImage.includes('image/png') ? 'png' : 'jpeg';
+    const evidFormat = evidenceImage.includes('image/png') ? 'png' : 'jpeg';
 
     const requestBody = {
       messages: [
@@ -479,13 +723,29 @@ Return ONLY the LISP format, nothing else.`;
           role: 'user',
           content: [
             {
-              text: compressedPrompt
+              image: {
+                format: refFormat,
+                source: {
+                  bytes: refImageData
+                }
+              }
+            },
+            {
+              image: {
+                format: evidFormat,
+                source: {
+                  bytes: evidImageData
+                }
+              }
+            },
+            {
+              text: `Reference Image (first) vs Evidence Image (second):\n\n${prompt}`
             }
           ]
         }
       ],
       inferenceConfig: {
-        max_new_tokens: 150,
+        max_new_tokens: 500,
         temperature: 0.1,
         topP: 0.9
       }
@@ -502,46 +762,27 @@ Return ONLY the LISP format, nothing else.`;
     const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
     const responseText = responseBody.output?.message?.content?.[0]?.text || '';
-    const inputTokens = responseBody.usage?.inputTokens || Math.ceil(compressedPrompt.length / 4);
-    const outputTokens = responseBody.usage?.outputTokens || Math.ceil(responseText.length / 4);
+    const inputTokens = responseBody.usage?.inputTokens || 3000;
+    const outputTokens = responseBody.usage?.outputTokens || 300;
 
-    // Log the raw response for debugging
-    loggingService.info('LLM raw response', {
+    loggingService.info('Nova Pro response received', {
       responseLength: responseText.length,
       responsePreview: responseText.substring(0, 500),
-      hasResponse: !!responseText
+      inputTokens,
+      outputTokens
     });
 
-    // Parse Cortex response
+    // Parse Cortex LISP response
     const complianceData = this.parseCortexResponse(responseText);
 
     // Calculate cost (Nova Pro: $0.80 input, $3.20 output per 1M tokens)
     const cost = (inputTokens / 1_000_000) * 0.80 + (outputTokens / 1_000_000) * 3.20;
 
-    // Track cost
-    AICostTrackingService.trackCall({
-      service: 'visual-compliance',
-      operation: 'check-compliance',
-      model: modelId,
-      inputTokens,
-      outputTokens,
-      estimatedCost: cost,
-      latency: Date.now() - startTime,
-      success: true,
-      userId
-    });
-
-    loggingService.info('Ultra-compressed LLM call', {
-      inputTokens,
-      outputTokens,
-      cost: `$${cost.toFixed(6)}`,
-      latency: `${Date.now() - startTime}ms`
-    });
-
     return {
       compliance_score: complianceData.score,
       pass_fail: complianceData.pass,
       feedback_message: complianceData.msg,
+      items: complianceData.items,
       metadata: {
         inputTokens,
         outputTokens,
@@ -550,21 +791,28 @@ Return ONLY the LISP format, nothing else.`;
         cacheHit: false,
         optimizationSavings: 0,
         compressionRatio: 0,
-        technique: 'feature_extraction'
+        technique: 'nova_pro_visual_cortex'
       }
     };
   }
 
+
   /**
-   * Parse Cortex LISP response
+   * Parse Cortex LISP response with per-item breakdown
    */
   private static parseCortexResponse(cortexText: string): {
     score: number;
     pass: boolean;
     msg: string;
+    items: Array<{
+      itemNumber: number;
+      itemName: string;
+      status: boolean;
+      message: string;
+    }>;
   } {
     try {
-      // Expected: (result (score 87.5) (pass t) (msg "All criteria met"))
+      // Expected: (result (score 87.5) (pass t) (msg "Overall") (items (i1 (name "Item 1: ...") (pass t) (msg "...")) ...))
       const scoreMatch = cortexText.match(/\(score\s+([\d.]+)\)/);
       const passMatch = cortexText.match(/\(pass\s+(t|f|true|false)\)/);
       const msgMatch = cortexText.match(/\(msg\s+"([^"]+)"\)/);
@@ -573,13 +821,78 @@ Return ONLY the LISP format, nothing else.`;
       const pass = ['t', 'true'].includes(passMatch?.[1]?.toLowerCase() || 'f');
       const msg = msgMatch?.[1] || 'No feedback';
 
-      return { score, pass, msg };
+      // Parse items section
+      const items: Array<{
+        itemNumber: number;
+        itemName: string;
+        status: boolean;
+        message: string;
+      }> = [];
+
+      // Extract items block: (items (...) (...) ...)
+      const itemsBlockMatch = cortexText.match(/\(items\s+(.*)\)\s*\)/s);
+      if (itemsBlockMatch) {
+        const itemsContent = itemsBlockMatch[1];
+        
+        // Match individual items: (i1 (name "...") (pass t/f) (msg "..."))
+        const itemRegex = /\(i(\d+)\s+\(name\s+"([^"]+)"\)\s+\(pass\s+(t|f|true|false)\)\s+\(msg\s+"([^"]+)"\)\)/g;
+        let itemMatch;
+        
+        while ((itemMatch = itemRegex.exec(itemsContent)) !== null) {
+          const itemNumber = parseInt(itemMatch[1]);
+          const itemName = itemMatch[2];
+          const itemPass = ['t', 'true'].includes(itemMatch[3]?.toLowerCase() || 'f');
+          const itemMsg = itemMatch[4];
+          
+          items.push({
+            itemNumber,
+            itemName,
+            status: itemPass,
+            message: itemMsg
+          });
+        }
+      }
+
+      // If no items were parsed but we have a response, create a single default item
+      if (items.length === 0) {
+        items.push({
+          itemNumber: 1,
+          itemName: 'Overall Compliance',
+          status: pass,
+          message: msg
+        });
+      }
+
+      // Recalculate overall pass/fail based on actual items
+      // A compliance check should pass only if ALL items pass
+      const actualPass = items.length > 0 ? items.every(item => item.status) : pass;
+      
+      // Recalculate score based on items pass rate
+      const passedItems = items.filter(item => item.status).length;
+      const actualScore = items.length > 0 ? (passedItems / items.length) * 100 : score;
+
+      return { 
+        score: actualScore, 
+        pass: actualPass, 
+        msg: items.length > 0 ? `${passedItems}/${items.length} items passed` : msg, 
+        items 
+      };
     } catch (error) {
       loggingService.warn('Failed to parse Cortex response', {
         error: error instanceof Error ? error.message : String(error),
         response: cortexText.substring(0, 200)
       });
-      return { score: 0, pass: false, msg: 'Parse error' };
+      return { 
+        score: 0, 
+        pass: false, 
+        msg: 'Parse error',
+        items: [{
+          itemNumber: 1,
+          itemName: 'Parse Error',
+          status: false,
+          message: 'Failed to parse response'
+        }]
+      };
     }
   }
 

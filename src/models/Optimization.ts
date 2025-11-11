@@ -17,7 +17,7 @@ export interface IOptimization {
     model: string;
     category: 'prompt_reduction' | 'context_optimization' | 'response_formatting' | 'batch_processing' | 'model_selection';
     // New field for optimization type
-    optimizationType: 'text' | 'visual_compliance';
+    optimizationType: 'text' | 'visual_compliance' | 'visual_compliance_standard';
     // Visual compliance specific fields
     visualComplianceData?: {
         referenceImageUrl?: string;
@@ -154,7 +154,7 @@ const optimizationSchema = new Schema<IOptimization>({
     },
     optimizationType: {
         type: String,
-        enum: ['text', 'visual_compliance'],
+        enum: ['text', 'visual_compliance', 'visual_compliance_standard'],
         default: 'text',
         required: true
     },
