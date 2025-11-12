@@ -13,3 +13,4 @@ export * from './requestMetrics';
 export * from './trace.middleware';
 export * from './validation.middleware';
 export * from './webhook.middleware';
+export * from './aiLogging.middleware';

@@ -27,3 +27,4 @@ export type { IntegrationType, IntegrationStatus, AlertType, AlertSeverity, Aler
 export { GitHubConnection, IGitHubConnection, IGitHubRepository } from './GitHubConnection';
 export { GitHubIntegration, IGitHubIntegration, IGitHubCommit, IAISuggestion, IFeatureConfig } from './GitHubIntegration';
 export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserMapping';
+export { AILog, IAILog } from './AILog';
