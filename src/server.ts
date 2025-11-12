@@ -83,13 +83,18 @@ app.use(securityLogger);
 app.use(cors(config.cors));
 
 // Body parsing with stricter limits to prevent memory issues
+// Store raw body for webhook signature verification
 app.use(express.json({ 
     limit: '100mb', // Reduced from 10mb to prevent memory issues
-    verify: (_req: Request, res: Response, buf: Buffer) => {
+    verify: (req: Request, res: Response, buf: Buffer, encoding: BufferEncoding) => {
         // Stream large requests to prevent memory buildup
         if (buf.length > 1024 * 1024 * 100) { // 100MB
             res.status(413).json({ error: 'Request too large' });
             return;
+        }
+        // Store raw body for GitHub webhook signature verification
+        if (req.path.includes('/github/webhook')) {
+            (req as any).rawBody = buf.toString(encoding || 'utf8');
         }
     }
 }));

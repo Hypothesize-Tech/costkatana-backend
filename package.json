@@ -17,11 +17,7 @@
     "otel:restart": "bash scripts/otel-restart.sh",
     "telemetry:verify": "node scripts/verify-telemetry.js",
     "telemetry:validate": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.validateTelemetryConfig())\"",
-    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\"",
-    "rag:migrate": "ts-node scripts/migrate-to-rag.ts",
-    "rag:migrate:clean": "ts-node scripts/migrate-to-rag.ts --clean",
-    "rag:create-index": "ts-node scripts/create-vector-index.ts",
-    "migrate:workspaces": "ts-node scripts/migrate-workspaces.ts"
+    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\""
   },
   "keywords": [
     "ai-cost-optimization",
@@ -136,7 +132,9 @@
     "winston": "^3.11.0",
     "ws": "^8.18.3",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "sharp": "^0.33.0",
+    "sharp-phash": "^2.1.0"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",

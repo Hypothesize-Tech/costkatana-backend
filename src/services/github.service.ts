@@ -1,5 +1,6 @@
 import { IGitHubConnection, IGitHubRepository } from '../models';
 import { loggingService } from './logging.service';
+import { GitHubErrors } from '../utils/githubErrors';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 
@@ -17,6 +18,9 @@ export interface OAuthTokenResponse {
     access_token: string;
     token_type: string;
     scope: string;
+    expires_in?: number;
+    refresh_token?: string;
+    refresh_token_expires_in?: number;
 }
 
 export interface GitHubUser {
@@ -88,6 +92,10 @@ export class GitHubService {
 
     private static modulesLoaded = false;
     private static initializationPromise: Promise<void> | null = null;
+    
+    // Rate limit tracking
+    private static rateLimitRemaining: number = 5000;
+    private static rateLimitReset: number = Date.now();
 
     /**
      * Initialize GitHub service modules
@@ -147,7 +155,9 @@ export class GitHubService {
         await this.initialize();
         
         if (!this.config.appId || !this.config.privateKey) {
-            throw new Error('GitHub App credentials not configured. Please set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY environment variables.');
+            const error = GitHubErrors.APP_NOT_CONFIGURED;
+            loggingService.error(error.message, { code: error.code });
+            throw new Error(error.userMessage);
         }
 
         try {
@@ -186,11 +196,14 @@ export class GitHubService {
     }
 
     /**
-     * Create JWT token for GitHub App authentication
+     * Create JWT token for GitHub App authentication (consolidated method)
+     * Uses jsonwebtoken library for reliability
      */
     private static createJWT(): string {
         if (!this.config.appId || !this.config.privateKey) {
-            throw new Error('GitHub App credentials not configured');
+            const error = GitHubErrors.APP_NOT_CONFIGURED;
+            loggingService.error(error.message, { code: error.code });
+            throw new Error(error.userMessage);
         }
 
         const now = Math.floor(Date.now() / 1000);
@@ -200,28 +213,37 @@ export class GitHubService {
             iss: this.config.appId // Issuer (App ID)
         };
 
-        const header = {
-            alg: 'RS256',
-            typ: 'JWT'
-        };
-
-        // Create JWT token manually since we don't have a JWT library
-        const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
-        const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-        
-        const signature = crypto
-            .createSign('RSA-SHA256')
-            .update(`${encodedHeader}.${encodedPayload}`)
-            .sign(this.config.privateKey, 'base64url');
-
-        return `${encodedHeader}.${encodedPayload}.${signature}`;
+        return jwt.sign(payload, this.config.privateKey, { algorithm: 'RS256' });
     }
 
     /**
-     * Get Octokit instance from GitHub connection
+     * Get Octokit instance from GitHub connection (with auto-refresh)
      */
-    private static async getOctokitFromConnection(connection: IGitHubConnection & { decryptToken: () => string }): Promise<any> {
+    private static async getOctokitFromConnection(connection: IGitHubConnection & { decryptToken: () => string; decryptRefreshToken?(): string }): Promise<any> {
         try {
+            // Check if OAuth token is expired and needs refresh
+            if (connection.tokenType === 'oauth' && connection.expiresAt) {
+                const now = new Date();
+                const expiresAt = new Date(connection.expiresAt);
+                
+                // Refresh if expired or expiring in next 5 minutes
+                if (expiresAt <= new Date(now.getTime() + 5 * 60 * 1000)) {
+                    loggingService.info('OAuth token expired or expiring soon, attempting refresh', {
+                        userId: connection.userId,
+                        expiresAt: connection.expiresAt
+                    });
+                    
+                    const refreshed = await this.refreshAccessToken(connection);
+                    if (refreshed) {
+                        return this.createOctokitFromToken(refreshed);
+                    }
+                    // If refresh failed, try with existing token (might still work)
+                    loggingService.warn('Token refresh failed, using existing token', {
+                        userId: connection.userId
+                    });
+                }
+            }
+            
             const decryptedToken = connection.decryptToken();
             
             if (connection.tokenType === 'app' && connection.installationId) {
@@ -236,7 +258,83 @@ export class GitHubService {
                 hasAccessToken: !!connection.accessToken,
                 tokenType: connection.tokenType
             });
-            throw new Error(`Failed to authenticate with GitHub: ${error.message}`);
+            const standardError = GitHubErrors.INVALID_CREDENTIALS;
+            throw new Error(standardError.userMessage);
+        }
+    }
+    
+    /**
+     * Refresh OAuth access token
+     */
+    static async refreshAccessToken(connection: IGitHubConnection & { decryptToken: () => string; decryptRefreshToken?(): string }): Promise<string | null> {
+        try {
+            if (!connection.decryptRefreshToken) {
+                loggingService.warn('No refresh token available for connection', {
+                    userId: connection.userId
+                });
+                return null;
+            }
+            
+            const refreshToken = connection.decryptRefreshToken();
+            if (!refreshToken) {
+                loggingService.warn('Refresh token is empty', {
+                    userId: connection.userId
+                });
+                return null;
+            }
+            
+            loggingService.info('Refreshing OAuth token', {
+                userId: connection.userId
+            });
+            
+            const response = await fetch('https://github.com/login/oauth/access_token', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    client_id: this.config.clientId,
+                    client_secret: this.config.clientSecret,
+                    refresh_token: refreshToken,
+                    grant_type: 'refresh_token'
+                })
+            });
+            
+            const data = await response.json() as OAuthTokenResponse;
+            
+            if (!data.access_token) {
+                const error = GitHubErrors.TOKEN_REFRESH_FAILED;
+                loggingService.error(error.message, {
+                    userId: connection.userId,
+                    code: error.code
+                });
+                return null;
+            }
+            
+            // Update connection with new tokens
+            connection.accessToken = data.access_token;
+            if (data.refresh_token) {
+                connection.refreshToken = data.refresh_token;
+            }
+            if (data.expires_in) {
+                connection.expiresAt = new Date(Date.now() + data.expires_in * 1000);
+            }
+            await connection.save();
+            
+            loggingService.info('OAuth token refreshed successfully', {
+                userId: connection.userId,
+                expiresAt: connection.expiresAt
+            });
+            
+            return data.access_token;
+        } catch (error: any) {
+            loggingService.error('Failed to refresh OAuth token', {
+                userId: connection.userId,
+                error: error.message,
+                stack: error.stack
+            });
+            return null;
         }
     }
 
@@ -261,7 +359,9 @@ export class GitHubService {
             const data = await response.json() as OAuthTokenResponse;
             
             if (!data.access_token) {
-                throw new Error('Failed to obtain access token');
+                const error = GitHubErrors.OAUTH_CALLBACK_FAILED;
+                loggingService.error(error.message, { code: error.code });
+                throw new Error(error.userMessage);
             }
 
             loggingService.info('OAuth token exchanged successfully');
@@ -342,7 +442,11 @@ export class GitHubService {
                 error: error.message,
                 stack: error.stack
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -364,7 +468,11 @@ export class GitHubService {
                 repository: `${owner}/${repo}`,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -407,7 +515,11 @@ export class GitHubService {
                 path,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -446,7 +558,11 @@ export class GitHubService {
                 path,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -592,7 +708,12 @@ export class GitHubService {
         try {
             // Verify we're using OAuth token, not App token
             if (connection.tokenType === 'app') {
-                throw new Error('GitHub App authentication detected. Please reconnect using OAuth flow for write access.');
+                const error = GitHubErrors.APP_PERMISSIONS_INSUFFICIENT;
+                loggingService.error(error.message, { 
+                    userId: connection.userId,
+                    code: error.code 
+                });
+                throw new Error(error.userMessage);
             }
 
             const octokit = await this.getOctokitFromConnection(connection);
@@ -628,16 +749,6 @@ export class GitHubService {
             const errorMessage = error instanceof Error ? error.message : 'Unknown error';
             const errorStatus = (error as any)?.status;
             
-            // Provide user-friendly error messages
-            let userMessage = errorMessage;
-            if (errorMessage.includes('Resource not accessible by integration')) {
-                userMessage = 'GitHub token does not have write permissions. Please reconnect your GitHub account and grant all requested permissions.';
-            } else if (errorMessage.includes('Bad credentials')) {
-                userMessage = 'GitHub authentication failed. Please reconnect your GitHub account.';
-            } else if (errorMessage.includes('Not Found')) {
-                userMessage = 'Repository or branch not found. Please verify the repository exists and you have access.';
-            }
-
             loggingService.error('Failed to create branch', {
                 repository: `${options.owner}/${options.repo}`,
                 branchName: options.branchName,
@@ -647,9 +758,11 @@ export class GitHubService {
                 isActive: connection.isActive
             });
             
-            // Throw error with user-friendly message
-            const friendlyError = new Error(userMessage);
-            (friendlyError as any).status = errorStatus;
+            // Use standardized error messages
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
             throw friendlyError;
         }
     }
@@ -710,7 +823,11 @@ export class GitHubService {
                 path: options.path,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -753,7 +870,11 @@ export class GitHubService {
                 title: options.title,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -789,7 +910,11 @@ export class GitHubService {
                 prNumber: options.prNumber,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -823,7 +948,11 @@ export class GitHubService {
                 prNumber,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -858,7 +987,11 @@ export class GitHubService {
                 prNumber,
                 error: error.message
             });
-            throw error;
+            const standardError = GitHubErrors.fromGitHubError(error);
+            const friendlyError = new Error(standardError.userMessage);
+            (friendlyError as any).code = standardError.code;
+            (friendlyError as any).status = standardError.httpStatus;
+            throw friendlyError;
         }
     }
 
@@ -897,35 +1030,51 @@ export class GitHubService {
 
     /**
      * Get app token for GitHub App authentication
+     * Uses consolidated createJWT method
      */
     private static async getAppToken(): Promise<string> {
-        if (!this.config.appId || !this.config.privateKey) {
-            throw new Error('GitHub App credentials not configured');
-        }
-
-        const now = Math.floor(Date.now() / 1000);
-        const payload = {
-            iat: now - 60,
-            exp: now + 600, // 10 minutes
-            iss: this.config.appId
-        };
-
-        const token = jwt.sign(payload, this.config.privateKey, { algorithm: 'RS256' });
-        return token;
+        return this.createJWT();
     }
 
     /**
-     * Verify webhook signature
+     * Verify webhook signature with proper null checks and error handling
      */
     static verifyWebhookSignature(payload: string, signature: string): boolean {
-        const secret = process.env.GITHUB_WEBHOOK_SECRET || '';
-        const hmac = crypto.createHmac('sha256', secret);
-        const digest = 'sha256=' + hmac.update(payload).digest('hex');
+        // Validate inputs
+        if (!signature || !payload) {
+            const error = GitHubErrors.WEBHOOK_SIGNATURE_INVALID;
+            loggingService.warn(error.message, { code: error.code });
+            return false;
+        }
         
-        return crypto.timingSafeEqual(
-            Buffer.from(digest),
-            Buffer.from(signature)
-        );
+        const secret = process.env.GITHUB_WEBHOOK_SECRET || '';
+        if (!secret) {
+            const error = GitHubErrors.APP_NOT_CONFIGURED;
+            loggingService.error(error.message, { code: error.code });
+            return false;
+        }
+        
+        try {
+            const hmac = crypto.createHmac('sha256', secret);
+            const digest = 'sha256=' + hmac.update(payload).digest('hex');
+            
+            // Ensure both buffers are same length to prevent timing attacks
+            if (digest.length !== signature.length) {
+                loggingService.warn('Webhook signature length mismatch');
+                return false;
+            }
+            
+            return crypto.timingSafeEqual(
+                Buffer.from(digest),
+                Buffer.from(signature)
+            );
+        } catch (error: any) {
+            loggingService.error('Webhook signature verification error', {
+                error: error.message,
+                stack: error.stack
+            });
+            return false;
+        }
     }
 }
 

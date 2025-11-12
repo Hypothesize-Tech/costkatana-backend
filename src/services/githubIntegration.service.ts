@@ -1,7 +1,7 @@
 import { GitHubService } from './github.service';
 import { GitHubAnalysisService, AnalysisResult } from './githubAnalysis.service';
 import { GitHubCodeGeneratorService, IntegrationCode } from './githubCodeGenerator.service';
-import { GitHubConnection, GitHubIntegration, IGitHubIntegration, IFeatureConfig, IGitHubConnection } from '../models';
+import { GitHubConnection, GitHubIntegration, IGitHubIntegration, IFeatureConfig, IGitHubConnection, RepositoryUserMapping } from '../models';
 import { loggingService } from './logging.service';
 import { Types } from 'mongoose';
 
@@ -66,6 +66,29 @@ export class GitHubIntegrationService {
                 commits: [],
                 aiSuggestions: []
             });
+
+            // Create or update repository-to-user mapping for webhook events
+            try {
+                await RepositoryUserMapping.findOneAndUpdate(
+                    { repositoryFullName },
+                    {
+                        userId,
+                        connectionId: connectionId.toString(),
+                        repositoryFullName
+                    },
+                    { upsert: true, new: true }
+                );
+                
+                loggingService.info('Repository-user mapping created/updated', {
+                    repositoryFullName,
+                    userId
+                });
+            } catch (mappingError: any) {
+                loggingService.warn('Failed to create repository mapping (non-critical)', {
+                    repositoryFullName,
+                    error: mappingError.message
+                });
+            }
 
             // Start async integration process
             this.processIntegration(integration._id.toString()).catch(error => {
@@ -182,7 +205,36 @@ export class GitHubIntegrationService {
                 framework: analysis.framework
             });
 
-            // Step 2: Generate integration code
+            // Step 2: Fetch existing file contents for preservation
+            integration.status = 'analyzing';
+            integration.lastActivityAt = new Date();
+            await integration.save();
+
+            // Retrieve existing entry point content to preserve it
+            const existingFileContents: Record<string, string> = {};
+            for (const entryPoint of analysis.entryPoints.slice(0, 3)) { // Check up to 3 entry points
+                try {
+                    loggingService.info('Fetching existing file content for preservation', {
+                        integrationId,
+                        filePath: entryPoint
+                    });
+                    const content = await GitHubService.getFileContent(connection, owner, repo, entryPoint);
+                    existingFileContents[entryPoint] = content;
+                    loggingService.info('Successfully retrieved existing file content', {
+                        integrationId,
+                        filePath: entryPoint,
+                        contentLength: content.length
+                    });
+                } catch (error: any) {
+                    loggingService.warn('Could not fetch existing file content', {
+                        integrationId,
+                        filePath: entryPoint,
+                        error: error.message
+                    });
+                }
+            }
+
+            // Step 3: Generate integration code
             integration.status = 'generating';
             integration.lastActivityAt = new Date();
             await integration.save();
@@ -190,6 +242,7 @@ export class GitHubIntegrationService {
             loggingService.info('Starting code generation step', {
                 integrationId,
                 integrationType: integration.integrationType,
+                existingFilesRetrieved: Object.keys(existingFileContents).length,
                 timestamp: new Date().toISOString()
             });
 
@@ -248,7 +301,8 @@ export class GitHubIntegrationService {
                                 features: integration.selectedFeatures,
                                 analysis,
                                 repositoryName: integration.repositoryName,
-                                apiKey: process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here'
+                                apiKey: process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here',
+                                existingFileContents // Pass existing file contents for preservation
                             }
                         ),
                         new Promise<IntegrationCode>((_, reject) => 
