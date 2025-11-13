@@ -39,6 +39,7 @@ export interface IntegrationCredentials {
     accessToken?: string;
     refreshToken?: string;
     botToken?: string;
+    botUserId?: string;
     channelId?: string;
     channelName?: string;
     guildId?: string;

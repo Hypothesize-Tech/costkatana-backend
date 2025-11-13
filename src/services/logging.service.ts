@@ -1,6 +1,6 @@
 import { BasicLoggerService } from './basic-logger.service';
 import { CloudWatchClient, PutMetricDataCommand } from '@aws-sdk/client-cloudwatch';
-import { addBreadcrumb, captureError } from '../config/sentry';
+import { addBreadcrumb } from '../config/sentry';
 import * as Sentry from '@sentry/node';
 
 export interface LogContext {

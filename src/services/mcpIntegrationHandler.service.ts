@@ -163,9 +163,10 @@ export class MCPIntegrationHandler {
       const hasIntegration = integrations.some(i => {
         if (integrationType === 'jira') return i.type === 'jira_oauth';
         if (integrationType === 'linear') return i.type === 'linear_oauth';
-        if (integrationType === 'slack') return i.type === 'slack_oauth';
-        if (integrationType === 'discord') return i.type === 'discord_oauth';
+        if (integrationType === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
+        if (integrationType === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
         if (integrationType === 'github') return i.type === 'github_oauth';
+        if (integrationType === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
 

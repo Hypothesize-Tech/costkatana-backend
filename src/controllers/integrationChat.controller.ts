@@ -114,8 +114,10 @@ export class IntegrationChatController {
         filteredIntegrations = integrations.filter(i => {
           if (integration === 'jira') return i.type === 'jira_oauth';
           if (integration === 'linear') return i.type === 'linear_oauth';
-          if (integration === 'slack') return i.type === 'slack_oauth';
-          if (integration === 'discord') return i.type === 'discord_oauth';
+          if (integration === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
+          if (integration === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
+          if (integration === 'github') return i.type === 'github_oauth';
+          if (integration === 'webhook') return i.type === 'custom_webhook';
           return false;
         });
       }
@@ -219,8 +221,10 @@ export class IntegrationChatController {
       const integration = integrations.find(i => {
         if (type === 'jira') return i.type === 'jira_oauth';
         if (type === 'linear') return i.type === 'linear_oauth';
-        if (type === 'slack') return i.type === 'slack_oauth';
-        if (type === 'discord') return i.type === 'discord_oauth';
+        if (type === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
+        if (type === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
+        if (type === 'github') return i.type === 'github_oauth';
+        if (type === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
 
@@ -356,8 +360,10 @@ export class IntegrationChatController {
       const integration = integrations.find(i => {
         if (type === 'jira') return i.type === 'jira_oauth';
         if (type === 'linear') return i.type === 'linear_oauth';
-        if (type === 'slack') return i.type === 'slack_oauth';
-        if (type === 'discord') return i.type === 'discord_oauth';
+        if (type === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
+        if (type === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
+        if (type === 'github') return i.type === 'github_oauth';
+        if (type === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
 

@@ -48,6 +48,8 @@ export interface IGitHubIntegration extends Document {
     aiSuggestions: IAISuggestion[];
     analysisResults?: {
         language: string;
+        languageConfidence: number;
+        isTypeScriptPrimary?: boolean;
         framework?: string;
         entryPoints: string[];
         existingAIIntegrations: string[];
@@ -200,6 +202,8 @@ const githubIntegrationSchema = new Schema<IGitHubIntegration>({
     analysisResults: {
         type: {
             language: String,
+            languageConfidence: Number,
+            isTypeScriptPrimary: Boolean,
             framework: String,
             entryPoints: [String],
             existingAIIntegrations: [String],

@@ -195,6 +195,132 @@ export class LinearService {
     }
 
     /**
+     * List users in organization
+     */
+    static async listUsers(accessToken: string): Promise<LinearUser[]> {
+        const query = `
+            query {
+                users {
+                    nodes {
+                        id
+                        name
+                        email
+                        active
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ users: { nodes: LinearUser[] } }>(accessToken, query);
+            return data.users.nodes || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Linear users', { error: error.message });
+            throw error;
+        }
+    }
+
+    /**
+     * List workflows (states) for a team
+     */
+    static async listWorkflows(accessToken: string, teamId: string): Promise<any[]> {
+        const query = `
+            query($teamId: String!) {
+                team(id: $teamId) {
+                    states {
+                        nodes {
+                            id
+                            name
+                            type
+                            color
+                            description
+                        }
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ team: { states: { nodes: any[] } } }>(
+                accessToken,
+                query,
+                { teamId }
+            );
+            return data.team?.states?.nodes || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Linear workflows', { error: error.message, teamId });
+            throw error;
+        }
+    }
+
+    /**
+     * List labels (tags) for a team
+     */
+    static async listLabels(accessToken: string, teamId: string): Promise<any[]> {
+        const query = `
+            query($teamId: String!) {
+                team(id: $teamId) {
+                    labels {
+                        nodes {
+                            id
+                            name
+                            color
+                            description
+                        }
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ team: { labels: { nodes: any[] } } }>(
+                accessToken,
+                query,
+                { teamId }
+            );
+            return data.team?.labels?.nodes || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Linear labels', { error: error.message, teamId });
+            throw error;
+        }
+    }
+
+    /**
+     * List cycles (iterations) for a team
+     */
+    static async listCycles(accessToken: string, teamId: string): Promise<any[]> {
+        const query = `
+            query($teamId: String!) {
+                team(id: $teamId) {
+                    cycles {
+                        nodes {
+                            id
+                            number
+                            name
+                            startsAt
+                            endsAt
+                            completedAt
+                            progress
+                        }
+                    }
+                }
+            }
+        `;
+
+        try {
+            const data = await this.executeQuery<{ team: { cycles: { nodes: any[] } } }>(
+                accessToken,
+                query,
+                { teamId }
+            );
+            return data.team?.cycles?.nodes || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Linear cycles', { error: error.message, teamId });
+            throw error;
+        }
+    }
+
+    /**
      * List projects for a team
      */
     static async listProjects(accessToken: string, teamId: string): Promise<LinearProject[]> {
