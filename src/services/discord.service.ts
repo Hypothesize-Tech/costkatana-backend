@@ -501,6 +501,12 @@ export class DiscordService {
      */
     static async listChannels(botToken: string, guildId: string): Promise<any[]> {
         try {
+            loggingService.info('Attempting to list Discord channels', {
+                guildId,
+                botTokenLength: botToken?.length,
+                botTokenPrefix: botToken?.substring(0, 20) + '...'
+            });
+
             const response = await axios.get(
                 `${this.DISCORD_API_BASE}/guilds/${guildId}/channels`,
                 {
@@ -512,7 +518,38 @@ export class DiscordService {
 
             return response.data || [];
         } catch (error: any) {
-            loggingService.error('Failed to list Discord channels', { error: error.message, guildId });
+            loggingService.error('Failed to list Discord channels', {
+                error: error.message,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                guildId,
+                botTokenLength: botToken?.length
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * List members in a Discord guild
+     */
+    static async listGuildMembers(botToken: string, guildId: string, limit: number = 100): Promise<any[]> {
+        try {
+            const response = await axios.get(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/members`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    },
+                    params: {
+                        limit: Math.min(limit, 1000) // Discord's max is 1000
+                    }
+                }
+            );
+
+            return response.data || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Discord guild members', { error: error.message, guildId });
             throw error;
         }
     }
@@ -597,6 +634,339 @@ export class DiscordService {
             loggingService.error('Failed to send Discord direct message', {
                 error: error.message,
                 userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * List all roles in a guild
+     */
+    static async listGuildRoles(botToken: string, guildId: string): Promise<any[]> {
+        try {
+            const response = await axios.get(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/roles`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Listed Discord guild roles', {
+                guildId,
+                roleCount: response.data.length
+            });
+
+            return response.data;
+        } catch (error: any) {
+            loggingService.error('Failed to list Discord guild roles', {
+                error: error.message,
+                guildId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Create a new role in a guild
+     */
+    static async createRole(
+        botToken: string,
+        guildId: string,
+        name: string,
+        color?: number,
+        permissions?: string,
+        hoist?: boolean
+    ): Promise<any> {
+        try {
+            const response = await axios.post(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/roles`,
+                {
+                    name,
+                    color,
+                    permissions,
+                    hoist: hoist || false
+                },
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Created Discord role', {
+                guildId,
+                roleName: name,
+                roleId: response.data.id
+            });
+
+            return response.data;
+        } catch (error: any) {
+            loggingService.error('Failed to create Discord role', {
+                error: error.message,
+                guildId,
+                roleName: name
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Assign a role to a user
+     */
+    static async assignRole(
+        botToken: string,
+        guildId: string,
+        userId: string,
+        roleId: string
+    ): Promise<void> {
+        try {
+            await axios.put(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
+                {},
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Assigned Discord role to user', {
+                guildId,
+                userId,
+                roleId
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to assign Discord role', {
+                error: error.message,
+                guildId,
+                userId,
+                roleId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Remove a role from a user
+     */
+    static async removeRole(
+        botToken: string,
+        guildId: string,
+        userId: string,
+        roleId: string
+    ): Promise<void> {
+        try {
+            await axios.delete(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Removed Discord role from user', {
+                guildId,
+                userId,
+                roleId
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to remove Discord role', {
+                error: error.message,
+                guildId,
+                userId,
+                roleId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Ban a user from a guild
+     */
+    static async banUser(
+        botToken: string,
+        guildId: string,
+        userId: string,
+        reason?: string,
+        deleteMessageDays?: number
+    ): Promise<void> {
+        try {
+            await axios.put(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/bans/${userId}`,
+                {
+                    delete_message_days: deleteMessageDays || 0,
+                    reason
+                },
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Banned Discord user', {
+                guildId,
+                userId,
+                reason
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to ban Discord user', {
+                error: error.message,
+                guildId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Unban a user from a guild
+     */
+    static async unbanUser(
+        botToken: string,
+        guildId: string,
+        userId: string
+    ): Promise<void> {
+        try {
+            await axios.delete(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/bans/${userId}`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Unbanned Discord user', {
+                guildId,
+                userId
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to unban Discord user', {
+                error: error.message,
+                guildId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Kick a user from a guild
+     */
+    static async kickUser(
+        botToken: string,
+        guildId: string,
+        userId: string,
+        reason?: string
+    ): Promise<void> {
+        try {
+            await axios.delete(
+                `${this.DISCORD_API_BASE}/guilds/${guildId}/members/${userId}`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'X-Audit-Log-Reason': reason || 'Kicked by CostKatana bot'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Kicked Discord user', {
+                guildId,
+                userId,
+                reason
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to kick Discord user', {
+                error: error.message,
+                guildId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Delete a channel
+     */
+    static async deleteChannel(
+        botToken: string,
+        channelId: string,
+        reason?: string
+    ): Promise<void> {
+        try {
+            await axios.delete(
+                `${this.DISCORD_API_BASE}/channels/${channelId}`,
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'X-Audit-Log-Reason': reason || 'Deleted by CostKatana bot'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Deleted Discord channel', {
+                channelId,
+                reason
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to delete Discord channel', {
+                error: error.message,
+                channelId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Update channel permissions
+     */
+    static async updateChannelPermissions(
+        botToken: string,
+        channelId: string,
+        overwriteId: string,
+        allow: string,
+        deny: string,
+        type: number
+    ): Promise<void> {
+        try {
+            await axios.put(
+                `${this.DISCORD_API_BASE}/channels/${channelId}/permissions/${overwriteId}`,
+                {
+                    allow,
+                    deny,
+                    type
+                },
+                {
+                    headers: {
+                        'Authorization': `Bot ${botToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            loggingService.info('Updated Discord channel permissions', {
+                channelId,
+                overwriteId
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to update Discord channel permissions', {
+                error: error.message,
+                channelId
             });
             throw error;
         }

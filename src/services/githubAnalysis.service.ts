@@ -4,6 +4,8 @@ import { loggingService } from './logging.service';
 
 export interface AnalysisResult {
     language: string;
+    languageConfidence: number; // 0-100, how confident we are about the language detection
+    isTypeScriptPrimary?: boolean; // For JS/TS projects, is TypeScript the primary language?
     framework?: string;
     entryPoints: string[];
     existingAIIntegrations: string[];
@@ -96,7 +98,10 @@ export class GitHubAnalysisService {
             );
 
             // Detect language and project type
-            const language = await this.detectLanguage(rootContents);
+            const languageDetection = await this.detectLanguage(rootContents);
+            const language = languageDetection.language;
+            const languageConfidence = languageDetection.confidence;
+            const isTypeScriptPrimary = languageDetection.isTypeScriptPrimary;
             const projectType = await this.detectProjectType(rootContents, language);
             const packageManager = this.detectPackageManager(rootContents);
 
@@ -140,6 +145,8 @@ export class GitHubAnalysisService {
 
             const result: AnalysisResult = {
                 language,
+                languageConfidence,
+                isTypeScriptPrimary,
                 framework,
                 entryPoints,
                 existingAIIntegrations,
@@ -155,6 +162,8 @@ export class GitHubAnalysisService {
             loggingService.info('Repository analysis completed', {
                 repository: `${owner}/${repo}`,
                 language,
+                languageConfidence,
+                isTypeScriptPrimary,
                 framework,
                 projectType,
                 entryPointCount: entryPoints.length,
@@ -173,35 +182,188 @@ export class GitHubAnalysisService {
     }
 
     /**
-     * Detect primary programming language
+     * Detect primary programming language with confidence scoring
      */
-    private static async detectLanguage(contents: RepositoryContent[]): Promise<string> {
-        const fileMap: Record<string, string> = {
-            'package.json': 'javascript',
-            'tsconfig.json': 'typescript',
-            'requirements.txt': 'python',
-            'pyproject.toml': 'python',
-            'Pipfile': 'python',
-            'Cargo.toml': 'rust',
-            'go.mod': 'go',
-            'pom.xml': 'java',
-            'build.gradle': 'java',
-            'Gemfile': 'ruby',
-            'composer.json': 'php'
+    private static async detectLanguage(contents: RepositoryContent[]): Promise<{ language: string; confidence: number; isTypeScriptPrimary?: boolean }> {
+        let confidence = 0;
+        let detectedLanguage = 'unknown';
+        let isTypeScriptPrimary = false;
+
+        // Priority 1: Strong config file indicators (confidence: 90-100)
+        const strongFileMap: Record<string, { language: string; confidence: number }> = {
+            'tsconfig.json': { language: 'typescript', confidence: 95 },
+            'Cargo.toml': { language: 'rust', confidence: 95 },
+            'go.mod': { language: 'go', confidence: 95 },
+            'pyproject.toml': { language: 'python', confidence: 90 },
+            'pom.xml': { language: 'java', confidence: 90 },
+            'build.gradle': { language: 'java', confidence: 90 }
         };
 
+        // Priority 2: Medium config file indicators (confidence: 70-80)
+        const mediumFileMap: Record<string, { language: string; confidence: number }> = {
+            'package.json': { language: 'javascript', confidence: 70 },
+            'requirements.txt': { language: 'python', confidence: 75 },
+            'Pipfile': { language: 'python', confidence: 75 },
+            'Gemfile': { language: 'ruby', confidence: 80 },
+            'composer.json': { language: 'php', confidence: 80 }
+        };
+
+        // Check strong indicators first
         for (const content of contents) {
-            if (content.type === 'file' && fileMap[content.name]) {
-                return fileMap[content.name];
+            if (content.type === 'file' && strongFileMap[content.name]) {
+                const indicator = strongFileMap[content.name];
+                detectedLanguage = indicator.language;
+                confidence = indicator.confidence;
+                
+                // For TypeScript, check if it's truly TypeScript-primary
+                if (indicator.language === 'typescript') {
+                    isTypeScriptPrimary = true;
+                }
+                
+                loggingService.info('Strong language indicator found', {
+                    file: content.name,
+                    language: detectedLanguage,
+                    confidence
+                });
+                break;
             }
         }
 
-        // Fallback: check file extensions
+        // If no strong indicator, check medium indicators
+        if (confidence === 0) {
+            for (const content of contents) {
+                if (content.type === 'file' && mediumFileMap[content.name]) {
+                    const indicator = mediumFileMap[content.name];
+                    detectedLanguage = indicator.language;
+                    confidence = indicator.confidence;
+                    break;
+                }
+            }
+        }
+
+        // Enhanced TypeScript detection for package.json projects
+        if (detectedLanguage === 'javascript' || detectedLanguage === 'typescript') {
+            const tsIndicators = this.analyzeTypeScriptIndicators(contents);
+            
+            if (tsIndicators.score >= 70) {
+                detectedLanguage = 'typescript';
+                isTypeScriptPrimary = true;
+                confidence = Math.max(confidence, tsIndicators.score);
+                
+                loggingService.info('TypeScript primary language detected', {
+                    score: tsIndicators.score,
+                    indicators: tsIndicators.reasons
+                });
+            } else if (tsIndicators.score >= 30) {
+                // Mixed project - has some TypeScript but JavaScript dominant
+                if (detectedLanguage === 'javascript') {
+                    isTypeScriptPrimary = false;
+                }
+                loggingService.info('Mixed JS/TS project detected', {
+                    primaryLanguage: detectedLanguage,
+                    tsScore: tsIndicators.score
+                });
+            }
+        }
+
+        // Fallback: analyze file extensions
+        if (confidence < 70) {
+            const extensionAnalysis = this.analyzeFileExtensions(contents);
+            if (extensionAnalysis.confidence > confidence) {
+                detectedLanguage = extensionAnalysis.language;
+                confidence = extensionAnalysis.confidence;
+                
+                if (extensionAnalysis.language === 'typescript') {
+                    isTypeScriptPrimary = extensionAnalysis.isTypeScriptDominant || false;
+                }
+            }
+        }
+
+        return { 
+            language: detectedLanguage, 
+            confidence,
+            isTypeScriptPrimary: detectedLanguage === 'typescript' ? isTypeScriptPrimary || false : undefined
+        };
+    }
+
+    /**
+     * Analyze TypeScript indicators in a project
+     */
+    private static analyzeTypeScriptIndicators(contents: RepositoryContent[]): { score: number; reasons: string[] } {
+        let score = 0;
+        const reasons: string[] = [];
+
+        // Check for tsconfig.json (strong indicator)
+        if (contents.some(c => c.name === 'tsconfig.json')) {
+            score += 40;
+            reasons.push('tsconfig.json present');
+        }
+
+        // Check for TypeScript files
+        const tsFiles = contents.filter(c => 
+            c.type === 'file' && 
+            (c.name.endsWith('.ts') || c.name.endsWith('.tsx'))
+        ).length;
+        
+        const jsFiles = contents.filter(c => 
+            c.type === 'file' && 
+            (c.name.endsWith('.js') || c.name.endsWith('.jsx')) &&
+            !c.name.includes('.config.') &&
+            !c.name.includes('.test.')
+        ).length;
+
+        // Calculate TypeScript file ratio
+        const totalFiles = tsFiles + jsFiles;
+        if (totalFiles > 0) {
+            const tsRatio = tsFiles / totalFiles;
+            if (tsRatio >= 0.8) {
+                score += 30;
+                reasons.push(`${Math.round(tsRatio * 100)}% TypeScript files`);
+            } else if (tsRatio >= 0.5) {
+                score += 20;
+                reasons.push(`${Math.round(tsRatio * 100)}% TypeScript files (majority)`);
+            } else if (tsRatio > 0) {
+                score += 10;
+                reasons.push(`${Math.round(tsRatio * 100)}% TypeScript files (minority)`);
+            }
+        }
+
+        // Check for @types/* dependencies in package.json
+        const hasPackageJson = contents.some(c => c.name === 'package.json');
+        if (hasPackageJson && tsFiles > 0) {
+            score += 15;
+            reasons.push('Has TypeScript type definitions');
+        }
+
+        // Check for common TypeScript directories
+        const hasSrcTs = contents.some(c => 
+            c.type === 'dir' && 
+            c.name === 'src' &&
+            contents.some(f => f.path?.startsWith('src/') && (f.name.endsWith('.ts') || f.name.endsWith('.tsx')))
+        );
+        if (hasSrcTs) {
+            score += 15;
+            reasons.push('TypeScript files in src/ directory');
+        }
+
+        return { score: Math.min(score, 100), reasons };
+    }
+
+    /**
+     * Analyze file extensions to detect language
+     */
+    private static analyzeFileExtensions(contents: RepositoryContent[]): { 
+        language: string; 
+        confidence: number; 
+        isTypeScriptDominant?: boolean 
+    } {
         const extensions: Record<string, number> = {};
+        
+        // Count file extensions (excluding common non-source files)
         for (const content of contents) {
             if (content.type === 'file') {
                 const ext = content.name.split('.').pop()?.toLowerCase();
-                if (ext) {
+                if (ext && !['md', 'txt', 'json', 'yml', 'yaml', 'xml'].includes(ext)) {
                     extensions[ext] = (extensions[ext] || 0) + 1;
                 }
             }
@@ -220,10 +382,45 @@ export class GitHubAnalysisService {
             'php': 'php'
         };
 
-        const mostCommonExt = Object.entries(extensions)
-            .sort(([, a], [, b]) => b - a)[0]?.[0];
+        // Get TypeScript and JavaScript counts
+        const tsCount = (extensions['ts'] || 0) + (extensions['tsx'] || 0);
+        const jsCount = (extensions['js'] || 0) + (extensions['jsx'] || 0);
+        const totalJsTsCount = tsCount + jsCount;
 
-        return extMap[mostCommonExt] || 'unknown';
+        // Sort extensions by count
+        const sortedExts = Object.entries(extensions)
+            .sort(([, a], [, b]) => b - a);
+
+        const mostCommonExt = sortedExts[0]?.[0];
+        const mostCommonCount = sortedExts[0]?.[1] || 0;
+        const totalFiles = Object.values(extensions).reduce((sum, count) => sum + count, 0);
+
+        const language = extMap[mostCommonExt] || 'unknown';
+        
+        // Calculate confidence based on dominance
+        const dominanceRatio = totalFiles > 0 ? mostCommonCount / totalFiles : 0;
+        let confidence = Math.round(dominanceRatio * 100);
+
+        // Adjust confidence for JS/TS
+        let isTypeScriptDominant = false;
+        if (language === 'typescript' || language === 'javascript') {
+            if (totalJsTsCount > 0) {
+                const tsRatio = tsCount / totalJsTsCount;
+                if (tsRatio >= 0.7) {
+                    isTypeScriptDominant = true;
+                    confidence = Math.max(confidence, 85);
+                } else if (tsRatio >= 0.5) {
+                    isTypeScriptDominant = true;
+                    confidence = Math.max(confidence, 70);
+                }
+            }
+        }
+
+        return { 
+            language, 
+            confidence: Math.min(confidence, 100),
+            isTypeScriptDominant: language === 'typescript' ? isTypeScriptDominant : undefined
+        };
     }
 
     /**

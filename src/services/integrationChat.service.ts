@@ -18,7 +18,7 @@ export interface ParsedMention {
 }
 
 export interface IntegrationCommand {
-  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add';
+  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add' | 'assign' | 'remove' | 'ban' | 'unban' | 'kick';
   entity: string;
   mention: ParsedMention;
   params: Record<string, any>;
@@ -124,6 +124,16 @@ export class IntegrationChatService {
             entity = 'channel';
           } else if (extractedCommand === 'list-users') {
             entity = 'user';
+          } else if (extractedCommand === 'list-teams') {
+            entity = 'team';
+          } else if (extractedCommand === 'list-workflows') {
+            entity = 'workflow';
+          } else if (extractedCommand === 'list-tags') {
+            entity = 'tag';
+          } else if (extractedCommand === 'list-iterations') {
+            entity = 'iteration';
+          } else if (extractedCommand === 'list-epics') {
+            entity = 'epic';
           } else if (extractedCommand === 'list-prs' || extractedCommand === 'list-pull-requests') {
             entity = 'pullrequest';
           } else if (extractedCommand === 'list-branches') {
@@ -333,6 +343,16 @@ export class IntegrationChatService {
         entity = 'channel';
       } else if (lowerMessage.includes('list-users') || lowerMessage.match(/\blist\s+users\b/)) {
         entity = 'user';
+      } else if (lowerMessage.includes('list-teams') || lowerMessage.match(/\blist\s+teams\b/)) {
+        entity = 'team';
+      } else if (lowerMessage.includes('list-workflows') || lowerMessage.match(/\blist\s+workflows\b/)) {
+        entity = 'workflow';
+      } else if (lowerMessage.includes('list-tags') || lowerMessage.match(/\blist\s+tags\b/)) {
+        entity = 'tag';
+      } else if (lowerMessage.includes('list-iterations') || lowerMessage.match(/\blist\s+iterations\b/)) {
+        entity = 'iteration';
+      } else if (lowerMessage.includes('list-epics') || lowerMessage.match(/\blist\s+epics\b/)) {
+        entity = 'epic';
       } else if (lowerMessage.includes('list-prs') || lowerMessage.includes('list-pull-requests') || lowerMessage.match(/\blist\s+(pull\s+requests?|prs?)\b/)) {
         entity = 'pullrequest';
       } else if (lowerMessage.includes('list-branches') || lowerMessage.match(/\blist\s+branches\b/)) {
@@ -345,6 +365,14 @@ export class IntegrationChatService {
         entity = 'channel';
       } else if (lowerMessage.includes('team')) {
         entity = 'team';
+      } else if (lowerMessage.includes('workflow')) {
+        entity = 'workflow';
+      } else if (lowerMessage.includes('tag') || lowerMessage.includes('label')) {
+        entity = 'tag';
+      } else if (lowerMessage.includes('iteration') || lowerMessage.includes('cycle')) {
+        entity = 'iteration';
+      } else if (lowerMessage.includes('epic')) {
+        entity = 'epic';
       } else if (lowerMessage.includes('repository') || lowerMessage.includes('repo')) {
         entity = 'repository';
       } else if (lowerMessage.includes('pull request') || lowerMessage.includes('pr')) {
@@ -468,9 +496,10 @@ export class IntegrationChatService {
         const integrationType = command.mention.integration;
         if (integrationType === 'jira') return i.type === 'jira_oauth';
         if (integrationType === 'linear') return i.type === 'linear_oauth';
-        if (integrationType === 'slack') return i.type === 'slack_oauth';
-        if (integrationType === 'discord') return i.type === 'discord_oauth';
+        if (integrationType === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
+        if (integrationType === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
         if (integrationType === 'github') return i.type === 'github_oauth';
+        if (integrationType === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
 
@@ -871,6 +900,106 @@ export class IntegrationChatService {
               message: `Found ${teams.length} teams`,
               data: teams
             };
+          } else if (command.entity === 'user') {
+            // List users requires organization context
+            const users = await LinearService.listUsers(accessToken);
+            return {
+              success: true,
+              message: `Found ${users.length} users`,
+              data: users
+            };
+          } else if (command.entity === 'workflow' || command.entity === 'channel') {
+            // List workflows (states) - Linear doesn't have channels, so map to workflows
+            let teamId = command.mention.entityId;
+            
+            if (!teamId) {
+              const teams = await LinearService.listTeams(accessToken);
+              if (teams.length > 0) {
+                teamId = teams[0].id;
+              } else {
+                return {
+                  success: false,
+                  message: 'Team ID is required. Use @linear:team:TEAM-ID or ensure you have at least one team',
+                  error: 'MISSING_TEAM_ID'
+                };
+              }
+            }
+
+            const workflows = await LinearService.listWorkflows(accessToken, teamId);
+            return {
+              success: true,
+              message: `Found ${workflows.length} workflows in team`,
+              data: workflows
+            };
+          } else if (command.entity === 'tag' || command.entity === 'label') {
+            // List labels (tags)
+            let teamId = command.mention.entityId;
+            
+            if (!teamId) {
+              const teams = await LinearService.listTeams(accessToken);
+              if (teams.length > 0) {
+                teamId = teams[0].id;
+              } else {
+                return {
+                  success: false,
+                  message: 'Team ID is required. Use @linear:team:TEAM-ID or ensure you have at least one team',
+                  error: 'MISSING_TEAM_ID'
+                };
+              }
+            }
+
+            const labels = await LinearService.listLabels(accessToken, teamId);
+            return {
+              success: true,
+              message: `Found ${labels.length} labels in team`,
+              data: labels
+            };
+          } else if (command.entity === 'iteration' || command.entity === 'cycle') {
+            // List cycles (iterations)
+            let teamId = command.mention.entityId;
+            
+            if (!teamId) {
+              const teams = await LinearService.listTeams(accessToken);
+              if (teams.length > 0) {
+                teamId = teams[0].id;
+              } else {
+                return {
+                  success: false,
+                  message: 'Team ID is required. Use @linear:team:TEAM-ID or ensure you have at least one team',
+                  error: 'MISSING_TEAM_ID'
+                };
+              }
+            }
+
+            const cycles = await LinearService.listCycles(accessToken, teamId);
+            return {
+              success: true,
+              message: `Found ${cycles.length} cycles in team`,
+              data: cycles
+            };
+          } else if (command.entity === 'epic') {
+            // Linear doesn't have epics, map to projects
+            let teamId = command.mention.entityId;
+            
+            if (!teamId) {
+              const teams = await LinearService.listTeams(accessToken);
+              if (teams.length > 0) {
+                teamId = teams[0].id;
+              } else {
+                return {
+                  success: false,
+                  message: 'Team ID is required. Use @linear:team:TEAM-ID or ensure you have at least one team',
+                  error: 'MISSING_TEAM_ID'
+                };
+              }
+            }
+
+            const projects = await LinearService.listProjects(accessToken, teamId);
+            return {
+              success: true,
+              message: `Found ${projects.length} projects (epics) in team`,
+              data: projects
+            };
           } else if (command.entity === 'project') {
             // For list projects, we need a team ID. Try to get from mention or use first team
             let teamId = command.mention.entityId;
@@ -1008,13 +1137,28 @@ export class IntegrationChatService {
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
     const accessToken = credentials.accessToken || '';
-    const channelId = command.mention.entityId || credentials.channelId || '';
+    let channelId = command.mention.entityId || credentials.channelId || '';
 
     if (!accessToken) {
+      // Check integration type to provide specific guidance
+      const integrationType = integration.type;
+      const isWebhook = integrationType === 'slack_webhook';
+      const isOAuth = integrationType === 'slack_oauth';
+
+      let errorMessage = '❌ Slack access token is missing. ';
+      
+      if (isWebhook) {
+        errorMessage += 'Your Slack webhook integration requires an access token to list channels and perform operations. Please go to Settings → Integrations → Slack and add your access token or switch to OAuth integration.';
+      } else if (isOAuth) {
+        errorMessage += 'Your Slack OAuth integration is missing the access token. Please reconnect your Slack integration from Settings → Integrations.';
+      } else {
+        errorMessage += 'Please configure your Slack integration with a valid access token from Settings → Integrations.';
+      }
+
       return {
         success: false,
-        message: 'Slack credentials not configured',
-        error: 'MISSING_CREDENTIALS'
+        message: errorMessage,
+        error: 'MISSING_ACCESS_TOKEN'
       };
     }
 
@@ -1022,12 +1166,49 @@ export class IntegrationChatService {
       switch (command.type) {
         case 'send':
           if (command.entity === 'message') {
+            // If no channelId provided, try to lookup by name or use first available channel
             if (!channelId) {
-              return {
-                success: false,
-                message: 'Channel ID is required. Use @slack:channel:CHANNEL-ID',
-                error: 'MISSING_CHANNEL_ID'
-              };
+              const channelName = command.params.channelName;
+              
+              if (channelName) {
+                // Lookup channel by name
+                loggingService.info('Looking up Slack channel by name', { channelName });
+                const channels = await SlackService.listChannels(accessToken);
+                const channel = channels.find((ch: any) => 
+                  ch.name === channelName.replace(/^#/, '') || // Remove # prefix if present
+                  ch.name === channelName
+                );
+                
+                if (channel) {
+                  channelId = channel.id;
+                  loggingService.info('Found Slack channel by name', { channelName, channelId });
+                } else {
+                  return {
+                    success: false,
+                    message: `❌ Channel "${channelName}" not found. Use @slack list-channels to see available channels.`,
+                    error: 'CHANNEL_NOT_FOUND'
+                  };
+                }
+              } else {
+                // No channel specified - use first available text channel as default
+                loggingService.info('No channel specified, using first available Slack channel');
+                const channels = await SlackService.listChannels(accessToken);
+                const textChannels = channels.filter((ch: any) => !ch.is_archived);
+                
+                if (textChannels.length > 0) {
+                  channelId = textChannels[0].id;
+                  loggingService.info('Using first available Slack channel', { 
+                    channelId, 
+                    channelName: textChannels[0].name 
+                  });
+                } else {
+                  return {
+                    success: false,
+                    message: '❌ No available channels found. Please create a channel or specify a channel ID.',
+                    error: 'NO_CHANNELS_AVAILABLE'
+                  };
+                }
+              }
             }
 
             await SlackService.sendMessage(accessToken, channelId, command.params.message || '');
@@ -1050,6 +1231,20 @@ export class IntegrationChatService {
                 name: ch.name,
                 isPrivate: ch.is_private,
                 isArchived: ch.is_archived
+              }))
+            };
+          } else if (command.entity === 'user') {
+            const users = await SlackService.listUsers(accessToken);
+            return {
+              success: true,
+              message: `Found ${users.length} users`,
+              data: users.map((user: any) => ({
+                id: user.id,
+                name: user.name,
+                realName: user.real_name,
+                displayName: user.profile?.display_name,
+                isBot: user.is_bot,
+                deleted: user.deleted
               }))
             };
           }
@@ -1083,7 +1278,7 @@ export class IntegrationChatService {
 
       return {
         success: false,
-        message: `Command not supported: ${command.type} ${command.entity}`,
+        message: `❌ Slack command not supported: ${command.type} ${command.entity}. Available commands: send-message, list-channels, list-users`,
         error: 'UNSUPPORTED_COMMAND'
       };
     } catch (error: any) {
@@ -1093,7 +1288,7 @@ export class IntegrationChatService {
       });
       return {
         success: false,
-        message: `Slack command failed: ${error.message}`,
+        message: `❌ Slack command failed: ${error.message}`,
         error: error.message
       };
     }
@@ -1108,13 +1303,49 @@ export class IntegrationChatService {
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
     const botToken = credentials.botToken || '';
-    const channelId = command.mention.entityId || credentials.channelId || '';
+    const webhookUrl = credentials.webhookUrl || '';
+    let channelId = command.mention.entityId || credentials.channelId || '';
+    const integrationType = integration.type;
+    const isWebhook = integrationType === 'discord_webhook';
 
+    // For webhook integrations, only certain operations are supported
+    if (isWebhook && !botToken) {
+      // Check if this is a send operation that can use webhook
+      if (command.type === 'send' && command.entity === 'message' && webhookUrl) {
+        // Webhook can send messages without bot token
+        try {
+          const discordMessage: any = {
+            content: command.params.message || ''
+          };
+          await DiscordService.sendWebhookMessage(webhookUrl, discordMessage);
+          return {
+            success: true,
+            message: `✅ Message sent to Discord via webhook`,
+            data: { method: 'webhook' }
+          };
+        } catch (error: any) {
+          return {
+            success: false,
+            message: `❌ Failed to send Discord message: ${error.message}`,
+            error: 'WEBHOOK_SEND_FAILED'
+          };
+        }
+      }
+
+      // For other operations, bot token is required
+      return {
+        success: false,
+        message: `❌ This operation requires a Discord bot token. Your current webhook integration can only send messages to the pre-configured channel. To use commands like listing channels, please add a bot token in Settings → Integrations → Discord, or switch to OAuth integration. Get a bot token from: https://discord.com/developers/applications`,
+        error: 'WEBHOOK_LIMITATION'
+      };
+    }
+
+    // For OAuth or webhook with bot token
     if (!botToken) {
       return {
         success: false,
-        message: 'Discord credentials not configured',
-        error: 'MISSING_CREDENTIALS'
+        message: '❌ Discord bot token is missing. Please reconnect your Discord integration from Settings → Integrations.',
+        error: 'MISSING_BOT_TOKEN'
       };
     }
 
@@ -1122,10 +1353,68 @@ export class IntegrationChatService {
         switch (command.type) {
           case 'send':
             if (command.entity === 'message') {
+              const guildId = credentials.guildId || '';
+              const channelName = command.params.channelName || command.params.channel;
+              
+              // If no channel ID but name provided, look up channel by name
+              if (!channelId && channelName) {
+                if (!guildId) {
+                  return {
+                    success: false,
+                    message: '❌ Guild ID is required to look up channel by name',
+                    error: 'MISSING_GUILD_ID'
+                  };
+                }
+
+                try {
+                  const channels = await DiscordService.listChannels(botToken, guildId);
+                  const matchedChannel = channels.find((ch: any) => 
+                    ch.name?.toLowerCase() === channelName.toLowerCase()
+                  );
+
+                  if (!matchedChannel) {
+                    return {
+                      success: false,
+                      message: `❌ Channel "${channelName}" not found. Use @discord list-channels to see available channels.`,
+                      error: 'CHANNEL_NOT_FOUND'
+                    };
+                  }
+
+                  channelId = matchedChannel.id;
+                } catch (error: any) {
+                  return {
+                    success: false,
+                    message: `❌ Failed to lookup channel: ${error.message}`,
+                    error: 'CHANNEL_LOOKUP_FAILED'
+                  };
+                }
+              }
+
+              // If still no channel ID, try to use first available text channel
+              if (!channelId && guildId) {
+                try {
+                  const channels = await DiscordService.listChannels(botToken, guildId);
+                  // Find first text channel (type 0)
+                  const textChannel = channels.find((ch: any) => ch.type === 0);
+                  
+                  if (textChannel) {
+                    channelId = textChannel.id;
+                    loggingService.info('Using first available text channel', {
+                      channelId,
+                      channelName: textChannel.name
+                    });
+                  }
+                } catch (error: any) {
+                  loggingService.warn('Failed to fetch channels for default channel', {
+                    error: error.message
+                  });
+                }
+              }
+              
               if (!channelId) {
                 return {
                   success: false,
-                  message: 'Channel ID is required. Use @discord:channel:CHANNEL-ID',
+                  message: '❌ Channel not specified. Example: @discord send hi to general',
                   error: 'MISSING_CHANNEL_ID'
                 };
               }
@@ -1133,14 +1422,43 @@ export class IntegrationChatService {
               await DiscordService.sendMessage(botToken, channelId, command.params.message || '');
               return {
                 success: true,
-                message: `✅ Message sent to Discord channel`,
-                data: { channelId }
+                message: `✅ Message sent to Discord channel${channelName ? ` #${channelName}` : ''}`,
+                data: { channelId, channelName }
               };
             }
             break;
 
           case 'list':
             if (command.entity === 'channel') {
+              const guildId = credentials.guildId || '';
+              
+              loggingService.info('Executing Discord list channels command', {
+                hasGuildId: !!guildId,
+                hasBotToken: !!botToken,
+                botTokenLength: botToken?.length,
+                guildId,
+                credentialsKeys: Object.keys(credentials)
+              });
+
+              if (!guildId) {
+                return {
+                  success: false,
+                  message: '❌ Discord Guild (Server) ID is missing. Please go to Settings → Integrations → Discord and add your Guild ID. You can find your Guild ID by right-clicking your Discord server and selecting "Copy Server ID" (Developer Mode must be enabled in Discord settings).',
+                  error: 'MISSING_GUILD_ID'
+                };
+              }
+
+              const channels = await DiscordService.listChannels(botToken, guildId);
+              return {
+                success: true,
+                message: `✅ Found ${channels.length} Discord channels`,
+                data: channels.map((ch: any) => ({
+                  id: ch.id,
+                  name: ch.name || ch.id,
+                  type: ch.type
+                }))
+              };
+            } else if (command.entity === 'user') {
               const guildId = credentials.guildId || '';
               if (!guildId) {
                 return {
@@ -1150,14 +1468,15 @@ export class IntegrationChatService {
                 };
               }
 
-              const channels = await DiscordService.listChannels(botToken, guildId);
+              const members = await DiscordService.listGuildMembers(botToken, guildId);
               return {
                 success: true,
-                message: `Found ${channels.length} channels`,
-                data: channels.map((ch: any) => ({
-                  id: ch.id,
-                  name: ch.name || ch.id,
-                  type: ch.type
+                message: `Found ${members.length} users`,
+                data: members.map((member: any) => ({
+                  id: member.user?.id,
+                  username: member.user?.username,
+                  displayName: member.nick || member.user?.global_name || member.user?.username,
+                  roles: member.roles
                 }))
               };
             }
@@ -1196,13 +1515,259 @@ export class IntegrationChatService {
                 message: `✅ Created Discord channel ${channelName}`,
                 data: { channelId: result.channelId }
               };
+            } else if (command.entity === 'role') {
+              const guildId = credentials.guildId || '';
+              const roleName = command.params.name || command.params.roleName;
+              
+              if (!guildId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID is required',
+                  error: 'MISSING_GUILD_ID'
+                };
+              }
+
+              if (!roleName) {
+                return {
+                  success: false,
+                  message: '❌ Role name is required. Use: @discord create role "Role Name"',
+                  error: 'MISSING_ROLE_NAME'
+                };
+              }
+
+              const result = await DiscordService.createRole(
+                botToken,
+                guildId,
+                roleName,
+                command.params.color,
+                command.params.permissions,
+                command.params.hoist
+              );
+
+              return {
+                success: true,
+                message: `✅ Created Discord role "${roleName}"`,
+                data: { roleId: result.id, roleName: result.name }
+              };
+            }
+            break;
+
+          case 'delete':
+            if (command.entity === 'channel') {
+              const guildId = credentials.guildId || '';
+              let channelId = command.mention.entityId || command.params.channelId;
+              const channelName = command.params.name || command.params.channelName;
+              
+              // If no channel ID but name provided, look up channel by name
+              if (!channelId && channelName) {
+                if (!guildId) {
+                  return {
+                    success: false,
+                    message: '❌ Guild ID is required to look up channel by name',
+                    error: 'MISSING_GUILD_ID'
+                  };
+                }
+
+                try {
+                  const channels = await DiscordService.listChannels(botToken, guildId);
+                  const matchedChannel = channels.find((ch: any) => 
+                    ch.name?.toLowerCase() === channelName.toLowerCase()
+                  );
+
+                  if (!matchedChannel) {
+                    return {
+                      success: false,
+                      message: `❌ Channel "${channelName}" not found. Use @discord list-channels to see available channels.`,
+                      error: 'CHANNEL_NOT_FOUND'
+                    };
+                  }
+
+                  channelId = matchedChannel.id;
+                } catch (error: any) {
+                  return {
+                    success: false,
+                    message: `❌ Failed to lookup channel: ${error.message}`,
+                    error: 'CHANNEL_LOOKUP_FAILED'
+                  };
+                }
+              }
+              
+              if (!channelId) {
+                return {
+                  success: false,
+                  message: '❌ Channel ID or name is required. Example: @discord delete channel QA',
+                  error: 'MISSING_CHANNEL_ID'
+                };
+              }
+
+              await DiscordService.deleteChannel(
+                botToken,
+                channelId,
+                command.params.reason
+              );
+
+              return {
+                success: true,
+                message: `✅ Deleted Discord channel${channelName ? ` "${channelName}"` : ''}`,
+                data: { channelId, channelName }
+              };
+            }
+            break;
+
+          case 'assign':
+            if (command.entity === 'role') {
+              const guildId = credentials.guildId || '';
+              const userId = command.params.userId || command.params.user;
+              const roleId = command.params.roleId || command.params.role;
+              
+              if (!guildId || !userId || !roleId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID, User ID, and Role ID are required',
+                  error: 'MISSING_PARAMETERS'
+                };
+              }
+
+              await DiscordService.assignRole(botToken, guildId, userId, roleId);
+
+              return {
+                success: true,
+                message: `✅ Assigned role to user`,
+                data: { userId, roleId }
+              };
+            }
+            break;
+
+          case 'remove':
+            if (command.entity === 'role') {
+              const guildId = credentials.guildId || '';
+              const userId = command.params.userId || command.params.user;
+              const roleId = command.params.roleId || command.params.role;
+              
+              if (!guildId || !userId || !roleId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID, User ID, and Role ID are required',
+                  error: 'MISSING_PARAMETERS'
+                };
+              }
+
+              await DiscordService.removeRole(botToken, guildId, userId, roleId);
+
+              return {
+                success: true,
+                message: `✅ Removed role from user`,
+                data: { userId, roleId }
+              };
+            }
+            break;
+
+          case 'ban':
+            if (command.entity === 'user') {
+              const guildId = credentials.guildId || '';
+              const userId = command.params.userId || command.params.user || command.mention.entityId;
+              const reason = command.params.reason;
+              const deleteMessageDays = command.params.deleteMessageDays || 0;
+              
+              if (!guildId || !userId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID and User ID are required. Use: @discord:user:USER_ID ban',
+                  error: 'MISSING_PARAMETERS'
+                };
+              }
+
+              await DiscordService.banUser(botToken, guildId, userId, reason, deleteMessageDays);
+
+              return {
+                success: true,
+                message: `✅ Banned user from Discord server`,
+                data: { userId, reason }
+              };
+            }
+            break;
+
+          case 'unban':
+            if (command.entity === 'user') {
+              const guildId = credentials.guildId || '';
+              const userId = command.params.userId || command.params.user || command.mention.entityId;
+              
+              if (!guildId || !userId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID and User ID are required. Use: @discord:user:USER_ID unban',
+                  error: 'MISSING_PARAMETERS'
+                };
+              }
+
+              await DiscordService.unbanUser(botToken, guildId, userId);
+
+              return {
+                success: true,
+                message: `✅ Unbanned user from Discord server`,
+                data: { userId }
+              };
+            }
+            break;
+
+          case 'kick':
+            if (command.entity === 'user') {
+              const guildId = credentials.guildId || '';
+              const userId = command.params.userId || command.params.user || command.mention.entityId;
+              const reason = command.params.reason;
+              
+              if (!guildId || !userId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID and User ID are required. Use: @discord:user:USER_ID kick',
+                  error: 'MISSING_PARAMETERS'
+                };
+              }
+
+              await DiscordService.kickUser(botToken, guildId, userId, reason);
+
+              return {
+                success: true,
+                message: `✅ Kicked user from Discord server`,
+                data: { userId, reason }
+              };
+            }
+            break;
+
+          case 'get':
+          case 'list':
+            if (command.entity === 'role' || command.entity === 'roles') {
+              const guildId = credentials.guildId || '';
+              
+              if (!guildId) {
+                return {
+                  success: false,
+                  message: '❌ Guild ID is required',
+                  error: 'MISSING_GUILD_ID'
+                };
+              }
+
+              const roles = await DiscordService.listGuildRoles(botToken, guildId);
+
+              return {
+                success: true,
+                message: `✅ Found ${roles.length} Discord roles`,
+                data: roles.map((role: any) => ({
+                  id: role.id,
+                  name: role.name,
+                  color: role.color,
+                  position: role.position,
+                  permissions: role.permissions,
+                  managed: role.managed
+                }))
+              };
             }
             break;
       }
 
       return {
         success: false,
-        message: `Command not supported: ${command.type} ${command.entity}`,
+        message: `❌ Command not supported: ${command.type} ${command.entity}. Available commands: list channels/users/roles, send message, create channel/role, delete channel, ban/unban/kick user, assign/remove role`,
         error: 'UNSUPPORTED_COMMAND'
       };
     } catch (error: any) {
@@ -1546,7 +2111,7 @@ export class IntegrationChatService {
 
       return {
         success: false,
-        message: `Command not supported: ${command.type} ${command.entity}`,
+        message: `❌ GitHub command not supported: ${command.type} ${command.entity}. Available commands: create-issue, create-pr, list-issues, list-prs, list-branches, get-issue, add-comment`,
         error: 'UNSUPPORTED_COMMAND'
       };
     } catch (error: any) {
@@ -1556,7 +2121,7 @@ export class IntegrationChatService {
       });
       return {
         success: false,
-        message: `GitHub command failed: ${error.message}`,
+        message: `❌ GitHub command failed: ${error.message}`,
         error: error.message
       };
     }

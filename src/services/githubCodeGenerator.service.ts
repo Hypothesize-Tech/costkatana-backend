@@ -89,6 +89,13 @@ export class GitHubCodeGeneratorService {
                     throw new Error(`Unsupported integration type: ${options.integrationType}`);
             }
 
+            // Validate and fix generated code
+            integrationCode = await this.validateAndFixGeneratedCode(
+                userId,
+                integrationCode,
+                options.analysis
+            );
+
             const elapsed = Date.now() - startTime;
             loggingService.info('Code generation completed', {
                 userId,
@@ -110,6 +117,157 @@ export class GitHubCodeGeneratorService {
             });
             throw error;
         }
+    }
+
+    /**
+     * Validate and fix generated code for common issues
+     */
+    private static async validateAndFixGeneratedCode(
+        userId: string,
+        integrationCode: IntegrationCode,
+        analysis: AnalysisResult
+    ): Promise<IntegrationCode> {
+        loggingService.info('Starting code validation', {
+            userId,
+            filesCount: integrationCode.files.length,
+            language: analysis.language
+        });
+
+        const expectedExtension = analysis.language === 'typescript' ? 'ts' : 
+                                  analysis.language === 'javascript' ? 'js' :
+                                  analysis.language === 'python' ? 'py' :
+                                  analysis.language === 'java' ? 'java' :
+                                  analysis.language === 'go' ? 'go' : 'js';
+
+        const wrongExtension = analysis.language === 'typescript' ? 'js' : 
+                              analysis.language === 'javascript' ? 'ts' : null;
+
+        const forbiddenDirs = ['dist', 'build', 'out', 'lib', '.next', '.nuxt', 'node_modules', '.cache'];
+
+        let validationErrors: string[] = [];
+        let autoFixCount = 0;
+
+        // Validate and fix each file
+        integrationCode.files = integrationCode.files.map((file, index) => {
+            const originalPath = file.path;
+            let modified = false;
+
+            // Check 1: Validate file extension
+            if (wrongExtension && file.path.endsWith(`.${wrongExtension}`)) {
+                file.path = file.path.replace(new RegExp(`\\.${wrongExtension}$`), `.${expectedExtension}`);
+                validationErrors.push(`❌ CRITICAL: File had wrong extension: ${originalPath} → Fixed to: ${file.path}`);
+                autoFixCount++;
+                modified = true;
+
+                loggingService.warn('Auto-fixed file extension', {
+                    userId,
+                    originalPath,
+                    newPath: file.path,
+                    expectedExtension,
+                    wrongExtension
+                });
+            }
+
+            // Check 2: Validate not in build output directories
+            const pathLower = file.path.toLowerCase();
+            const inForbiddenDir = forbiddenDirs.some(dir => 
+                pathLower.startsWith(`${dir}/`) || 
+                pathLower.includes(`/${dir}/`)
+            );
+
+            if (inForbiddenDir) {
+                // Try to fix by moving to src/
+                const fileName = file.path.split('/').pop() || file.path;
+                file.path = `src/${fileName}`;
+                validationErrors.push(`⚠️ WARNING: File was in build directory: ${originalPath} → Moved to: ${file.path}`);
+                autoFixCount++;
+                modified = true;
+
+                loggingService.warn('Auto-fixed forbidden directory', {
+                    userId,
+                    originalPath,
+                    newPath: file.path
+                });
+            }
+
+            // Check 3: Validate TypeScript code quality for .ts files
+            if (analysis.language === 'typescript' && file.path.endsWith('.ts')) {
+                const issues = this.validateTypeScriptCode(file.content);
+                if (issues.length > 0) {
+                    validationErrors.push(...issues.map(issue => `⚠️ TypeScript Issue in ${file.path}: ${issue}`));
+                }
+            }
+
+            // Check 4: Validate code doesn't delete existing functionality
+            if (file.content.length < 100 && !file.path.endsWith('.md') && !file.path.endsWith('.example')) {
+                validationErrors.push(`⚠️ WARNING: File ${file.path} has suspiciously short content (${file.content.length} chars) - may have deleted existing code`);
+            }
+
+            return file;
+        });
+
+        // Check 5: Ensure main integration file exists with correct extension
+        const mainIntegrationFile = `src/costkatana.${expectedExtension}`;
+        const hasMainFile = integrationCode.files.some(f => 
+            f.path === mainIntegrationFile ||
+            f.path.endsWith(`/costkatana.${expectedExtension}`)
+        );
+
+        if (!hasMainFile) {
+            validationErrors.push(`❌ CRITICAL: Main integration file missing: ${mainIntegrationFile}`);
+        }
+
+        // Log validation results
+        if (validationErrors.length > 0) {
+            loggingService.warn('Code validation found issues', {
+                userId,
+                errorsCount: validationErrors.length,
+                autoFixCount,
+                errors: validationErrors
+            });
+        } else {
+            loggingService.info('Code validation passed', {
+                userId,
+                filesValidated: integrationCode.files.length
+            });
+        }
+
+        // If critical errors remain after auto-fix, throw error
+        const criticalErrors = validationErrors.filter(e => e.includes('❌ CRITICAL'));
+        if (criticalErrors.length > 0 && autoFixCount === 0) {
+            throw new Error(`Code generation validation failed:\n${criticalErrors.join('\n')}`);
+        }
+
+        return integrationCode;
+    }
+
+    /**
+     * Validate TypeScript code quality
+     */
+    private static validateTypeScriptCode(content: string): string[] {
+        const issues: string[] = [];
+
+        // Check for TypeScript types
+        if (!content.includes('interface') && !content.includes('type ') && !content.includes(': ')) {
+            issues.push('Missing TypeScript type annotations');
+        }
+
+        // Check for async/await (not .then)
+        if (content.includes('.then(') && !content.includes('// legacy')) {
+            issues.push('Uses .then() instead of async/await');
+        }
+
+        // Check for proper exports
+        if (!content.includes('export ') && !content.includes('export default')) {
+            issues.push('No exports found - file may not be importable');
+        }
+
+        // Check for error handling
+        if (content.includes('async ') && !content.includes('try') && !content.includes('catch')) {
+            issues.push('Async functions missing try/catch error handling');
+        }
+
+        return issues;
     }
 
     /**
@@ -242,12 +400,39 @@ export class GitHubCodeGeneratorService {
             ? `src/server.${fileExtension}` 
             : null;
 
-        const prompt = `You are an expert software engineer helping integrate CostKatana (cost-katana npm package) into a ${analysis.language} project.
+        const prompt = `🚨🚨🚨 CRITICAL FILE EXTENSION REQUIREMENT - READ FIRST 🚨🚨🚨
+
+PROJECT LANGUAGE: ${analysis.language.toUpperCase()}
+REQUIRED FILE EXTENSION: .${fileExtension}
+${analysis.language === 'typescript' ? '❌ FORBIDDEN: .js files | ✅ REQUIRED: .ts files' : '❌ FORBIDDEN: .ts files | ✅ REQUIRED: .js files'}
+
+YOU ARE INTEGRATING INTO A ${analysis.language.toUpperCase()} PROJECT. THIS MEANS:
+${analysis.language === 'typescript' ? `
+✅ CORRECT EXAMPLES:
+   - src/costkatana.ts
+   - src/index.ts
+   - src/server.ts
+   
+❌ WRONG EXAMPLES (DO NOT USE):
+   - src/costkatana.js  ← WRONG!
+   - src/index.js       ← WRONG!
+   - src/server.js      ← WRONG!
+` : `
+✅ CORRECT EXAMPLES:
+   - src/costkatana.js
+   - src/index.js
+   - src/server.js
+   
+❌ WRONG EXAMPLES (DO NOT USE):
+   - src/costkatana.ts  ← WRONG!
+   - src/index.ts       ← WRONG!
+   - src/server.ts      ← WRONG!
+`}
 
 Repository: ${repositoryName}
 
 Repository Analysis:
-- Language: ${analysis.language}
+- Language: ${analysis.language} (Confidence: ${analysis.languageConfidence || 100}%)${analysis.isTypeScriptPrimary ? ' [TypeScript-Primary]' : ''}
 - Framework: ${analysis.framework ?? 'None detected'}
 - Project Type: ${analysis.projectType}
 - Entry Points: ${analysis.entryPoints.join(', ')}
@@ -279,28 +464,39 @@ Integration Context:
 ${context}
 
 Your task:
-1. Generate a NEW integration file: src/costkatana.${fileExtension} (NOT .js, MUST be .${fileExtension})
+1. Generate a NEW integration file: src/costkatana.${fileExtension} (EXTENSION MUST BE .${fileExtension})
 2. UPDATE the main entry point (${mainEntryPoint}) to ADD CostKatana import and initialization
 3. Create a comprehensive .env.example with all required CostKatana variables
 4. Generate a detailed setup guide (COSTKATANA_SETUP.md)
 
-🚨 CRITICAL RULES - READ CAREFULLY:
+🚨🚨🚨 CRITICAL RULES - FAILURE TO FOLLOW THESE WILL BREAK THE PROJECT 🚨🚨🚨
 
-FILE NAMING (MANDATORY):
-- This is a ${analysis.language.toUpperCase()} project - ALL source files MUST use .${fileExtension}
-- Main integration file MUST be: src/costkatana.${fileExtension} (NOT costkatana.js)
-- Entry point file: ${mainEntryPoint} (NOT ${mainEntryPoint.replace(/\.ts$/, '.js')})
-${serverEntryPoint ? `- Server file: ${serverEntryPoint} (NOT ${serverEntryPoint.replace(/\.ts$/, '.js')})` : ''}
-- NEVER generate .js files for TypeScript projects - ALWAYS use .ts
-- NEVER generate .ts files for JavaScript projects - ALWAYS use .js
-- NEVER generate files in dist/, build/, out/, lib/, .next/, or node_modules/
+FILE NAMING RULES (MANDATORY - ZERO TOLERANCE):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ CORRECT: This is a ${analysis.language.toUpperCase()} project
+✅ CORRECT: ALL source files MUST use .${fileExtension} extension
+✅ CORRECT: Main integration file MUST be: src/costkatana.${fileExtension}
+✅ CORRECT: Entry point file: ${mainEntryPoint}
+${serverEntryPoint ? `✅ CORRECT: Server file: ${serverEntryPoint}` : ''}
+
+❌ FORBIDDEN: .${analysis.language === 'typescript' ? 'js' : 'ts'} files for ${analysis.language.toUpperCase()} projects
+❌ FORBIDDEN: src/costkatana.${analysis.language === 'typescript' ? 'js' : 'ts'} ← THIS WILL CAUSE BUILD FAILURE
+❌ FORBIDDEN: ${mainEntryPoint.replace(new RegExp(`\\.${fileExtension}$`), `.${analysis.language === 'typescript' ? 'js' : 'ts'}`)} ← WRONG EXTENSION
+❌ FORBIDDEN: Files in dist/, build/, out/, lib/, .next/, or node_modules/
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VALIDATION CHECKPOINT:
+Before generating any file path, ask yourself:
+1. Is this a ${analysis.language.toUpperCase()} project? YES
+2. Does the file extension match .${fileExtension}? (Must be YES)
+3. Is the file in a source directory (src/, not dist/)? (Must be YES)
 
 CODE PRESERVATION (MANDATORY):
 - DO NOT DELETE any existing code, routes, or functionality
 - DO NOT REMOVE any imports, middleware, or configurations
 - DO NOT MODIFY existing function implementations
 - ONLY ADD CostKatana-related code:
-  * Import statement at the top: import costKatanaService from './costkatana.${fileExtension}';
+  * Import statement at the top: import costKatanaService from './costkatana${analysis.language === 'typescript' ? '' : '.js'}';
   * Initialization call: costKatanaService.initialize();
   * Optional: Add middleware if auto-tracking is enabled
 - PRESERVE ALL existing:
@@ -311,26 +507,43 @@ CODE PRESERVATION (MANDATORY):
   * Event listeners
   * All existing imports and exports
 
-Requirements:
-- Use modern ES6/TypeScript syntax
-- Follow the project's existing patterns (detected: ${(analysis.detectedPatterns && analysis.detectedPatterns.length > 0) ? analysis.detectedPatterns.join(', ') : 'standard patterns'})
-- Include error handling and logging
-- Add TypeScript types if project uses TypeScript
-- Generate production-ready, well-documented code
+CODE QUALITY REQUIREMENTS:
+${analysis.language === 'typescript' ? `
+- Use TypeScript with proper type annotations
+- Add interface/type definitions for all CostKatana configurations
+- Use async/await (NOT .then().catch())
+- Include JSDoc comments with @param and @returns tags
+- Export types for external use
+` : `
+- Use modern ES6+ syntax
+- Include JSDoc comments for all functions
+- Use async/await (NOT .then().catch())
+- Add proper error handling with try/catch
+`}
+- Follow the project's existing patterns: ${(analysis.detectedPatterns && analysis.detectedPatterns.length > 0) ? analysis.detectedPatterns.join(', ') : 'standard patterns'}
+- Include comprehensive error handling
+- Add detailed logging for debugging
+- Generate production-ready, well-tested code
 - Include example usage for each selected feature
-- TRIPLE-CHECK: All file paths use .${fileExtension} extension (NOT .js for TypeScript)
+
+FINAL VERIFICATION BEFORE RETURNING:
+□ All file paths end with .${fileExtension} (NOT .${analysis.language === 'typescript' ? 'js' : 'ts'})
+□ No files are in dist/, build/, or output directories
+□ TypeScript types are included if language is TypeScript
+□ Existing code is preserved in updated files
+□ Imports use correct file extensions
 
 Return a JSON object with this exact structure:
 {
   "files": [
     {
       "path": "src/costkatana.${fileExtension}",
-      "content": "// file content here",
+      "content": "// file content here with ${analysis.language === 'typescript' ? 'TypeScript types' : 'modern ES6'}",
       "description": "CostKatana configuration and initialization"
     },
     {
       "path": "${mainEntryPoint}",
-      "content": "// updated entry point with CostKatana import",
+      "content": "// updated entry point with CostKatana import - MUST preserve all existing code",
       "description": "Main entry point updated with CostKatana integration"
     }
   ],
@@ -338,10 +551,12 @@ Return a JSON object with this exact structure:
     "COSTKATANA_API_KEY": "Your CostKatana API key",
     "COSTKATANA_DEFAULT_MODEL": "amazon.nova-lite-v1:0"
   },
-  "installCommands": ["${analysis.packageManager ?? 'npm'} install cost-katana"],
+  "installCommands": ["${analysis.packageManager ?? 'npm'} install cost-katana${analysis.language === 'typescript' ? ' && npm install --save-dev @types/node' : ''}"],
   "setupInstructions": "Detailed markdown instructions",
   "testingSteps": ["Step 1", "Step 2"]
-}`;
+}
+
+🚨 REMINDER: Before you return, verify EVERY file path ends with .${fileExtension} 🚨`;
 
         // Add timeout wrapper for code generation (8 minutes max - increased for complex projects)
         const CODE_GENERATION_TIMEOUT = 8 * 60 * 1000; // 8 minutes
@@ -1071,12 +1286,16 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
             : analysis.language === 'java' ? 'CostKatanaHeaders.java'
             : `costkatana-headers.${fileExtension}`;
 
-        const prompt = `You are an expert helping integrate CostKatana via HTTP headers into a ${analysis.language} project.
+        const prompt = `🚨🚨🚨 CRITICAL FILE EXTENSION REQUIREMENT - READ FIRST 🚨🚨🚨
+
+PROJECT LANGUAGE: ${analysis.language.toUpperCase()}
+REQUIRED FILE EXTENSION: .${fileExtension}
+${analysis.language === 'typescript' ? '❌ FORBIDDEN: .js files | ✅ REQUIRED: .ts files' : analysis.language === 'javascript' ? '❌ FORBIDDEN: .ts files | ✅ REQUIRED: .js files' : ''}
 
 Repository: ${repositoryName}
 
 Repository Analysis:
-- Language: ${analysis.language}
+- Language: ${analysis.language} (Confidence: ${analysis.languageConfidence || 100}%)${analysis.isTypeScriptPrimary ? ' [TypeScript-Primary]' : ''}
 - Framework: ${analysis.framework ?? 'None detected'}
 - Project Type: ${analysis.projectType}
 - Entry Points: ${analysis.entryPoints.join(', ')}
@@ -1089,13 +1308,20 @@ ${features.map(f => `- ${f.name}${f.config ? ': ' + JSON.stringify(f.config) : '
 Integration Context:
 ${context}
 
-🚨 CRITICAL RULES - READ CAREFULLY:
+🚨🚨🚨 CRITICAL RULES - FAILURE TO FOLLOW WILL BREAK THE PROJECT 🚨🚨🚨
 
-FILE NAMING (MANDATORY):
-- This is a ${analysis.language.toUpperCase()} project
-- ALL source files MUST use .${fileExtension} extension
-- Configuration helper file: ${configFileName}
-- NEVER generate wrong file extensions (e.g., .js for TypeScript, .ts for Python)
+FILE NAMING (MANDATORY - ZERO TOLERANCE):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ CORRECT: This is a ${analysis.language.toUpperCase()} project
+✅ CORRECT: ALL source files MUST use .${fileExtension} extension
+✅ CORRECT: Configuration helper file: ${configFileName}
+${analysis.language === 'typescript' || analysis.language === 'javascript' ? `
+✅ CORRECT: src/utils/costkatana-client.${fileExtension}
+❌ FORBIDDEN: src/utils/costkatana-client.${analysis.language === 'typescript' ? 'js' : 'ts'} ← THIS WILL CAUSE BUILD FAILURE
+` : ''}
+❌ FORBIDDEN: Wrong file extensions (e.g., .${analysis.language === 'typescript' ? 'js' : analysis.language === 'javascript' ? 'ts' : 'ts'} for ${analysis.language.toUpperCase()} projects)
+❌ FORBIDDEN: Files in dist/, build/, out/, lib/, .next/, or node_modules/
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CODE PRESERVATION (MANDATORY):
 - DO NOT DELETE any existing code
@@ -1112,22 +1338,40 @@ Generate code examples showing how to add CostKatana tracking headers to HTTP re
 5. Include error handling and logging
 6. Create a reusable helper/utility module
 
-Requirements:
-- Use modern syntax for the detected language/framework
-- Follow the project's existing patterns (detected: ${(analysis.detectedPatterns && analysis.detectedPatterns.length > 0) ? analysis.detectedPatterns.join(', ') : 'standard patterns'})
-- Include comprehensive examples for different HTTP clients (fetch, axios, requests, http.client, curl, etc.)
-- Add TypeScript types if project uses TypeScript
+CODE QUALITY REQUIREMENTS:
+${analysis.language === 'typescript' ? `
+- Use TypeScript with proper type annotations
+- Add interface/type definitions for all configurations
+- Use async/await (NOT .then().catch())
+- Include JSDoc comments with @param and @returns tags
+- Export types for external use
+` : analysis.language === 'javascript' ? `
+- Use modern ES6+ syntax
+- Include JSDoc comments for all functions
+- Use async/await (NOT .then().catch())
+- Add proper error handling with try/catch
+` : `
+- Use modern ${analysis.language} syntax
+- Include proper error handling
+- Add comprehensive comments
+`}
+- Follow the project's existing patterns: ${(analysis.detectedPatterns && analysis.detectedPatterns.length > 0) ? analysis.detectedPatterns.join(', ') : 'standard patterns'}
+- Include comprehensive examples for different HTTP clients
 - Generate production-ready, well-documented code
 - Include example usage for each selected feature
-- CRITICAL: For TypeScript projects (language is 'typescript'), ONLY generate .ts files. Do NOT generate .js files.
-- CRITICAL: Only generate source files, never generate files in dist/, build/, or other output directories
+
+FINAL VERIFICATION BEFORE RETURNING:
+□ All file paths end with .${fileExtension} (NOT .${analysis.language === 'typescript' ? 'js' : analysis.language === 'javascript' ? 'ts' : 'wrong-extension'})
+□ No files are in dist/, build/, or output directories
+□ TypeScript types are included if language is TypeScript
+□ Code uses modern syntax for the detected language
 
 Return a JSON object with this exact structure:
 {
   "files": [
     {
-      "path": "src/utils/costkatana-client.${analysis.language === 'typescript' ? 'ts' : 'js'}",
-      "content": "// CostKatana HTTP client helper with headers",
+      "path": "src/utils/costkatana-client.${fileExtension}",
+      "content": "// CostKatana HTTP client helper with headers - ${analysis.language === 'typescript' ? 'TypeScript with types' : 'modern syntax'}",
       "description": "CostKatana HTTP headers integration utility"
     },
     {

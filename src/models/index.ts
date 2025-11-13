@@ -28,3 +28,5 @@ export { GitHubConnection, IGitHubConnection, IGitHubRepository } from './GitHub
 export { GitHubIntegration, IGitHubIntegration, IGitHubCommit, IAISuggestion, IFeatureConfig } from './GitHubIntegration';
 export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserMapping';
 export { AILog, IAILog } from './AILog';
+export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversation';
+export { LogQueryAudit, ILogQueryAudit } from './LogQueryAudit';

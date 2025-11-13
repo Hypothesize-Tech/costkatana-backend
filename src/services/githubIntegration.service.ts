@@ -405,6 +405,30 @@ export class GitHubIntegrationService {
                 branchName: integration.branchName
             });
 
+            // Pre-commit validation - final safety check
+            const preCommitValidation = this.preCommitValidation(generatedCode, analysis);
+            if (!preCommitValidation.isValid) {
+                loggingService.error('Pre-commit validation failed', {
+                    integrationId,
+                    errors: preCommitValidation.errors,
+                    warnings: preCommitValidation.warnings
+                });
+
+                // Update integration status
+                integration.status = 'failed';
+                integration.errorMessage = `Pre-commit validation failed: ${preCommitValidation.errors.join('; ')}`;
+                await integration.save();
+
+                throw new Error(`Pre-commit validation failed:\n${preCommitValidation.errors.join('\n')}`);
+            }
+
+            if (preCommitValidation.warnings.length > 0) {
+                loggingService.warn('Pre-commit warnings found', {
+                    integrationId,
+                    warnings: preCommitValidation.warnings
+                });
+            }
+
             // Commit generated files
             for (const file of generatedCode.files) {
                 const result = await GitHubService.createOrUpdateFile(connection, {
@@ -500,6 +524,75 @@ export class GitHubIntegrationService {
 
             throw error;
         }
+    }
+
+    /**
+     * Pre-commit validation - final safety check before committing files
+     */
+    private static preCommitValidation(
+        generatedCode: any,
+        analysis: any
+    ): { isValid: boolean; errors: string[]; warnings: string[] } {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+
+        const expectedExtension = analysis.language === 'typescript' ? 'ts' : 
+                                  analysis.language === 'javascript' ? 'js' :
+                                  analysis.language === 'python' ? 'py' :
+                                  analysis.language === 'java' ? 'java' :
+                                  analysis.language === 'go' ? 'go' : 'js';
+
+        const wrongExtension = analysis.language === 'typescript' ? 'js' : 
+                              analysis.language === 'javascript' ? 'ts' : null;
+
+        const forbiddenDirs = ['dist', 'build', 'out', 'lib', '.next', '.nuxt', 'node_modules', '.cache'];
+
+        // Validate each file
+        generatedCode.files.forEach((file: any) => {
+            // Critical: Check file extension
+            if (wrongExtension && file.path.endsWith(`.${wrongExtension}`)) {
+                errors.push(`CRITICAL: File has wrong extension for ${analysis.language} project: ${file.path} (expected .${expectedExtension})`);
+            }
+
+            // Critical: Check for build output directories
+            const pathLower = file.path.toLowerCase();
+            const inForbiddenDir = forbiddenDirs.some(dir => 
+                pathLower.startsWith(`${dir}/`) || 
+                pathLower.includes(`/${dir}/`)
+            );
+
+            if (inForbiddenDir) {
+                errors.push(`CRITICAL: File in forbidden directory: ${file.path}`);
+            }
+
+            // Warning: Check for suspiciously short files
+            if (file.content.length < 50 && !file.path.endsWith('.md') && !file.path.endsWith('.example')) {
+                warnings.push(`File has very short content: ${file.path} (${file.content.length} chars)`);
+            }
+
+            // Warning: Check for missing imports in TypeScript files
+            if (analysis.language === 'typescript' && file.path.endsWith('.ts')) {
+                if (!file.content.includes('import ') && !file.content.includes('require(')) {
+                    warnings.push(`TypeScript file missing imports: ${file.path}`);
+                }
+            }
+        });
+
+        // Check for main integration file
+        const mainFile = `src/costkatana.${expectedExtension}`;
+        const hasMainFile = generatedCode.files.some((f: any) => 
+            f.path === mainFile || f.path.endsWith(`/costkatana.${expectedExtension}`)
+        );
+
+        if (!hasMainFile) {
+            warnings.push(`Main integration file not found: ${mainFile}`);
+        }
+
+        return {
+            isValid: errors.length === 0,
+            errors,
+            warnings
+        };
     }
 
     /**
@@ -670,7 +763,11 @@ ${code.testingSteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
             status: integration.status,
             progress: statusMap[integration.status] || 0,
             currentStep: this.getStepDescription(integration.status),
-            analysis: integration.analysisResults,
+            analysis: integration.analysisResults ? {
+                ...integration.analysisResults,
+                languageConfidence: integration.analysisResults.languageConfidence || 100,
+                isTypeScriptPrimary: integration.analysisResults.isTypeScriptPrimary
+            } : undefined,
             prUrl: integration.prUrl,
             errorMessage: integration.errorMessage
         };

@@ -1136,6 +1136,466 @@ export class IntegrationController {
     }
 
     /**
+     * Initiate Discord OAuth flow
+     * GET /api/integrations/discord/auth
+     */
+    static async initiateDiscordOAuth(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const clientId = process.env.DISCORD_CLIENT_ID;
+            if (!clientId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Discord Client ID not configured. Please set DISCORD_CLIENT_ID in environment variables.'
+                });
+            }
+
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.DISCORD_CALLBACK_URL ?? `${backendUrl}/api/integrations/discord/callback`;
+            
+            // Generate state for CSRF protection
+            const crypto = require('crypto');
+            const state = crypto.randomBytes(16).toString('hex');
+            
+            // Store state with userId
+            const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
+
+            // Discord OAuth2 scopes - bot scope is required to get bot token
+            // When using 'bot' scope, Discord returns bot.token in the OAuth response
+            const scopes = ['bot', 'identify', 'guilds'].join('%20');
+            const permissions = '8'; // Administrator permission (gives full access to all features)
+            const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&permissions=${permissions}&scope=${scopes}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${stateData}&response_type=code`;
+
+            loggingService.info('Discord OAuth flow initiated', { 
+                userId,
+                scopes: ['bot', 'identify', 'guilds'],
+                permissions,
+                authUrl: authUrl.substring(0, 100) + '...'
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    authUrl,
+                    state: stateData
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to initiate Discord OAuth', {
+                error: error.message,
+                stack: error.stack
+            });
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to initiate Discord OAuth flow'
+            });
+        }
+    }
+
+    /**
+     * Handle Discord OAuth callback
+     * GET /api/integrations/discord/callback
+     */
+    static async handleDiscordOAuthCallback(req: any, res: Response): Promise<void> {
+        try {
+            const { code, state, error, guild_id } = req.query;
+
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+            // Handle error from Discord
+            if (error) {
+                loggingService.error('Discord OAuth error', { error });
+                res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent(error as string)}`);
+                return;
+            }
+
+            // Validate required parameters
+            if (!code || !state) {
+                loggingService.error('Discord OAuth callback missing parameters', { code: !!code, state: !!state });
+                res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent('Missing code or state parameter')}`);
+                return;
+            }
+
+            // Decode state
+            let stateData: { userId: string; nonce: string };
+            try {
+                stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+            } catch (error: any) {
+                loggingService.error('Failed to decode Discord OAuth state', { error: error.message });
+                res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent('Invalid state parameter')}`);
+                return;
+            }
+
+            const userId = stateData.userId;
+
+            const clientId = process.env.DISCORD_CLIENT_ID;
+            const clientSecret = process.env.DISCORD_CLIENT_SECRET;
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.DISCORD_CALLBACK_URL ?? `${backendUrl}/api/integrations/discord/callback`;
+
+            if (!clientId || !clientSecret) {
+                loggingService.error('Discord OAuth credentials not configured');
+                res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent('Discord OAuth not configured')}`);
+                return;
+            }
+
+            // Exchange code for token
+            const axios = require('axios');
+            const FormData = require('form-data');
+            const formData = new FormData();
+            formData.append('client_id', clientId);
+            formData.append('client_secret', clientSecret);
+            formData.append('grant_type', 'authorization_code');
+            formData.append('code', code as string);
+            formData.append('redirect_uri', callbackUrl);
+
+            const tokenResponse = await axios.post('https://discord.com/api/oauth2/token', formData, {
+                headers: formData.getHeaders()
+            });
+
+            loggingService.info('Discord OAuth token response', {
+                hasAccessToken: !!tokenResponse.data.access_token,
+                hasRefreshToken: !!tokenResponse.data.refresh_token,
+                hasBot: !!tokenResponse.data.bot,
+                hasBotToken: !!tokenResponse.data.bot?.token,
+                scopes: tokenResponse.data.scope,
+                tokenResponseKeys: Object.keys(tokenResponse.data)
+            });
+
+            const accessToken = tokenResponse.data.access_token;
+            const refreshToken = tokenResponse.data.refresh_token;
+            
+            // Discord's modern OAuth flow doesn't return bot.token in the OAuth response
+            // Instead, we need to use the Bot Token from the Discord Developer Portal
+            // The bot token should be configured as an environment variable
+            const botToken = process.env.DISCORD_BOT_TOKEN || tokenResponse.data.bot?.token;
+
+            if (!botToken) {
+                loggingService.error('Discord bot token not configured', {
+                    tokenResponseKeys: Object.keys(tokenResponse.data),
+                    hasEnvBotToken: !!process.env.DISCORD_BOT_TOKEN,
+                    hasBotInResponse: !!tokenResponse.data.bot
+                });
+                res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent('Discord bot token not configured. Please set DISCORD_BOT_TOKEN in your environment variables. Get your bot token from: https://discord.com/developers/applications → Your App → Bot → Reset Token')}`);
+                return;
+            }
+
+            // Get user information
+            const userResponse = await axios.get('https://discord.com/api/users/@me', {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`
+                }
+            });
+
+            const discordUser = userResponse.data;
+            const guildId = guild_id as string || '';
+
+            // Get guild information if guild_id is provided
+            let guildName = '';
+            if (guildId && botToken) {
+                try {
+                    const guildResponse = await axios.get(`https://discord.com/api/guilds/${guildId}`, {
+                        headers: {
+                            Authorization: `Bot ${botToken}`
+                        }
+                    });
+                    guildName = guildResponse.data.name;
+                } catch (error) {
+                    loggingService.warn('Failed to fetch Discord guild name', { guildId });
+                }
+            }
+
+            // Create Discord OAuth integration
+            const Integration = (await import('../models')).Integration;
+            const integration = new Integration({
+                userId,
+                type: 'discord_oauth',
+                name: guildName ? `Discord - ${guildName}` : `Discord - ${discordUser.username}`,
+                description: `Connected via OAuth as ${discordUser.username}#${discordUser.discriminator}`,
+                status: 'active',
+                alertRouting: new Map(),
+                deliveryConfig: {
+                    retryEnabled: true,
+                    maxRetries: 3,
+                    timeout: 30000
+                },
+                stats: {
+                    totalDeliveries: 0,
+                    successfulDeliveries: 0,
+                    failedDeliveries: 0,
+                    lastDeliveryAt: null,
+                    averageResponseTime: 0
+                },
+                metadata: {
+                    discordUserId: discordUser.id,
+                    discordUsername: discordUser.username,
+                    discriminator: discordUser.discriminator,
+                    guildId: guildId || undefined
+                }
+            });
+
+            // Set encrypted credentials before saving
+            integration.setCredentials({
+                accessToken,
+                refreshToken,
+                botToken,
+                guildId,
+                guildName
+            });
+
+            await integration.save();
+
+            loggingService.info('Discord OAuth integration created', {
+                userId,
+                integrationId: integration._id,
+                discordUserId: discordUser.id,
+                guildId,
+                guildName
+            });
+
+            // Redirect to success page
+            res.redirect(`${frontendUrl}/integrations/discord/success?integrationId=${integration._id}`);
+        } catch (error: any) {
+            loggingService.error('Failed to handle Discord OAuth callback', {
+                error: error.message,
+                stack: error.stack
+            });
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            res.redirect(`${frontendUrl}/integrations/discord/error?message=${encodeURIComponent(error.message || 'Failed to connect Discord')}`);
+        }
+    }
+
+    /**
+     * Initiate Slack OAuth flow
+     * GET /api/integrations/slack/auth
+     */
+    static async initiateSlackOAuth(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const clientId = process.env.SLACK_CLIENT_ID;
+            if (!clientId) {
+                return res.status(500).json({
+                    success: false,
+                    message: 'Slack Client ID not configured. Please set SLACK_CLIENT_ID in environment variables.'
+                });
+            }
+
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.SLACK_CALLBACK_URL ?? `${backendUrl}/api/integrations/slack/callback`;
+            
+            // Generate state for CSRF protection
+            const crypto = require('crypto');
+            const state = crypto.randomBytes(16).toString('hex');
+            
+            // Store state with userId
+            const stateData = Buffer.from(JSON.stringify({ userId, nonce: state })).toString('base64');
+
+            // Slack OAuth2 scopes - request bot permissions for full capabilities
+            const scopes = [
+                'chat:write',        // Send messages
+                'channels:read',     // List channels
+                'channels:manage',   // Create/archive channels
+                'users:read',        // List users
+                'channels:history',  // Read channel messages (optional)
+                'groups:read'        // List private channels (optional)
+            ].join(',');
+
+            const authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${stateData}`;
+
+            loggingService.info('Slack OAuth flow initiated', { 
+                userId,
+                scopes: scopes.split(','),
+                authUrl: authUrl.substring(0, 100) + '...'
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    authUrl,
+                    state: stateData
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to initiate Slack OAuth', {
+                error: error.message,
+                stack: error.stack
+            });
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to initiate Slack OAuth flow'
+            });
+        }
+    }
+
+    /**
+     * Handle Slack OAuth callback
+     * GET /api/integrations/slack/callback
+     */
+    static async handleSlackOAuthCallback(req: any, res: Response): Promise<void> {
+        try {
+            const { code, state, error } = req.query;
+
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+            // Handle error from Slack
+            if (error) {
+                loggingService.error('Slack OAuth error', { error });
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent(error as string)}`);
+                return;
+            }
+
+            // Validate required parameters
+            if (!code || !state) {
+                loggingService.error('Slack OAuth callback missing parameters', { code: !!code, state: !!state });
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent('Missing code or state parameter')}`);
+                return;
+            }
+
+            // Decode state
+            let stateData: { userId: string; nonce: string };
+            try {
+                stateData = JSON.parse(Buffer.from(state as string, 'base64').toString('utf-8'));
+            } catch (error: any) {
+                loggingService.error('Failed to decode Slack OAuth state', { error: error.message });
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent('Invalid state parameter')}`);
+                return;
+            }
+
+            const userId = stateData.userId;
+
+            const clientId = process.env.SLACK_CLIENT_ID;
+            const clientSecret = process.env.SLACK_CLIENT_SECRET;
+            const backendUrl = process.env.BACKEND_URL ?? 'http://localhost:8000';
+            const callbackUrl = process.env.SLACK_CALLBACK_URL ?? `${backendUrl}/api/integrations/slack/callback`;
+
+            if (!clientId || !clientSecret) {
+                loggingService.error('Slack OAuth credentials not configured');
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent('Slack OAuth not configured')}`);
+                return;
+            }
+
+            // Exchange code for token using Slack's oauth.v2.access endpoint
+            const axios = require('axios');
+            const tokenResponse = await axios.post('https://slack.com/api/oauth.v2.access', 
+                new URLSearchParams({
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                    code: code as string,
+                    redirect_uri: callbackUrl
+                }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    }
+                }
+            );
+
+            loggingService.info('Slack OAuth token response', {
+                ok: tokenResponse.data.ok,
+                hasAccessToken: !!tokenResponse.data.access_token,
+                hasTeam: !!tokenResponse.data.team,
+                hasAuthedUser: !!tokenResponse.data.authed_user,
+                scopes: tokenResponse.data.scope,
+                tokenResponseKeys: Object.keys(tokenResponse.data)
+            });
+
+            if (!tokenResponse.data.ok) {
+                loggingService.error('Slack OAuth token exchange failed', { 
+                    error: tokenResponse.data.error 
+                });
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent(tokenResponse.data.error || 'Failed to exchange token')}`);
+                return;
+            }
+
+            const accessToken = tokenResponse.data.access_token;
+            const team = tokenResponse.data.team;
+            const authedUser = tokenResponse.data.authed_user;
+            const botUserId = tokenResponse.data.bot_user_id;
+
+            if (!accessToken || !team) {
+                loggingService.error('Slack OAuth response missing required data');
+                res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent('Missing access token or team information')}`);
+                return;
+            }
+
+            // Create new Slack OAuth integration
+            const Integration = (await import('../models')).Integration;
+            
+            const integration = new Integration({
+                userId,
+                type: 'slack_oauth',
+                name: `Slack - ${team.name}`,
+                description: `Connected via OAuth to ${team.name} workspace`,
+                status: 'active',
+                alertRouting: {},
+                webhookConfig: {
+                    url: '',
+                    headers: {},
+                    method: 'POST',
+                    timeout: 30000,
+                    retryAttempts: 3
+                },
+                deliveryStats: {
+                    totalDeliveries: 0,
+                    successfulDeliveries: 0,
+                    failedDeliveries: 0,
+                    lastDeliveryAt: null,
+                    averageResponseTime: 0
+                },
+                metadata: {
+                    teamId: team.id,
+                    teamName: team.name,
+                    authedUserId: authedUser?.id,
+                    botUserId
+                }
+            });
+
+            // Set encrypted credentials before saving
+            integration.setCredentials({
+                accessToken,
+                teamId: team.id,
+                teamName: team.name,
+                botUserId
+            });
+
+            await integration.save();
+
+            loggingService.info('Slack OAuth integration created', {
+                userId,
+                integrationId: integration._id,
+                teamId: team.id,
+                teamName: team.name,
+                botUserId
+            });
+
+            // Redirect to success page
+            res.redirect(`${frontendUrl}/integrations/slack/success?integrationId=${integration._id}`);
+        } catch (error: any) {
+            loggingService.error('Failed to handle Slack OAuth callback', {
+                error: error.message,
+                stack: error.stack,
+                response: error.response?.data
+            });
+            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            res.redirect(`${frontendUrl}/integrations/slack/error?message=${encodeURIComponent(error.message || 'Failed to connect Slack')}`);
+        }
+    }
+
+    /**
      * Validate JIRA API token and fetch projects
      * POST /api/integrations/jira/validate-token
      */

@@ -1084,6 +1084,7 @@ export class ChatService {
                             }
                         });
 
+                        // Handle both success and failure cases explicitly
                         if (result.success && result.result.success) {
                             // Sanitize response for display (remove MongoDB IDs, etc.)
                             const { formatIntegrationResultForDisplay } = await import('../utils/responseSanitizer');
@@ -1124,14 +1125,129 @@ export class ChatService {
                                 cacheHit: false,
                                 riskLevel: 'low' as const
                             };
+                        } else {
+                            // Integration command failed - return error message directly
+                            const errorMessage = result.result?.message || result.result?.error || 'Integration command failed';
+                            
+                            // Save error response
+                            const session2 = await mongoose.startSession();
+                            try {
+                                await session2.withTransaction(async () => {
+                                    await ChatMessage.create([{
+                                        conversationId: conversation._id,
+                                        userId: request.userId,
+                                        role: 'assistant',
+                                        content: `❌ ${errorMessage}`,
+                                        modelId: request.modelId
+                                    }], { session: session2 });
+
+                                    conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                                    conversation!.lastMessage = errorMessage.substring(0, 100);
+                                    conversation!.lastMessageAt = new Date();
+                                    await conversation!.save({ session: session2 });
+                                });
+                            } finally {
+                                await session2.endSession();
+                            }
+
+                            const latency = Date.now() - startTime;
+                            return {
+                                messageId: new Types.ObjectId().toString(),
+                                conversationId: conversation!._id.toString(),
+                                response: `❌ ${errorMessage}`,
+                                cost: 0,
+                                latency,
+                                tokenCount: 0,
+                                model: request.modelId,
+                                agentPath: ['integration_handler'],
+                                optimizationsApplied: [],
+                                cacheHit: false,
+                                riskLevel: 'low' as const
+                            };
                         }
+                    } else {
+                        // Could not parse command - return helpful error
+                        const integration = mentions[0].integration;
+                        const errorMessage = `I couldn't understand the ${integration} command. Please use a format like @${integration}:list-issues or @${integration}:create-issue with title "..."`;
+                        
+                        const session2 = await mongoose.startSession();
+                        try {
+                            await session2.withTransaction(async () => {
+                                await ChatMessage.create([{
+                                    conversationId: conversation._id,
+                                    userId: request.userId,
+                                    role: 'assistant',
+                                    content: `❓ ${errorMessage}`,
+                                    modelId: request.modelId
+                                }], { session: session2 });
+
+                                conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                                conversation!.lastMessage = errorMessage.substring(0, 100);
+                                conversation!.lastMessageAt = new Date();
+                                await conversation!.save({ session: session2 });
+                            });
+                        } finally {
+                            await session2.endSession();
+                        }
+
+                        const latency = Date.now() - startTime;
+                        return {
+                            messageId: new Types.ObjectId().toString(),
+                            conversationId: conversation!._id.toString(),
+                            response: `❓ ${errorMessage}`,
+                            cost: 0,
+                            latency,
+                            tokenCount: 0,
+                            model: request.modelId,
+                            agentPath: ['integration_handler'],
+                            optimizationsApplied: [],
+                            cacheHit: false,
+                            riskLevel: 'low' as const
+                        };
                     }
                 } catch (error) {
-                    loggingService.warn('Integration command failed, continuing with normal processing', {
-                        error: error instanceof Error ? error.message : String(error),
-                        userId: request.userId
+                    // Unexpected error - return error message instead of falling back
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown integration error';
+                    loggingService.error('Integration command failed with unexpected error', {
+                        error: errorMessage,
+                        userId: request.userId,
+                        message: request.message
                     });
-                    // Continue with normal processing if integration command fails
+                    
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: `❌ ${errorMessage}`,
+                                modelId: request.modelId
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = errorMessage.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+
+                    const latency = Date.now() - startTime;
+                    return {
+                        messageId: new Types.ObjectId().toString(),
+                        conversationId: conversation!._id.toString(),
+                        response: `❌ ${errorMessage}`,
+                        cost: 0,
+                        latency,
+                        tokenCount: 0,
+                        model: request.modelId,
+                        agentPath: ['integration_handler'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low' as const
+                    };
                 }
             }
 

@@ -515,6 +515,34 @@ export class SlackService {
     }
 
     /**
+     * Get list of users (OAuth only)
+     */
+    static async listUsers(accessToken: string): Promise<any[]> {
+        try {
+            const response = await axios.get(
+                `${this.SLACK_API_BASE}/users.list`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    params: {
+                        limit: 100
+                    }
+                }
+            );
+
+            if (!response.data.ok) {
+                throw new Error(`Slack API error: ${response.data.error}`);
+            }
+
+            return response.data.members || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Slack users', { error: error.message });
+            throw error;
+        }
+    }
+
+    /**
      * Send a simple message to Slack channel (OAuth)
      */
     static async sendMessage(accessToken: string, channelId: string, message: string): Promise<{ success: boolean; messageTs?: string }> {
@@ -590,6 +618,36 @@ export class SlackService {
             return await this.sendMessage(accessToken, channelId, message);
         } catch (error: any) {
             loggingService.error('Failed to send Slack direct message', { error: error.message, userId });
+            throw error;
+        }
+    }
+
+    /**
+     * Get workspace information
+     */
+    static async getWorkspaceInfo(accessToken: string): Promise<any> {
+        try {
+            const response = await axios.get(
+                `${this.SLACK_API_BASE}/team.info`,
+                {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                }
+            );
+
+            if (!response.data.ok) {
+                throw new Error(`Slack API error: ${response.data.error}`);
+            }
+
+            loggingService.info('Slack workspace info retrieved', { 
+                teamId: response.data.team?.id,
+                teamName: response.data.team?.name 
+            });
+
+            return response.data.team || {};
+        } catch (error: any) {
+            loggingService.error('Failed to get Slack workspace info', { error: error.message });
             throw error;
         }
     }

@@ -10,6 +10,12 @@ router.get('/linear/callback', IntegrationController.handleLinearOAuthCallback);
 // JIRA OAuth callback (no auth - called by JIRA)
 router.get('/jira/callback', IntegrationController.handleJiraOAuthCallback);
 
+// Discord OAuth callback (no auth - called by Discord)
+router.get('/discord/callback', IntegrationController.handleDiscordOAuthCallback);
+
+// Slack OAuth callback (no auth - called by Slack)
+router.get('/slack/callback', IntegrationController.handleSlackOAuthCallback);
+
 // All other routes require authentication
 router.use(authenticate);
 
@@ -32,6 +38,12 @@ router.get('/linear/auth', IntegrationController.initiateLinearOAuth);
 // JIRA OAuth routes (must come before parameterized routes)
 router.post('/jira/validate-token', IntegrationController.validateJiraToken);
 router.get('/jira/auth', IntegrationController.initiateJiraOAuth);
+
+// Discord OAuth routes (must come before parameterized routes)
+router.get('/discord/auth', IntegrationController.initiateDiscordOAuth);
+
+// Slack OAuth routes (must come before parameterized routes)
+router.get('/slack/auth', IntegrationController.initiateSlackOAuth);
 
 // Slack-specific
 router.get('/:id/slack/channels', IntegrationController.getSlackChannels);
