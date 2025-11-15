@@ -467,7 +467,7 @@ response = model.generate_content("Hello")
 - Implement graceful degradation for non-critical features
 
 ### 3. Cost Optimization
-- Use Cortex optimization for production workloads (70-95% savings)
+- Use Cortex optimization for production workloads (40-75% savings)
 - Choose appropriate models based on task complexity
 - Implement caching for frequently used prompts
 - Monitor usage patterns to identify optimization opportunities
