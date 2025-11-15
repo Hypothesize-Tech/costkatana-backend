@@ -715,7 +715,7 @@ Suggestions:
                    `cost-katana test\n\n` +
                    `# Start interactive chat\n` +
                    `cost-katana chat --model nova-lite\n\n` +
-                   `# Optimize with Cortex (70-95% savings)\n` +
+                   `# Optimize with Cortex (40-75% savings)\n` +
                    `cost-katana optimize --prompt "your query" --cortex\n\n` +
                    `# Analyze costs\n` +
                    `cost-katana analyze --days 30\n\n` +
