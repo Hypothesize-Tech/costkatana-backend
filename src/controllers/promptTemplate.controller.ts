@@ -433,7 +433,7 @@ export class PromptTemplateController {
             const result = await Promise.race([generationPromise, timeoutPromise]);
 
             // Reset failure count on success
-            this.aiFailureCount = 0;
+            PromptTemplateController.aiFailureCount = 0;
 
             res.json({
                 success: true,
@@ -705,7 +705,7 @@ export class PromptTemplateController {
 
     private static recordAiFailure(): void {
         PromptTemplateController.aiFailureCount++;
-        this.lastAiFailureTime = Date.now();
+        PromptTemplateController.lastAiFailureTime = Date.now();
     }
 
     /**
@@ -717,8 +717,8 @@ export class PromptTemplateController {
 
     private static startBackgroundProcessor(): void {
         PromptTemplateController.backgroundProcessor = setInterval(async () => {
-            if (this.backgroundQueue.length > 0) {
-                const operation = this.backgroundQueue.shift();
+            if (PromptTemplateController.backgroundQueue.length > 0) {
+                const operation = PromptTemplateController.backgroundQueue.shift();
                 if (operation) {
                     try {
                         await operation();
@@ -998,14 +998,14 @@ export class PromptTemplateController {
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {
-        if (this.backgroundProcessor) {
-            clearInterval(this.backgroundProcessor);
-            this.backgroundProcessor = undefined;
+        if (PromptTemplateController.backgroundProcessor) {
+            clearInterval(PromptTemplateController.backgroundProcessor);
+            PromptTemplateController.backgroundProcessor = undefined;
         }
         
         // Process remaining queue items
-        while (this.backgroundQueue.length > 0) {
-            const operation = this.backgroundQueue.shift();
+        while (PromptTemplateController.backgroundQueue.length > 0) {
+            const operation = PromptTemplateController.backgroundQueue.shift();
             if (operation) {
                 operation().catch(error => {
                     loggingService.error('Cleanup operation failed:', {
@@ -1016,6 +1016,6 @@ export class PromptTemplateController {
         }
         
         // Clear caches
-        this.userProjectCache.clear();
+        PromptTemplateController.userProjectCache.clear();
     }
 } 
