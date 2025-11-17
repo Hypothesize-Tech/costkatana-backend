@@ -231,7 +231,7 @@ export class ChatService {
         
         // Package entities
         const packagePatterns = [
-            /ai-cost-tracker/g, /ai-cost-optimizer-cli/g, /cost-katana/g,
+            /cost-katana/g, /cost-katana-cli/g,
             /npm\s+package/g, /pypi\s+package/g, /python\s+package/g,
             /javascript\s+package/g, /typescript\s+package/g
         ];
@@ -283,11 +283,11 @@ export class ChatService {
             confidence = 0.9;
             
             if (lowerMessage.includes('python') || lowerMessage.includes('pypi')) {
-                subject = 'cost-katana-python';
+                subject = 'cost-katana';
             } else if (lowerMessage.includes('npm') || lowerMessage.includes('javascript') || lowerMessage.includes('typescript')) {
-                subject = 'ai-cost-tracker';
+                subject = 'cost-katana';
             } else if (lowerMessage.includes('cli') || lowerMessage.includes('command')) {
-                subject = 'ai-cost-optimizer-cli';
+                subject = 'cost-katana-cli';
             }
         } else if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi')) {
             domain = 'packages';
@@ -309,12 +309,10 @@ export class ChatService {
         if (hasCoref && recentMessages.length > 0) {
             // Try to resolve from recent context
             const recentContext = recentMessages.slice(-3).map(m => m.content).join(' ');
-            if (recentContext.includes('cost-katana') || recentContext.includes('python')) {
-                subject = 'cost-katana-python';
-            } else if (recentContext.includes('ai-cost-tracker') || recentContext.includes('npm')) {
-                subject = 'ai-cost-tracker';
-            } else if (recentContext.includes('ai-cost-optimizer-cli') || recentContext.includes('cli')) {
-                subject = 'ai-cost-optimizer-cli';
+            if (recentContext.includes('cost-katana') || recentContext.includes('python') || recentContext.includes('npm')) {
+                subject = 'cost-katana';
+            } else if (recentContext.includes('cost-katana-cli') || recentContext.includes('cli')) {
+                subject = 'cost-katana-cli';
             }
             confidence = Math.max(confidence, 0.6);
         }
@@ -624,89 +622,70 @@ export class ChatService {
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
         
-        loggingService.info('📚 Routing to knowledge base', {
+        loggingService.info('📚 Routing to knowledge base with Modular RAG', {
             subject: context.currentSubject,
             domain: context.lastDomain
         });
         
         try {
-            // Retrieve relevant context from RAG system
-            const retrievalOptions: any = {
-                limit: 5,
-                useCache: true,
-                rerank: true
-            };
+            // Use new Modular RAG Orchestrator
+            const { modularRAGOrchestrator } = await import('../rag');
             
-            // If specific documents are provided, filter by them
-            if (request.documentIds && request.documentIds.length > 0) {
-                retrievalOptions.filters = {
-                    documentIds: request.documentIds
-                };
-                retrievalOptions.limit = 10; // Increase limit for document-specific queries
-            }
-            
-            const ragContext = await retrievalService.retrieveWithContext(
-                request.message,
-                {
-                    userId: request.userId,
-                    recentMessages: recentMessages.slice(-3).map(msg => msg.content),
-                    currentTopic: context.currentSubject
-                },
-                retrievalOptions
-            );
-
-            loggingService.info('📚 Retrieved RAG context', {
-                documentsFound: ragContext.documents.length,
-                sources: ragContext.sources || [],
-                userId: request.userId
-            });
-
-            const { agentService } = await import('./agent.service');
-            
-            // Build enhanced query with RAG context
-            let enhancedQuery = `${contextPreamble}\n\n`;
-            
-            // Add RAG context if available
-            if (ragContext.documents.length > 0) {
-                enhancedQuery += `**Relevant Knowledge Base Context:**\n`;
-                ragContext.documents.slice(0, 3).forEach((doc, idx) => {
-                    const content = (doc as any).content || (doc as any).pageContent || '';
-                    enhancedQuery += `${idx + 1}. ${content.substring(0, 200)}...\n`;
-                });
-                enhancedQuery += `\n`;
-            }
-            
-            enhancedQuery += `User query: ${request.message}`;
-            
-            const agentResponse = await agentService.query({
+            // Build RAG context
+            const ragContext: any = {
                 userId: request.userId,
-                query: enhancedQuery,
-                context: {
-                    conversationId: context.conversationId,
-                    previousMessages: recentMessages.map(msg => ({
-                        role: msg.role,
-                        content: msg.content
-                    }))
-                }
+                conversationId: context.conversationId,
+                recentMessages: recentMessages.slice(-3).map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                currentTopic: context.currentSubject,
+            };
+
+            // Configure RAG based on query characteristics
+            const config: any = {};
+            if (request.documentIds && request.documentIds.length > 0) {
+                config.modules = {
+                    retrieve: {
+                        limit: 10,
+                        filters: {
+                            documentIds: request.documentIds,
+                        },
+                    },
+                };
+            }
+
+            // Execute modular RAG
+            const ragResult = await modularRAGOrchestrator.execute({
+                query: request.message,
+                context: ragContext,
+                config,
             });
 
-            if (agentResponse.success && agentResponse.response) {
+            loggingService.info('📚 Modular RAG completed', {
+                success: ragResult.success,
+                pattern: ragResult.metadata.pattern,
+                documentsFound: ragResult.documents.length,
+                sources: ragResult.sources,
+                userId: request.userId,
+            });
+
+            if (ragResult.success && ragResult.answer) {
                 return {
-                    response: agentResponse.response,
-                    agentThinking: agentResponse.thinking,
-                    agentPath: ['knowledge_base', 'rag_enhanced'],
+                    response: ragResult.answer,
+                    agentPath: ['knowledge_base', 'modular_rag', ragResult.metadata.pattern],
                     optimizationsApplied: [
-                        'context_enhancement',
-                        'knowledge_base_routing',
-                        'rag_retrieval',
-                        `retrieved_${ragContext.documents.length}_docs`
+                        'modular_rag',
+                        `pattern_${ragResult.metadata.pattern}`,
+                        ...ragResult.metadata.modulesUsed.map((m: string) => `module_${m}`),
+                        `retrieved_${ragResult.documents.length}_docs`,
                     ],
-                    cacheHit: ragContext.cacheHit || false,
-                    riskLevel: 'low'
+                    cacheHit: ragResult.metadata.cacheHit || false,
+                    riskLevel: 'low',
                 };
             }
         } catch (error) {
-            loggingService.warn('Knowledge base routing failed, falling back to conversational flow', {
+            loggingService.warn('Modular RAG failed, falling back to conversational flow', {
                 error: error instanceof Error ? error.message : String(error)
             });
         }
