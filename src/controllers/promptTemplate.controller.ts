@@ -367,6 +367,32 @@ export class PromptTemplateController {
     }
 
     /**
+     * Get trending templates
+     */
+    static async getTrendingTemplates(req: any, res: Response): Promise<void> {
+        try {
+            const { period, category, limit } = req.query;
+
+            const templates = await PromptTemplateService.getTrendingTemplates(
+                period as 'day' | 'week' | 'month' || 'week',
+                category as string,
+                limit ? parseInt(limit as string) : 10
+            );
+
+            res.json({
+                success: true,
+                data: templates
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting trending templates:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message || 'Failed to get trending templates'
+            });
+        }
+    }
+
+    /**
      * AI: Generate template from intent
      */
     static async generateFromIntent(req: any, res: Response): Promise<void> {

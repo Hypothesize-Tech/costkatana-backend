@@ -85,6 +85,15 @@ export interface ITemplateActivityMetadata {
     // Usage specific
     variablesUsed?: Record<string, any>;
     executionTime?: number;
+    resolvedVariables?: Record<string, any>;
+    resolutionDetails?: Array<{
+        variableName: string;
+        value: string;
+        confidence: number;
+        source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
+        reasoning?: string;
+    }>;
+    contextUsed?: boolean;
     // Feedback specific
     rating?: number;
     feedback?: string;
@@ -271,6 +280,7 @@ export type TemplateActivityType =
     | 'template_ai_generated'
     | 'template_optimized'
     | 'template_used'
+    | 'template_used_with_context'
     | 'template_shared'
     | 'template_feedback_added'
     | 'template_variables_detected'

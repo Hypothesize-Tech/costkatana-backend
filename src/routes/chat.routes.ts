@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
+import { validateRequest } from '../middleware/validation.middleware';
+import { body } from 'express-validator';
 import {
     sendMessage,
     getConversationHistory,
@@ -22,7 +24,22 @@ const router = Router();
 router.get('/models', getAvailableModels);
 
 // Send a message to a model
-router.post('/message', authenticate, sendMessage);
+router.post(
+    '/message',
+    [
+        body('message').optional().isString().withMessage('Message must be a string'),
+        body('modelId').notEmpty().withMessage('modelId is required'),
+        body('conversationId').optional().isMongoId().withMessage('Invalid conversationId'),
+        body('temperature').optional().isFloat({ min: 0, max: 2 }).withMessage('Temperature must be between 0 and 2'),
+        body('maxTokens').optional().isInt({ min: 1, max: 100000 }).withMessage('maxTokens must be between 1 and 100000'),
+        body('documentIds').optional().isArray().withMessage('documentIds must be an array'),
+        body('templateId').optional().isMongoId().withMessage('Invalid templateId'),
+        body('templateVariables').optional().isObject().withMessage('templateVariables must be an object')
+    ],
+    validateRequest,
+    authenticate,
+    sendMessage
+);
 
 // Create a new conversation
 router.post('/conversations', authenticate, createConversation);

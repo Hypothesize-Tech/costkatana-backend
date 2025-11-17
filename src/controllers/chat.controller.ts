@@ -12,7 +12,17 @@ export interface AuthenticatedRequest extends Request {
 export const sendMessage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
-    const { message, modelId, conversationId, temperature = 0.7, maxTokens = 2000, documentIds, githubContext } = req.body;
+    const { 
+        message, 
+        modelId, 
+        conversationId, 
+        temperature = 0.7, 
+        maxTokens = 8000, 
+        documentIds, 
+        githubContext,
+        templateId,
+        templateVariables 
+    } = req.body;
 
     try {
         loggingService.info('Chat message request initiated', {
@@ -20,6 +30,8 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             modelId,
             conversationId: conversationId || 'new',
             messageLength: message?.length || 0,
+            hasTemplate: !!templateId,
+            hasVariables: !!templateVariables,
             temperature,
             maxTokens,
             requestId: req.headers['x-request-id'] as string
@@ -37,17 +49,29 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             return;
         }
 
-        if (!message || !modelId) {
-            loggingService.warn('Chat message request failed - missing required fields', {
+        // Validate that either message or templateId is provided
+        if (!message && !templateId) {
+            loggingService.warn('Chat message request failed - neither message nor templateId provided', {
                 userId,
-                hasMessage: !!message,
-                hasModelId: !!modelId,
                 requestId: req.headers['x-request-id'] as string
             });
 
             res.status(400).json({
                 success: false,
-                message: 'Message and modelId are required'
+                message: 'Either message or templateId must be provided'
+            });
+            return;
+        }
+
+        if (!modelId) {
+            loggingService.warn('Chat message request failed - missing modelId', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(400).json({
+                success: false,
+                message: 'modelId is required'
             });
             return;
         }
@@ -61,6 +85,8 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             maxTokens,
             documentIds,
             githubContext,
+            templateId,
+            templateVariables,
             req
         });
 
@@ -71,7 +97,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             modelId,
             conversationId: conversationId || 'new',
             duration,
-            messageLength: message.length,
+            messageLength: message?.length || 0,
             responseLength: result.response?.length || 0,
             requestId: req.headers['x-request-id'] as string
         });
@@ -85,7 +111,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                 userId,
                 modelId,
                 conversationId: conversationId || 'new',
-                messageLength: message.length,
+                messageLength: message?.length || 0,
                 responseLength: result.response?.length || 0,
                 temperature,
                 maxTokens
