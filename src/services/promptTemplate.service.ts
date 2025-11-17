@@ -36,6 +36,7 @@ async function trackTemplateActivity(
             'template_ai_generated': 'AI Template Generated',
             'template_optimized': 'Template Optimized',
             'template_used': 'Template Used',
+            'template_used_with_context': 'Template Used with Context',
             'template_shared': 'Template Shared',
             'template_feedback_added': 'Template Feedback Added',
             'template_variables_detected': 'Template Variables Detected',
@@ -50,6 +51,7 @@ async function trackTemplateActivity(
             'template_ai_generated': `Generated template "${template.name}" using AI${additionalMetadata?.intent ? ` from intent: "${additionalMetadata.intent}"` : ''}`,
             'template_optimized': `Optimized template "${template.name}"${additionalMetadata?.optimizationType ? ` for ${additionalMetadata.optimizationType}` : ''}`,
             'template_used': `Used template "${template.name}"${additionalMetadata?.variablesUsed ? ` with ${Object.keys(additionalMetadata.variablesUsed).length} variables` : ''}`,
+            'template_used_with_context': `Used template "${template.name}" with context-aware resolution${additionalMetadata?.resolvedVariables ? ` (${Object.keys(additionalMetadata.resolvedVariables).length} variables resolved)` : ''}`,
             'template_shared': `Shared template "${template.name}" with visibility: ${template.sharing.visibility}`,
             'template_feedback_added': `Added feedback to template "${template.name}"${additionalMetadata?.rating ? ` (Rating: ${additionalMetadata.rating}/5)` : ''}`,
             'template_variables_detected': `Detected ${additionalMetadata?.variablesCount || 0} variables in template "${template.name}"`,
@@ -308,6 +310,142 @@ export class PromptTemplateService {
     }
 
     /**
+     * Use a prompt template with intelligent context-aware variable resolution
+     * This method integrates with conversation history to auto-fill variables
+     */
+    static async useTemplateWithContext(
+        templateId: string,
+        userId: string,
+        options: {
+            userProvidedVariables?: Record<string, any>;
+            conversationHistory?: Array<{
+                role: 'user' | 'assistant';
+                content: string;
+            }>;
+        }
+    ): Promise<{
+        prompt: string;
+        estimatedTokens: number;
+        estimatedCost?: number;
+        resolutionDetails: Array<{
+            variableName: string;
+            value: string;
+            confidence: number;
+            source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
+            reasoning?: string;
+        }>;
+        template: {
+            id: string;
+            name: string;
+            category: string;
+        };
+    }> {
+        try {
+            const { TemplateContextResolverService } = await import('./templateContextResolver.service');
+
+            loggingService.info('Using template with context resolution', {
+                templateId,
+                userId,
+                hasHistory: !!options.conversationHistory?.length,
+                providedVariables: Object.keys(options.userProvidedVariables || {})
+            });
+
+            // Fetch template
+            const template = await PromptTemplate.findById(templateId);
+            if (!template || !template.isActive) {
+                throw new Error('Template not found or inactive');
+            }
+
+            // Check access (optimized)
+            const userProjectIds = await this.getUserProjectIds(userId);
+
+            const canAccess =
+                template.createdBy.toString() === userId ||
+                template.sharing.visibility === 'public' ||
+                (template.sharing.visibility === 'project' &&
+                    template.projectId && userProjectIds.includes(template.projectId.toString())) ||
+                template.sharing.sharedWith.some(id => id.toString() === userId);
+
+            if (!canAccess) {
+                throw new Error('Unauthorized: Cannot access this template');
+            }
+
+            // Resolve variables using context
+            const { resolvedVariables, resolutionDetails, allRequiredProvided } = 
+                await TemplateContextResolverService.resolveVariables({
+                    conversationHistory: options.conversationHistory || [],
+                    userProvidedVariables: options.userProvidedVariables,
+                    templateVariables: template.variables || []
+                });
+
+            // Check if all required variables are provided
+            if (!allRequiredProvided) {
+                const missingRequired = resolutionDetails
+                    .filter(r => r.source === 'missing' && 
+                        template.variables?.find(v => v.name === r.variableName)?.required)
+                    .map(r => r.variableName);
+
+                throw new Error(
+                    `Required variables missing: ${missingRequired.join(', ')}. ` +
+                    `Please provide these variables or ensure they are mentioned in the conversation.`
+                );
+            }
+
+            // Process template with resolved variables
+            let prompt = template.content;
+            if (template.variables && template.variables.length > 0) {
+                for (const variable of template.variables) {
+                    const value = resolvedVariables[variable.name] || '';
+                    const regex = new RegExp(`{{${variable.name}}}`, 'g');
+                    prompt = prompt.replace(regex, value);
+                }
+            }
+
+            // Update usage statistics (background)
+            this.queueBackgroundOperation(async () => {
+                await PromptTemplate.findByIdAndUpdate(templateId, {
+                    $inc: { 'usage.count': 1 },
+                    $set: { 'usage.lastUsed': new Date() }
+                });
+                
+                await trackTemplateActivity(userId, 'template_used_with_context', template, {
+                    resolvedVariables,
+                    resolutionDetails,
+                    contextUsed: !!options.conversationHistory?.length
+                });
+            });
+
+            const estimatedTokens = template.metadata.estimatedTokens || this.estimateTokenCount(prompt);
+
+            loggingService.info('Template resolved successfully with context', {
+                templateId,
+                variablesResolved: resolutionDetails.length,
+                contextInferred: resolutionDetails.filter(r => r.source === 'context_inferred').length,
+                estimatedTokens
+            });
+
+            return {
+                prompt,
+                estimatedTokens,
+                estimatedCost: template.metadata.estimatedCost,
+                resolutionDetails,
+                template: {
+                    id: template._id.toString(),
+                    name: template.name,
+                    category: template.category
+                }
+            };
+        } catch (error) {
+            loggingService.error('Error using template with context:', { 
+                error: error instanceof Error ? error.message : String(error),
+                templateId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
      * Fork a prompt template
      */
     static async forkTemplate(
@@ -508,6 +646,46 @@ export class PromptTemplateService {
 
         return PromptTemplate.find(filter)
             .sort({ 'usage.count': -1, 'usage.averageRating': -1 })
+            .limit(limit)
+            .populate('createdBy', 'name');
+    }
+
+    /**
+     * Get trending templates based on recent usage growth
+     */
+    static async getTrendingTemplates(
+        period: 'day' | 'week' | 'month' = 'week',
+        category?: string,
+        limit: number = 10
+    ): Promise<IPromptTemplate[]> {
+        // Calculate the date threshold based on period
+        const now = new Date();
+        const periodMap = {
+            day: 1,
+            week: 7,
+            month: 30
+        };
+        const daysAgo = periodMap[period];
+        const dateThreshold = new Date(now.getTime() - (daysAgo * 24 * 60 * 60 * 1000));
+
+        const filter: any = {
+            isActive: true,
+            isDeleted: false,
+            'sharing.visibility': 'public',
+            'usage.lastUsedAt': { $gte: dateThreshold }
+        };
+
+        if (category) {
+            filter.category = category;
+        }
+
+        // Sort by recent usage and rating
+        return PromptTemplate.find(filter)
+            .sort({ 
+                'usage.lastUsedAt': -1, 
+                'usage.count': -1, 
+                'usage.averageRating': -1 
+            })
             .limit(limit)
             .populate('createdBy', 'name');
     }

@@ -8,7 +8,6 @@ import mongoose from 'mongoose';
 // import { conversationalFlowService } from './conversationFlow.service';
 // import { multiAgentFlowService } from './multiAgentFlow.service';
 // import { TrendingDetectorService } from './trendingDetector.service';
-import { retrievalService } from './retrieval.service';
 import { loggingService } from './logging.service';
 import { IntegrationChatService, ParsedMention } from './integrationChat.service';
 import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
@@ -77,7 +76,7 @@ export interface ConversationResponse {
 
 export interface ChatSendMessageRequest {
     userId: string;
-    message: string;
+    message?: string; // Now optional when templateId is provided
     modelId: string;
     conversationId?: string;
     temperature?: number;
@@ -91,6 +90,9 @@ export interface ChatSendMessageRequest {
         repositoryName: string;
         repositoryFullName: string;
     };
+    // Template support
+    templateId?: string; // Use a prompt template
+    templateVariables?: Record<string, any>; // Variables for template
     req?: any; // Express Request object for tracing context
 }
 
@@ -124,6 +126,19 @@ export interface ChatSendMessageResponse {
         progress?: number;
         currentStep?: string;
         prUrl?: string;
+    };
+    // Template metadata
+    templateUsed?: {
+        id: string;
+        name: string;
+        category: string;
+        variablesResolved: Array<{
+            variableName: string;
+            value: string;
+            confidence: number;
+            source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
+            reasoning?: string;
+        }>;
     };
 }
 
@@ -554,15 +569,15 @@ export class ChatService {
         // Build conversation context
         const context = this.buildConversationContext(
             conversation._id.toString(),
-            request.message,
+            request.message || '',
             recentMessages
         );
         
         // Resolve coreference if needed
-        const corefResult = await this.resolveCoreference(request.message, context, recentMessages);
+            const corefResult = await this.resolveCoreference(request.message || '', context, recentMessages);
         let resolvedMessage = request.message;
         
-        if (corefResult.resolved && corefResult.subject) {
+        if (corefResult.resolved && corefResult.subject && request.message) {
             resolvedMessage = request.message.replace(
                 /\b(this|that|it|the package|the tool|the service)\b/gi,
                 corefResult.subject
@@ -586,7 +601,7 @@ export class ChatService {
             });
         } else {
             // Decide routing based on context
-            route = this.decideRoute(context, resolvedMessage);
+            route = this.decideRoute(context, resolvedMessage || '');
         }
         
         loggingService.info('🎯 Route decision', {
@@ -657,7 +672,7 @@ export class ChatService {
 
             // Execute modular RAG
             const ragResult = await modularRAGOrchestrator.execute({
-                query: request.message,
+                query: request.message || '',
                 context: ragContext,
                 config,
             });
@@ -722,7 +737,7 @@ export class ChatService {
                         content: msg.content
                     })),
                     useWebScraper: true,
-                    searchTerms: this.extractSearchTerms(request.message)
+                    searchTerms: this.extractSearchTerms(request.message || '')
                 }
             });
 
@@ -835,7 +850,7 @@ export class ChatService {
         try {
             const { conversationalFlowService } = await import('./conversationFlow.service');
             
-            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
+            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message || ''}`;
             
             const result = await conversationalFlowService.processMessage(
                 context.conversationId,
@@ -876,7 +891,7 @@ export class ChatService {
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
         
         // Build contextual prompt, but pass messages for intelligent handling
-        const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message);
+        const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message || '');
         
         // Enhanced: Pass context to BedrockService for ChatGPT-style conversation
         const response = await BedrockService.invokeModel(
@@ -912,8 +927,26 @@ export class ChatService {
         try {
             const startTime = Date.now();
             
+            // Validate that either message or templateId is provided
+            if (!request.message && !request.templateId) {
+                throw new Error('Either message or templateId must be provided');
+            }
+
             let conversation: IConversation;
             let recentMessages: any[] = [];
+            let templateMetadata: {
+                id: string;
+                name: string;
+                category: string;
+                variablesResolved: Array<{
+                    variableName: string;
+                    value: string;
+                    confidence: number;
+                    source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
+                    reasoning?: string;
+                }>;
+            } | undefined;
+            let actualMessage = request.message || '';
             
             // Optimized: Use MongoDB session for transaction
             const session = await mongoose.startSession();
@@ -928,8 +961,10 @@ export class ChatService {
                         }
                         conversation = foundConversation;
                     } else {
-                        // Create new conversation with smart title from first message
-                        const title = this.generateSimpleTitle(request.message, request.modelId);
+                    // Create new conversation with smart title from first message or template
+                    const title = request.templateId 
+                        ? 'Template Chat'  // Will be updated after template resolution
+                        : this.generateSimpleTitle(request.message || 'New Chat', request.modelId);
                         const newConversation = new Conversation({
                             userId: request.userId,
                             title: title,
@@ -943,7 +978,7 @@ export class ChatService {
                     // Optimized: Get recent messages with dynamic context sizing
                     recentMessages = await this.getOptimalContext(
                         conversation!._id.toString(), 
-                        request.message.length
+                        request.message?.length || 50
                     );
 
                     // Fetch attached document metadata if documentIds provided
@@ -986,14 +1021,17 @@ export class ChatService {
                         }));
                     }
 
-                    // Save user message with attached documents
-                    await ChatMessage.create([{
-                        conversationId: conversation!._id,
-                        userId: request.userId,
-                        role: 'user',
-                        content: request.message,
-                        attachedDocuments: attachedDocuments
-                    }], { session });
+                    // Save user message with attached documents (only if not using template initially)
+                    // Template messages will be saved after resolution
+                    if (!request.templateId) {
+                        await ChatMessage.create([{
+                            conversationId: conversation!._id,
+                            userId: request.userId,
+                            role: 'user',
+                            content: request.message || '',
+                            attachedDocuments: attachedDocuments
+                        }], { session });
+                    }
                 });
             } finally {
                 await session.endSession();
@@ -1004,6 +1042,77 @@ export class ChatService {
                 throw new Error('Failed to get or create conversation');
             }
 
+            // Handle template resolution if templateId is provided
+            if (request.templateId) {
+                loggingService.info('Processing template request', {
+                    templateId: request.templateId,
+                    userId: request.userId,
+                    hasVariables: !!request.templateVariables
+                });
+
+                const { PromptTemplateService } = await import('./promptTemplate.service');
+
+                // Use template with context-aware resolution
+                const templateResult = await PromptTemplateService.useTemplateWithContext(
+                    request.templateId,
+                    request.userId,
+                    {
+                        userProvidedVariables: request.templateVariables,
+                        conversationHistory: recentMessages.map(msg => ({
+                            role: msg.role,
+                            content: msg.content
+                        }))
+                    }
+                );
+
+                // Update actualMessage with resolved template
+                actualMessage = templateResult.prompt;
+
+                // Store template metadata for response
+                templateMetadata = {
+                    id: templateResult.template.id,
+                    name: templateResult.template.name,
+                    category: templateResult.template.category,
+                    variablesResolved: templateResult.resolutionDetails
+                };
+
+                // Update conversation title if it's a new conversation
+                if (conversation.messageCount === 0) {
+                    conversation.title = this.generateSimpleTitle(actualMessage, request.modelId);
+                    await conversation.save();
+                }
+
+                // Save the resolved prompt as the user message
+                const session2 = await mongoose.startSession();
+                try {
+                    await session2.withTransaction(async () => {
+                        await ChatMessage.create([{
+                            conversationId: conversation._id,
+                            userId: request.userId,
+                            role: 'user',
+                            content: actualMessage,
+                            metadata: {
+                                templateId: request.templateId,
+                                templateName: templateResult.template.name,
+                                variablesResolved: templateResult.resolutionDetails
+                            }
+                        }], { session: session2 });
+                    });
+                } finally {
+                    await session2.endSession();
+                }
+
+                loggingService.info('Template resolved successfully', {
+                    templateId: request.templateId,
+                    templateName: templateResult.template.name,
+                    variablesResolved: templateResult.resolutionDetails.length,
+                    resolvedLength: actualMessage.length
+                });
+
+                // Update request.message with resolved template for downstream processing
+                request.message = actualMessage;
+            }
+
             // Check for integration mentions in the message
             // Pattern 1: @integration:entityType:entityId:subEntityType:subEntityId (original format)
             // Pattern 2: @integration:command (e.g., @linear:list-issues, @linear:list-projects)
@@ -1012,7 +1121,7 @@ export class ChatService {
             const mentions: ParsedMention[] = [];
             let match;
             
-            while ((match = mentionPattern.exec(request.message)) !== null) {
+            while (actualMessage && (match = mentionPattern.exec(actualMessage)) !== null) {
                 const [, integration, part1, part2, subEntityType, subEntityId] = match;
                 if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
                     // If part2 exists, it's entityId (Pattern 1: @integration:entityType:entityId)
@@ -1032,7 +1141,7 @@ export class ChatService {
             // Also detect simple @integration format (without colon)
             const simpleMentionPattern = /@([a-z]+)(?![:\w])/g;
             let simpleMatch;
-            while ((simpleMatch = simpleMentionPattern.exec(request.message)) !== null) {
+            while (actualMessage && (simpleMatch = simpleMentionPattern.exec(actualMessage)) !== null) {
                 const [, integration] = simpleMatch;
                 if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
                     // Check if this integration is already in mentions
@@ -1051,7 +1160,7 @@ export class ChatService {
             // If mentions found, try to execute integration command
             if (mentions.length > 0) {
                 try {
-                    const command = await IntegrationChatService.parseCommand(request.message, mentions);
+                    const command = await IntegrationChatService.parseCommand(actualMessage, mentions);
                     if (command) {
                         // Execute via MCP handler
                         const result = await MCPIntegrationHandler.handleIntegrationOperation({
@@ -1276,7 +1385,7 @@ export class ChatService {
                         conversationId: conversation!._id.toString(),
                         userId: request.userId,
                         githubContext: conversationGithubContext
-                    }, request.message);
+                    }, request.message || '');
 
                     // Format response - include integration data for frontend polling
                     const processingResult = {
@@ -1312,7 +1421,7 @@ export class ChatService {
                     }
 
                     const latency = Date.now() - startTime;
-                    const inputTokens = Math.ceil(request.message.length / 4);
+                    const inputTokens = Math.ceil((request.message || '').length / 4);
                     const outputTokens = Math.ceil(githubResponse.message.length / 4);
                     const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
 
@@ -1362,7 +1471,7 @@ export class ChatService {
             const latency = Date.now() - startTime;
             
             // Calculate cost (rough estimation)
-            const inputTokens = Math.ceil(request.message.length / 4);
+            const inputTokens = Math.ceil(actualMessage.length / 4);
             const outputTokens = Math.ceil(response.length / 4);
             const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
 
@@ -1415,7 +1524,8 @@ export class ChatService {
                 optimizationsApplied,
                 cacheHit,
                 agentPath,
-                riskLevel
+                riskLevel,
+                templateUsed: templateMetadata
             };
 
         } catch (error) {

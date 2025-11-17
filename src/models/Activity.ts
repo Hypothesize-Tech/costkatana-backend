@@ -9,7 +9,7 @@ export interface IActivity {
     'dashboard_api_key_created' | 'dashboard_api_key_deleted' | 'file_uploaded' | 'export_generated' |
     'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed' |
     'template_created' | 'template_updated' | 'template_deleted' | 'template_forked' |
-    'template_ai_generated' | 'template_optimized' | 'template_used' | 'template_shared' |
+    'template_ai_generated' | 'template_optimized' | 'template_used' | 'template_used_with_context' | 'template_shared' |
     'template_feedback_added' | 'template_variables_detected' | 'template_effectiveness_predicted';                                                                      
     title: string;
     description?: string;

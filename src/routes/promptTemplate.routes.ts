@@ -63,6 +63,18 @@ router.get(
     PromptTemplateController.getPopularTemplates
 );
 
+// Get trending templates
+router.get(
+    '/trending',
+    [
+        query('period').optional().isIn(['day', 'week', 'month']),
+        query('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        query('limit').optional().isInt({ min: 1, max: 50 })
+    ],
+    validateRequest,
+    PromptTemplateController.getTrendingTemplates
+);
+
 // Get specific template
 router.get(
     '/:templateId',
