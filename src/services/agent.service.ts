@@ -1268,34 +1268,35 @@ export class AgentService {
                 agentType: process.env.AGENT_TYPE || 'standard'
              } });
 
-            // First, search knowledge base for relevant context
-            const knowledgeBaseTool = new KnowledgeBaseTool();
+            // Use Modular RAG for enhanced knowledge retrieval
+            const { modularRAGOrchestrator } = await import('../rag');
             
-            // Enhance the knowledge base query with existing context
-            let contextualKnowledgeQuery = query.query;
-            if (query.context) {
-                // Add conversation context for better knowledge base search
-                if (query.context.previousMessages && query.context.previousMessages.length > 0) {
-                    const recentContext = query.context.previousMessages
-                        .slice(-2) // Last 2 messages for context
-                        .map((msg: any) => `${msg.role}: ${msg.content}`)
-                        .join('\n');
-                    
-                    contextualKnowledgeQuery = `Conversation context:\n${recentContext}\n\nCurrent query: ${query.query}`;
-                }
+            // Build RAG context from query context
+            const ragContext: any = {
+                userId: query.userId,
+                conversationId: query.context?.conversationId,
+                projectId: query.context?.projectId,
+                recentMessages: query.context?.previousMessages || [],
+            };
 
-                // Add project context if available
-                if (query.context.projectId) {
-                    contextualKnowledgeQuery += `\n\nProject context: ${query.context.projectId}`;
-                }
+            // Execute RAG with adaptive pattern for efficiency
+            const ragResult = await modularRAGOrchestrator.execute({
+                query: query.query,
+                context: ragContext,
+                preferredPattern: 'adaptive', // Use adaptive for agent queries
+            });
 
-                // Add conversation ID for tracking
-                if (query.context.conversationId) {
-                    contextualKnowledgeQuery += `\n\nConversation: ${query.context.conversationId}`;
-                }
+            // Format knowledge context from RAG result
+            let knowledgeContext = '';
+            if (ragResult.success && ragResult.documents.length > 0) {
+                knowledgeContext = `Knowledge Base Context:\n`;
+                ragResult.documents.slice(0, 3).forEach((doc, idx) => {
+                    knowledgeContext += `${idx + 1}. ${doc.pageContent.substring(0, 300)}...\n`;
+                });
+                knowledgeContext += `\nSources: ${ragResult.sources.join(', ')}`;
+            } else {
+                knowledgeContext = 'No specific knowledge base context found.';
             }
-            
-            const knowledgeContext = await knowledgeBaseTool._call(contextualKnowledgeQuery);
 
             // Enhance the query with knowledge context
             const enhancedQuery: AgentQuery = {
@@ -1327,8 +1328,8 @@ export class AgentService {
                 success: response.success,
                 duration,
                 hasKnowledgeContext: !!knowledgeContext,
-                usedContextualQuery: contextualKnowledgeQuery !== query.query,
-                contextualQueryLength: contextualKnowledgeQuery.length,
+                documentsRetrieved: ragResult.documents.length,
+                ragPattern: ragResult.metadata.pattern,
                 agentType: process.env.AGENT_TYPE || 'standard'
              } });
 

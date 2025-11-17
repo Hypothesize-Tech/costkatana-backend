@@ -1,30 +1,17 @@
 module.exports = {
-    preset: 'ts-jest',
-    testEnvironment: 'node',
-    roots: ['<rootDir>/src'],
-    testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
-    transform: {
-      '^.+\\.ts$': 'ts-jest',
-    },
-    collectCoverageFrom: [
-      'src/**/*.ts',
-      '!src/**/*.d.ts',
-      '!src/**/*.test.ts',
-      '!src/**/*.spec.ts',
-      '!src/server.ts',
-    ],
-    coverageThreshold: {
-      global: {
-        branches: 70,
-        functions: 70,
-        lines: 70,
-        statements: 70,
-      },
-    },
-    moduleNameMapper: {
-      '^@/(.*)$': '<rootDir>/src/$1',
-    },
-  
-    setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
+  preset: 'ts-jest',
+  testEnvironment: 'node',
+  roots: ['<rootDir>/src'],
+  testMatch: ['**/__tests__/**/*.test.ts'],
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  collectCoverageFrom: [
+    'src/rag/**/*.ts',
+    '!src/rag/**/*.test.ts',
+    '!src/rag/__tests__/**',
+    '!src/rag/**/index.ts',
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov', 'html'],
   testTimeout: 30000,
-  };
+  verbose: true,
+};

@@ -504,77 +504,46 @@ Please try:
         const startTime = Date.now();
 
         try {
-            loggingService.info('🤖 Using AI-enhanced RAG for knowledge base query', {
+            loggingService.info('🤖 Using Modular RAG for knowledge base query', {
                 component: 'knowledgeBaseTool',
                 query: query,
-                approach: 'ai_rag'
+                approach: 'modular_rag'
             });
 
-            // First, retrieve relevant documents using enhanced retrieval service
-            const retrievalResult = await retrievalService.retrieveKnowledgeBase(query, 5);
-            const relevantDocs = retrievalResult.documents;
+            // Use Modular RAG Orchestrator
+            const { modularRAGOrchestrator } = await import('../rag');
+            
+            const ragContext: any = {
+                userId: contextInfo.userId,
+                conversationId: contextInfo.conversationId,
+            };
 
-            if (relevantDocs.length === 0) {
-                return this.generateVectorSearchResponse(query, query, false, contextInfo, startTime);
-            }
-
-            // Extract content from relevant documents
-            const contextContent = relevantDocs.map(doc => {
-                const source = this.extractSourceName(doc.metadata?.fileName || doc.metadata?.source || 'Unknown');
-                return `**${source}:**\n${this.formatContent(doc.pageContent)}\n`;
-            }).join('\n');
-
-            // Create AI model for RAG
-            const llm = new ChatBedrockConverse({
-                model: "anthropic.claude-3-sonnet-20240229-v1:0",
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.1, // Lower temperature for factual accuracy
-                maxTokens: 1000,
+            // Execute with iterative pattern for comprehensive knowledge base queries
+            const ragResult = await modularRAGOrchestrator.execute({
+                query,
+                context: ragContext,
+                preferredPattern: 'iterative', // Use iterative for thorough knowledge base responses
             });
-
-            // Create RAG prompt
-            const ragPrompt = `You are an expert AI assistant for CostKatana, a cost optimization platform for AI applications.
-
-You have access to the following knowledge base information:
-
-${contextContent}
-
-Based on this knowledge base, please provide a comprehensive and accurate answer to the following question:
-
-"${query}"
-
-Guidelines:
-- Be specific and factual
-- Reference the correct package names (cost-katana, cost-katana-cli, cost-katana)
-- Include installation commands and links when relevant
-- Do not invent or suggest non-existent packages or features
-- If the question is about specific packages, provide their exact npm/pypi links
-- Structure your response clearly with sections when appropriate
-
-Answer:`;
-
-            // Generate response using AI model
-            const response = await llm.invoke([
-                new SystemMessage("You are a helpful AI assistant specialized in CostKatana documentation and integration."),
-                new HumanMessage(ragPrompt)
-            ]);
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('🤖 AI RAG response generated successfully', {
-                component: 'knowledgeBaseTool',
-                query: query,
-                documentsUsed: relevantDocs.length,
-                responseLength: response.content.length,
-                duration: duration,
-                approach: 'ai_rag',
-                retrievalStats: retrievalResult.stats
-            });
+            if (ragResult.success && ragResult.answer) {
+                loggingService.info('🤖 Modular RAG response generated successfully', {
+                    component: 'knowledgeBaseTool',
+                    query: query,
+                    pattern: ragResult.metadata.pattern,
+                    documentsUsed: ragResult.documents.length,
+                    responseLength: ragResult.answer.length,
+                    duration: duration,
+                });
 
-            return `🤖 **AI-Enhanced Knowledge Base Response:**\n\n${response.content}\n\n📊 **Sources:** ${relevantDocs.length} documents from ${retrievalResult.stats.sources.join(', ')}`;
-
+                return `🤖 **Knowledge Base Response:**\n\n${ragResult.answer}\n\n📊 **Sources:** ${ragResult.sources.join(', ')}`;
+            } else {
+                // Fallback if RAG fails
+                return this.generateVectorSearchResponse(query, query, false, contextInfo, startTime);
+            }
         } catch (error) {
-            loggingService.error('🤖 AI RAG failed, falling back to vector search', {
+            loggingService.error('🤖 Modular RAG failed, falling back to vector search', {
                 component: 'knowledgeBaseTool',
                 query: query,
                 error: error instanceof Error ? error.message : String(error)
