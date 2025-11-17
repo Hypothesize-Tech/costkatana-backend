@@ -5,7 +5,7 @@ export interface IPromptTemplate {
     name: string;
     description?: string;
     content: string;
-    category: 'general' | 'coding' | 'writing' | 'analysis' | 'creative' | 'business' | 'custom';
+    category: 'general' | 'coding' | 'writing' | 'analysis' | 'creative' | 'business' | 'custom' | 'visual-compliance';
     projectId?: mongoose.Types.ObjectId;
     organizationId?: mongoose.Types.ObjectId;
     createdBy: mongoose.Types.ObjectId;
@@ -16,6 +16,15 @@ export interface IPromptTemplate {
         description?: string;
         defaultValue?: string;
         required: boolean;
+        type?: 'text' | 'image';
+        imageRole?: 'reference' | 'evidence';
+        s3Url?: string;
+        accept?: string;
+        metadata?: {
+            format?: string;
+            dimensions?: string;
+            uploadedAt?: Date;
+        };
     }>;
     metadata: {
         estimatedTokens?: number;
@@ -42,6 +51,12 @@ export interface IPromptTemplate {
         sharedWith: mongoose.Types.ObjectId[]; // Specific users
         allowFork: boolean;
     };
+    isVisualCompliance?: boolean;
+    visualComplianceConfig?: {
+        industry: 'jewelry' | 'grooming' | 'retail' | 'fmcg' | 'documents';
+        mode?: 'optimized' | 'standard';
+        metaPromptPresetId?: string;
+    };
     isActive: boolean;
     isDeleted: boolean;
     createdAt: Date;
@@ -64,7 +79,7 @@ const promptTemplateSchema = new Schema<IPromptTemplate>({
     },
     category: {
         type: String,
-        enum: ['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom'],
+        enum: ['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance'],
         default: 'general'
     },
     projectId: {
@@ -98,6 +113,22 @@ const promptTemplateSchema = new Schema<IPromptTemplate>({
         required: {
             type: Boolean,
             default: false
+        },
+        type: {
+            type: String,
+            enum: ['text', 'image'],
+            default: 'text'
+        },
+        imageRole: {
+            type: String,
+            enum: ['reference', 'evidence']
+        },
+        s3Url: String,
+        accept: String,
+        metadata: {
+            format: String,
+            dimensions: String,
+            uploadedAt: Date
         }
     }],
     metadata: {
@@ -159,6 +190,22 @@ const promptTemplateSchema = new Schema<IPromptTemplate>({
             default: true
         }
     },
+    isVisualCompliance: {
+        type: Boolean,
+        default: false
+    },
+    visualComplianceConfig: {
+        industry: {
+            type: String,
+            enum: ['jewelry', 'grooming', 'retail', 'fmcg', 'documents']
+        },
+        mode: {
+            type: String,
+            enum: ['optimized', 'standard'],
+            default: 'optimized'
+        },
+        metaPromptPresetId: String
+    },
     isActive: {
         type: Boolean,
         default: true
@@ -178,6 +225,8 @@ promptTemplateSchema.index({ createdBy: 1 });
 promptTemplateSchema.index({ 'sharing.visibility': 1 });
 promptTemplateSchema.index({ 'metadata.tags': 1 });
 promptTemplateSchema.index({ category: 1 });
+promptTemplateSchema.index({ isVisualCompliance: 1 });
+promptTemplateSchema.index({ 'visualComplianceConfig.industry': 1 });
 
 // Methods
 promptTemplateSchema.methods.canAccess = function (userId: string, userProjectIds: string[] = []): boolean {

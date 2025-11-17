@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 // Template Categories
-export type TemplateCategory = 'general' | 'coding' | 'writing' | 'analysis' | 'creative' | 'business' | 'custom';
+export type TemplateCategory = 'general' | 'coding' | 'writing' | 'analysis' | 'creative' | 'business' | 'custom' | 'visual-compliance';
 
 // Template Visibility
 export type TemplateVisibility = 'private' | 'project' | 'organization' | 'public';
@@ -106,6 +106,11 @@ export interface ITemplateActivityMetadata {
     specificity?: number;
     tokenEfficiency?: number;
     expectedOutputQuality?: number;
+    // Visual compliance specific
+    category?: string;
+    isVisualCompliance?: boolean;
+    complianceScore?: number;
+    passFail?: boolean;
 }
 
 // Template Creation DTO

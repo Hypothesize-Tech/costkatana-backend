@@ -743,6 +743,258 @@ export class PromptTemplateController {
     }
 
     /**
+     * POST /api/prompt-templates/visual-compliance
+     * Create a visual compliance template
+     */
+    static async createVisualComplianceTemplate(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const requestId = req.headers['x-request-id'] as string;
+
+        try {
+            loggingService.info('Visual compliance template creation initiated', {
+                userId,
+                requestId,
+                templateName: req.body?.name,
+                industry: req.body?.industry
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId } = req.body;
+
+            // Validation
+            if (!name || !complianceCriteria || !imageVariables || !industry) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields: name, complianceCriteria, imageVariables, industry'
+                });
+                return;
+            }
+
+            if (!Array.isArray(complianceCriteria) || complianceCriteria.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'complianceCriteria must be a non-empty array'
+                });
+                return;
+            }
+
+            if (!Array.isArray(imageVariables) || imageVariables.length === 0) {
+                res.status(400).json({
+                    success: false,
+                    error: 'imageVariables must be a non-empty array'
+                });
+                return;
+            }
+
+            const template = await PromptTemplateService.createVisualComplianceTemplate(userId, {
+                name,
+                description,
+                content: content || `Visual compliance check for ${industry}`,
+                complianceCriteria,
+                imageVariables,
+                industry,
+                mode,
+                metaPromptPresetId,
+                projectId
+            });
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Visual compliance template created successfully', {
+                userId,
+                duration,
+                templateId: template._id,
+                templateName: template.name,
+                industry,
+                requestId
+            });
+
+            res.status(201).json({
+                success: true,
+                data: template,
+                message: 'Visual compliance template created successfully'
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Visual compliance template creation failed', {
+                userId,
+                requestId,
+                error: error.message || 'Unknown error',
+                duration
+            });
+
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to create visual compliance template'
+            });
+        }
+    }
+
+    /**
+     * POST /api/prompt-templates/:id/use-visual
+     * Use visual compliance template with images
+     */
+    static async useVisualTemplate(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const templateId = req.params.id;
+        const requestId = req.headers['x-request-id'] as string;
+
+        try {
+            loggingService.info('Visual template usage initiated', {
+                userId,
+                templateId,
+                requestId
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const { textVariables, imageVariables, projectId } = req.body;
+
+            // Execute visual compliance check with template
+            const result = await PromptTemplateService.executeVisualComplianceTemplate(
+                templateId,
+                userId,
+                {
+                    text: textVariables,
+                    images: imageVariables
+                },
+                projectId
+            );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Visual template executed successfully', {
+                userId,
+                templateId,
+                duration,
+                complianceScore: result.compliance_score,
+                passFail: result.pass_fail,
+                requestId
+            });
+
+            res.status(200).json({
+                success: true,
+                data: result,
+                message: 'Visual compliance check completed successfully'
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Visual template execution failed', {
+                userId,
+                templateId,
+                requestId,
+                error: error.message || 'Unknown error',
+                duration
+            });
+
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to execute visual template'
+            });
+        }
+    }
+
+    /**
+     * POST /api/prompt-templates/:id/upload-image
+     * Upload image for template variable
+     */
+    static async uploadTemplateImage(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const templateId = req.params.id;
+        const requestId = req.headers['x-request-id'] as string;
+
+        try {
+            loggingService.info('Template image upload initiated', {
+                userId,
+                templateId,
+                requestId
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const { variableName, imageData, mimeType } = req.body;
+
+            if (!variableName || !imageData || !mimeType) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Missing required fields: variableName, imageData, mimeType'
+                });
+                return;
+            }
+
+            // Convert base64 to buffer
+            const imageBuffer = Buffer.from(
+                imageData.includes('base64,') ? imageData.split('base64,')[1] : imageData,
+                'base64'
+            );
+
+            const result = await PromptTemplateService.uploadTemplateImage(
+                templateId,
+                userId,
+                variableName,
+                imageBuffer,
+                mimeType
+            );
+
+            const duration = Date.now() - startTime;
+
+            loggingService.info('Template image uploaded successfully', {
+                userId,
+                templateId,
+                variableName,
+                duration,
+                s3Url: result.s3Url,
+                requestId
+            });
+
+            res.status(200).json({
+                success: true,
+                data: result,
+                message: 'Image uploaded successfully'
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Template image upload failed', {
+                userId,
+                templateId,
+                requestId,
+                error: error.message || 'Unknown error',
+                duration
+            });
+
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to upload image'
+            });
+        }
+    }
+
+    /**
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {

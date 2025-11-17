@@ -1224,6 +1224,358 @@ export class PromptTemplateService {
     }
 
     /**
+     * Create a visual compliance template
+     */
+    static async createVisualComplianceTemplate(
+        userId: string,
+        data: {
+            name: string;
+            description?: string;
+            content: string;
+            complianceCriteria: string[];
+            imageVariables: Array<{
+                name: string;
+                imageRole: 'reference' | 'evidence';
+                description?: string;
+                required: boolean;
+            }>;
+            industry: 'jewelry' | 'grooming' | 'retail' | 'fmcg' | 'documents';
+            mode?: 'optimized' | 'standard';
+            metaPromptPresetId?: string;
+            projectId?: string;
+        }
+    ): Promise<IPromptTemplate> {
+        try {
+            // Create variables array combining criteria (text) and images
+            const variables: Array<any> = [
+                // Add compliance criteria as text variables
+                ...data.complianceCriteria.map((criterion, index) => ({
+                    name: `criterion_${index + 1}`,
+                    description: criterion,
+                    defaultValue: criterion,
+                    required: true,
+                    type: 'text'
+                })),
+                // Add image variables
+                ...data.imageVariables.map(imgVar => ({
+                    name: imgVar.name,
+                    description: imgVar.description || `${imgVar.imageRole} image`,
+                    required: imgVar.required,
+                    type: 'image',
+                    imageRole: imgVar.imageRole,
+                    accept: 'image/*'
+                }))
+            ];
+
+            const template = await PromptTemplate.create({
+                name: data.name,
+                description: data.description,
+                content: data.content,
+                category: 'visual-compliance',
+                createdBy: new mongoose.Types.ObjectId(userId),
+                projectId: data.projectId ? new mongoose.Types.ObjectId(data.projectId) : undefined,
+                variables,
+                metadata: {
+                    tags: ['visual-compliance', data.industry],
+                    recommendedModel: data.mode === 'standard' ? 'anthropic.claude-3-5-sonnet' : 'amazon.nova-pro-v1:0'
+                },
+                usage: {
+                    count: 0,
+                    totalTokensSaved: 0,
+                    totalCostSaved: 0,
+                    feedback: []
+                },
+                sharing: {
+                    visibility: 'private',
+                    sharedWith: [],
+                    allowFork: true
+                },
+                isVisualCompliance: true,
+                visualComplianceConfig: {
+                    industry: data.industry,
+                    mode: data.mode || 'optimized',
+                    metaPromptPresetId: data.metaPromptPresetId
+                },
+                version: 1,
+                isActive: true,
+                isDeleted: false
+            });
+
+            // Track activity
+            await trackTemplateActivity(userId, 'template_created', template, {
+                category: 'visual-compliance',
+                isVisualCompliance: true
+            });
+
+            loggingService.info('Visual compliance template created', {
+                templateId: template._id,
+                userId,
+                industry: data.industry,
+                criteriaCount: data.complianceCriteria.length,
+                imageVariableCount: data.imageVariables.length
+            });
+
+            return template;
+        } catch (error) {
+            loggingService.error('Failed to create visual compliance template', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Resolve visual template with text and image variables
+     */
+    static async resolveVisualTemplate(
+        templateId: string,
+        userId: string,
+        variables: {
+            text?: Record<string, string>;
+            images?: Record<string, string>; // name -> S3 URL or base64
+        }
+    ): Promise<{
+        template: IPromptTemplate;
+        resolvedCriteria: string[];
+        resolvedImages: {
+            reference?: string;
+            evidence?: string;
+        };
+        allVariablesProvided: boolean;
+    }> {
+        try {
+            const template = await PromptTemplate.findById(templateId);
+            if (!template) {
+                throw new Error('Template not found');
+            }
+
+            if (!template.isVisualCompliance) {
+                throw new Error('Template is not a visual compliance template');
+            }
+
+            // Separate text and image variables
+            const textVariables = template.variables.filter(v => v.type !== 'image');
+            const imageVariables = template.variables.filter(v => v.type === 'image');
+
+            // Resolve text variables (compliance criteria)
+            const resolvedCriteria: string[] = [];
+            for (const textVar of textVariables) {
+                const value = variables.text?.[textVar.name] || textVar.defaultValue || '';
+                resolvedCriteria.push(value);
+            }
+
+            // Resolve image variables
+            const resolvedImages: { reference?: string; evidence?: string } = {};
+            for (const imageVar of imageVariables) {
+                const value = variables.images?.[imageVar.name] || imageVar.s3Url || imageVar.defaultValue;
+                if (value) {
+                    if (imageVar.imageRole === 'reference') {
+                        resolvedImages.reference = value;
+                    } else if (imageVar.imageRole === 'evidence') {
+                        resolvedImages.evidence = value;
+                    }
+                }
+            }
+
+            // Check if all required variables are provided
+            const allRequiredTextProvided = textVariables
+                .filter(v => v.required)
+                .every(v => variables.text?.[v.name] || v.defaultValue);
+            
+            const allRequiredImagesProvided = imageVariables
+                .filter(v => v.required)
+                .every(v => variables.images?.[v.name] || v.s3Url || v.defaultValue);
+
+            const allVariablesProvided = allRequiredTextProvided && allRequiredImagesProvided;
+
+            loggingService.info('Visual template resolved', {
+                templateId,
+                userId,
+                criteriaCount: resolvedCriteria.length,
+                hasReference: !!resolvedImages.reference,
+                hasEvidence: !!resolvedImages.evidence,
+                allVariablesProvided
+            });
+
+            return {
+                template,
+                resolvedCriteria,
+                resolvedImages,
+                allVariablesProvided
+            };
+        } catch (error) {
+            loggingService.error('Failed to resolve visual template', {
+                error: error instanceof Error ? error.message : String(error),
+                templateId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Execute visual compliance check using template
+     */
+    static async executeVisualComplianceTemplate(
+        templateId: string,
+        userId: string,
+        variables: {
+            text?: Record<string, string>;
+            images?: Record<string, string>;
+        },
+        projectId?: string
+    ): Promise<any> {
+        try {
+            // Resolve template variables
+            const resolution = await this.resolveVisualTemplate(templateId, userId, variables);
+
+            if (!resolution.allVariablesProvided) {
+                throw new Error('Not all required variables are provided');
+            }
+
+            const { template, resolvedCriteria, resolvedImages } = resolution;
+
+            if (!resolvedImages.reference || !resolvedImages.evidence) {
+                throw new Error('Both reference and evidence images are required');
+            }
+
+            // Import visual compliance service
+            const { VisualComplianceOptimizedService } = await import('./visualComplianceOptimized.service');
+
+            // Execute visual compliance check
+            const result = await VisualComplianceOptimizedService.processComplianceCheckOptimized({
+                referenceImage: resolvedImages.reference,
+                evidenceImage: resolvedImages.evidence,
+                complianceCriteria: resolvedCriteria,
+                industry: template.visualComplianceConfig!.industry,
+                userId,
+                projectId,
+                useUltraCompression: true,
+                mode: template.visualComplianceConfig!.mode || 'optimized',
+                metaPromptPresetId: template.visualComplianceConfig!.metaPromptPresetId
+            });
+
+            // Update template usage statistics
+            const templateDoc = await PromptTemplate.findById(templateId);
+            if (templateDoc) {
+                templateDoc.usage.count += 1;
+                templateDoc.usage.lastUsed = new Date();
+                
+                // Track cost savings if available
+                if (result.metadata.costBreakdown) {
+                    const savings = result.metadata.costBreakdown.savings.amount;
+                    templateDoc.usage.totalCostSaved = (templateDoc.usage.totalCostSaved || 0) + savings;
+                }
+                
+                await templateDoc.save();
+            }
+
+            // Track activity
+            await trackTemplateActivity(userId, 'template_used', template, {
+                variablesUsed: { ...variables.text, ...variables.images },
+                complianceScore: result.compliance_score,
+                passFail: result.pass_fail
+            });
+
+            loggingService.info('Visual compliance template executed', {
+                templateId,
+                userId,
+                complianceScore: result.compliance_score,
+                passFail: result.pass_fail,
+                costSavings: result.metadata.costBreakdown?.savings.percentage
+            });
+
+            return {
+                ...result,
+                templateInfo: {
+                    id: template._id,
+                    name: template.name,
+                    category: template.category
+                }
+            };
+        } catch (error) {
+            loggingService.error('Failed to execute visual compliance template', {
+                error: error instanceof Error ? error.message : String(error),
+                templateId,
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Upload image for template variable
+     */
+    static async uploadTemplateImage(
+        templateId: string,
+        userId: string,
+        variableName: string,
+        imageFile: Buffer,
+        mimeType: string
+    ): Promise<{ s3Url: string; variable: any }> {
+        try {
+            const template = await PromptTemplate.findById(templateId);
+            if (!template) {
+                throw new Error('Template not found');
+            }
+
+            // Check if variable exists and is an image variable
+            const variable = template.variables.find(v => v.name === variableName && v.type === 'image');
+            if (!variable) {
+                throw new Error('Image variable not found in template');
+            }
+
+            // Import S3 service
+            const { S3Service } = await import('./s3.service');
+
+            // Upload to S3
+            const fileName = `template-${templateId}-${variableName}-${Date.now()}.${mimeType.split('/')[1]}`;
+            const uploadResult = await S3Service.uploadDocument(
+                userId,
+                fileName,
+                imageFile,
+                mimeType,
+                {
+                    type: 'template-image',
+                    templateId: templateId,
+                    variableName: variableName,
+                    imageRole: variable.imageRole || 'evidence'
+                }
+            );
+
+            // Update variable with S3 URL
+            variable.s3Url = uploadResult.s3Url;
+            variable.metadata = {
+                format: mimeType,
+                uploadedAt: new Date()
+            };
+
+            await template.save();
+
+            loggingService.info('Template image uploaded', {
+                templateId,
+                userId,
+                variableName,
+                s3Url: uploadResult.s3Url
+            });
+
+            return {
+                s3Url: uploadResult.s3Url,
+                variable
+            };
+        } catch (error) {
+            loggingService.error('Failed to upload template image', {
+                error: error instanceof Error ? error.message : String(error),
+                templateId,
+                userId,
+                variableName
+            });
+            throw error;
+        }
+    }
+
+    /**
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {

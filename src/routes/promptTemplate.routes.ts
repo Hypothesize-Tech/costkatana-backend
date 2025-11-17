@@ -261,4 +261,51 @@ router.post(
     PromptTemplateController.applyOptimization
 );
 
+// ============ VISUAL COMPLIANCE TEMPLATE ENDPOINTS ============
+
+// Create visual compliance template
+router.post(
+    '/visual-compliance',
+    [
+        body('name').notEmpty().withMessage('Template name is required'),
+        body('complianceCriteria').isArray({ min: 1 }).withMessage('Compliance criteria must be a non-empty array'),
+        body('imageVariables').isArray({ min: 1 }).withMessage('Image variables must be a non-empty array'),
+        body('imageVariables.*.name').notEmpty().withMessage('Image variable name is required'),
+        body('imageVariables.*.imageRole').isIn(['reference', 'evidence']).withMessage('Image role must be reference or evidence'),
+        body('imageVariables.*.required').isBoolean(),
+        body('industry').isIn(['jewelry', 'grooming', 'retail', 'fmcg', 'documents']).withMessage('Invalid industry'),
+        body('mode').optional().isIn(['optimized', 'standard']),
+        body('metaPromptPresetId').optional().isString(),
+        body('projectId').optional().isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.createVisualComplianceTemplate
+);
+
+// Use visual compliance template
+router.post(
+    '/:templateId/use-visual',
+    [
+        param('templateId').isMongoId(),
+        body('textVariables').optional().isObject(),
+        body('imageVariables').isObject().withMessage('Image variables are required'),
+        body('projectId').optional().isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.useVisualTemplate
+);
+
+// Upload image for template variable
+router.post(
+    '/:templateId/upload-image',
+    [
+        param('templateId').isMongoId(),
+        body('variableName').notEmpty().withMessage('Variable name is required'),
+        body('imageData').notEmpty().withMessage('Image data is required'),
+        body('mimeType').notEmpty().withMessage('MIME type is required')
+    ],
+    validateRequest,
+    PromptTemplateController.uploadTemplateImage
+);
+
 export default router; 
