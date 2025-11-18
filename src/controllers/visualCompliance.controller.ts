@@ -140,9 +140,9 @@ export class VisualComplianceController {
             mode === 'optimized' ? 'cortex_compression' : 'meta_prompt',
             result.metadata.technique
           ],
-          originalTokens: costBreakdown?.baseline.inputTokens ?? 4500,
+          originalTokens: (costBreakdown?.baseline.inputTokens ?? 4500) + (costBreakdown?.baseline.outputTokens ?? 800),
           optimizedTokens: result.metadata.inputTokens + result.metadata.outputTokens,
-          tokensSaved: Math.max(0, (costBreakdown?.baseline.inputTokens ?? 4500) - (result.metadata.inputTokens + result.metadata.outputTokens)),
+          tokensSaved: Math.max(0, ((costBreakdown?.baseline.inputTokens ?? 4500) + (costBreakdown?.baseline.outputTokens ?? 800)) - (result.metadata.inputTokens + result.metadata.outputTokens)),
           originalCost: costBreakdown?.baseline.totalCost ?? baselineCost,
           optimizedCost: result.metadata.cost,
           // For standard mode, set minimum of 0 for costSaved and improvementPercentage since it's not optimizing for cost
@@ -167,13 +167,14 @@ export class VisualComplianceController {
             compressionRatio: result.metadata.compressionRatio,
             technique: result.metadata.technique,
             inputTokens: result.metadata.inputTokens,
-            outputTokens: result.metadata.outputTokens
+            outputTokens: result.metadata.outputTokens,
+            costBreakdown: result.metadata.costBreakdown
           },
           cortexImpactMetrics: {
             tokenReduction: {
-              withoutCortex: costBreakdown?.baseline.inputTokens ?? 4500,
-              withCortex: result.metadata.inputTokens,
-              absoluteSavings: Math.max(0, (costBreakdown?.baseline.inputTokens ?? 4500) - result.metadata.inputTokens),
+              withoutCortex: (costBreakdown?.baseline.inputTokens ?? 4500) + (costBreakdown?.baseline.outputTokens ?? 800),
+              withCortex: result.metadata.inputTokens + result.metadata.outputTokens,
+              absoluteSavings: Math.max(0, ((costBreakdown?.baseline.inputTokens ?? 4500) + (costBreakdown?.baseline.outputTokens ?? 800)) - (result.metadata.inputTokens + result.metadata.outputTokens)),
               percentageSavings: Math.max(0, result.metadata.compressionRatio)
             },
             qualityMetrics: {
