@@ -11,7 +11,7 @@
  * processing for any domain.
  */
 
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { CortexConfig, DEFAULT_CORTEX_CONFIG } from '../types/cortex.types';
 
@@ -113,11 +113,10 @@ Your task is to analyze a user's query and create tailored prompts for the three
 
 export class CortexLispInstructionGeneratorService {
     private static instance: CortexLispInstructionGeneratorService;
-    private bedrockService: BedrockService;
     private cache = new Map<string, InstructionGeneratorCacheEntry>();
 
     private constructor() {
-        this.bedrockService = new BedrockService();
+        // AIRouterService is used statically, no instance needed
     }
 
     public static getInstance(): CortexLispInstructionGeneratorService {
@@ -146,13 +145,13 @@ export class CortexLispInstructionGeneratorService {
             const model = config?.instructionGenerator?.model || DEFAULT_CORTEX_CONFIG.instructionGenerator.model;
             const fullPrompt = `${INSTRUCTION_GENERATOR_PROMPT}\n\n**User Query:** "${userQuery}"`;
 
-            const response = await BedrockService.invokeModel(fullPrompt, model);
+            const response = await AIRouterService.invokeModel(fullPrompt, model);
             
             let responseText = '';
             if (typeof response === 'string') {
                 responseText = response;
-            } else if (response.content && response.content[0] && response.content[0].text) {
-                responseText = response.content[0].text;
+            } else if ((response as any)?.content && (response as any)?.content[0] && (response as any)?.content[0].text) {
+                responseText = (response as any).content[0].text;
             }
 
             // Clean the response to ensure it's valid JSON

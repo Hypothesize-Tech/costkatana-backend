@@ -1,4 +1,4 @@
-import { BedrockService } from './tracedBedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { ParsedMention, IntegrationCommand } from './integrationChat.service';
 
@@ -178,10 +178,9 @@ export class IntegrationIntentRecognitionService {
       const prompt = this.buildIntentRecognitionPrompt(message, mention);
 
       // Call AI model for intent recognition
-      const response = await BedrockService.invokeModel(
+      const response = await AIRouterService.invokeModel(
         prompt,
-        model,
-        { useSystemPrompt: false }
+        model
       );
 
       // Parse AI response

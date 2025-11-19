@@ -19,7 +19,7 @@ import {
 } from '../types/cortex.types';
 
 import { CortexVocabularyService } from './cortexVocabulary.service';
-import { BedrockService } from './tracedBedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { 
     validateCortexFrame, 
@@ -310,7 +310,6 @@ interface DecodingStats {
 export class CortexDecoderService {
     private static instance: CortexDecoderService;
     private vocabularyService: CortexVocabularyService;
-    private bedrockService: BedrockService;
     private decodingCache = new Map<string, DecoderCacheEntry>();
     private stats: DecodingStats = {
         totalDecoded: 0,
@@ -324,7 +323,6 @@ export class CortexDecoderService {
 
     private constructor() {
         this.vocabularyService = CortexVocabularyService.getInstance();
-        this.bedrockService = new BedrockService();
     }
 
     /**
@@ -560,7 +558,7 @@ PRESERVATION CHECKLIST:
 
         try {
             const fullPrompt = `${enhancedSystemPrompt}\n\nUser: ${userPrompt}`;
-            const aiResponse = await BedrockService.invokeModel(fullPrompt, decodingConfig.model);
+            const aiResponse = await AIRouterService.invokeModel(fullPrompt, decodingConfig.model);
 
             if (!aiResponse || typeof aiResponse !== 'string') {
                 throw new CortexError(
@@ -592,7 +590,7 @@ NO SUMMARIZATION. NO OMISSIONS. COMPLETE INFORMATION TRANSFER.
 \n\nUser: ${userPrompt}`;
 
                 try {
-                    const recoveryResponse = await BedrockService.invokeModel(fallbackPrompt, decodingConfig.model);
+                    const recoveryResponse = await AIRouterService.invokeModel(fallbackPrompt, decodingConfig.model);
                     if (recoveryResponse && typeof recoveryResponse === 'string') {
                         const recoveredText = recoveryResponse.trim();
                         const recoveryValidation = await this.validateInformationPreservation(cortexStructure, recoveredText);
@@ -654,7 +652,7 @@ Only report loss if:
 
 Reply ONLY JSON: {"has_information_loss": false, "issues": []}`;
 
-            const validationResult = await BedrockService.invokeModel(
+            const validationResult = await AIRouterService.invokeModel(
                 validationPrompt,
                 'amazon.nova-pro-v1:0' // Nova Pro for decoding validation
             );

@@ -10,7 +10,6 @@ import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedroc
 import sharp from 'sharp';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
-import { encodeToTOON } from '../utils/toon.utils';
 import { AICostTrackingService } from './aiCostTracking.service';
 import crypto from 'crypto';
 
@@ -668,61 +667,6 @@ export class VisualComplianceOptimizedService {
   }
 
   /**
-   * Encode features as TOON format (ultra-compact)
-   */
-  private static async encodeFeaturesAsTOON(
-    refFeatures: ImageFeatures,
-    evidFeatures: ImageFeatures
-  ): Promise<string> {
-    const featuresArray = [
-      {
-        hist: refFeatures.histogram.join(','),
-        edge: refFeatures.edges.reduce((a, b) => a + b, 0) / refFeatures.edges.length,
-        bright: refFeatures.brightness,
-        contr: refFeatures.contrast,
-        colors: refFeatures.dominant_colors.join(','),
-        objs: refFeatures.objects_detected.join(',')
-      },
-      {
-        hist: evidFeatures.histogram.join(','),
-        edge: evidFeatures.edges.reduce((a, b) => a + b, 0) / evidFeatures.edges.length,
-        bright: evidFeatures.brightness,
-        contr: evidFeatures.contrast,
-        colors: evidFeatures.dominant_colors.join(','),
-        objs: evidFeatures.objects_detected.join(',')
-      }
-    ];
-
-    const toonEncoded = await encodeToTOON(featuresArray);
-    
-    loggingService.debug('Features encoded to TOON', {
-      originalSize: JSON.stringify(featuresArray).length,
-      toonSize: toonEncoded.length,
-      reduction: `${((1 - toonEncoded.length / JSON.stringify(featuresArray).length) * 100).toFixed(1)}%`
-    });
-
-    return toonEncoded;
-  }
-
-  /**
-   * Encode compliance criteria as Cortex LISP
-   */
-  private static encodeCriteriaAsCortex(criteria: string[]): string {
-    const cortexCriteria = criteria.map((c, i) => {
-      const compressed = c
-        .toLowerCase()
-        .replace(/should be|must be|need to be/gi, '')
-        .replace(/\s+/g, '_')
-        .replace(/[^a-z0-9_]/g, '')
-        .substring(0, 20);
-      
-      return `(c${i + 1} "${compressed}")`;
-    }).join(' ');
-
-    return `(criteria ${cortexCriteria})`;
-  }
-
-  /**
    * Build optimized prompt with Cortex LISP output (for Nova Pro with images)
    */
   private static buildOptimizedPromptWithCortex(metaPrompt: string, criteria: string[]): string {
@@ -1018,7 +962,7 @@ ${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
       const criteriaHash = this.hashCriteria(request.complianceCriteria);
       
       const cacheKey = `compliance:${request.industry}:${refHash}:${evidHash}:${criteriaHash}`;
-      const cacheTTL = parseInt(process.env.VISUAL_COMPLIANCE_CACHE_TTL || '86400');
+      const cacheTTL = parseInt('86400');
 
       if (redisService.isConnected) {
         await redisService.set(cacheKey, result, cacheTTL);

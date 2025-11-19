@@ -22,7 +22,7 @@ import {
 } from '../types/cortex.types';
 
 import { CortexVocabularyService } from './cortexVocabulary.service';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { 
     generateCortexHash, 
@@ -130,7 +130,6 @@ RULES:
 export class CortexCoreService {
     private static instance: CortexCoreService;
     private vocabularyService: CortexVocabularyService;
-    private bedrockService: BedrockService;
     private processingCache = new Map<string, CoreProcessingCacheEntry>();
     private stats: CoreProcessingStats = {
         totalProcessed: 0,
@@ -143,7 +142,6 @@ export class CortexCoreService {
 
     private constructor() {
         this.vocabularyService = CortexVocabularyService.getInstance();
-        this.bedrockService = new BedrockService();
     }
 
     /**
@@ -364,12 +362,12 @@ export class CortexCoreService {
             const systemPrompt = dynamicPrompt || CORTEX_CORE_ANSWERING_PROMPT;
             const prompt = `${systemPrompt}\n\nNow answer this query:\n${serializedQuery}`;
             
-            const response = await BedrockService.invokeModel(prompt, model);
+            const response = await AIRouterService.invokeModel(prompt, model);
 
             // Extract answer text based on the response structure
             const answerText = typeof response === 'string' 
                 ? response.trim()
-                : (response.content?.[0]?.text || response.text || JSON.stringify(response)).trim();
+                : ((response as any)?.content?.[0]?.text || (response as any)?.text || JSON.stringify(response)).trim();
             
             loggingService.info('✅ Generated LISP answer', {
                 answer: answerText.substring(0, 500) + (answerText.length > 500 ? '...' : ''),

@@ -1,4 +1,4 @@
-import { TracedBedrockService as BedrockService } from './tracedBedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { AnalysisResult } from './githubAnalysis.service';
 import { loggingService } from './logging.service';
 import { IFeatureConfig } from '../models';
@@ -591,10 +591,9 @@ Return a JSON object with this exact structure:
         
         try {
             response = await Promise.race([
-                BedrockService.invokeModel(
+                AIRouterService.invokeModel(
                     prompt,
-                    'anthropic.claude-opus-4-1-20250805-v1:0', // Use Claude Opus 4.1 for complex code generation
-                    { useSystemPrompt: false }
+                    'anthropic.claude-opus-4-1-20250805-v1:0' // Use Claude Opus 4.1 for complex code generation
                 ) as Promise<string>,
                 new Promise<string>((_, reject) => 
                     setTimeout(() => {
@@ -637,10 +636,9 @@ Return a JSON object with this exact structure:
             const fallbackStartTime = Date.now();
             try {
                 response = await Promise.race([
-                    BedrockService.invokeModel(
+                    AIRouterService.invokeModel(
                         prompt,
-                        'anthropic.claude-3-5-sonnet-20240620-v1:0', // Fallback to Claude 3.5 Sonnet
-                        { useSystemPrompt: false }
+                        'anthropic.claude-3-5-sonnet-20240620-v1:0' // Fallback to Claude 3.5 Sonnet
                     ) as Promise<string>,
                     new Promise<string>((_, reject) => {
                         setTimeout(() => {
@@ -1046,10 +1044,9 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
         let response: string;
         try {
             response = await Promise.race([
-                BedrockService.invokeModel(
+                AIRouterService.invokeModel(
                     prompt,
-                    'anthropic.claude-opus-4-1-20250805-v1:0', // Use Claude Opus 4.1 for CLI integration
-                    { useSystemPrompt: false }
+                    'anthropic.claude-opus-4-1-20250805-v1:0' // Use Claude Opus 4.1 for CLI integration
                 ) as Promise<string>,
                 new Promise<string>((_, reject) => 
                     setTimeout(() => reject(new Error('CLI integration code generation timeout')), CODE_GENERATION_TIMEOUT)
@@ -1162,10 +1159,9 @@ Return JSON with files, envVars, installCommands, setupInstructions, and testing
         let response: string;
         try {
             response = await Promise.race([
-                BedrockService.invokeModel(
+                AIRouterService.invokeModel(
                     prompt,
-                    'anthropic.claude-opus-4-1-20250805-v1:0', // Use Claude Opus 4.1 for Python integration
-                    { useSystemPrompt: false }
+                    'anthropic.claude-opus-4-1-20250805-v1:0' // Use Claude Opus 4.1 for Python integration
                 ) as Promise<string>,
                 new Promise<string>((_, reject) => 
                     setTimeout(() => reject(new Error('Python integration code generation timeout')), CODE_GENERATION_TIMEOUT)
@@ -1403,10 +1399,9 @@ Return a JSON object with this exact structure:
         const startTime = Date.now();
         try {
             response = await Promise.race([
-                BedrockService.invokeModel(
+                AIRouterService.invokeModel(
                     prompt,
-                    'anthropic.claude-opus-4-1-20250805-v1:0', // Use Claude Opus 4.1 for HTTP headers integration
-                    { useSystemPrompt: false }
+                    'anthropic.claude-opus-4-1-20250805-v1:0' // Use Claude Opus 4.1 for HTTP headers integration
                 ) as Promise<string>,
                 new Promise<string>((_, reject) => 
                     setTimeout(() => reject(new Error('HTTP headers integration code generation timeout')), CODE_GENERATION_TIMEOUT)

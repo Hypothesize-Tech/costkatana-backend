@@ -1,6 +1,6 @@
 import { loggingService } from './logging.service';
 import { TelemetryService } from './telemetry.service';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 
 
 export interface CostDriver {
@@ -504,7 +504,7 @@ FORMAT: Return a clear, structured explanation with bullet points and sections.`
       try {
         // Use Bedrock service to generate AI-powered cost story
         const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-        const aiResponse = await BedrockService.invokeModel(prompt, modelId);
+        const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
         
         if (aiResponse && typeof aiResponse === 'string' && aiResponse.trim().length > 0) {
           return aiResponse.trim();
@@ -583,7 +583,7 @@ CRITICAL: Return ONLY the JSON object above. No explanations, no markdown, no ad
       try {
         // Use Bedrock service to generate AI-powered recommendations
         const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-        const aiResponse = await BedrockService.invokeModel(prompt, modelId);
+        const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
         
         if (aiResponse && typeof aiResponse === 'string' && aiResponse.trim().length > 0) {
           // Try to parse AI response as JSON
@@ -963,7 +963,7 @@ Write in a professional but accessible tone, suitable for developers and cost an
       try {
         // Use Bedrock service to generate AI-powered cost story
         const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-        const aiResponse = await BedrockService.invokeModel(prompt, modelId);
+        const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
         
         if (aiResponse && typeof aiResponse === 'string' && aiResponse.trim().length > 0) {
           return aiResponse.trim();
@@ -1498,7 +1498,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
       try {
         // Use Bedrock service to generate AI-powered cost predictions
         const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-        const aiResponse = await BedrockService.invokeModel(prompt, modelId);
+        const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
         
         if (aiResponse && typeof aiResponse === 'string' && aiResponse.trim().length > 0) {
           // Try to parse AI response for predictions

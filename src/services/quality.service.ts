@@ -1,5 +1,5 @@
 import { QualityScore, IQualityScore } from '../models/QualityScore';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { ActivityService } from './activity.service';
 import { AICostTrackingService } from './aiCostTracking.service';
@@ -91,8 +91,8 @@ export class QualityService {
             const scoringPrompt = this.buildScoringPrompt(prompt, response, expectedOutput);
             const estimatedInputTokens = Math.ceil(scoringPrompt.length / 4);
 
-            // Use a cheap model for scoring
-            const result = await BedrockService['invokeModel'](
+            // Use AIRouterService for scoring
+            const result = await AIRouterService.invokeModel(
                 scoringPrompt,
                 modelId
             );

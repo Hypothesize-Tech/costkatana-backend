@@ -1,4 +1,4 @@
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 
 /**
@@ -183,7 +183,7 @@ Variable to extract: ${templateVar.name}${templateVar.description ? ` - ${templa
 Extracted value:`;
 
             // Use Nova Micro for fast, cost-effective extraction
-            const response = await BedrockService.invokeModel(
+            const response = await AIRouterService.invokeModel(
                 extractionPrompt,
                 'amazon.nova-micro-v1:0',
                 {

@@ -14,7 +14,7 @@ import {
     DEFAULT_CORTEX_CONFIG,
     CortexEncodingRequest
 } from '../types/cortex.types';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { loggingService } from './logging.service';
 import { validateCortexFrame } from '../utils/cortex.utils';
 import { analyzeText } from '../utils/textAnalysis';
@@ -251,7 +251,7 @@ export class CortexEncoderService {
         const fullPrompt = `${systemPrompt}\n\n${text}`;
         const model = config?.encoding?.model ?? DEFAULT_CORTEX_CONFIG.encoding.model;
 
-        const rawResponse = await BedrockService.invokeModel(fullPrompt, model) as string;
+        const rawResponse = await AIRouterService.invokeModel(fullPrompt, model) as string;
         
         // Try to extract structured data (TOON format)
         const structuredData = await extractStructuredData(rawResponse);

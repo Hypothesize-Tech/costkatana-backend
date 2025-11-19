@@ -185,10 +185,10 @@ export class AICostTrackerService {
             });
         }
 
-        if (process.env.GOOGLE_AI_API_KEY) {
+        if (process.env.GEMINI_API_KEY) {
             providers.push({
                 provider: AIProvider.Google,
-                apiKey: process.env.GOOGLE_AI_API_KEY
+                apiKey: process.env.GEMINI_API_KEY
             });
         }
 

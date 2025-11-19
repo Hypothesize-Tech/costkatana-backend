@@ -56,7 +56,9 @@
 - **ChatGPT Custom GPT**: Direct integration with AI-powered tips in ChatGPT interface
 - **Magic Link Onboarding**: Seamless user setup with automatic account creation
 - **Real-Time API Tracking**: Automatic usage monitoring across all AI providers
-- **Multi-Provider Support**: OpenAI, AWS Bedrock, Anthropic, Google AI, and more
+- **Multi-Provider Support**: Native SDKs for OpenAI and Google Gemini, plus AWS Bedrock for Claude and other models
+- **Smart Provider Routing**: Automatically selects optimal provider (native SDK or Bedrock) with fallback support
+- 
 
 ### 📊 **Advanced Analytics**
 - **Real-Time Dashboards**: Live usage monitoring with AI insights
@@ -75,7 +77,10 @@
 ### Prerequisites
 - **Node.js 18+** with npm
 - **MongoDB 5.0+** database
-- **AWS Account** with Bedrock access (for AI features)
+- **AI Provider API Keys** (one or more):
+  - **OpenAI API Key** (recommended) - for direct GPT model access
+  - **Google AI API Key** (recommended) - for direct Gemini model access
+  - **AWS Account with Bedrock** - for Claude and other models, also used as fallback
 - **Gmail Account** with OAuth2 credentials (for intelligent emails)
 
 ### Installation
@@ -106,7 +111,11 @@ The server will start at `http://localhost:8000` with AI intelligence features e
 ### 🔑 **Required Environment Variables**
 
 ```bash
-# 🤖 AI Intelligence (Required for AI features)
+# 🤖 Native AI Provider SDKs (Recommended for best performance)
+OPENAI_API_KEY=your-openai-api-key              # For GPT models
+GEMINI_API_KEY=your-google-ai-api-key        # For Gemini models
+
+# 🤖 AWS Bedrock (For Claude and fallback)
 AWS_ACCESS_KEY_ID=your-bedrock-access-key
 AWS_SECRET_ACCESS_KEY=your-bedrock-secret-key
 AWS_REGION=us-east-1
@@ -129,8 +138,27 @@ SMTP_PASS=your-app-specific-password
 FRONTEND_URL=http://localhost:3000
 ```
 
-### 🤖 **AWS Bedrock Setup**
+### 🤖 **AI Provider Setup**
 
+#### OpenAI (Optional - User Provided API Key Required)
+> **⚠️ You must provide your own API key** - CostKATANA does not include OpenAI access
+
+1. Visit https://platform.openai.com/api-keys
+2. Create a new API key
+3. Add to `.env` as `OPENAI_API_KEY`
+4. Supports: GPT-4, GPT-4o, GPT-3.5-turbo, and all OpenAI models
+5. **Without this key**: OpenAI models will not be available
+
+#### Google Gemini (Optional - User Provided API Key Required)
+> **⚠️ You must provide your own API key** - CostKATANA does not include Gemini access
+
+1. Visit https://makersuite.google.com/app/apikey
+2. Create a new API key  
+3. Add to `.env` as `GEMINI_API_KEY`
+4. Supports: Gemini 2.5 Pro, Gemini 2.5 Flash, Gemini 2.0 Flash, Gemini 1.5 models
+5. **Without this key**: Gemini models will not be available
+
+#### AWS Bedrock (For Claude & Fallback)
 1. **Enable Bedrock** in your AWS account (us-east-1 recommended)
 2. **Request Model Access** to Claude 3.5 Sonnet in AWS Console
 3. **Create IAM User** with Bedrock permissions:
@@ -149,6 +177,16 @@ FRONTEND_URL=http://localhost:3000
      ]
    }
    ```
+
+#### Smart Routing
+The system automatically:
+- Routes OpenAI models (gpt-*) to native OpenAI SDK **[Requires OPENAI_API_KEY]**
+- Routes Gemini models (gemini-*) to native Google SDK **[Requires GEMINI_API_KEY]**
+- Routes Claude models to AWS Bedrock **[Requires AWS credentials]**
+- Falls back to Bedrock if native SDK fails
+- No code changes needed - just add API keys!
+
+> **⚠️ Important**: OpenAI and Gemini providers are **only available if you provide your own API keys**. Without these keys, only AWS Bedrock models (Claude, Nova, etc.) will be available. CostKATANA does not provide API keys for OpenAI or Google.
 
 ### 📧 **Email Configuration**
 
@@ -176,6 +214,11 @@ npm run lint:fix    # Fix code style issues
 src/
 ├── 🤖 services/
 │   ├── intelligentMonitoring.service.ts  # AI-powered monitoring
+│   ├── aiRouter.service.ts               # Smart AI provider routing
+│   ├── providers/                        # Native SDK integrations
+│   │   ├── openai.provider.ts           # OpenAI native SDK
+│   │   ├── gemini.provider.ts           # Google Gemini SDK  
+│   │   └── base.provider.ts             # Provider base class
 │   ├── bedrock.service.ts                # AWS Bedrock integration
 │   └── email.service.ts                  # AI-enhanced emails
 ├── 🎮 controllers/
