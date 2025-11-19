@@ -5,7 +5,7 @@ import { WhatIfScenario } from '../models/WhatIfScenario';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 import { MODEL_PRICING } from '../utils/pricing';
 import mongoose from 'mongoose';
-import { BedrockService } from './bedrock.service'; 
+import { AIRouterService } from './aiRouter.service'; 
 import { EventEmitter } from 'events';
 import { AICostTrackingService } from './aiCostTracking.service';
 
@@ -330,8 +330,8 @@ export class ExperimentationService {
                 const bedrockModelId = this.mapToBedrockModelId(model.model, model.provider);
                 loggingService.info(`Mapped ${model.provider}:${model.model} -> ${bedrockModelId}`);
                 
-                // Execute on Bedrock
-                bedrockOutput = await BedrockService.invokeModel(prompt, bedrockModelId);
+                // Execute via AI Router (routes to appropriate provider)
+                bedrockOutput = await AIRouterService.invokeModel(prompt, bedrockModelId);
                 modelResponse = bedrockOutput;
                 
                 // Calculate actual cost based on tokens used
@@ -661,7 +661,7 @@ export class ExperimentationService {
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
                 
-                return await BedrockService.invokeModel(prompt, modelId);
+                return await AIRouterService.invokeModel(prompt, modelId);
                 
             } catch (error: any) {
                 lastError = error;
@@ -753,7 +753,7 @@ export class ExperimentationService {
                 );
             }
 
-            const extractedJson = await BedrockService.extractJson(analysisResponse);
+            const extractedJson = await AIRouterService.extractJson(analysisResponse);
             try {
                 return JSON.parse(extractedJson);
             } catch (parseError) {
@@ -996,7 +996,7 @@ export class ExperimentationService {
 
     private static async parseEvaluationResponse(response: string, results: RealTimeComparisonResult[]): Promise<any[]> {
         try {
-            let cleanedResponse = await BedrockService.extractJson(response);
+            let cleanedResponse = await AIRouterService.extractJson(response);
             
             // Additional cleaning for control characters and invalid JSON
             cleanedResponse = cleanedResponse
@@ -2492,7 +2492,7 @@ Return a JSON object with this structure:
 Make the data realistic and consistent with the scenario type.`;
 
             const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
-            const jsonResponse = await BedrockService.extractJson(response);
+            const jsonResponse = await AIRouterService.extractJson(response);
             
             try {
                 const analysis = JSON.parse(jsonResponse);
@@ -2551,7 +2551,7 @@ Return a JSON object with this structure:
 Base your analysis on real-world AI cost optimization patterns and industry best practices.`;
 
             const response = await this.invokeWithExponentialBackoff(prompt, 'anthropic.claude-3-5-sonnet-20240620-v1:0');
-            const jsonResponse = await BedrockService.extractJson(response);
+            const jsonResponse = await AIRouterService.extractJson(response);
             
             try {
                 const analysis = JSON.parse(jsonResponse);

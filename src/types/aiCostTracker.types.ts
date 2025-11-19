@@ -139,13 +139,14 @@ export enum AIProvider {
     Anthropic = 'anthropic',
     Google = 'google',
     Cohere = 'cohere',
-    Gemini = 'gemini',
     DeepSeek = 'deepseek',
     Groq = 'groq',
     HuggingFace = 'huggingface',
     Ollama = 'ollama',
     Replicate = 'replicate',
-    Azure = 'azure'
+    Azure = 'azure',
+    // Gemini is an alias for Google (both use Google AI SDK)
+    Gemini = 'gemini'
 }
 
 export interface TrackerConfig {

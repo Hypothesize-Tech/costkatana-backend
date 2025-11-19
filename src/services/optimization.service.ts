@@ -21,7 +21,7 @@ import {
     DEFAULT_CORTEX_CONFIG
 } from '../types/cortex.types';
 import { CortexEncoderService } from './cortexEncoder.service';
-import { BedrockService } from './tracedBedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { CortexTrainingDataCollectorService } from './cortexTrainingDataCollector.service';
 import { CortexAnalyticsService, CortexImpactMetrics } from './cortexAnalytics.service';
 import { CortexVocabularyService } from './cortexVocabulary.service';
@@ -37,8 +37,8 @@ function providerEnumToString(provider: AIProvider): string {
     const providerMap: Record<AIProvider, string> = {
         [AIProvider.OpenAI]: 'OpenAI',
         [AIProvider.Anthropic]: 'Anthropic',
-        [AIProvider.Google]: 'Google AI',
-        [AIProvider.Gemini]: 'Google AI',
+        [AIProvider.Google]: 'Google',
+        [AIProvider.Gemini]: 'Google',
         [AIProvider.AWSBedrock]: 'AWS Bedrock',
         [AIProvider.Cohere]: 'Cohere',
         [AIProvider.DeepSeek]: 'DeepSeek',
@@ -175,10 +175,13 @@ export class OptimizationService {
                 return AIProvider.OpenAI;
             case 'aws-bedrock':
             case 'awsbedrock':
+            case 'bedrock':
                 return AIProvider.AWSBedrock;
             case 'anthropic':
                 return AIProvider.Anthropic;
             case 'google':
+            case 'google-ai':
+            case 'gemini':
                 return AIProvider.Google;
             case 'cohere':
                 return AIProvider.Cohere;
@@ -190,6 +193,7 @@ export class OptimizationService {
             case 'groq':
                 return AIProvider.Groq;
             case 'huggingface':
+            case 'hugging-face':
                 return AIProvider.HuggingFace;
             case 'ollama':
                 return AIProvider.Ollama;
@@ -879,7 +883,7 @@ ${originalPrompt}
 
 Return a structured representation that maintains all semantic meaning but is more efficient for AI processing.`;
 
-            const encodedResult = await BedrockService.invokeModel(
+            const encodedResult = await AIRouterService.invokeModel(
                 encodingPrompt,
                 'anthropic.claude-3-5-haiku-20241022-v1:0' // Lightweight encoder
             );
@@ -902,7 +906,7 @@ ${encodedResult}
 
 Generate an efficient response structure that fully addresses the query requirements.`;
 
-            const coreResult = await BedrockService.invokeModel(
+            const coreResult = await AIRouterService.invokeModel(
                 coreProcessingPrompt,
                 'amazon.nova-pro-v1:0' // Cost-effective core processing
             );
@@ -925,7 +929,7 @@ ${coreResult}
 
 Convert to natural language while preserving all meaning and completeness.`;
 
-            const decodedResult = await BedrockService.invokeModel(
+            const decodedResult = await AIRouterService.invokeModel(
                 decodingPrompt,
                 'anthropic.claude-3-5-haiku-20241022-v1:0' // Lightweight decoder
             );
@@ -1042,7 +1046,7 @@ ${originalPrompt}
 
 Return the same prompt with only obvious filler words removed (like extra "just", "really", "actually", "basically", etc.).`;
 
-            const optimizedResult = await BedrockService.invokeModel(
+            const optimizedResult = await AIRouterService.invokeModel(
                 optimizationPrompt,
                 'amazon.nova-pro-v1:0' // Nova Pro for quality assessment
             );
@@ -1130,7 +1134,7 @@ Check for:
 
 Reply ONLY: {"valid": true/false, "issues": ["specific issue 1", "specific issue 2"]}`;
 
-            const validationResult = await BedrockService.invokeModel(
+            const validationResult = await AIRouterService.invokeModel(
                 validationPrompt,
                 'amazon.nova-pro-v1:0' // Nova Pro for quality assessment
             );
@@ -1313,7 +1317,7 @@ Is the optimized version terrible compared to original?
 REPLY FORMAT (JSON only):
 {"is_terrible": false, "quality_score": 8.5}`;
 
-            const qualityResult = await BedrockService.invokeModel(
+            const qualityResult = await AIRouterService.invokeModel(
                 qualityPrompt,
                 'amazon.nova-pro-v1:0' // Nova Pro for quality assessment // Fast, cheap model for validation
             );

@@ -3,7 +3,7 @@ import { Usage, IUsage } from '../models/Usage';
 import { Alert } from '../models/Alert';
 import { loggingService } from './logging.service';
 import { PaginationOptions, paginate } from '../utils/helpers';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { AICostTrackerService } from './aiCostTracker.service';
 import { getUserIdFromToken } from '../controllers/usage.controller';
 
@@ -439,21 +439,57 @@ export class UsageService {
                 return { anomalies: [], recommendations: [] };
             }
 
-            // Use Bedrock to detect anomalies
-            const anomalyResult = await BedrockService.detectAnomalies(
-                recentUsage.map(u => ({
-                    timestamp: u.createdAt,
-                    cost: u.cost,
-                    tokens: u.totalTokens,
-                })),
-                {
-                    cost: historicalStats[0].avgCost,
-                    tokens: historicalStats[0].avgTokens,
-                }
+            // Use AIRouterService to detect anomalies
+            const analysisPrompt = `Analyze the following usage data for anomalies:
+
+Recent Usage Data:
+${JSON.stringify(recentUsage.map(u => ({
+    timestamp: u.createdAt,
+    cost: u.cost,
+    tokens: u.totalTokens,
+})), null, 2)}
+
+Historical Averages:
+- Average Cost: ${historicalStats[0].avgCost}
+- Average Tokens: ${historicalStats[0].avgTokens}
+
+Identify any anomalies in cost or token usage patterns. Return a JSON object with:
+{
+    "anomalies": [
+        {
+            "type": "cost_spike" | "token_spike" | "unusual_pattern",
+            "severity": "low" | "medium" | "high",
+            "description": "string",
+            "timestamp": "ISO date",
+            "value": number,
+            "threshold": number
+        }
+    ],
+    "recommendations": ["string array of recommendations"]
+}`;
+
+            const response = await AIRouterService.invokeModel(
+                analysisPrompt,
+                'anthropic.claude-3-5-haiku-20241022-v1:0'
             );
 
+            // Parse the response
+            let anomalyResult;
+            try {
+                // Extract JSON from response
+                const jsonMatch = response.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    anomalyResult = JSON.parse(jsonMatch[0]);
+                } else {
+                    throw new Error('No JSON found in response');
+                }
+            } catch (parseError) {
+                loggingService.warn('Failed to parse anomaly detection response, using defaults');
+                anomalyResult = { anomalies: [], recommendations: [] };
+            }
+
             // Create alerts for high severity anomalies
-            for (const anomaly of anomalyResult.anomalies) {
+            for (const anomaly of anomalyResult.anomalies || []) {
                 if (anomaly.severity === 'high') {
                     await Alert.create({
                         userId,

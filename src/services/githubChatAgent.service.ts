@@ -1,4 +1,4 @@
-import { TracedBedrockService as BedrockService } from './tracedBedrock.service';
+import { AIRouterService } from './aiRouter.service';
 import { GitHubIntegrationService } from './githubIntegration.service';
 import { GitHubConnection, GitHubIntegration, Conversation, IGitHubContext, IGitHubConnection } from '../models';
 import { loggingService } from './logging.service';
@@ -320,10 +320,9 @@ Return a JSON array of example file paths that are most relevant:
 }`;
 
         try {
-            const response = await BedrockService.invokeModel(
+            const response = await AIRouterService.invokeModel(
                 searchPrompt,
-                'amazon.nova-pro-v1:0',
-                { useSystemPrompt: false }
+                'amazon.nova-pro-v1:0'
             );
 
             const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -477,10 +476,9 @@ Return a JSON object with the most relevant file paths (top 20):
   "relevantFiles": ["path/to/file1", "path/to/file2", ...]
 }`;
 
-            const response = await BedrockService.invokeModel(
+            const response = await AIRouterService.invokeModel(
                 relevancePrompt,
-                'anthropic.claude-opus-4-1-20250805-v1:0',
-                { useSystemPrompt: false }
+                'anthropic.claude-opus-4-1-20250805-v1:0'
             );
 
             const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -1138,10 +1136,9 @@ Return a JSON object with this structure:
 }`;
 
         try {
-            const response = await BedrockService.invokeModel(
+            const response = await AIRouterService.invokeModel(
                 prompt,
-                'anthropic.claude-opus-4-1-20250805-v1:0',
-                { useSystemPrompt: false }
+                'anthropic.claude-opus-4-1-20250805-v1:0'
             );
 
             const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -1776,10 +1773,9 @@ CRITICAL REQUIREMENTS:
 - If adding dependencies, update the appropriate package manager file
 - Think like Cursor: understand relationships, not just individual files`;
 
-            const aiResponse = await BedrockService.invokeModel(
+            const aiResponse = await AIRouterService.invokeModel(
                 prompt,
-                'anthropic.claude-opus-4-1-20250805-v1:0',
-                { useSystemPrompt: false }
+                'anthropic.claude-opus-4-1-20250805-v1:0'
             );
 
             // Parse AI response

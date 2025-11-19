@@ -1,6 +1,6 @@
 import { BaseService, ServiceError } from '../shared/BaseService';
 import { loggingService } from './logging.service';
-import { BedrockService } from './bedrock.service';
+import { AIRouterService } from './aiRouter.service';
 
 export interface ModelComparisonResult {
     id: string;
@@ -68,7 +68,6 @@ export interface ComparisonAnalysis {
  */
 export class ExperimentAnalyticsService extends BaseService {
     private static instance: ExperimentAnalyticsService;
-    private bedrockService: BedrockService;
 
     // Analysis configuration
     private readonly QUALITY_EVALUATION_TIMEOUT = 30000; // 30 seconds
@@ -79,8 +78,6 @@ export class ExperimentAnalyticsService extends BaseService {
             max: 500, // Cache up to 500 analysis results
             ttl: 2 * 60 * 60 * 1000 // 2 hour TTL
         });
-
-        this.bedrockService = new BedrockService();
     }
 
     public static getInstance(): ExperimentAnalyticsService {
@@ -105,7 +102,7 @@ export class ExperimentAnalyticsService extends BaseService {
                 const evaluationPrompt = this.buildEvaluationPrompt(prompt, response, criteria);
                 
                 try {
-                    const evaluation = await BedrockService.invokeModel(
+                    const evaluation = await AIRouterService.invokeModel(
                         evaluationPrompt,
                         'amazon.nova-micro-v1:0'
                     );
@@ -339,7 +336,7 @@ Score (0-100):`;
         try {
             const analysisPrompt = this.buildAnalysisPrompt(results);
             
-            const analysis = await BedrockService.invokeModel(
+            const analysis = await AIRouterService.invokeModel(
                 analysisPrompt,
                 'amazon.nova-micro-v1:0'
             );
