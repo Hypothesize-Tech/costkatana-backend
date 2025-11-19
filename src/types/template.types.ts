@@ -79,9 +79,9 @@ export interface ITemplateActivityMetadata {
     tokenReduction?: number;
     costSaving?: number;
     targetModel?: string;
-    // Fork specific
+    // Duplicate specific
     originalTemplateId?: mongoose.Types.ObjectId;
-    forkedTemplateId?: mongoose.Types.ObjectId;
+    duplicatedTemplateId?: mongoose.Types.ObjectId;
     // Usage specific
     variablesUsed?: Record<string, any>;
     executionTime?: number;
@@ -132,6 +132,16 @@ export interface UpdateTemplateDto {
     content?: string;
     category?: TemplateCategory;
     variables?: ITemplateVariable[];
+    metadata?: Partial<ITemplateMetadata>;
+    sharing?: Partial<ITemplateSharing>;
+}
+
+// Template Duplicate DTO
+export interface DuplicateTemplateDto {
+    name?: string;
+    description?: string;
+    category?: TemplateCategory;
+    projectId?: string;
     metadata?: Partial<ITemplateMetadata>;
     sharing?: Partial<ITemplateSharing>;
 }
@@ -281,7 +291,7 @@ export type TemplateActivityType =
     | 'template_created'
     | 'template_updated'
     | 'template_deleted'
-    | 'template_forked'
+    | 'template_duplicated'
     | 'template_ai_generated'
     | 'template_optimized'
     | 'template_used'

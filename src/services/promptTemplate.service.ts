@@ -7,6 +7,7 @@ import { aiTemplateEngine } from './aiTemplateEngine.service';
 import mongoose from 'mongoose';
 import {
     CreateTemplateDto,
+    DuplicateTemplateDto,
     TemplateQueryParams,
     TemplateActivityType,
     ITemplateActivityMetadata,
@@ -32,7 +33,7 @@ async function trackTemplateActivity(
             'template_created': 'Template Created',
             'template_updated': 'Template Updated',
             'template_deleted': 'Template Deleted',
-            'template_forked': 'Template Forked',
+            'template_duplicated': 'Template Duplicated',
             'template_ai_generated': 'AI Template Generated',
             'template_optimized': 'Template Optimized',
             'template_used': 'Template Used',
@@ -47,7 +48,7 @@ async function trackTemplateActivity(
             'template_created': `Created template "${template.name}" in ${template.category} category`,
             'template_updated': `Updated template "${template.name}" to version ${template.version}`,
             'template_deleted': `Deleted template "${template.name}"`,
-            'template_forked': `Forked template "${template.name}"`,
+            'template_duplicated': `Duplicated template "${template.name}"`,
             'template_ai_generated': `Generated template "${template.name}" using AI${additionalMetadata?.intent ? ` from intent: "${additionalMetadata.intent}"` : ''}`,
             'template_optimized': `Optimized template "${template.name}"${additionalMetadata?.optimizationType ? ` for ${additionalMetadata.optimizationType}` : ''}`,
             'template_used': `Used template "${template.name}"${additionalMetadata?.variablesUsed ? ` with ${Object.keys(additionalMetadata.variablesUsed).length} variables` : ''}`,
@@ -446,12 +447,12 @@ export class PromptTemplateService {
     }
 
     /**
-     * Fork a prompt template
+     * Duplicate a template (create an independent copy)
      */
-    static async forkTemplate(
+    static async duplicateTemplate(
         templateId: string,
         userId: string,
-        projectId?: string
+        customizations?: DuplicateTemplateDto
     ): Promise<IPromptTemplate> {
         try {
             const originalTemplate = await PromptTemplate.findById(templateId);
@@ -459,17 +460,19 @@ export class PromptTemplateService {
                 throw new Error('Template not found');
             }
 
-            if (!originalTemplate.sharing.allowFork) {
-                throw new Error('This template cannot be forked');
-            }
+            // Generate default name if not provided
+            const duplicateName = customizations?.name || `Copy of ${originalTemplate.name}`;
 
-            // Create forked template manually
-            const forkedTemplate = new PromptTemplate({
+            // Create duplicated template as an independent copy (no parentId)
+            const duplicatedTemplate = new PromptTemplate({
                 ...originalTemplate.toObject(),
                 _id: undefined,
+                name: duplicateName,
+                description: customizations?.description !== undefined ? customizations.description : originalTemplate.description,
+                category: customizations?.category || originalTemplate.category,
                 createdBy: userId,
-                projectId: projectId || originalTemplate.projectId,
-                parentId: originalTemplate._id,
+                projectId: customizations?.projectId || originalTemplate.projectId,
+                parentId: undefined, // Independent copy
                 version: 1,
                 usage: {
                     count: 0,
@@ -477,21 +480,31 @@ export class PromptTemplateService {
                     totalCostSaved: 0,
                     feedback: []
                 },
+                metadata: {
+                    ...originalTemplate.metadata,
+                    ...customizations?.metadata,
+                    tags: customizations?.metadata?.tags || originalTemplate.metadata?.tags || []
+                },
+                sharing: {
+                    visibility: customizations?.sharing?.visibility || 'private',
+                    sharedWith: customizations?.sharing?.sharedWith || [],
+                    allowFork: customizations?.sharing?.allowFork !== undefined ? customizations.sharing.allowFork : true
+                },
                 createdAt: undefined,
                 updatedAt: undefined
             });
 
-            await forkedTemplate.save();
+            await duplicatedTemplate.save();
 
-            // Track template fork activity
-            await trackTemplateActivity(userId, 'template_forked', forkedTemplate, {
+            // Track template duplicate activity
+            await trackTemplateActivity(userId, 'template_duplicated', duplicatedTemplate, {
                 originalTemplateId: originalTemplate._id,
-                forkedTemplateId: forkedTemplate._id
+                duplicatedTemplateId: duplicatedTemplate._id
             });
 
-            return forkedTemplate;
+            return duplicatedTemplate;
         } catch (error) {
-            loggingService.error('Error forking prompt template:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error duplicating prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }

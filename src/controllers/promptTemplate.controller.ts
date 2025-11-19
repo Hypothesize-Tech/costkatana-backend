@@ -262,30 +262,68 @@ export class PromptTemplateController {
     }
 
     /**
-     * Fork a prompt template
+     * Duplicate a prompt template
      */
-    static async forkTemplate(req: any, res: Response): Promise<void> {
-        try {
-            const { templateId } = req.params;
-            const userId = req.user!.id;
-            const { projectId } = req.body;
+    static async duplicateTemplate(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const { templateId } = req.params;
+        const requestId = req.headers['x-request-id'] as string;
 
-            const forkedTemplate = await PromptTemplateService.forkTemplate(
+        try {
+            PromptTemplateController.conditionalLog('info', 'Template duplication initiated', {
+                userId,
+                templateId,
+                requestId,
+                customizations: req.body
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const customizations = req.body;
+
+            const duplicatedTemplate = await PromptTemplateService.duplicateTemplate(
                 templateId,
                 userId,
-                projectId
+                customizations
             );
+
+            const duration = Date.now() - startTime;
+
+            PromptTemplateController.conditionalLog('info', 'Template duplicated successfully', {
+                userId,
+                templateId,
+                duplicatedTemplateId: duplicatedTemplate._id,
+                duplicatedTemplateName: duplicatedTemplate.name,
+                duration,
+                requestId
+            });
 
             res.status(201).json({
                 success: true,
-                data: forkedTemplate,
-                message: 'Template forked successfully'
+                data: duplicatedTemplate,
+                message: 'Template duplicated successfully'
             });
         } catch (error: any) {
-            loggingService.error('Error forking prompt template:', error);
+            const duration = Date.now() - startTime;
+            
+            PromptTemplateController.conditionalLog('error', 'Template duplication failed', {
+                userId,
+                templateId,
+                requestId,
+                error: error.message || 'Unknown error',
+                duration
+            });
+
             res.status(400).json({
                 success: false,
-                error: error.message || 'Failed to fork template'
+                error: error.message || 'Failed to duplicate template'
             });
         }
     }

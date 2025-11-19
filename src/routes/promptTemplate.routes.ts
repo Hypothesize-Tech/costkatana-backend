@@ -123,15 +123,24 @@ router.delete(
     PromptTemplateController.deleteTemplate
 );
 
-// Fork template
+// Duplicate template
 router.post(
-    '/:templateId/fork',
+    '/:templateId/duplicate',
     [
         param('templateId').isMongoId(),
-        body('projectId').optional().isMongoId()
+        body('name').optional().notEmpty().withMessage('Name must not be empty if provided'),
+        body('description').optional().isString(),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
+        body('projectId').optional().isMongoId(),
+        body('metadata').optional().isObject(),
+        body('metadata.tags').optional().isArray(),
+        body('sharing').optional().isObject(),
+        body('sharing.visibility').optional().isIn(['private', 'project', 'organization', 'public']),
+        body('sharing.sharedWith').optional().isArray(),
+        body('sharing.allowFork').optional().isBoolean()
     ],
     validateRequest,
-    PromptTemplateController.forkTemplate
+    PromptTemplateController.duplicateTemplate
 );
 
 // Add feedback
