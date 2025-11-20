@@ -1256,6 +1256,12 @@ export class PromptTemplateService {
             mode?: 'optimized' | 'standard';
             metaPromptPresetId?: string;
             projectId?: string;
+            referenceImage?: {
+                s3Url: string;
+                s3Key: string;
+                uploadedAt: string;
+                uploadedBy: string;
+            };
         }
     ): Promise<IPromptTemplate> {
         try {
@@ -1279,6 +1285,52 @@ export class PromptTemplateService {
                     accept: 'image/*'
                 }))
             ];
+
+            // Prepare referenceImage data if provided
+            // Log incoming reference image data for debugging
+            loggingService.info('Processing reference image data', {
+                component: 'PromptTemplateService',
+                operation: 'createVisualComplianceTemplate',
+                hasReferenceImage: !!data.referenceImage,
+                referenceImageData: data.referenceImage
+            });
+
+            const referenceImageData = data.referenceImage ? {
+                s3Url: data.referenceImage.s3Url,
+                s3Key: data.referenceImage.s3Key,
+                uploadedAt: new Date(data.referenceImage.uploadedAt),
+                uploadedBy: userId,
+                extractedFeatures: {
+                    extractedAt: new Date(),
+                    extractedBy: '',
+                    status: 'pending' as const,
+                    analysis: {
+                        visualDescription: '',
+                        structuredData: {
+                            colors: { dominant: [], accent: [], background: '' },
+                            layout: { composition: '', orientation: '', spacing: '' },
+                            objects: [],
+                            text: { detected: [], prominent: [], language: '' },
+                            lighting: { type: '', direction: '', quality: '' },
+                            quality: { sharpness: '', clarity: '', professionalGrade: false }
+                        },
+                        criteriaAnalysis: []
+                    },
+                    extractionCost: {
+                        initialCallTokens: { input: 0, output: 0, cost: 0 },
+                        followUpCalls: [],
+                        totalTokens: 0,
+                        totalCost: 0
+                    },
+                    usage: {
+                        checksPerformed: 0,
+                        totalTokensSaved: 0,
+                        totalCostSaved: 0,
+                        averageConfidence: 0,
+                        lowConfidenceCount: 0
+                    }
+                }
+            } : undefined;
 
             const template = await PromptTemplate.create({
                 name: data.name,
@@ -1309,6 +1361,7 @@ export class PromptTemplateService {
                     mode: data.mode || 'optimized',
                     metaPromptPresetId: data.metaPromptPresetId
                 },
+                referenceImage: referenceImageData,
                 version: 1,
                 isActive: true,
                 isDeleted: false
@@ -1325,10 +1378,12 @@ export class PromptTemplateService {
                 userId,
                 industry: data.industry,
                 criteriaCount: data.complianceCriteria.length,
-                imageVariableCount: data.imageVariables.length
+                imageVariableCount: data.imageVariables.length,
+                hasReferenceImage: !!data.referenceImage
             });
 
-            return template;
+            // Return the full template with all nested fields
+            return template.toObject();
         } catch (error) {
             loggingService.error('Failed to create visual compliance template', {
                 error: error instanceof Error ? error.message : String(error),
@@ -1380,11 +1435,25 @@ export class PromptTemplateService {
 
             // Resolve image variables
             const resolvedImages: { reference?: string; evidence?: string } = {};
+            
+            // Check if template has cached reference image
+            if (template.referenceImage?.s3Url && template.referenceImage?.extractedFeatures?.status === 'completed') {
+                resolvedImages.reference = template.referenceImage.s3Url;
+                loggingService.info('Using cached reference image from template', {
+                    templateId,
+                    s3Url: template.referenceImage.s3Url,
+                    extractionStatus: template.referenceImage.extractedFeatures.status
+                });
+            }
+            
             for (const imageVar of imageVariables) {
                 const value = variables.images?.[imageVar.name] || imageVar.s3Url || imageVar.defaultValue;
                 if (value) {
                     if (imageVar.imageRole === 'reference') {
-                        resolvedImages.reference = value;
+                        // Only override if not already set from template cache
+                        if (!resolvedImages.reference) {
+                            resolvedImages.reference = value;
+                        }
                     } else if (imageVar.imageRole === 'evidence') {
                         resolvedImages.evidence = value;
                     }
@@ -1396,9 +1465,23 @@ export class PromptTemplateService {
                 .filter(v => v.required)
                 .every(v => variables.text?.[v.name] || v.defaultValue);
             
+            // For image variables, check if they're provided OR if they're already resolved (from cache)
             const allRequiredImagesProvided = imageVariables
                 .filter(v => v.required)
-                .every(v => variables.images?.[v.name] || v.s3Url || v.defaultValue);
+                .every(v => {
+                    // Check if provided in request
+                    if (variables.images?.[v.name] || v.s3Url || v.defaultValue) {
+                        return true;
+                    }
+                    // Check if already resolved (e.g., from cached reference image)
+                    if (v.imageRole === 'reference' && resolvedImages.reference) {
+                        return true;
+                    }
+                    if (v.imageRole === 'evidence' && resolvedImages.evidence) {
+                        return true;
+                    }
+                    return false;
+                });
 
             const allVariablesProvided = allRequiredTextProvided && allRequiredImagesProvided;
 
@@ -1449,16 +1532,83 @@ export class PromptTemplateService {
 
             const { template, resolvedCriteria, resolvedImages } = resolution;
 
-            if (!resolvedImages.reference || !resolvedImages.evidence) {
-                throw new Error('Both reference and evidence images are required');
+            if (!resolvedImages.evidence) {
+                throw new Error('Evidence image is required');
+            }
+
+            // Check if we can use cached reference features
+            const useCachedFeatures = template.referenceImage?.extractedFeatures?.status === 'completed';
+
+            if (!useCachedFeatures && !resolvedImages.reference) {
+                throw new Error('Reference image is required when cached features are not available');
+            }
+
+            loggingService.info('Executing visual compliance check', {
+                templateId,
+                userId,
+                useCachedFeatures,
+                hasReferenceImage: !!resolvedImages.reference,
+                hasEvidenceImage: !!resolvedImages.evidence
+            });
+
+            // Upload evidence image to S3 if it's base64 (not already an S3 URL)
+            if (resolvedImages.evidence && !resolvedImages.evidence.startsWith('s3://')) {
+                loggingService.info('Uploading evidence image to S3', {
+                    templateId,
+                    userId,
+                    isBase64: resolvedImages.evidence.startsWith('data:')
+                });
+
+                try {
+                    // Import S3 service
+                    const { S3Service } = await import('./s3.service');
+
+                    // Convert base64 to buffer
+                    const evidenceBuffer = Buffer.from(
+                        resolvedImages.evidence.replace(/^data:image\/\w+;base64,/, ''),
+                        'base64'
+                    );
+
+                    // Upload to S3
+                    const uploadResult = await S3Service.uploadDocument(
+                        userId,
+                        `template-evidence-${templateId}-${Date.now()}.jpg`,
+                        evidenceBuffer,
+                        'image/jpeg',
+                        { 
+                            type: 'template-evidence', 
+                            templateId: templateId,
+                            uploadedAt: new Date().toISOString()
+                        }
+                    );
+
+                    // Replace base64 with S3 URL
+                    resolvedImages.evidence = uploadResult.s3Url;
+
+                    loggingService.info('Evidence image uploaded to S3 successfully', {
+                        templateId,
+                        userId,
+                        s3Url: uploadResult.s3Url,
+                        s3Key: uploadResult.s3Key
+                    });
+                } catch (uploadError) {
+                    loggingService.error('Failed to upload evidence image to S3', {
+                        error: uploadError instanceof Error ? uploadError.message : String(uploadError),
+                        templateId,
+                        userId
+                    });
+                    // Continue with base64 if upload fails
+                }
             }
 
             // Import visual compliance service
             const { VisualComplianceOptimizedService } = await import('./visualComplianceOptimized.service');
 
             // Execute visual compliance check
+            // The service will automatically use cached features if templateId is provided and features are available
             const result = await VisualComplianceOptimizedService.processComplianceCheckOptimized({
-                referenceImage: resolvedImages.reference,
+                templateId: templateId, // Important: Pass templateId to enable cached features
+                referenceImage: resolvedImages.reference || '', // Can be empty if using cached features
                 evidenceImage: resolvedImages.evidence,
                 complianceCriteria: resolvedCriteria,
                 industry: template.visualComplianceConfig!.industry,

@@ -10,7 +10,8 @@ export interface IActivity {
     'bulk_optimization' | 'cost_audit_completed' | 'subscription_changed' |
     'template_created' | 'template_updated' | 'template_deleted' | 'template_duplicated' |
     'template_ai_generated' | 'template_optimized' | 'template_used' | 'template_used_with_context' | 'template_shared' |
-    'template_feedback_added' | 'template_variables_detected' | 'template_effectiveness_predicted';                                                                      
+    'template_feedback_added' | 'template_variables_detected' | 'template_effectiveness_predicted' |
+    'reference_image_uploaded' | 'reference_features_extracted' | 'reference_extraction_failed' | 'reference_features_updated';                                                                      
     title: string;
     description?: string;
     metadata?: {
@@ -63,7 +64,8 @@ const activitySchema = new Schema<IActivity>({
             'bulk_optimization', 'cost_audit_completed', 'subscription_changed',
             'template_created', 'template_updated', 'template_deleted', 'template_duplicated',
             'template_ai_generated', 'template_optimized', 'template_used', 'template_shared',
-            'template_feedback_added', 'template_variables_detected', 'template_effectiveness_predicted'
+            'template_feedback_added', 'template_variables_detected', 'template_effectiveness_predicted',
+            'reference_image_uploaded', 'reference_features_extracted', 'reference_extraction_failed', 'reference_features_updated'
         ],
         required: true
     },

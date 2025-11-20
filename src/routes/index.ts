@@ -57,6 +57,7 @@ import integrationRoutes from './integration.routes';
 import githubRoutes from './github.routes';
 import visualComplianceRoutes from './visualCompliance.routes';
 import logsRoutes from './logs.routes';
+import referenceImageRoutes from './referenceImage.routes';
 
 const router = Router();
 
@@ -129,5 +130,7 @@ router.use('/integrations', integrationRoutes);
 router.use('/github', githubRoutes);
 router.use('/visual-compliance', visualComplianceRoutes);
 router.use('/logs', logsRoutes);
+router.use('/templates', referenceImageRoutes);
+router.use('/reference-image', referenceImageRoutes);
 
 export const apiRouter = router;

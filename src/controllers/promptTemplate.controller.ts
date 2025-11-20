@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { PromptTemplateService } from '../services/promptTemplate.service';
 import { loggingService } from '../services/logging.service';
+import { ReferenceImageAnalysisService } from '../services/referenceImageAnalysis.service';
 
 export class PromptTemplateController {
     // Background processing queue
@@ -805,7 +806,7 @@ export class PromptTemplateController {
                 return;
             }
 
-            const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId } = req.body;
+            const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId, referenceImage } = req.body;
 
             // Validation
             if (!name || !complianceCriteria || !imageVariables || !industry) {
@@ -832,6 +833,13 @@ export class PromptTemplateController {
                 return;
             }
 
+            // Log reference image data for debugging
+            loggingService.info('Creating visual compliance template with reference image', {
+                component: 'PromptTemplateController',
+                hasReferenceImage: !!referenceImage,
+                referenceImageKeys: referenceImage ? Object.keys(referenceImage) : []
+            });
+
             const template = await PromptTemplateService.createVisualComplianceTemplate(userId, {
                 name,
                 description,
@@ -841,7 +849,8 @@ export class PromptTemplateController {
                 industry,
                 mode,
                 metaPromptPresetId,
-                projectId
+                projectId,
+                referenceImage
             });
 
             const duration = Date.now() - startTime;
@@ -854,6 +863,37 @@ export class PromptTemplateController {
                 industry,
                 requestId
             });
+
+            // Trigger automatic feature extraction if reference image exists
+            if (template.referenceImage?.s3Url) {
+                loggingService.info('Starting automatic feature extraction for template', {
+                    templateId: template._id,
+                    userId
+                });
+
+                // Extract criteria from template variables
+                const criteria = template.variables
+                    .filter((v: any) => v.name.startsWith('criterion_'))
+                    .map((v: any) => ({
+                        name: v.name,
+                        text: v.defaultValue || v.description || ''
+                    }));
+
+                // Start feature extraction in background
+                ReferenceImageAnalysisService.extractReferenceFeatures(
+                    template.referenceImage.s3Url,
+                    criteria,
+                    template.visualComplianceConfig?.industry || 'retail',
+                    template._id.toString(),
+                    userId
+                ).catch(error => {
+                    loggingService.error('Background feature extraction failed during template creation', {
+                        component: 'PromptTemplateController',
+                        templateId: template._id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
 
             res.status(201).json({
                 success: true,
@@ -884,7 +924,7 @@ export class PromptTemplateController {
     static async useVisualTemplate(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = req.user?.id;
-        const templateId = req.params.id;
+        const templateId = req.params.templateId;
         const requestId = req.headers['x-request-id'] as string;
 
         try {
