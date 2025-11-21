@@ -865,6 +865,36 @@ Format your response as JSON:
             modelId
         });
         
+        // EARLY VALIDATION: Check base64 size for data URLs
+        if (imageUrl.startsWith('data:image')) {
+            const maxBase64Size = 5 * 1024 * 1024; // 5MB limit for base64 (AWS Bedrock Messages API limit)
+            
+            if (imageUrl.length > maxBase64Size) {
+                const sizeMB = (imageUrl.length / (1024 * 1024)).toFixed(2);
+                const maxSizeMB = (maxBase64Size / (1024 * 1024)).toFixed(2);
+                
+                loggingService.error('Image base64 exceeds AWS Bedrock limit', {
+                    component: 'BedrockService',
+                    operation: 'invokeWithImage',
+                    base64Size: imageUrl.length,
+                    sizeMB,
+                    maxSizeMB,
+                    userId
+                });
+                
+                throw new Error(
+                    `Image too large (${sizeMB}MB). AWS Bedrock limit is ${maxSizeMB}MB. Please compress the image before uploading.`
+                );
+            }
+            
+            loggingService.info('Base64 size validation passed', {
+                component: 'BedrockService',
+                base64Size: imageUrl.length,
+                sizeMB: (imageUrl.length / (1024 * 1024)).toFixed(2),
+                maxSizeMB: (maxBase64Size / (1024 * 1024)).toFixed(2)
+            });
+        }
+        
         try {
             // Fetch the image
             let imageBuffer: Buffer;
@@ -1095,6 +1125,26 @@ Format your response as JSON:
                 throw new Error('Base64 validation failed after cleaning/padding');
             }
             
+            // FINAL SIZE VALIDATION: Check if base64 is within AWS Bedrock limits
+            const maxBase64Size = 4.5 * 1024 * 1024; // 4.5MB safe limit for base64 content
+            if (properlyPaddedBase64.length > maxBase64Size) {
+                const sizeMB = (properlyPaddedBase64.length / (1024 * 1024)).toFixed(2);
+                const maxSizeMB = (maxBase64Size / (1024 * 1024)).toFixed(2);
+                
+                loggingService.error('Final base64 exceeds AWS Bedrock safe limit', {
+                    component: 'BedrockService',
+                    operation: 'invokeWithImage',
+                    base64Size: properlyPaddedBase64.length,
+                    sizeMB,
+                    maxSizeMB,
+                    userId
+                });
+                
+                throw new Error(
+                    `Processed image too large (${sizeMB}MB). AWS Bedrock safe limit is ${maxSizeMB}MB. Please use a smaller image.`
+                );
+            }
+            
             loggingService.info('Building Bedrock payload with RFC 4648 compliant base64', {
                 component: 'BedrockService',
                 operation: 'invokeWithImage',
@@ -1106,7 +1156,8 @@ Format your response as JSON:
                 isMultipleOf4: properlyPaddedBase64.length % 4 === 0,
                 mediaType,
                 firstChars: properlyPaddedBase64.substring(0, 20),
-                lastChars: properlyPaddedBase64.substring(properlyPaddedBase64.length - 20)
+                lastChars: properlyPaddedBase64.substring(properlyPaddedBase64.length - 20),
+                sizeMB: (properlyPaddedBase64.length / (1024 * 1024)).toFixed(2)
             });
             
             const payload: any = {

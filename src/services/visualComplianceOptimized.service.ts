@@ -256,70 +256,101 @@ export class VisualComplianceOptimizedService {
         optimizedPrompt,
         typeof request.evidenceImage === 'string' ? request.evidenceImage : request.evidenceImage.toString('base64'),
         request.userId,
-        'anthropic.claude-3-5-sonnet-20241022-v2:0'
+        'us.anthropic.claude-3-5-sonnet-20241022-v2:0'  // Use inference profile ID
       );
 
-      // Parse response (handle both TOON and JSON formats)
+      // Log the raw response for debugging
+      console.log('='.repeat(80));
+      console.log('🔍 RAW BEDROCK RESPONSE:');
+      console.log('Response length:', result.response.length);
+      console.log('Response preview:', result.response.substring(0, 500));
+      console.log('Response full:', result.response);
+      console.log('='.repeat(80));
+
+      // Parse TOON response (ONLY TOON format expected)
       let complianceResults: any;
       try {
-        // First, try to parse TOON format
-        const { decodeFromTOON } = await import('../utils/toon.utils');
-        try {
-          complianceResults = decodeFromTOON(result.response);
+        console.log('🔍 Parsing TOON response...');
+        
+        // Parse TOON format directly (more reliable than toon.utils)
+        const lines = result.response.trim().split('\n');
+        
+        // Check for ERROR response (image mismatch, etc.)
+        const errorLine = lines[0]?.match(/ERROR\[Analysis\]\{([^}]+)\}:(.+)/);
+        if (errorLine) {
+          const errorMessage = errorLine[2]?.trim() || 'Image analysis error';
+          console.log('⚠️  Claude detected an issue:', errorMessage);
           
-          // Convert TOON structure to expected format if needed
-          if (complianceResults && !complianceResults.compliance_score) {
-            // Extract from TOON structure
-            const complianceLine = result.response.match(/Compliance\[Result\]\{([^}]+)\}:(.+)/);
-            if (complianceLine) {
-              const params = complianceLine[1];
-              const scoreMatch = params.match(/score:(\d+)/);
-              const passMatch = params.match(/pass:(true|false|1|0)/);
-              const confMatch = params.match(/conf:([\d.]+)/);
+          // Return failed compliance with error message
+          complianceResults = {
+            compliance_score: 0,
+            pass_fail: false,
+            overall_confidence: 0.99,
+            feedback_message: errorMessage,
+            criteria: request.complianceCriteria.map((criterion, index) => ({
+              criterion_number: index + 1,
+              compliant: false,
+              confidence: 0.99,
+              message: 'Image mismatch detected - cannot evaluate this criterion',
+              reason: errorMessage
+            }))
+          };
+          
+          console.log('✅ Parsed ERROR response as failed compliance');
+        } else {
+          // Line 1: Compliance[Result]{score:XX,pass:true/false,conf:0.XX}:summary
+          const complianceLine = lines[0]?.match(/Compliance\[Result\]\{([^}]+)\}:(.+)/);
+          if (!complianceLine) {
+            throw new Error('Invalid TOON format: Missing Compliance line');
+          }
+          
+          const params = complianceLine[1];
+          const scoreMatch = params.match(/score:(\d+)/);
+          const passMatch = params.match(/pass:(true|false)/);
+          const confMatch = params.match(/conf:([\d.]+)/);
+          
+          complianceResults = {
+            compliance_score: scoreMatch ? parseInt(scoreMatch[1]) : 0,
+            pass_fail: passMatch ? passMatch[1] === 'true' : false,
+            overall_confidence: confMatch ? parseFloat(confMatch[1]) : 0.5,
+            feedback_message: complianceLine[2]?.trim() || 'Compliance check completed',
+            criteria: []
+          };
+          
+          // Lines 2+: C1[Item]{ok:1,cf:0.95}:reason
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const itemMatch = line.match(/C(\d+)\[Item\]\{([^}]+)\}:(.+)/);
+            if (itemMatch) {
+              const itemParams = itemMatch[2];
+              const okMatch = itemParams.match(/ok:(\d+)/);
+              const cfMatch = itemParams.match(/cf:([\d.]+)/);
               
-              complianceResults = {
-                compliance_score: scoreMatch ? parseInt(scoreMatch[1]) : 0,
-                pass_fail: passMatch ? (passMatch[1] === 'true' || passMatch[1] === '1') : false,
-                overall_confidence: confMatch ? parseFloat(confMatch[1]) : 0.5,
-                feedback_message: complianceLine[2] || '',
-                criteria: []
-              };
-              
-              // Parse criteria items
-              const itemMatches = result.response.matchAll(/C(\d+)\[Item\]\{([^}]+)\}:(.+)/g);
-              for (const match of itemMatches) {
-                const params = match[2];
-                const okMatch = params.match(/ok:(\d+)/);
-                const cfMatch = params.match(/cf:([\d.]+)/);
-                
-                complianceResults.criteria.push({
-                  criterion_number: parseInt(match[1]),
-                  compliant: okMatch ? parseInt(okMatch[1]) === 1 : false,
-                  confidence: cfMatch ? parseFloat(cfMatch[1]) : 0.5,
-                  message: match[3] || '',
-                  reason: match[3] || ''
-                });
-              }
+              complianceResults.criteria.push({
+                criterion_number: parseInt(itemMatch[1]),
+                compliant: okMatch ? parseInt(okMatch[1]) === 1 : false,
+                confidence: cfMatch ? parseFloat(cfMatch[1]) : 0.5,
+                message: itemMatch[3]?.trim() || 'No details',
+                reason: itemMatch[3]?.trim() || 'No details'
+              });
             }
           }
-        } catch (toonError) {
-          // If TOON parsing fails, try JSON
-          const jsonMatch = result.response.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            complianceResults = JSON.parse(jsonMatch[0]);
-          } else {
-            complianceResults = JSON.parse(result.response);
-          }
+          
+          console.log('✅ Successfully parsed TOON response:', {
+            score: complianceResults.compliance_score,
+            pass: complianceResults.pass_fail,
+            itemsCount: complianceResults.criteria.length
+          });
         }
         
-        // Validate we have results
-        if (!complianceResults || typeof complianceResults !== 'object') {
-          throw new Error('Invalid response format');
-        }
       } catch (parseError) {
-        loggingService.error('Failed to parse compliance results', { 
+        console.error('❌ TOON PARSING ERROR:', parseError);
+        console.error('Raw response was:', result.response);
+        loggingService.error('Failed to parse TOON compliance results', { 
           error: parseError,
-          response: result.response.substring(0, 500)
+          response: result.response
         });
         return null;
       }
@@ -480,20 +511,20 @@ INSTRUCTIONS:
 4. Provide an overall compliance score (0-100)
 5. Include overall confidence score (0-1)
 
-CRITICAL: Use TOON (Text Object Oriented Notation) format for MAXIMUM token efficiency.
+CRITICAL: You MUST respond ONLY in TOON (Text Object Oriented Notation) format. NO JSON, NO PROSE, ONLY TOON.
 
-TOON FORMAT RULES:
-- Use ultra-compact notation with minimal tokens
-- Format: FieldName[Type]{Key:Value}:Content
-- Example: Score[Int]{v:85}:pass Conf[Float]{v:0.95}:high
+TOON FORMAT (STRICT):
+Line 1: Compliance[Result]{score:<0-100>,pass:<true/false>,conf:<0-1>}:<one_line_summary>
+Lines 2+: C<N>[Item]{ok:<1/0>,cf:<0-1>}:<short_reason>
 
-Return in TOON format like this:
-Compliance[Result]{score:85,pass:true,conf:0.95}:summary_here
-Items[Array]{count:${criteria.length}}:
-${criteria.map((_, i) => `C${i+1}[Item]{n:${i+1},ok:1,cf:0.95}:reason_here`).join('\n')}
+EXAMPLE OUTPUT:
+Compliance[Result]{score:85,pass:true,conf:0.92}:All criteria met with good confidence
+C1[Item]{ok:1,cf:0.95}:Toothpaste display clearly visible
+C2[Item]{ok:1,cf:0.90}:Products neatly organized
+C3[Item]{ok:1,cf:0.88}:Product names facing forward
+C4[Item]{ok:1,cf:0.85}:Multiple SKUs present
 
-Use this ultra-compact TOON structure. Each line represents one criterion result.
-Use abbreviations: ok=compliant(1/0), cf=confidence, n=number, msg=message`;
+YOUR RESPONSE (TOON ONLY, NO OTHER TEXT):`;
   }
 
   /**

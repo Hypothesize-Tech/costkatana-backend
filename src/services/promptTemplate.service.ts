@@ -1560,14 +1560,62 @@ export class PromptTemplateService {
                 });
 
                 try {
-                    // Import S3 service
+                    // Import required services
                     const { S3Service } = await import('./s3.service');
+                    const sharp = (await import('sharp')).default;
 
                     // Convert base64 to buffer
-                    const evidenceBuffer = Buffer.from(
+                    const originalBuffer = Buffer.from(
                         resolvedImages.evidence.replace(/^data:image\/\w+;base64,/, ''),
                         'base64'
                     );
+
+                    const originalSize = originalBuffer.length;
+                    
+                    loggingService.info('Compressing evidence image before S3 upload', {
+                        templateId,
+                        userId,
+                        originalSize,
+                        originalSizeMB: (originalSize / (1024 * 1024)).toFixed(2)
+                    });
+
+                    // Compress image using Sharp to reduce size
+                    let evidenceBuffer: Buffer;
+                    try {
+                        const compressedBuffer = await sharp(originalBuffer)
+                            .resize(2048, 2048, {
+                                fit: 'inside',
+                                withoutEnlargement: true
+                            })
+                            .jpeg({
+                                quality: 85,
+                                mozjpeg: true
+                            })
+                            .toBuffer();
+                        
+                        evidenceBuffer = compressedBuffer;
+
+                        const compressedSize = compressedBuffer.length;
+                        const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
+
+                        loggingService.info('Image compressed successfully', {
+                            templateId,
+                            userId,
+                            originalSize,
+                            compressedSize,
+                            compressionRatio: `${compressionRatio}%`,
+                            originalSizeMB: (originalSize / (1024 * 1024)).toFixed(2),
+                            compressedSizeMB: (compressedSize / (1024 * 1024)).toFixed(2)
+                        });
+                    } catch (compressionError) {
+                        loggingService.warn('Image compression failed, using original', {
+                            error: compressionError instanceof Error ? compressionError.message : String(compressionError),
+                            templateId,
+                            userId
+                        });
+                        // Continue with original buffer if compression fails
+                        evidenceBuffer = originalBuffer;
+                    }
 
                     // Upload to S3
                     const uploadResult = await S3Service.uploadDocument(
@@ -1589,7 +1637,8 @@ export class PromptTemplateService {
                         templateId,
                         userId,
                         s3Url: uploadResult.s3Url,
-                        s3Key: uploadResult.s3Key
+                        s3Key: uploadResult.s3Key,
+                        finalSize: evidenceBuffer.length
                     });
                 } catch (uploadError) {
                     loggingService.error('Failed to upload evidence image to S3', {
