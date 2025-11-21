@@ -4,6 +4,7 @@ import { PromptTemplate } from '../models/PromptTemplate';
 import { Activity } from '../models/Activity';
 import { loggingService } from './logging.service';
 import mongoose from 'mongoose';
+import { EventEmitter } from 'events';
 
 interface CriterionInput {
     name: string;
@@ -93,6 +94,14 @@ interface ValidationResult {
 
 export class ReferenceImageAnalysisService {
     private static readonly MODEL_ID = 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+    private static extractionEmitter = new EventEmitter();
+
+    /**
+     * Get extraction event emitter for SSE subscriptions
+     */
+    static getExtractionEmitter(): EventEmitter {
+        return this.extractionEmitter;
+    }
 
     /**
      * Build comprehensive extraction prompt
@@ -480,6 +489,31 @@ Return ONLY valid JSON with the missing fields populated. No markdown or additio
             templateId,
             status,
             errorMessage
+        });
+
+        // Emit event for SSE subscribers
+        const template = await PromptTemplate.findById(templateId);
+        const extractionData: any = {
+            templateId,
+            status,
+            errorMessage
+        };
+
+        if (template?.referenceImage?.extractedFeatures) {
+            const features = template.referenceImage.extractedFeatures;
+            extractionData.extractedAt = features.extractedAt;
+            extractionData.extractedBy = features.extractedBy;
+            extractionData.usage = features.usage;
+            extractionData.extractionCost = features.extractionCost?.totalCost;
+        }
+
+        this.extractionEmitter.emit('status_update', extractionData);
+
+        loggingService.info('Emitted extraction status update event', {
+            component: 'ReferenceImageAnalysisService',
+            operation: 'updateExtractionStatus',
+            templateId,
+            status
         });
     }
 

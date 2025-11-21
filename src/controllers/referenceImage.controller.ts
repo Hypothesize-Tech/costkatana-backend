@@ -494,6 +494,152 @@ export class ReferenceImageController {
     }
 
     /**
+     * Stream extraction status updates via SSE
+     * GET /api/templates/:templateId/reference-image/stream
+     */
+    static async streamExtractionStatus(req: any, res: Response): Promise<void> {
+        try {
+            const { templateId } = req.params;
+            const userId = req.user?._id || req.user?.id;
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+                return;
+            }
+
+            loggingService.info('Initializing SSE connection for extraction status', {
+                component: 'ReferenceImageController',
+                operation: 'streamExtractionStatus',
+                templateId,
+                userId
+            });
+
+            // Verify template exists
+            const template = await PromptTemplate.findById(templateId);
+            if (!template) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Template not found'
+                });
+                return;
+            }
+
+            // Get origin from request or use default
+            const origin = req.headers.origin || 'http://localhost:3000';
+
+            // Set SSE headers with CORS support
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+            res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, User-Agent, Accept, Cache-Control, X-Requested-With');
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Cache-Control, X-Accel-Buffering');
+
+            // Send initial connection message with current status
+            const currentStatus = template.referenceImage?.extractedFeatures?.status || 'pending';
+            res.write(`data: ${JSON.stringify({
+                type: 'connected',
+                message: 'Extraction status stream connected',
+                templateId,
+                status: currentStatus,
+                extractedAt: template.referenceImage?.extractedFeatures?.extractedAt,
+                extractedBy: template.referenceImage?.extractedFeatures?.extractedBy,
+                usage: template.referenceImage?.extractedFeatures?.usage,
+                extractionCost: template.referenceImage?.extractedFeatures?.extractionCost?.totalCost,
+                errorMessage: template.referenceImage?.extractedFeatures?.errorMessage
+            })}\n\n`);
+
+            // Set up heartbeat to prevent timeout
+            const heartbeatInterval = setInterval(() => {
+                res.write(`: heartbeat ${Date.now()}\n\n`);
+            }, 30000); // Send heartbeat every 30 seconds
+
+            // Listen for extraction status updates
+            const extractionEmitter = ReferenceImageAnalysisService.getExtractionEmitter();
+            const statusUpdateHandler = (data: any) => {
+                // Filter events for this specific template
+                if (data.templateId === templateId) {
+                    res.write(`data: ${JSON.stringify({
+                        type: 'status_update',
+                        ...data
+                    })}\n\n`);
+
+                    // Close connection when extraction completes or fails
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        res.write(`data: ${JSON.stringify({
+                            type: 'close',
+                            message: 'Extraction finished'
+                        })}\n\n`);
+                        
+                        // Clean up and close
+                        clearInterval(heartbeatInterval);
+                        extractionEmitter.off('status_update', statusUpdateHandler);
+                        res.end();
+
+                        loggingService.info('SSE connection closed - extraction finished', {
+                            component: 'ReferenceImageController',
+                            operation: 'streamExtractionStatus',
+                            templateId,
+                            finalStatus: data.status
+                        });
+                    }
+                }
+            };
+
+            extractionEmitter.on('status_update', statusUpdateHandler);
+
+            // Handle client disconnect
+            req.on('close', () => {
+                clearInterval(heartbeatInterval);
+                extractionEmitter.off('status_update', statusUpdateHandler);
+                loggingService.info('SSE connection closed by client', {
+                    component: 'ReferenceImageController',
+                    operation: 'streamExtractionStatus',
+                    templateId,
+                    userId
+                });
+            });
+
+            // Set timeout to auto-close after 5 minutes
+            const timeout = setTimeout(() => {
+                res.write(`data: ${JSON.stringify({
+                    type: 'timeout',
+                    message: 'Stream timeout - exceeded maximum duration'
+                })}\n\n`);
+                clearInterval(heartbeatInterval);
+                extractionEmitter.off('status_update', statusUpdateHandler);
+                res.end();
+            }, 300000); // 5 minutes
+
+            // Clean up timeout on manual close
+            req.on('close', () => {
+                clearTimeout(timeout);
+            });
+
+        } catch (error) {
+            loggingService.error('SSE stream error', {
+                component: 'ReferenceImageController',
+                operation: 'streamExtractionStatus',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            // Only send JSON error if headers haven't been sent
+            if (!res.headersSent) {
+                res.status(500).json({
+                    success: false,
+                    message: 'SSE stream error'
+                });
+            }
+        }
+    }
+
+    /**
      * Get extracted features
      * GET /api/templates/:templateId/reference-image/features
      */

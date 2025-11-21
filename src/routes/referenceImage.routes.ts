@@ -23,7 +23,18 @@ const upload = multer({
     }
 });
 
-// All routes require authentication
+/**
+ * GET /api/templates/:templateId/reference-image/stream
+ * Stream extraction status updates via SSE
+ * NOTE: Must be registered BEFORE authenticate middleware to handle token in query params
+ */
+router.get(
+    '/:templateId/reference-image/stream',
+    authenticate,
+    ReferenceImageController.streamExtractionStatus
+);
+
+// All other routes require authentication
 router.use(authenticate);
 
 /**

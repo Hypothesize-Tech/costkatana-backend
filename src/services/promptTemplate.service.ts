@@ -1705,13 +1705,13 @@ export class PromptTemplateService {
                 await UsageService.trackUsage({
                     userId,
                     service: 'aws-bedrock',
-                    model: result.metadata.model || 'amazon.nova-pro-v1:0',
+                    model: 'amazon.nova-pro-v1:0', // Default model for visual compliance
                     prompt: JSON.stringify(resolvedCriteria).substring(0, 500),
-                    completion: JSON.stringify(result.results).substring(0, 500),
-                    promptTokens: result.metadata.tokens?.input || 0,
-                    completionTokens: result.metadata.tokens?.output || 0,
-                    totalTokens: result.metadata.tokens?.total || 0,
-                    cost: result.metadata.costBreakdown?.total || 0,
+                    completion: JSON.stringify(result.items).substring(0, 500),
+                    promptTokens: result.metadata.inputTokens || 0,
+                    completionTokens: result.metadata.outputTokens || 0,
+                    totalTokens: (result.metadata.inputTokens || 0) + (result.metadata.outputTokens || 0),
+                    cost: result.metadata.cost || 0,
                     responseTime: result.metadata.latency || 0,
                     metadata: {
                         source: 'visual-compliance',
