@@ -58,6 +58,7 @@ import githubRoutes from './github.routes';
 import visualComplianceRoutes from './visualCompliance.routes';
 import logsRoutes from './logs.routes';
 import referenceImageRoutes from './referenceImage.routes';
+import templateAnalyticsRoutes from './templateAnalytics.routes';
 
 const router = Router();
 
@@ -81,6 +82,7 @@ router.use('/tracker', trackerRouter);
 router.use('/intelligence', intelligenceRoutes);
 router.use('/projects', projectRoutes);
 router.use('/prompt-templates', promptTemplateRoutes);
+router.use('/templates/analytics', templateAnalyticsRoutes);
 router.use('/pricing', pricingRoutes);
 router.use('/tags', taggingRoutes);
 router.use('/performance-cost', performanceCostAnalysisRoutes);

@@ -1690,6 +1690,52 @@ export class PromptTemplateService {
                 passFail: result.pass_fail
             });
 
+            // Track usage for analytics
+            try {
+                const { UsageService } = await import('./usage.service');
+                
+                // Prepare variable resolution data
+                const variablesResolved = Object.entries({ ...variables.text, ...variables.images }).map(([key, value]) => ({
+                    variableName: key,
+                    value: typeof value === 'string' ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : String(value),
+                    confidence: 1.0,
+                    source: 'user_provided' as const
+                }));
+
+                await UsageService.trackUsage({
+                    userId,
+                    service: 'aws-bedrock',
+                    model: result.metadata.model || 'amazon.nova-pro-v1:0',
+                    prompt: JSON.stringify(resolvedCriteria).substring(0, 500),
+                    completion: JSON.stringify(result.results).substring(0, 500),
+                    promptTokens: result.metadata.tokens?.input || 0,
+                    completionTokens: result.metadata.tokens?.output || 0,
+                    totalTokens: result.metadata.tokens?.total || 0,
+                    cost: result.metadata.costBreakdown?.total || 0,
+                    responseTime: result.metadata.latency || 0,
+                    metadata: {
+                        source: 'visual-compliance',
+                        complianceScore: result.compliance_score,
+                        passFail: result.pass_fail
+                    },
+                    tags: ['visual-compliance', 'template'],
+                    optimizationApplied: false,
+                    errorOccurred: false,
+                    templateUsage: {
+                        templateId: template._id.toString(),
+                        templateName: template.name,
+                        templateCategory: template.category,
+                        variablesResolved,
+                        context: 'visual-compliance',
+                        templateVersion: template.version || 1
+                    }
+                });
+            } catch (usageError) {
+                loggingService.warn('Failed to track visual compliance template usage:', {
+                    error: usageError instanceof Error ? usageError.message : String(usageError)
+                });
+            }
+
             loggingService.info('Visual compliance template executed', {
                 templateId,
                 userId,

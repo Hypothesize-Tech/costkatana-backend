@@ -59,6 +59,21 @@ export interface IUsage {
     workflowName?: string;
     workflowStep?: string;
     workflowSequence?: number;
+    // Template usage tracking
+    templateUsage?: {
+        templateId: mongoose.Types.ObjectId;
+        templateName: string;
+        templateCategory: string;
+        variablesResolved: Array<{
+            variableName: string;
+            value: string; // truncated if sensitive
+            confidence: number;
+            source: 'user_provided' | 'context_inferred' | 'default' | 'missing';
+            reasoning?: string;
+        }>;
+        context: 'chat' | 'optimization' | 'visual-compliance' | 'workflow' | 'api';
+        templateVersion?: number;
+    };
     createdAt: Date;
     updatedAt: Date;
     // Email fields for user and customer identification
@@ -193,6 +208,33 @@ const usageSchema = new Schema<IUsage>({
         type: Number,
         min: 0
     },
+    // Template usage tracking schema
+    templateUsage: {
+        templateId: {
+            type: Schema.Types.ObjectId,
+            ref: 'PromptTemplate'
+        },
+        templateName: String,
+        templateCategory: {
+            type: String,
+            enum: ['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']
+        },
+        variablesResolved: [{
+            variableName: String,
+            value: String,
+            confidence: Number,
+            source: {
+                type: String,
+                enum: ['user_provided', 'context_inferred', 'default', 'missing']
+            },
+            reasoning: String
+        }],
+        context: {
+            type: String,
+            enum: ['chat', 'optimization', 'visual-compliance', 'workflow', 'api']
+        },
+        templateVersion: Number
+    }
 }, {
     timestamps: true,
 });
@@ -214,6 +256,11 @@ usageSchema.index({ errorOccurred: 1, createdAt: -1 });
 
 // 6. Text search for prompts (if needed)
 usageSchema.index({ prompt: 'text', completion: 'text' });
+
+// 7. Template usage tracking
+usageSchema.index({ 'templateUsage.templateId': 1, createdAt: -1 });
+usageSchema.index({ 'templateUsage.context': 1, createdAt: -1 });
+usageSchema.index({ userId: 1, 'templateUsage.templateId': 1, createdAt: -1 });
 
 // Virtual for cost per token
 usageSchema.virtual('costPerToken').get(function () {
