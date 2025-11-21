@@ -277,7 +277,8 @@ export class AICostTrackerService {
             return this.config;
         }
         
-        await this.getConfig();
+        // Initialize config if not already initialized
+        await this.initialize();
         return this.config!;
     }
 

@@ -317,4 +317,52 @@ router.post(
     PromptTemplateController.uploadTemplateImage
 );
 
+// ============ TEMPLATE EXECUTION ENDPOINTS ============
+
+// Execute template with AI
+router.post(
+    '/:templateId/execute',
+    [
+        param('templateId').isMongoId(),
+        body('variables').optional().isObject(),
+        body('executionMode').optional().isIn(['single', 'comparison', 'recommended']),
+        body('modelId').optional().isString(),
+        body('compareWith').optional().isArray(),
+        body('enableOptimization').optional().isBoolean()
+    ],
+    validateRequest,
+    PromptTemplateController.executeTemplate
+);
+
+// Get model recommendation for template
+router.get(
+    '/:templateId/recommendation',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.getModelRecommendation
+);
+
+// Get execution history for template
+router.get(
+    '/:templateId/executions',
+    [
+        param('templateId').isMongoId(),
+        query('limit').optional().isInt({ min: 1, max: 50 })
+    ],
+    validateRequest,
+    PromptTemplateController.getExecutionHistory
+);
+
+// Get execution statistics for template
+router.get(
+    '/:templateId/execution-stats',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.getExecutionStats
+);
+
 export default router; 

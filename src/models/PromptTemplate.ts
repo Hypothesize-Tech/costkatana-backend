@@ -46,6 +46,13 @@ export interface IPromptTemplate {
             createdAt: Date;
         }>;
     };
+    executionStats?: {
+        totalExecutions: number;
+        totalCostSavings: number;
+        averageCost: number;
+        mostUsedModel: string;
+        lastExecutedAt?: Date;
+    };
     sharing: {
         visibility: 'private' | 'project' | 'organization' | 'public';
         sharedWith: mongoose.Types.ObjectId[]; // Specific users
@@ -270,6 +277,25 @@ const promptTemplateSchema = new Schema<IPromptTemplate>({
             type: Boolean,
             default: true
         }
+    },
+    executionStats: {
+        totalExecutions: {
+            type: Number,
+            default: 0
+        },
+        totalCostSavings: {
+            type: Number,
+            default: 0
+        },
+        averageCost: {
+            type: Number,
+            default: 0
+        },
+        mostUsedModel: {
+            type: String,
+            default: ''
+        },
+        lastExecutedAt: Date
     },
     isVisualCompliance: {
         type: Boolean,
