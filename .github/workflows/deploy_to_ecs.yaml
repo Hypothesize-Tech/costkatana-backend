@@ -21,6 +21,7 @@ jobs:
       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_URL: ${{ secrets.S3_URL}}
 
     steps:
       - name: Checkout repository
@@ -32,7 +33,7 @@ jobs:
 
       - name: Download environment file from S3
         run: |
-          aws s3 cp s3://ai-cost-optimizer-env/.env .env
+          aws s3 cp ${S3_URL}
 
       - name: Debug environment variables
         run: echo "ECR_REPOSITORY=${ECR_REPOSITORY}"
