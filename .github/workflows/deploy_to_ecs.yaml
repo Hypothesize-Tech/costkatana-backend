@@ -33,7 +33,7 @@ jobs:
 
       - name: Download environment file from S3
         run: |
-          aws s3 cp s3://ck-prod-env/.env
+          aws s3 cp s3://ck-prod-env/.env .env
 
       - name: Debug environment variables
         run: echo "ECR_REPOSITORY=${ECR_REPOSITORY}"
