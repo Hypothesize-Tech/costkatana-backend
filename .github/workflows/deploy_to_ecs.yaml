@@ -56,7 +56,7 @@ jobs:
       - name: Update ECS Task Definition
         run: |
           # Fetch the current task definition
-          task_def=$(aws ecs describe-task-definition --task-definition arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/hypothesize-ai-cost-optimizer)
+          task_def=$(aws ecs describe-task-definition --task-definition arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/ck-prod-td)
 
           # Clean the task definition by removing unwanted fields
           new_task_def=$(echo "$task_def" | jq '
@@ -76,6 +76,6 @@ jobs:
         run: |
           aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
-            --service "hypothesize-ai-cost-optimizer-service-jczpswhs" \
+            --service "ck-prod-td-service-lggotxj9" \
             --desired-count 4 \
             --force-new-deployment
