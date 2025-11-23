@@ -1,6 +1,10 @@
 import { Response } from 'express';
 import { PromptTemplateService } from '../services/promptTemplate.service';
+import { TemplateExecutionService } from '../services/templateExecution.service';
+import { ModelRecommendationService } from '../services/modelRecommendation.service';
 import { loggingService } from '../services/logging.service';
+import { ReferenceImageAnalysisService } from '../services/referenceImageAnalysis.service';
+import { PromptTemplate } from '../models/PromptTemplate';
 
 export class PromptTemplateController {
     // Background processing queue
@@ -182,7 +186,7 @@ export class PromptTemplateController {
     }
 
     /**
-     * Use a prompt template
+     * Use a prompt template (legacy - just fills variables)
      */
     static async useTemplate(req: any, res: Response): Promise<void> {
         try {
@@ -262,30 +266,68 @@ export class PromptTemplateController {
     }
 
     /**
-     * Fork a prompt template
+     * Duplicate a prompt template
      */
-    static async forkTemplate(req: any, res: Response): Promise<void> {
-        try {
-            const { templateId } = req.params;
-            const userId = req.user!.id;
-            const { projectId } = req.body;
+    static async duplicateTemplate(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const userId = req.user?.id;
+        const { templateId } = req.params;
+        const requestId = req.headers['x-request-id'] as string;
 
-            const forkedTemplate = await PromptTemplateService.forkTemplate(
+        try {
+            PromptTemplateController.conditionalLog('info', 'Template duplication initiated', {
+                userId,
+                templateId,
+                requestId,
+                customizations: req.body
+            });
+
+            if (!userId) {
+                res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+                return;
+            }
+
+            const customizations = req.body;
+
+            const duplicatedTemplate = await PromptTemplateService.duplicateTemplate(
                 templateId,
                 userId,
-                projectId
+                customizations
             );
+
+            const duration = Date.now() - startTime;
+
+            PromptTemplateController.conditionalLog('info', 'Template duplicated successfully', {
+                userId,
+                templateId,
+                duplicatedTemplateId: duplicatedTemplate._id,
+                duplicatedTemplateName: duplicatedTemplate.name,
+                duration,
+                requestId
+            });
 
             res.status(201).json({
                 success: true,
-                data: forkedTemplate,
-                message: 'Template forked successfully'
+                data: duplicatedTemplate,
+                message: 'Template duplicated successfully'
             });
         } catch (error: any) {
-            loggingService.error('Error forking prompt template:', error);
+            const duration = Date.now() - startTime;
+            
+            PromptTemplateController.conditionalLog('error', 'Template duplication failed', {
+                userId,
+                templateId,
+                requestId,
+                error: error.message || 'Unknown error',
+                duration
+            });
+
             res.status(400).json({
                 success: false,
-                error: error.message || 'Failed to fork template'
+                error: error.message || 'Failed to duplicate template'
             });
         }
     }
@@ -767,7 +809,7 @@ export class PromptTemplateController {
                 return;
             }
 
-            const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId } = req.body;
+            const { name, description, content, complianceCriteria, imageVariables, industry, mode, metaPromptPresetId, projectId, referenceImage } = req.body;
 
             // Validation
             if (!name || !complianceCriteria || !imageVariables || !industry) {
@@ -794,6 +836,13 @@ export class PromptTemplateController {
                 return;
             }
 
+            // Log reference image data for debugging
+            loggingService.info('Creating visual compliance template with reference image', {
+                component: 'PromptTemplateController',
+                hasReferenceImage: !!referenceImage,
+                referenceImageKeys: referenceImage ? Object.keys(referenceImage) : []
+            });
+
             const template = await PromptTemplateService.createVisualComplianceTemplate(userId, {
                 name,
                 description,
@@ -803,7 +852,8 @@ export class PromptTemplateController {
                 industry,
                 mode,
                 metaPromptPresetId,
-                projectId
+                projectId,
+                referenceImage
             });
 
             const duration = Date.now() - startTime;
@@ -816,6 +866,37 @@ export class PromptTemplateController {
                 industry,
                 requestId
             });
+
+            // Trigger automatic feature extraction if reference image exists
+            if (template.referenceImage?.s3Url) {
+                loggingService.info('Starting automatic feature extraction for template', {
+                    templateId: template._id,
+                    userId
+                });
+
+                // Extract criteria from template variables
+                const criteria = template.variables
+                    .filter((v: any) => v.name.startsWith('criterion_'))
+                    .map((v: any) => ({
+                        name: v.name,
+                        text: v.defaultValue || v.description || ''
+                    }));
+
+                // Start feature extraction in background
+                ReferenceImageAnalysisService.extractReferenceFeatures(
+                    template.referenceImage.s3Url,
+                    criteria,
+                    template.visualComplianceConfig?.industry || 'retail',
+                    template._id.toString(),
+                    userId
+                ).catch(error => {
+                    loggingService.error('Background feature extraction failed during template creation', {
+                        component: 'PromptTemplateController',
+                        templateId: template._id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                });
+            }
 
             res.status(201).json({
                 success: true,
@@ -846,7 +927,7 @@ export class PromptTemplateController {
     static async useVisualTemplate(req: any, res: Response): Promise<void> {
         const startTime = Date.now();
         const userId = req.user?.id;
-        const templateId = req.params.id;
+        const templateId = req.params.templateId;
         const requestId = req.headers['x-request-id'] as string;
 
         try {
@@ -1017,5 +1098,165 @@ export class PromptTemplateController {
         
         // Clear caches
         PromptTemplateController.userProjectCache.clear();
+    }
+
+    /**
+     * Execute a prompt template with AI
+     */
+    static async executeTemplate(req: any, res: Response): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const { templateId } = req.params;
+            const userId = req.user!.id;
+            const {
+                variables = {},
+                executionMode = 'recommended',
+                modelId,
+                compareWith,
+                enableOptimization = false
+            } = req.body;
+
+            PromptTemplateController.conditionalLog('info', 'Template execution initiated', {
+                userId,
+                templateId,
+                executionMode,
+                modelId,
+                hasCompareWith: !!compareWith
+            });
+
+            const result = await TemplateExecutionService.executeTemplate({
+                templateId,
+                userId,
+                variables,
+                executionMode,
+                modelId,
+                compareWith,
+                enableOptimization
+            });
+
+            const duration = Date.now() - startTime;
+
+            PromptTemplateController.conditionalLog('info', 'Template execution completed', {
+                userId,
+                templateId,
+                duration
+            });
+
+            res.json({
+                success: true,
+                data: result,
+                message: 'Template executed successfully'
+            });
+        } catch (error: any) {
+            const duration = Date.now() - startTime;
+            loggingService.error('Error executing prompt template', {
+                error: error instanceof Error ? error.message : String(error),
+                duration,
+                userId: req.user?.id,
+                templateId: req.params.templateId
+            });
+            
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to execute template'
+            });
+        }
+    }
+
+    /**
+     * Get model recommendation for a template
+     */
+    static async getModelRecommendation(req: any, res: Response): Promise<void> {
+        try {
+            const templateId = req.params.templateId as string;
+
+            // Find template without strict authorization check for recommendations
+            const template = await PromptTemplate.findById(templateId);
+            if (!template || !template.isActive || template.isDeleted) {
+                res.status(404).json({
+                    success: false,
+                    error: 'Template not found'
+                });
+                return;
+            }
+
+            // Get recommendations
+            const recommendations = await ModelRecommendationService.recommendModel(template);
+
+            res.json({
+                success: true,
+                data: recommendations
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting model recommendation', {
+                error: error instanceof Error ? error.message : String(error),
+                userId: req.user?.id,
+                templateId: req.params.templateId
+            });
+            
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to get model recommendation'
+            });
+        }
+    }
+
+    /**
+     * Get execution history for a template
+     */
+    static async getExecutionHistory(req: any, res: Response): Promise<void> {
+        try {
+            const { templateId } = req.params;
+            const userId = req.user!.id;
+            const limit = parseInt(req.query.limit as string) || 10;
+
+            const history = await TemplateExecutionService.getExecutionHistory(
+                templateId,
+                userId,
+                limit
+            );
+
+            res.json({
+                success: true,
+                data: history
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting execution history', {
+                error: error instanceof Error ? error.message : String(error),
+                userId: req.user?.id,
+                templateId: req.params.templateId
+            });
+            
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to get execution history'
+            });
+        }
+    }
+
+    /**
+     * Get execution statistics for a template
+     */
+    static async getExecutionStats(req: any, res: Response): Promise<void> {
+        try {
+            const { templateId } = req.params;
+
+            const stats = await TemplateExecutionService.getExecutionStats(templateId);
+
+            res.json({
+                success: true,
+                data: stats
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting execution stats', {
+                error: error instanceof Error ? error.message : String(error),
+                templateId: req.params.templateId
+            });
+            
+            res.status(400).json({
+                success: false,
+                error: error.message || 'Failed to get execution stats'
+            });
+        }
     }
 } 

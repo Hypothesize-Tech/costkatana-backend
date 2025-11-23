@@ -75,7 +75,7 @@ export class UsageService {
                 userId = new mongoose.Types.ObjectId(userId);
             }
             // Create usage document
-            const usageData = {
+            const usageData: any = {
                 userId: new mongoose.Types.ObjectId(data.userId),
                 service: data.service || data.provider || 'openai',
                 model: data.model,
@@ -102,6 +102,18 @@ export class UsageService {
                 userEmail: data.userEmail,
                 customerEmail: data.customerEmail
             };
+
+            // Add template usage tracking if templateUsage data is provided
+            if (data.templateUsage) {
+                usageData.templateUsage = {
+                    templateId: new mongoose.Types.ObjectId(data.templateUsage.templateId),
+                    templateName: data.templateUsage.templateName,
+                    templateCategory: data.templateUsage.templateCategory,
+                    variablesResolved: data.templateUsage.variablesResolved || [],
+                    context: data.templateUsage.context,
+                    templateVersion: data.templateUsage.templateVersion
+                };
+            }
 
             // Only add projectId if it exists and is not empty
             if (data.projectId && typeof data.projectId === 'string' && data.projectId.trim() !== '') {

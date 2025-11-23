@@ -15,7 +15,7 @@ router.post(
     [
         body('name').notEmpty().withMessage('Template name is required'),
         body('content').notEmpty().withMessage('Template content is required'),
-        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
         body('projectId').optional().isMongoId(),
         body('variables').optional().isArray(),
         body('variables.*.name').optional().notEmpty(),
@@ -33,7 +33,7 @@ router.get(
     '/',
     [
         query('projectId').optional().isMongoId(),
-        query('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        query('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
         query('tags').optional().isString(),
         query('visibility').optional().isIn(['private', 'project', 'organization', 'public']),
         query('search').optional().isString(),
@@ -104,7 +104,7 @@ router.put(
         body('name').optional().notEmpty(),
         body('description').optional(),
         body('content').optional().notEmpty(),
-        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
         body('variables').optional().isArray(),
         body('metadata').optional().isObject(),
         body('sharing').optional().isObject()
@@ -123,15 +123,24 @@ router.delete(
     PromptTemplateController.deleteTemplate
 );
 
-// Fork template
+// Duplicate template
 router.post(
-    '/:templateId/fork',
+    '/:templateId/duplicate',
     [
         param('templateId').isMongoId(),
-        body('projectId').optional().isMongoId()
+        body('name').optional().notEmpty().withMessage('Name must not be empty if provided'),
+        body('description').optional().isString(),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
+        body('projectId').optional().isMongoId(),
+        body('metadata').optional().isObject(),
+        body('metadata.tags').optional().isArray(),
+        body('sharing').optional().isObject(),
+        body('sharing.visibility').optional().isIn(['private', 'project', 'organization', 'public']),
+        body('sharing.sharedWith').optional().isArray(),
+        body('sharing.allowFork').optional().isBoolean()
     ],
     validateRequest,
-    PromptTemplateController.forkTemplate
+    PromptTemplateController.duplicateTemplate
 );
 
 // Add feedback
@@ -163,7 +172,7 @@ router.post(
     '/ai/generate',
     [
         body('intent').notEmpty().withMessage('Intent is required'),
-        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom']),
+        body('category').optional().isIn(['general', 'coding', 'writing', 'analysis', 'creative', 'business', 'custom', 'visual-compliance']),
         body('context').optional().isObject(),
         body('constraints').optional().isObject()
     ],
@@ -306,6 +315,54 @@ router.post(
     ],
     validateRequest,
     PromptTemplateController.uploadTemplateImage
+);
+
+// ============ TEMPLATE EXECUTION ENDPOINTS ============
+
+// Execute template with AI
+router.post(
+    '/:templateId/execute',
+    [
+        param('templateId').isMongoId(),
+        body('variables').optional().isObject(),
+        body('executionMode').optional().isIn(['single', 'comparison', 'recommended']),
+        body('modelId').optional().isString(),
+        body('compareWith').optional().isArray(),
+        body('enableOptimization').optional().isBoolean()
+    ],
+    validateRequest,
+    PromptTemplateController.executeTemplate
+);
+
+// Get model recommendation for template
+router.get(
+    '/:templateId/recommendation',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.getModelRecommendation
+);
+
+// Get execution history for template
+router.get(
+    '/:templateId/executions',
+    [
+        param('templateId').isMongoId(),
+        query('limit').optional().isInt({ min: 1, max: 50 })
+    ],
+    validateRequest,
+    PromptTemplateController.getExecutionHistory
+);
+
+// Get execution statistics for template
+router.get(
+    '/:templateId/execution-stats',
+    [
+        param('templateId').isMongoId()
+    ],
+    validateRequest,
+    PromptTemplateController.getExecutionStats
 );
 
 export default router; 

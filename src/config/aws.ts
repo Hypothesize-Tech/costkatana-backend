@@ -1,14 +1,17 @@
+import dotenv from 'dotenv';
 import * as AWS from '@aws-sdk/client-bedrock-runtime';
 import * as CloudWatch from '@aws-sdk/client-cloudwatch';
 import * as S3 from '@aws-sdk/client-s3';
 
+// Load environment variables
+dotenv.config();
 
 const { BedrockRuntimeClient } = AWS;
 const { CloudWatchClient } = CloudWatch;
 const { S3Client } = S3;
 
 export const bedrockClient = new BedrockRuntimeClient({
-    region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
+    region: process.env.AWS_REGION ?? 'us-east-1',
     credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
@@ -16,7 +19,7 @@ export const bedrockClient = new BedrockRuntimeClient({
 });
 
 export const cloudWatchClient = new CloudWatchClient({
-    region: process.env.AWS_REGION || 'us-east-1',
+    region: process.env.AWS_REGION ?? 'us-east-1',
     credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
@@ -24,7 +27,7 @@ export const cloudWatchClient = new CloudWatchClient({
 });
 
 export const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
+    region: process.env.AWS_REGION ?? 'us-east-1',
     credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
@@ -48,22 +51,23 @@ function detectModelType(modelId: string): 'nova' | 'claude3' | 'claude' | 'tita
     return 'unknown';
 }
 
-const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0';
+const modelId = process.env.AWS_BEDROCK_MODEL_ID ?? 'anthropic.claude-3-sonnet-20240229-v1:0';
 const modelType = detectModelType(modelId);
 
 export const AWS_CONFIG = {
     bedrock: {
         modelId,
         modelType,
-        maxTokens: parseInt(process.env.AWS_BEDROCK_MAX_TOKENS || '4096'),
-        temperature: parseFloat(process.env.AWS_BEDROCK_TEMPERATURE || '0.7'),
+        maxTokens: parseInt(process.env.AWS_BEDROCK_MAX_TOKENS ?? '4096'),
+        temperature: parseFloat(process.env.AWS_BEDROCK_TEMPERATURE ?? '0.7'),
         // Model-specific configs
         isNova: modelType === 'nova',
         isClaude3: modelType === 'claude3',
         isTitan: modelType === 'titan',
     },
     s3: {
-        bucketName: process.env.AWS_S3_BUCKET || 'ai-cost-optimizer-reports',
+        bucketName: process.env.AWS_S3_BUCKET ?? 'ai-cost-optimizer-reports',
+        region: process.env.AWS_REGION ?? 'us-east-1',
     },
     cloudWatch: {
         namespace: 'AICostOptimizer',

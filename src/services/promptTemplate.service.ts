@@ -7,6 +7,7 @@ import { aiTemplateEngine } from './aiTemplateEngine.service';
 import mongoose from 'mongoose';
 import {
     CreateTemplateDto,
+    DuplicateTemplateDto,
     TemplateQueryParams,
     TemplateActivityType,
     ITemplateActivityMetadata,
@@ -32,7 +33,7 @@ async function trackTemplateActivity(
             'template_created': 'Template Created',
             'template_updated': 'Template Updated',
             'template_deleted': 'Template Deleted',
-            'template_forked': 'Template Forked',
+            'template_duplicated': 'Template Duplicated',
             'template_ai_generated': 'AI Template Generated',
             'template_optimized': 'Template Optimized',
             'template_used': 'Template Used',
@@ -47,7 +48,7 @@ async function trackTemplateActivity(
             'template_created': `Created template "${template.name}" in ${template.category} category`,
             'template_updated': `Updated template "${template.name}" to version ${template.version}`,
             'template_deleted': `Deleted template "${template.name}"`,
-            'template_forked': `Forked template "${template.name}"`,
+            'template_duplicated': `Duplicated template "${template.name}"`,
             'template_ai_generated': `Generated template "${template.name}" using AI${additionalMetadata?.intent ? ` from intent: "${additionalMetadata.intent}"` : ''}`,
             'template_optimized': `Optimized template "${template.name}"${additionalMetadata?.optimizationType ? ` for ${additionalMetadata.optimizationType}` : ''}`,
             'template_used': `Used template "${template.name}"${additionalMetadata?.variablesUsed ? ` with ${Object.keys(additionalMetadata.variablesUsed).length} variables` : ''}`,
@@ -446,12 +447,12 @@ export class PromptTemplateService {
     }
 
     /**
-     * Fork a prompt template
+     * Duplicate a template (create an independent copy)
      */
-    static async forkTemplate(
+    static async duplicateTemplate(
         templateId: string,
         userId: string,
-        projectId?: string
+        customizations?: DuplicateTemplateDto
     ): Promise<IPromptTemplate> {
         try {
             const originalTemplate = await PromptTemplate.findById(templateId);
@@ -459,17 +460,19 @@ export class PromptTemplateService {
                 throw new Error('Template not found');
             }
 
-            if (!originalTemplate.sharing.allowFork) {
-                throw new Error('This template cannot be forked');
-            }
+            // Generate default name if not provided
+            const duplicateName = customizations?.name || `Copy of ${originalTemplate.name}`;
 
-            // Create forked template manually
-            const forkedTemplate = new PromptTemplate({
+            // Create duplicated template as an independent copy (no parentId)
+            const duplicatedTemplate = new PromptTemplate({
                 ...originalTemplate.toObject(),
                 _id: undefined,
+                name: duplicateName,
+                description: customizations?.description !== undefined ? customizations.description : originalTemplate.description,
+                category: customizations?.category || originalTemplate.category,
                 createdBy: userId,
-                projectId: projectId || originalTemplate.projectId,
-                parentId: originalTemplate._id,
+                projectId: customizations?.projectId || originalTemplate.projectId,
+                parentId: undefined, // Independent copy
                 version: 1,
                 usage: {
                     count: 0,
@@ -477,21 +480,31 @@ export class PromptTemplateService {
                     totalCostSaved: 0,
                     feedback: []
                 },
+                metadata: {
+                    ...originalTemplate.metadata,
+                    ...customizations?.metadata,
+                    tags: customizations?.metadata?.tags || originalTemplate.metadata?.tags || []
+                },
+                sharing: {
+                    visibility: customizations?.sharing?.visibility || 'private',
+                    sharedWith: customizations?.sharing?.sharedWith || [],
+                    allowFork: customizations?.sharing?.allowFork !== undefined ? customizations.sharing.allowFork : true
+                },
                 createdAt: undefined,
                 updatedAt: undefined
             });
 
-            await forkedTemplate.save();
+            await duplicatedTemplate.save();
 
-            // Track template fork activity
-            await trackTemplateActivity(userId, 'template_forked', forkedTemplate, {
+            // Track template duplicate activity
+            await trackTemplateActivity(userId, 'template_duplicated', duplicatedTemplate, {
                 originalTemplateId: originalTemplate._id,
-                forkedTemplateId: forkedTemplate._id
+                duplicatedTemplateId: duplicatedTemplate._id
             });
 
-            return forkedTemplate;
+            return duplicatedTemplate;
         } catch (error) {
-            loggingService.error('Error forking prompt template:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error duplicating prompt template:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
         }
     }
@@ -1243,6 +1256,12 @@ export class PromptTemplateService {
             mode?: 'optimized' | 'standard';
             metaPromptPresetId?: string;
             projectId?: string;
+            referenceImage?: {
+                s3Url: string;
+                s3Key: string;
+                uploadedAt: string;
+                uploadedBy: string;
+            };
         }
     ): Promise<IPromptTemplate> {
         try {
@@ -1266,6 +1285,52 @@ export class PromptTemplateService {
                     accept: 'image/*'
                 }))
             ];
+
+            // Prepare referenceImage data if provided
+            // Log incoming reference image data for debugging
+            loggingService.info('Processing reference image data', {
+                component: 'PromptTemplateService',
+                operation: 'createVisualComplianceTemplate',
+                hasReferenceImage: !!data.referenceImage,
+                referenceImageData: data.referenceImage
+            });
+
+            const referenceImageData = data.referenceImage ? {
+                s3Url: data.referenceImage.s3Url,
+                s3Key: data.referenceImage.s3Key,
+                uploadedAt: new Date(data.referenceImage.uploadedAt),
+                uploadedBy: userId,
+                extractedFeatures: {
+                    extractedAt: new Date(),
+                    extractedBy: '',
+                    status: 'pending' as const,
+                    analysis: {
+                        visualDescription: '',
+                        structuredData: {
+                            colors: { dominant: [], accent: [], background: '' },
+                            layout: { composition: '', orientation: '', spacing: '' },
+                            objects: [],
+                            text: { detected: [], prominent: [], language: '' },
+                            lighting: { type: '', direction: '', quality: '' },
+                            quality: { sharpness: '', clarity: '', professionalGrade: false }
+                        },
+                        criteriaAnalysis: []
+                    },
+                    extractionCost: {
+                        initialCallTokens: { input: 0, output: 0, cost: 0 },
+                        followUpCalls: [],
+                        totalTokens: 0,
+                        totalCost: 0
+                    },
+                    usage: {
+                        checksPerformed: 0,
+                        totalTokensSaved: 0,
+                        totalCostSaved: 0,
+                        averageConfidence: 0,
+                        lowConfidenceCount: 0
+                    }
+                }
+            } : undefined;
 
             const template = await PromptTemplate.create({
                 name: data.name,
@@ -1296,6 +1361,7 @@ export class PromptTemplateService {
                     mode: data.mode || 'optimized',
                     metaPromptPresetId: data.metaPromptPresetId
                 },
+                referenceImage: referenceImageData,
                 version: 1,
                 isActive: true,
                 isDeleted: false
@@ -1312,10 +1378,12 @@ export class PromptTemplateService {
                 userId,
                 industry: data.industry,
                 criteriaCount: data.complianceCriteria.length,
-                imageVariableCount: data.imageVariables.length
+                imageVariableCount: data.imageVariables.length,
+                hasReferenceImage: !!data.referenceImage
             });
 
-            return template;
+            // Return the full template with all nested fields
+            return template.toObject();
         } catch (error) {
             loggingService.error('Failed to create visual compliance template', {
                 error: error instanceof Error ? error.message : String(error),
@@ -1367,11 +1435,25 @@ export class PromptTemplateService {
 
             // Resolve image variables
             const resolvedImages: { reference?: string; evidence?: string } = {};
+            
+            // Check if template has cached reference image
+            if (template.referenceImage?.s3Url && template.referenceImage?.extractedFeatures?.status === 'completed') {
+                resolvedImages.reference = template.referenceImage.s3Url;
+                loggingService.info('Using cached reference image from template', {
+                    templateId,
+                    s3Url: template.referenceImage.s3Url,
+                    extractionStatus: template.referenceImage.extractedFeatures.status
+                });
+            }
+            
             for (const imageVar of imageVariables) {
                 const value = variables.images?.[imageVar.name] || imageVar.s3Url || imageVar.defaultValue;
                 if (value) {
                     if (imageVar.imageRole === 'reference') {
-                        resolvedImages.reference = value;
+                        // Only override if not already set from template cache
+                        if (!resolvedImages.reference) {
+                            resolvedImages.reference = value;
+                        }
                     } else if (imageVar.imageRole === 'evidence') {
                         resolvedImages.evidence = value;
                     }
@@ -1383,9 +1465,23 @@ export class PromptTemplateService {
                 .filter(v => v.required)
                 .every(v => variables.text?.[v.name] || v.defaultValue);
             
+            // For image variables, check if they're provided OR if they're already resolved (from cache)
             const allRequiredImagesProvided = imageVariables
                 .filter(v => v.required)
-                .every(v => variables.images?.[v.name] || v.s3Url || v.defaultValue);
+                .every(v => {
+                    // Check if provided in request
+                    if (variables.images?.[v.name] || v.s3Url || v.defaultValue) {
+                        return true;
+                    }
+                    // Check if already resolved (e.g., from cached reference image)
+                    if (v.imageRole === 'reference' && resolvedImages.reference) {
+                        return true;
+                    }
+                    if (v.imageRole === 'evidence' && resolvedImages.evidence) {
+                        return true;
+                    }
+                    return false;
+                });
 
             const allVariablesProvided = allRequiredTextProvided && allRequiredImagesProvided;
 
@@ -1436,16 +1532,132 @@ export class PromptTemplateService {
 
             const { template, resolvedCriteria, resolvedImages } = resolution;
 
-            if (!resolvedImages.reference || !resolvedImages.evidence) {
-                throw new Error('Both reference and evidence images are required');
+            if (!resolvedImages.evidence) {
+                throw new Error('Evidence image is required');
+            }
+
+            // Check if we can use cached reference features
+            const useCachedFeatures = template.referenceImage?.extractedFeatures?.status === 'completed';
+
+            if (!useCachedFeatures && !resolvedImages.reference) {
+                throw new Error('Reference image is required when cached features are not available');
+            }
+
+            loggingService.info('Executing visual compliance check', {
+                templateId,
+                userId,
+                useCachedFeatures,
+                hasReferenceImage: !!resolvedImages.reference,
+                hasEvidenceImage: !!resolvedImages.evidence
+            });
+
+            // Upload evidence image to S3 if it's base64 (not already an S3 URL)
+            if (resolvedImages.evidence && !resolvedImages.evidence.startsWith('s3://')) {
+                loggingService.info('Uploading evidence image to S3', {
+                    templateId,
+                    userId,
+                    isBase64: resolvedImages.evidence.startsWith('data:')
+                });
+
+                try {
+                    // Import required services
+                    const { S3Service } = await import('./s3.service');
+                    const sharp = (await import('sharp')).default;
+
+                    // Convert base64 to buffer
+                    const originalBuffer = Buffer.from(
+                        resolvedImages.evidence.replace(/^data:image\/\w+;base64,/, ''),
+                        'base64'
+                    );
+
+                    const originalSize = originalBuffer.length;
+                    
+                    loggingService.info('Compressing evidence image before S3 upload', {
+                        templateId,
+                        userId,
+                        originalSize,
+                        originalSizeMB: (originalSize / (1024 * 1024)).toFixed(2)
+                    });
+
+                    // Compress image using Sharp to reduce size
+                    let evidenceBuffer: Buffer;
+                    try {
+                        const compressedBuffer = await sharp(originalBuffer)
+                            .resize(2048, 2048, {
+                                fit: 'inside',
+                                withoutEnlargement: true
+                            })
+                            .jpeg({
+                                quality: 85,
+                                mozjpeg: true
+                            })
+                            .toBuffer();
+                        
+                        evidenceBuffer = compressedBuffer;
+
+                        const compressedSize = compressedBuffer.length;
+                        const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
+
+                        loggingService.info('Image compressed successfully', {
+                            templateId,
+                            userId,
+                            originalSize,
+                            compressedSize,
+                            compressionRatio: `${compressionRatio}%`,
+                            originalSizeMB: (originalSize / (1024 * 1024)).toFixed(2),
+                            compressedSizeMB: (compressedSize / (1024 * 1024)).toFixed(2)
+                        });
+                    } catch (compressionError) {
+                        loggingService.warn('Image compression failed, using original', {
+                            error: compressionError instanceof Error ? compressionError.message : String(compressionError),
+                            templateId,
+                            userId
+                        });
+                        // Continue with original buffer if compression fails
+                        evidenceBuffer = originalBuffer;
+                    }
+
+                    // Upload to S3
+                    const uploadResult = await S3Service.uploadDocument(
+                        userId,
+                        `template-evidence-${templateId}-${Date.now()}.jpg`,
+                        evidenceBuffer,
+                        'image/jpeg',
+                        { 
+                            type: 'template-evidence', 
+                            templateId: templateId,
+                            uploadedAt: new Date().toISOString()
+                        }
+                    );
+
+                    // Replace base64 with S3 URL
+                    resolvedImages.evidence = uploadResult.s3Url;
+
+                    loggingService.info('Evidence image uploaded to S3 successfully', {
+                        templateId,
+                        userId,
+                        s3Url: uploadResult.s3Url,
+                        s3Key: uploadResult.s3Key,
+                        finalSize: evidenceBuffer.length
+                    });
+                } catch (uploadError) {
+                    loggingService.error('Failed to upload evidence image to S3', {
+                        error: uploadError instanceof Error ? uploadError.message : String(uploadError),
+                        templateId,
+                        userId
+                    });
+                    // Continue with base64 if upload fails
+                }
             }
 
             // Import visual compliance service
             const { VisualComplianceOptimizedService } = await import('./visualComplianceOptimized.service');
 
             // Execute visual compliance check
+            // The service will automatically use cached features if templateId is provided and features are available
             const result = await VisualComplianceOptimizedService.processComplianceCheckOptimized({
-                referenceImage: resolvedImages.reference,
+                templateId: templateId, // Important: Pass templateId to enable cached features
+                referenceImage: resolvedImages.reference || '', // Can be empty if using cached features
                 evidenceImage: resolvedImages.evidence,
                 complianceCriteria: resolvedCriteria,
                 industry: template.visualComplianceConfig!.industry,
@@ -1477,6 +1689,52 @@ export class PromptTemplateService {
                 complianceScore: result.compliance_score,
                 passFail: result.pass_fail
             });
+
+            // Track usage for analytics
+            try {
+                const { UsageService } = await import('./usage.service');
+                
+                // Prepare variable resolution data
+                const variablesResolved = Object.entries({ ...variables.text, ...variables.images }).map(([key, value]) => ({
+                    variableName: key,
+                    value: typeof value === 'string' ? (value.length > 100 ? value.substring(0, 100) + '...' : value) : String(value),
+                    confidence: 1.0,
+                    source: 'user_provided' as const
+                }));
+
+                await UsageService.trackUsage({
+                    userId,
+                    service: 'aws-bedrock',
+                    model: 'amazon.nova-pro-v1:0', // Default model for visual compliance
+                    prompt: JSON.stringify(resolvedCriteria).substring(0, 500),
+                    completion: JSON.stringify(result.items).substring(0, 500),
+                    promptTokens: result.metadata.inputTokens || 0,
+                    completionTokens: result.metadata.outputTokens || 0,
+                    totalTokens: (result.metadata.inputTokens || 0) + (result.metadata.outputTokens || 0),
+                    cost: result.metadata.cost || 0,
+                    responseTime: result.metadata.latency || 0,
+                    metadata: {
+                        source: 'visual-compliance',
+                        complianceScore: result.compliance_score,
+                        passFail: result.pass_fail
+                    },
+                    tags: ['visual-compliance', 'template'],
+                    optimizationApplied: false,
+                    errorOccurred: false,
+                    templateUsage: {
+                        templateId: template._id.toString(),
+                        templateName: template.name,
+                        templateCategory: template.category,
+                        variablesResolved,
+                        context: 'visual-compliance',
+                        templateVersion: template.version || 1
+                    }
+                });
+            } catch (usageError) {
+                loggingService.warn('Failed to track visual compliance template usage:', {
+                    error: usageError instanceof Error ? usageError.message : String(usageError)
+                });
+            }
 
             loggingService.info('Visual compliance template executed', {
                 templateId,

@@ -23,7 +23,8 @@ export class VisualComplianceController {
         useUltraCompression = true,
         mode = 'optimized',
         metaPrompt,
-        metaPromptPresetId
+        metaPromptPresetId,
+        templateId
       } = req.body;
 
       // Validation
@@ -64,6 +65,7 @@ export class VisualComplianceController {
         complianceCriteria,
         industry,
         userId,
+        templateId,
         projectId,
         useUltraCompression,
         mode,

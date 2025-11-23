@@ -1509,6 +1509,58 @@ export class ChatService {
                 await session2.endSession();
             }
 
+            // Track usage for analytics if template was used
+            if (templateMetadata) {
+                try {
+                    const { UsageService } = await import('./usage.service');
+                    // Helper function to truncate sensitive variable values
+                    const truncateValue = (value: string, maxLength: number = 100): string => {
+                        if (!value) return '';
+                        return value.length > maxLength ? value.substring(0, maxLength) + '...' : value;
+                    };
+
+                    await UsageService.trackUsage({
+                        userId: request.userId,
+                        service: 'aws-bedrock',
+                        model: request.modelId,
+                        prompt: actualMessage.substring(0, 500), // Truncate for storage
+                        completion: response.substring(0, 500), // Truncate for storage
+                        promptTokens: inputTokens,
+                        completionTokens: outputTokens,
+                        totalTokens: inputTokens + outputTokens,
+                        cost,
+                        responseTime: latency,
+                        metadata: {
+                            source: 'chat',
+                            conversationId: conversation!._id.toString(),
+                            temperature: request.temperature,
+                            maxTokens: request.maxTokens
+                        },
+                        tags: ['chat', 'template'],
+                        optimizationApplied: false,
+                        errorOccurred: false,
+                        templateUsage: {
+                            templateId: templateMetadata.id,
+                            templateName: templateMetadata.name,
+                            templateCategory: templateMetadata.category,
+                            variablesResolved: templateMetadata.variablesResolved.map((v: any) => ({
+                                variableName: v.variableName,
+                                value: truncateValue(v.value),
+                                confidence: v.confidence,
+                                source: v.source,
+                                reasoning: v.reasoning
+                            })),
+                            context: 'chat',
+                            templateVersion: 1
+                        }
+                    });
+                } catch (usageError) {
+                    loggingService.warn('Failed to track template usage:', { 
+                        error: usageError instanceof Error ? usageError.message : String(usageError) 
+                    });
+                }
+            }
+
             loggingService.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
 
             return {

@@ -949,10 +949,13 @@ export class UsageController {
 
             if (format === 'csv') {
                 const csv = [
-                    'Date,Service,Model,Prompt,Tokens,Cost,Response Time',
-                    ...result.data.map(u =>
-                        `"${u.createdAt}","${u.service}","${u.model}","${u.prompt.replace(/"/g, '""')}",${u.totalTokens},${u.cost},${u.responseTime}`
-                    ),
+                    'Date,Service,Model,Prompt,Tokens,Cost,Response Time,Template Name,Template Category,Template Context',
+                    ...result.data.map(u => {
+                        const templateName = (u as any).templateUsage?.templateName || '';
+                        const templateCategory = (u as any).templateUsage?.templateCategory || '';
+                        const templateContext = (u as any).templateUsage?.context || '';
+                        return `"${u.createdAt}","${u.service}","${u.model}","${u.prompt.replace(/"/g, '""')}",${u.totalTokens},${u.cost},${u.responseTime},"${templateName}","${templateCategory}","${templateContext}"`;
+                    }),
                 ].join('\n');
 
                 res.setHeader('Content-Type', 'text/csv');

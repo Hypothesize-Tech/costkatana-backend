@@ -24,6 +24,7 @@ interface VisualComplianceRequest {
   mode?: 'optimized' | 'standard';
   metaPrompt?: string;
   metaPromptPresetId?: string;
+  templateId?: string; // For checking cached reference features
 }
 
 interface ImageFeatures {
@@ -124,6 +125,18 @@ export class VisualComplianceOptimizedService {
       // Determine mode: default to optimized for backward compatibility
       const mode = request.mode || 'optimized';
 
+      // Check if template has cached reference features
+      if (request.templateId && mode === 'optimized') {
+        const cachedResult = await this.processWithCachedReferenceFeatures(request);
+        if (cachedResult) {
+          loggingService.info('Used cached reference features for compliance check', {
+            templateId: request.templateId,
+            tokensSaved: cachedResult.metadata.optimizationSavings || 0
+          });
+          return cachedResult;
+        }
+      }
+
       // Check cache first (only for optimized mode)
       if (mode === 'optimized' && request.useUltraCompression !== false) {
         const cacheResult = await this.checkComplianceCache(request);
@@ -168,6 +181,350 @@ export class VisualComplianceOptimizedService {
       });
       throw error;
     }
+  }
+
+  /**
+   * Process compliance check using cached reference features (Maximum Cost Optimization)
+   * Only analyzes evidence image against pre-extracted reference features
+   */
+  private static async processWithCachedReferenceFeatures(
+    request: VisualComplianceRequest
+  ): Promise<ComplianceResponse | null> {
+    if (!request.templateId) return null;
+
+    try {
+      // Import PromptTemplate model
+      const { PromptTemplate } = await import('../models/PromptTemplate');
+      
+      // Fetch template with reference features
+      const template = await PromptTemplate.findById(request.templateId);
+      
+      if (!template || !template.referenceImage || !template.referenceImage.extractedFeatures) {
+        return null;
+      }
+
+      const features = template.referenceImage.extractedFeatures;
+      
+      // Check if features are extracted and ready
+      if (features.status !== 'completed') {
+        loggingService.warn('Reference features not ready, falling back to standard flow', {
+          templateId: request.templateId,
+          status: features.status
+        });
+        return null;
+      }
+
+      const startTime = Date.now();
+
+      // Build optimized prompt using cached features
+      const optimizedPrompt = this.buildCachedFeaturePrompt(
+        features.analysis,
+        request.complianceCriteria
+      );
+
+      // Call Claude with only evidence image + cached features
+      const { BedrockService } = await import('./bedrock.service');
+      
+      // ABSOLUTE FIRST THING: Console log before calling Bedrock
+      console.log('='.repeat(80));
+      console.log('🚨 VISUAL COMPLIANCE: ABOUT TO CALL BedrockService.invokeWithImage');
+      console.log('evidenceImage type:', typeof request.evidenceImage);
+      console.log('evidenceImage is string?', typeof request.evidenceImage === 'string');
+      console.log('evidenceImage length:', typeof request.evidenceImage === 'string' ? request.evidenceImage.length : 'N/A');
+      console.log('evidenceImage first 100:', typeof request.evidenceImage === 'string' ? request.evidenceImage.substring(0, 100) : 'N/A');
+      console.log('='.repeat(80));
+      
+      // CRITICAL DEBUG: Log the evidence image details
+      loggingService.info('🔍 ABOUT TO CALL BedrockService.invokeWithImage', {
+        component: 'VisualComplianceOptimizedService',
+        evidenceImageType: typeof request.evidenceImage,
+        evidenceImageIsBuffer: Buffer.isBuffer(request.evidenceImage),
+        evidenceImageIsString: typeof request.evidenceImage === 'string',
+        evidenceImageLength: typeof request.evidenceImage === 'string' 
+          ? request.evidenceImage.length 
+          : Buffer.isBuffer(request.evidenceImage) 
+            ? request.evidenceImage.length 
+            : 'UNKNOWN',
+        evidenceImagePrefix: typeof request.evidenceImage === 'string' 
+          ? request.evidenceImage.substring(0, 100) 
+          : Buffer.isBuffer(request.evidenceImage)
+            ? request.evidenceImage.toString('base64').substring(0, 100)
+            : 'UNKNOWN'
+      });
+      
+      const result = await BedrockService.invokeWithImage(
+        optimizedPrompt,
+        typeof request.evidenceImage === 'string' ? request.evidenceImage : request.evidenceImage.toString('base64'),
+        request.userId,
+        'us.anthropic.claude-3-5-sonnet-20241022-v2:0'  // Use inference profile ID
+      );
+
+      // Log the raw response for debugging
+      console.log('='.repeat(80));
+      console.log('🔍 RAW BEDROCK RESPONSE:');
+      console.log('Response length:', result.response.length);
+      console.log('Response preview:', result.response.substring(0, 500));
+      console.log('Response full:', result.response);
+      console.log('='.repeat(80));
+
+      // Parse TOON response (ONLY TOON format expected)
+      let complianceResults: any;
+      try {
+        console.log('🔍 Parsing TOON response...');
+        
+        // Parse TOON format directly (more reliable than toon.utils)
+        const lines = result.response.trim().split('\n');
+        
+        // Check for ERROR response (image mismatch, etc.)
+        const errorLine = lines[0]?.match(/ERROR\[Analysis\]\{([^}]+)\}:(.+)/);
+        if (errorLine) {
+          const errorMessage = errorLine[2]?.trim() || 'Image analysis error';
+          console.log('⚠️  Claude detected an issue:', errorMessage);
+          
+          // Return failed compliance with error message
+          complianceResults = {
+            compliance_score: 0,
+            pass_fail: false,
+            overall_confidence: 0.99,
+            feedback_message: errorMessage,
+            criteria: request.complianceCriteria.map((criterion, index) => ({
+              criterion_number: index + 1,
+              compliant: false,
+              confidence: 0.99,
+              message: 'Image mismatch detected - cannot evaluate this criterion',
+              reason: errorMessage
+            }))
+          };
+          
+          console.log('✅ Parsed ERROR response as failed compliance');
+        } else {
+          // Line 1: Compliance[Result]{score:XX,pass:true/false,conf:0.XX}:summary
+          const complianceLine = lines[0]?.match(/Compliance\[Result\]\{([^}]+)\}:(.+)/);
+          if (!complianceLine) {
+            throw new Error('Invalid TOON format: Missing Compliance line');
+          }
+          
+          const params = complianceLine[1];
+          const scoreMatch = params.match(/score:(\d+)/);
+          const passMatch = params.match(/pass:(true|false)/);
+          const confMatch = params.match(/conf:([\d.]+)/);
+          
+          complianceResults = {
+            compliance_score: scoreMatch ? parseInt(scoreMatch[1]) : 0,
+            pass_fail: passMatch ? passMatch[1] === 'true' : false,
+            overall_confidence: confMatch ? parseFloat(confMatch[1]) : 0.5,
+            feedback_message: complianceLine[2]?.trim() || 'Compliance check completed',
+            criteria: []
+          };
+          
+          // Lines 2+: C1[Item]{ok:1,cf:0.95}:reason
+          for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            
+            const itemMatch = line.match(/C(\d+)\[Item\]\{([^}]+)\}:(.+)/);
+            if (itemMatch) {
+              const itemParams = itemMatch[2];
+              const okMatch = itemParams.match(/ok:(\d+)/);
+              const cfMatch = itemParams.match(/cf:([\d.]+)/);
+              
+              complianceResults.criteria.push({
+                criterion_number: parseInt(itemMatch[1]),
+                compliant: okMatch ? parseInt(okMatch[1]) === 1 : false,
+                confidence: cfMatch ? parseFloat(cfMatch[1]) : 0.5,
+                message: itemMatch[3]?.trim() || 'No details',
+                reason: itemMatch[3]?.trim() || 'No details'
+              });
+            }
+          }
+          
+          console.log('✅ Successfully parsed TOON response:', {
+            score: complianceResults.compliance_score,
+            pass: complianceResults.pass_fail,
+            itemsCount: complianceResults.criteria.length
+          });
+        }
+        
+      } catch (parseError) {
+        console.error('❌ TOON PARSING ERROR:', parseError);
+        console.error('Raw response was:', result.response);
+        loggingService.error('Failed to parse TOON compliance results', { 
+          error: parseError,
+          response: result.response
+        });
+        return null;
+      }
+
+      // Calculate savings vs full-image baseline (with verbose JSON output)
+      const baselineInputTokens = 1800; // Typical with both images + verbose prompts
+      const baselineOutputTokens = 1000; // Verbose JSON response
+      const baselineCost = ((baselineInputTokens / 1_000_000) * 3.0) + ((baselineOutputTokens / 1_000_000) * 15.0);
+      
+      const actualCost = result.cost;
+      const tokensSaved = (baselineInputTokens + baselineOutputTokens) - (result.inputTokens + result.outputTokens);
+      const costSaved = baselineCost - actualCost;
+      const savingsPercentage = (costSaved / baselineCost) * 100;
+
+      // Update template usage statistics
+      await PromptTemplate.findByIdAndUpdate(request.templateId, {
+        $inc: {
+          'referenceImage.extractedFeatures.usage.checksPerformed': 1,
+          'referenceImage.extractedFeatures.usage.totalTokensSaved': tokensSaved,
+          'referenceImage.extractedFeatures.usage.totalCostSaved': costSaved,
+        },
+        $set: {
+          'referenceImage.extractedFeatures.usage.lastUsedAt': new Date()
+        }
+      });
+
+      // Track low confidence if applicable
+      if (complianceResults.overall_confidence && complianceResults.overall_confidence < 0.8) {
+        await PromptTemplate.findByIdAndUpdate(request.templateId, {
+          $inc: {
+            'referenceImage.extractedFeatures.usage.lowConfidenceCount': 1
+          }
+        });
+      }
+
+      const latency = Date.now() - startTime;
+
+      loggingService.info('Cached reference features compliance check completed', {
+        templateId: request.templateId,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        tokensSaved,
+        costSaved: `$${costSaved.toFixed(6)}`,
+        savingsPercentage: `${savingsPercentage.toFixed(1)}%`,
+        latency
+      });
+
+      // Format response
+      const items = request.complianceCriteria.map((criterion, index) => {
+        const criterionResult = complianceResults.criteria?.[index] || {};
+        return {
+          itemNumber: index + 1,
+          itemName: criterion,
+          status: criterionResult.compliant || false,
+          message: criterionResult.message || criterionResult.reason || 'No details available'
+        };
+      });
+
+      return {
+        compliance_score: complianceResults.compliance_score || complianceResults.overall_score || 0,
+        pass_fail: complianceResults.pass_fail || complianceResults.overall_compliant || false,
+        feedback_message: complianceResults.feedback_message || complianceResults.summary || 'Compliance check completed',
+        items,
+        metadata: {
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          cost: actualCost,
+          latency,
+          cacheHit: false,
+          optimizationSavings: tokensSaved,
+          compressionRatio: (tokensSaved / (baselineInputTokens + baselineOutputTokens)) * 100,
+          technique: 'cached_reference_features',
+          costBreakdown: {
+            optimized: {
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+              inputCost: (result.inputTokens / 1_000_000) * 3.0,
+              outputCost: (result.outputTokens / 1_000_000) * 15.0,
+              totalCost: actualCost
+            },
+            baseline: {
+              inputTokens: baselineInputTokens,
+              outputTokens: baselineOutputTokens,
+              inputCost: (baselineInputTokens / 1_000_000) * 3.0,
+              outputCost: (baselineOutputTokens / 1_000_000) * 15.0,
+              totalCost: baselineCost
+            },
+            savings: {
+              amount: costSaved,
+              percentage: savingsPercentage,
+              tokenReduction: savingsPercentage
+            },
+            netSavings: {
+              amount: costSaved,
+              percentage: savingsPercentage
+            }
+          }
+        }
+      };
+
+    } catch (error) {
+      loggingService.error('Error processing with cached reference features', {
+        error: error instanceof Error ? error.message : String(error),
+        templateId: request.templateId
+      });
+      return null; // Fall back to standard processing
+    }
+  }
+
+  /**
+   * Build optimized prompt using cached reference features with TOON encoding
+   */
+  private static buildCachedFeaturePrompt(
+    analysis: any,
+    criteria: string[]
+  ): string {
+    return `You are performing a visual compliance check on an evidence image.
+
+REFERENCE ANALYSIS (Pre-extracted):
+${analysis.visualDescription}
+
+STRUCTURED REFERENCE DATA:
+Colors: ${JSON.stringify(analysis.structuredData?.colors || {})}
+Layout: ${JSON.stringify(analysis.structuredData?.layout || {})}
+Lighting: ${JSON.stringify(analysis.structuredData?.lighting || {})}
+Quality: ${JSON.stringify(analysis.structuredData?.quality || {})}
+
+COMPLIANCE CRITERIA TO CHECK:
+
+${criteria.map((criterion, index) => `
+CRITERION ${index + 1}: "${criterion}"
+
+${analysis.criteriaAnalysis?.[index] ? `
+Reference State:
+- Status: ${analysis.criteriaAnalysis[index].referenceState?.status}
+- Description: ${analysis.criteriaAnalysis[index].referenceState?.description}
+- Specific Details: ${analysis.criteriaAnalysis[index].referenceState?.specificDetails}
+- Visual Indicators: ${analysis.criteriaAnalysis[index].referenceState?.visualIndicators?.join(', ') || 'None'}
+
+Check Instructions:
+- What to check: ${analysis.criteriaAnalysis[index].comparisonInstructions?.whatToCheck}
+- How to measure: ${analysis.criteriaAnalysis[index].comparisonInstructions?.howToMeasure}
+- Pass criteria: ${analysis.criteriaAnalysis[index].comparisonInstructions?.passCriteria}
+- Fail criteria: ${analysis.criteriaAnalysis[index].comparisonInstructions?.failCriteria}
+` : `
+Reference State: Analyze the reference image for this criterion and compare with evidence image.
+`}
+
+TASK: Compare the evidence image against the reference state above for this criterion.
+`).join('\n')}
+
+EVIDENCE IMAGE: [attached image]
+
+INSTRUCTIONS:
+1. Analyze the evidence image carefully
+2. For each criterion, compare it against the reference state described above
+3. Determine compliance (pass/fail) for each criterion
+4. Provide an overall compliance score (0-100)
+5. Include overall confidence score (0-1)
+
+CRITICAL: You MUST respond ONLY in TOON (Text Object Oriented Notation) format. NO JSON, NO PROSE, ONLY TOON.
+
+TOON FORMAT (STRICT):
+Line 1: Compliance[Result]{score:<0-100>,pass:<true/false>,conf:<0-1>}:<one_line_summary>
+Lines 2+: C<N>[Item]{ok:<1/0>,cf:<0-1>}:<short_reason>
+
+EXAMPLE OUTPUT:
+Compliance[Result]{score:85,pass:true,conf:0.92}:All criteria met with good confidence
+C1[Item]{ok:1,cf:0.95}:Toothpaste display clearly visible
+C2[Item]{ok:1,cf:0.90}:Products neatly organized
+C3[Item]{ok:1,cf:0.88}:Product names facing forward
+C4[Item]{ok:1,cf:0.85}:Multiple SKUs present
+
+YOUR RESPONSE (TOON ONLY, NO OTHER TEXT):`;
   }
 
   /**
