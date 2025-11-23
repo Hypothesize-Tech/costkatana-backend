@@ -1,50 +1,65 @@
 {
-  "family": "hypothesize-p3m-backend-production",
-  "executionRoleArn": "arn:aws:iam::148123604300:role/ecsTaskExecutionRole",
-  "networkMode": "awsvpc",
+  "compatibilities": ["EC2", "MANAGED_INSTANCES", "FARGATE"],
   "containerDefinitions": [
     {
-      "name": "ai-cost-optimizer-app",
-      "image": "148123604300.dkr.ecr.us-east-1.amazonaws.com/hypothesize/ai-cost-optimizer:latest",
       "cpu": 0,
-      "portMappings": [
-        {
-          "name": "access-port",
-          "containerPort": 8000,
-          "hostPort": 8000,
-          "protocol": "tcp",
-          "appProtocol": "http"
-        }
-      ],
-      "essential": true,
       "environment": [],
       "environmentFiles": [
         {
-          "value": "arn:aws:s3:::ai-cost-optimizer-env/.env",
-          "type": "s3"
+          "type": "s3",
+          "value": "arn:aws:s3:::ck-prod-env/.env"
         }
       ],
-      "mountPoints": [],
-      "volumesFrom": [],
-      "ulimits": [],
+      "essential": true,
+      "image": "502339147927.dkr.ecr.us-east-1.amazonaws.com/cost-katana/backend@sha256:e638fb404c36516e8460653ee1e4f98588625797ec2fa547e50b74e2e5269f85",
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/hypothesize-ai-cost-optimizer",
+          "awslogs-group": "/ecs/ck-prod-td",
           "awslogs-create-group": "true",
           "awslogs-region": "us-east-1",
           "awslogs-stream-prefix": "ecs"
         },
         "secretOptions": []
       },
-      "systemControls": []
+      "mountPoints": [],
+      "name": "ck-app",
+      "portMappings": [
+        {
+          "appProtocol": "http",
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "name": "ck-app-8000-tcp",
+          "protocol": "tcp"
+        }
+      ],
+      "systemControls": [],
+      "ulimits": [],
+      "volumesFrom": []
     }
   ],
   "cpu": "1024",
-  "memory": "2048",
+  "enableFaultInjection": false,
+  "executionRoleArn": "arn:aws:iam::502339147927:role/ecsTaskExecutionRole",
+  "family": "ck-prod-td",
+  "memory": "3072",
+  "networkMode": "awsvpc",
+  "placementConstraints": [],
+  "registeredAt": "2025-11-21T19:20:21.935Z",
+  "registeredBy": "arn:aws:iam::502339147927:user/admin_ck",
   "requiresCompatibilities": ["FARGATE"],
+  "revision": 1,
   "runtimePlatform": {
     "cpuArchitecture": "X86_64",
     "operatingSystemFamily": "LINUX"
-  }
+  },
+  "status": "ACTIVE",
+  "taskDefinitionArn": "arn:aws:ecs:us-east-1:502339147927:task-definition/ck-prod-td:1",
+  "volumes": [],
+  "tags": [
+    {
+      "key": "app",
+      "value": "cost katana"
+    }
+  ]
 }
