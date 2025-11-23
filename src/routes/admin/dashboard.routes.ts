@@ -81,5 +81,8 @@ router.get('/analytics/integrations/trends', AdminDashboardController.getIntegra
 router.get('/analytics/integrations/health', AdminDashboardController.getIntegrationHealth);
 router.get('/analytics/integrations/top', AdminDashboardController.getTopIntegrations);
 
+// Report Export
+router.post('/reports/export', AdminDashboardController.exportReport);
+
 export default router;
 

@@ -12,6 +12,7 @@ import { AdminEndpointPerformanceService } from '../services/adminEndpointPerfor
 import { AdminGeographicPatternsService } from '../services/adminGeographicPatterns.service';
 import { AdminBudgetManagementService } from '../services/adminBudgetManagement.service';
 import { AdminIntegrationAnalyticsService } from '../services/adminIntegrationAnalytics.service';
+import { AdminReportingService } from '../services/adminReporting.service';
 import { loggingService } from '../services/logging.service';
 
 export class AdminDashboardController {
@@ -1790,6 +1791,67 @@ export class AdminDashboardController {
                 error: error instanceof Error ? error.message : String(error),
                 component: 'AdminDashboardController',
                 operation: 'getTopIntegrations',
+                adminUserId: req.user?.id
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Export report in specified format
+     * POST /api/admin/reports/export
+     */
+    static async exportReport(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            const { format, startDate, endDate, includeCharts, sections } = req.body;
+
+            if (!format || !['csv', 'excel', 'json'].includes(format)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid format. Must be csv, excel, or json'
+                });
+                return;
+            }
+
+            const config = {
+                format: format as 'csv' | 'excel' | 'json',
+                startDate: startDate ? new Date(startDate) : undefined,
+                endDate: endDate ? new Date(endDate) : undefined,
+                includeCharts: includeCharts || false,
+                sections: sections || []
+            };
+
+            const reportData = await AdminReportingService.exportReport(config);
+
+            const duration = Date.now() - startTime;
+            loggingService.info('Report exported successfully', {
+                component: 'AdminDashboardController',
+                operation: 'exportReport',
+                adminUserId: req.user?.id,
+                format,
+                duration
+            });
+
+            // Set appropriate headers based on format
+            if (format === 'json') {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Content-Disposition', `attachment; filename="admin-report-${new Date().toISOString().split('T')[0]}.json"`);
+                res.send(reportData as string);
+            } else if (format === 'csv') {
+                res.setHeader('Content-Type', 'text/csv');
+                res.setHeader('Content-Disposition', `attachment; filename="admin-report-${new Date().toISOString().split('T')[0]}.csv"`);
+                res.send(reportData as string);
+            } else if (format === 'excel') {
+                res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                res.setHeader('Content-Disposition', `attachment; filename="admin-report-${new Date().toISOString().split('T')[0]}.xlsx"`);
+                res.send(reportData as Buffer);
+            }
+        } catch (error) {
+            loggingService.error('Error exporting report:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'exportReport',
                 adminUserId: req.user?.id
             });
             next(error);
