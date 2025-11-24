@@ -709,7 +709,7 @@ export function getContextWindowLimits(provider: AIProvider, model: string): num
         [AIProvider.Gemini]: 30720,
         [AIProvider.Cohere]: 4096,
         [AIProvider.DeepSeek]: 8192,
-        [AIProvider.Groq]: 8192,
+        [AIProvider.Grok]: 8192,
         [AIProvider.HuggingFace]: 4096,
         [AIProvider.Ollama]: 4096,
         [AIProvider.Replicate]: 4096

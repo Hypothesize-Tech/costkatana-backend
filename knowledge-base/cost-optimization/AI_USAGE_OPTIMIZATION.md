@@ -31,7 +31,7 @@ Usage Optimization Approach:
 ### 1. Output Optimization (Cortex)
 - Generates responses in efficient LISP format
 - Converts to natural language post-generation
-- 70-95% token reduction on outputs
+- 40-75% token reduction on outputs
 - Maintains or improves quality
 
 ### 2. Context Management
@@ -153,7 +153,7 @@ const response = await optimizationService.createOptimization({
 ## Measuring Success
 
 ### Key Metrics
-1. **Token Reduction**: 70-95% typical
+1. **Token Reduction**: 40-75% typical
 2. **Cost Savings**: 60-90% reduction
 3. **Quality Scores**: 85-95% maintained
 4. **Processing Time**: 30-50% faster

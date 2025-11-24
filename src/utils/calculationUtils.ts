@@ -33,7 +33,7 @@ function providerEnumToString(provider: AIProvider): string {
         [AIProvider.AWSBedrock]: 'AWS Bedrock',
         [AIProvider.Cohere]: 'Cohere',
         [AIProvider.DeepSeek]: 'DeepSeek',
-        [AIProvider.Groq]: 'Groq',
+        [AIProvider.Grok]: 'Grok',
         [AIProvider.HuggingFace]: 'Hugging Face',
         [AIProvider.Ollama]: 'Ollama',
         [AIProvider.Replicate]: 'Replicate',

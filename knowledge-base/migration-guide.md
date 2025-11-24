@@ -9,7 +9,7 @@ Step-by-step guide for migrating from direct AI provider SDKs to CostKatana pack
 | Feature | Before (Direct SDKs) | After (CostKatana) |
 |---------|---------------------|-------------------|
 | **API Keys** | Multiple keys for each provider | Single `dak_` key for all providers |
-| **Cost Optimization** | Manual optimization | 70-95% token reduction with Cortex |
+| **Cost Optimization** | Manual optimization | 40-75% token reduction with Cortex |
 | **Failover** | Manual error handling | Automatic provider switching |
 | **Analytics** | No built-in tracking | Real-time cost and usage analytics |
 | **Budget Management** | Manual tracking | Automated budget limits and alerts |
@@ -651,7 +651,7 @@ response = model.generate_content(
     "your query",
     cortex={
         'enabled': True,
-        'mode': 'answer_generation'  # 70-95% token reduction
+        'mode': 'answer_generation'  # 40-75% token reduction
     }
 )
 ```
@@ -723,7 +723,7 @@ ck.configure(
 **A:** No, CostKatana is designed to be a drop-in replacement. Start with basic migrations and gradually add advanced features.
 
 **Q: How much will I save after migration?**
-**A:** Most users see 40-70% cost reduction immediately, and 70-95% with Cortex optimization enabled.
+**A:** Most users see 40-70% cost reduction immediately, and 40-75% with Cortex optimization enabled.
 
 **Q: Can I migrate gradually?**
 **A:** Yes! Use the wrapper pattern to add CostKatana features to existing code without breaking changes.

@@ -94,7 +94,7 @@ const response = await aiManager.generateResponse('Explain quantum computing');
 
 ### Basic Cortex Usage
 ```javascript
-// Enable Cortex for massive token savings (70-95% reduction)
+// Enable Cortex for massive token savings (40-75% reduction)
 const response = await tracker.generateContent(
   'Write a complete Python web scraper',
   {

@@ -173,7 +173,7 @@ response = model.generate_content(
 
 ### Q: Cortex showing low token reduction percentages
 **A:**
-- **Expected**: 70-95% token reduction for most queries
+- **Expected**: 40-75% token reduction for most queries
 - **Common reasons for lower reduction**:
   - Very short prompts (less room for optimization)
   - Simple queries that don't benefit much from Cortex
@@ -199,7 +199,7 @@ response = model.generate_content(
 **A:**
 
 **Immediate Solutions:**
-1. **Enable Cortex optimization** (70-95% cost reduction)
+1. **Enable Cortex optimization** (40-75% cost reduction)
 2. **Set budget limits** to prevent overspending
 3. **Monitor usage patterns**
 
@@ -748,7 +748,7 @@ const response = await tracker.generateContent('Hello', {
 
 **Key Benefits:**
 1. **Unified API**: One interface for all AI providers
-2. **Cost Optimization**: 70-95% token reduction with Cortex
+2. **Cost Optimization**: 40-75% token reduction with Cortex
 3. **Automatic Failover**: Seamless provider switching
 4. **Built-in Analytics**: Real-time cost tracking
 5. **Enterprise Features**: Team management, budgets, audit logs

@@ -63,7 +63,7 @@ cost-katana chat --output session.json
 # Basic optimization
 cost-katana optimize --prompt "Write a Python function to calculate fibonacci numbers"
 
-# With Cortex optimization (70-95% token reduction)
+# With Cortex optimization (40-75% token reduction)
 cost-katana optimize --prompt "Write a complete REST API" --cortex
 
 # Specify model explicitly

@@ -140,7 +140,7 @@ export enum AIProvider {
     Google = 'google',
     Cohere = 'cohere',
     DeepSeek = 'deepseek',
-    Groq = 'groq',
+    Grok = 'groq',
     HuggingFace = 'huggingface',
     Ollama = 'ollama',
     Replicate = 'replicate',

@@ -162,7 +162,7 @@ ck.configure()  # Loads from environment
 
 ### CLI Cortex Integration
 ```bash
-# Enable Cortex for massive token savings (70-95% reduction)
+# Enable Cortex for massive token savings (40-75% reduction)
 cost-katana optimize --prompt "Write a complete REST API" --cortex
 
 # Advanced Cortex configuration

@@ -42,7 +42,7 @@ function providerEnumToString(provider: AIProvider): string {
         [AIProvider.AWSBedrock]: 'AWS Bedrock',
         [AIProvider.Cohere]: 'Cohere',
         [AIProvider.DeepSeek]: 'DeepSeek',
-        [AIProvider.Groq]: 'Groq',
+        [AIProvider.Grok]: 'Grok',
         [AIProvider.HuggingFace]: 'Hugging Face',
         [AIProvider.Ollama]: 'Ollama',
         [AIProvider.Replicate]: 'Replicate',
@@ -191,7 +191,7 @@ export class OptimizationService {
             case 'deepseek':
                 return AIProvider.DeepSeek;
             case 'groq':
-                return AIProvider.Groq;
+                return AIProvider.Grok;
             case 'huggingface':
             case 'hugging-face':
                 return AIProvider.HuggingFace;
