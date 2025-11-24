@@ -2,7 +2,7 @@
 
 ## Overview
 
-Cortex is an advanced AI usage optimization system that revolutionizes how AI responses are generated and delivered. Instead of optimizing input prompts, Cortex focuses on optimizing the output generation process, achieving 70-95% token reduction while maintaining or improving response quality.
+Cortex is an advanced AI usage optimization system that revolutionizes how AI responses are generated and delivered. Instead of optimizing input prompts, Cortex focuses on optimizing the output generation process, achieving 40-75% token reduction while maintaining or improving response quality.
 
 ## Core Architecture
 
@@ -16,7 +16,7 @@ Cortex is an advanced AI usage optimization system that revolutionizes how AI re
 #### Stage 2: Core Processor (LISP Query → LISP Answer)
 - **This is where the magic happens**
 - Processes queries and generates answers entirely in LISP format
-- Achieves 70-95% token reduction by avoiding natural language generation
+- Achieves 40-75% token reduction by avoiding natural language generation
 - Uses semantic understanding to create concise, structured responses
 
 #### Stage 3: Decoder (LISP → Natural Language)
@@ -29,7 +29,7 @@ Cortex is an advanced AI usage optimization system that revolutionizes how AI re
 ### 1. Massive Token Reduction
 - Traditional approach: Generate full natural language responses (100% tokens)
 - Cortex approach: Generate LISP responses (5-30% tokens)
-- Real-world savings: 70-95% reduction in generation tokens
+- Real-world savings: 40-75% reduction in generation tokens
 
 ### 2. Quality Improvements
 - **Clarity Score**: 85-95% (reduced ambiguity)
@@ -105,7 +105,7 @@ Cortex is an advanced AI usage optimization system that revolutionizes how AI re
 
 ### Cortex Approach (Usage Optimization)
 - Focus: Optimizing entire AI usage pattern
-- Impact: 70-95% savings (outputs are typically large)
+- Impact: 40-75% savings (outputs are typically large)
 - Benefit: Addresses the real cost driver (output tokens)
 
 ## Integration

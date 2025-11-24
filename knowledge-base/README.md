@@ -22,7 +22,7 @@ This knowledge base provides comprehensive information about all features and ca
 
 ### High-Level Overview
 CostKatana is a comprehensive AI usage optimization platform that combines:
-- **Cortex Meta-Language System**: Revolutionary 70-95% token reduction technology
+- **Cortex Meta-Language System**: Revolutionary 40-75% token reduction technology
 - **Intelligent Optimization**: AI-powered usage and cost reduction strategies
 - **Impact Analytics**: Transparent justification of optimization effectiveness
 - **Personalized Insights**: User-specific recommendations and analysis

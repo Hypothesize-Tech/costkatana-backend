@@ -29,11 +29,11 @@ export const OTHERS_PRICING: ModelPricing[] = [
         notes: 'DeepSeek Coder model for code generation'
     },
 
-    // Groq Models
+    // Grok Models
     {
         modelId: 'llama-3-70b-8192',
         modelName: 'Llama 3 70B',
-        provider: 'Groq',
+        provider: 'Grok',
         inputPrice: 0.59,
         outputPrice: 0.79,
         unit: PricingUnit.PER_1M_TOKENS,
@@ -41,12 +41,12 @@ export const OTHERS_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Llama 3 70B on Groq - ultra-fast inference'
+        notes: 'Llama 3 70B on Grok - ultra-fast inference'
     },
     {
         modelId: 'llama-3-8b-8192',
         modelName: 'Llama 3 8B',
-        provider: 'Groq',
+        provider: 'Grok',
         inputPrice: 0.05,
         outputPrice: 0.10,
         unit: PricingUnit.PER_1M_TOKENS,
@@ -54,12 +54,12 @@ export const OTHERS_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Llama 3 8B on Groq - ultra-fast inference'
+        notes: 'Llama 3 8B on Grok - ultra-fast inference'
     },
     {
         modelId: 'mixtral-8x7b-32768',
         modelName: 'Mixtral 8x7B',
-        provider: 'Groq',
+        provider: 'Grok',
         inputPrice: 0.14,
         outputPrice: 0.42,
         unit: PricingUnit.PER_1M_TOKENS,
@@ -67,7 +67,7 @@ export const OTHERS_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: true,
-        notes: 'Mixtral 8x7B on Groq - ultra-fast inference'
+        notes: 'Mixtral 8x7B on Grok - ultra-fast inference'
     },
 
     // Hugging Face Models

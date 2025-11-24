@@ -652,7 +652,7 @@ Suggestions:
                    `**Key Features:**\n` +
                    `• Provider abstraction across multiple AI services\n` +
                    `• Real-time cost tracking and analytics\n` +
-                   `• Cortex meta-language optimization (70-95% token reduction)\n` +
+                   `• Cortex meta-language optimization (40-75% token reduction)\n` +
                    `• Automatic failover and intelligent routing\n` +
                    `• Comprehensive error handling and retry logic`;
         }
@@ -668,7 +668,7 @@ Suggestions:
                    `• Interactive chat sessions with AI models\n` +
                    `• Cost analysis and optimization workflows\n` +
                    `• Bulk processing and batch operations\n` +
-                   `• Cortex optimization for 70-95% token reduction\n` +
+                   `• Cortex optimization for 40-75% token reduction\n` +
                    `• Budget management and cost monitoring\n` +
                    `• Multi-step workflow crafting and evaluation\n` +
                    `• Cost simulation and what-if scenarios\n` +
@@ -719,7 +719,7 @@ Suggestions:
                    `  📦 Install: \`pip install cost-katana\`\n` +
                    `  🔗 Package: https://pypi.org/project/cost-katana/\n\n` +
                    `**Key Features:**\n` +
-                   `• Cortex meta-language for 70-95% token reduction\n` +
+                   `• Cortex meta-language for 40-75% token reduction\n` +
                    `• SAST (Semantic Abstract Syntax Tree) processing\n` +
                    `• Multi-provider support (OpenAI, Anthropic, Google, AWS Bedrock)\n` +
                    `• Real-time cost tracking and analytics\n` +

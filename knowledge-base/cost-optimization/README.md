@@ -1,12 +1,12 @@
 # Cost Optimization Knowledge Base
 
 ## Overview
-Cost optimization is the core feature of CostKatana, providing intelligent, personalized strategies for optimizing AI usage (not just prompts) across multiple providers and models. Our revolutionary Cortex system achieves 70-95% token reduction by optimizing how AI generates responses.
+Cost optimization is the core feature of CostKatana, providing intelligent, personalized strategies for optimizing AI usage (not just prompts) across multiple providers and models. Our revolutionary Cortex system achieves 40-75% token reduction by optimizing how AI generates responses.
 
 ## Core Concepts
 
 ### 1. AI Usage Optimization (Beyond Prompts)
-- **[Cortex Meta-Language System](../cortex-optimization/CORTEX_ARCHITECTURE.md)**: 70-95% output token reduction
+- **[Cortex Meta-Language System](../cortex-optimization/CORTEX_ARCHITECTURE.md)**: 40-75% output token reduction
 - **[AI Usage Optimization](./AI_USAGE_OPTIMIZATION.md)**: Complete lifecycle optimization
 - **Context Trimming**: Intelligent removal of irrelevant conversation history
 - **Request Fusion**: Combining multiple similar requests into single optimized calls
