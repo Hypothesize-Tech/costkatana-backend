@@ -649,7 +649,7 @@ export class MFAController {
                 // Check if user wants to remember device
                 let trustedDeviceAdded = false;
                 if (rememberDevice === true) {
-                    const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
+                    const { deviceId, userAgent, ipAddress } = MFAController.getDeviceInfo(req);
                     const finalDeviceName = deviceName || 'Unknown Device';
 
                     await MFAService.addTrustedDevice(userId, {
@@ -889,7 +889,7 @@ export class MFAController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
+            const { deviceId, userAgent, ipAddress } = MFAController.getDeviceInfo(req);
 
             await MFAService.addTrustedDevice(userId, {
                 deviceId,
@@ -1086,7 +1086,7 @@ export class MFAController {
                 requestId: req.headers['x-request-id'] as string
             });
 
-            const { deviceId, userAgent, ipAddress } = this.getDeviceInfo(req);
+            const { deviceId, userAgent, ipAddress } = MFAController.getDeviceInfo(req);
 
             const isTrusted = await MFAService.isTrustedDevice(userId, deviceId);
 
@@ -1156,15 +1156,15 @@ export class MFAController {
         // Create cache key for this request
         const cacheKey = `${userAgent}-${ipAddress}`;
         
-        let deviceId = this.deviceIdCache.get(cacheKey);
+        let deviceId = MFAController.deviceIdCache.get(cacheKey);
         if (!deviceId) {
             deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
-            this.deviceIdCache.set(cacheKey, deviceId);
+            MFAController.deviceIdCache.set(cacheKey, deviceId);
             
             // Clean cache periodically (keep last 100 entries)
-            if (this.deviceIdCache.size > 100) {
-                const firstKey = this.deviceIdCache.keys().next().value;
-                this.deviceIdCache.delete(firstKey || '');
+            if (MFAController.deviceIdCache.size > 100) {
+                const firstKey = MFAController.deviceIdCache.keys().next().value;
+                MFAController.deviceIdCache.delete(firstKey || '');
             }
         }
 

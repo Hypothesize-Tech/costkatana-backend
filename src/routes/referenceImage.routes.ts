@@ -34,17 +34,18 @@ router.get(
     ReferenceImageController.streamExtractionStatus
 );
 
-// All other routes require authentication
-router.use(authenticate);
-
 /**
  * GET /api/reference-image/presigned-url
  * Get presigned URL for viewing reference image
+ * NOTE: Public endpoint - no auth required for viewing uploaded images
  */
 router.get(
     '/presigned-url',
     ReferenceImageController.getPresignedUrl
 );
+
+// All other routes require authentication
+router.use(authenticate);
 
 /**
  * POST /api/reference-image/pre-upload
