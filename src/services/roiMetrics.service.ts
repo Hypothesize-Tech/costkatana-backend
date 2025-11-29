@@ -6,6 +6,63 @@ import { Project } from '../models/Project';
 import { User } from '../models/User';
 import { EmailService } from './email.service';
 
+export interface WorkflowROIMetrics {
+    workflowId: string;
+    workflowName: string;
+    platform: string;
+    timeRange: {
+        startDate: Date;
+        endDate: Date;
+    };
+    
+    // Cost metrics
+    totalCost: number;
+    totalOrchestrationCost: number;
+    totalAICost: number;
+    previousPeriodCost: number;
+    costChange: number;
+    costChangePercentage: number;
+    
+    // Execution metrics
+    totalExecutions: number;
+    averageCostPerExecution: number;
+    costPerStep: Array<{
+        step: string;
+        sequence: number;
+        cost: number;
+        executions: number;
+        averageCost: number;
+    }>;
+    
+    // Business outcome metrics (if metadata available)
+    costPerOutcome?: number;
+    outcomes?: Array<{
+        type: string;
+        count: number;
+        totalCost: number;
+        averageCost: number;
+    }>;
+    
+    // Efficiency score (0-100, higher is better)
+    efficiencyScore: number;
+    efficiencyFactors: {
+        costPerExecution: number; // Lower is better
+        orchestrationOverhead: number; // Lower is better
+        modelEfficiency: number; // Based on model selection
+        cachingUtilization: number; // Higher is better (if available)
+    };
+    
+    // ROI comparison
+    roiRank?: number; // Rank among all workflows
+    totalWorkflows?: number;
+    
+    // Trends
+    trends: {
+        dailyCosts: Array<{ date: string; cost: number; executions: number }>;
+        costPerExecutionTrend: 'improving' | 'degrading' | 'stable';
+    };
+}
+
 export interface ProjectROIMetrics {
     projectId: string;
     projectName: string;
@@ -771,6 +828,275 @@ The Cost Katana Team
         `;
 
         return { text, html };
+    }
+
+    /**
+     * Calculate ROI metrics for a workflow
+     */
+    static async calculateWorkflowROI(
+        userId: string,
+        workflowId: string,
+        startDate: Date,
+        endDate: Date
+    ): Promise<WorkflowROIMetrics> {
+        try {
+            // Calculate previous period for comparison
+            const periodDuration = endDate.getTime() - startDate.getTime();
+            const previousStartDate = new Date(startDate.getTime() - periodDuration);
+            const previousEndDate = new Date(startDate.getTime());
+
+            const match: any = {
+                userId: new mongoose.Types.ObjectId(userId),
+                workflowId: workflowId,
+                automationPlatform: { $exists: true, $ne: null },
+                createdAt: { $gte: startDate, $lte: endDate }
+            };
+
+            const previousMatch: any = {
+                userId: new mongoose.Types.ObjectId(userId),
+                workflowId: workflowId,
+                automationPlatform: { $exists: true, $ne: null },
+                createdAt: { $gte: previousStartDate, $lte: previousEndDate }
+            };
+
+            // Get current and previous period usage
+            const [currentUsage, previousUsage, workflowInfo] = await Promise.all([
+                Usage.find(match).lean(),
+                Usage.find(previousMatch).lean(),
+                Usage.findOne(match).lean()
+            ]);
+
+            if (!workflowInfo) {
+                throw new Error('Workflow not found');
+            }
+
+            // Calculate cost metrics
+            const totalAICost = currentUsage.reduce((sum, u) => sum + (u.cost || 0), 0);
+            const totalOrchestrationCost = currentUsage.reduce((sum, u) => sum + (u.orchestrationCost || 0), 0);
+            const totalCost = totalAICost + totalOrchestrationCost;
+            
+            const previousPeriodCost = previousUsage.reduce((sum, u) => sum + (u.cost || 0) + (u.orchestrationCost || 0), 0);
+            const costChange = totalCost - previousPeriodCost;
+            const costChangePercentage = previousPeriodCost > 0 ? (costChange / previousPeriodCost) * 100 : 0;
+
+            // Calculate execution metrics
+            const totalExecutions = currentUsage.length;
+            const averageCostPerExecution = totalExecutions > 0 ? totalCost / totalExecutions : 0;
+
+            // Calculate cost per step
+            const stepMap = new Map<string, { cost: number; executions: number; sequence: number }>();
+            currentUsage.forEach((u: any) => {
+                const key = `${u.workflowStep || 'unknown'}_${u.workflowSequence || 0}`;
+                const existing = stepMap.get(key) || { cost: 0, executions: 0, sequence: u.workflowSequence || 0 };
+                stepMap.set(key, {
+                    cost: existing.cost + (u.cost || 0) + (u.orchestrationCost || 0),
+                    executions: existing.executions + 1,
+                    sequence: existing.sequence
+                });
+            });
+
+            const costPerStep = Array.from(stepMap.entries())
+                .map(([key, data]) => ({
+                    step: key.split('_')[0],
+                    sequence: data.sequence,
+                    cost: data.cost,
+                    executions: data.executions,
+                    averageCost: data.executions > 0 ? data.cost / data.executions : 0
+                }))
+                .sort((a, b) => a.sequence - b.sequence);
+
+            // Calculate business outcomes if metadata available
+            const outcomeMap = new Map<string, { count: number; totalCost: number }>();
+            currentUsage.forEach((u: any) => {
+                const outcomeType = u.metadata?.outcomeType || u.metadata?.businessOutcome || 'unknown';
+                const existing = outcomeMap.get(outcomeType) || { count: 0, totalCost: 0 };
+                outcomeMap.set(outcomeType, {
+                    count: existing.count + 1,
+                    totalCost: existing.totalCost + (u.cost || 0) + (u.orchestrationCost || 0)
+                });
+            });
+
+            const outcomes = Array.from(outcomeMap.entries()).map(([type, data]) => ({
+                type,
+                count: data.count,
+                totalCost: data.totalCost,
+                averageCost: data.count > 0 ? data.totalCost / data.count : 0
+            }));
+
+            const costPerOutcome = outcomes.length > 0 && outcomes[0].count > 0 
+                ? outcomes[0].totalCost / outcomes[0].count 
+                : undefined;
+
+            // Calculate efficiency score (0-100)
+            const orchestrationOverheadPercentage = totalCost > 0 
+                ? (totalOrchestrationCost / totalCost) * 100 
+                : 0;
+            
+            // Efficiency factors (normalized to 0-100 scale)
+            const costPerExecutionScore = Math.max(0, 100 - (averageCostPerExecution * 1000)); // Lower cost = higher score
+            const orchestrationScore = Math.max(0, 100 - (orchestrationOverheadPercentage * 2)); // Lower overhead = higher score
+            const modelEfficiencyScore = 75; // Default, can be enhanced with model comparison
+            const cachingScore = 50; // Default, can be enhanced with cache hit rate data
+
+            const efficiencyScore = (
+                costPerExecutionScore * 0.3 +
+                orchestrationScore * 0.3 +
+                modelEfficiencyScore * 0.2 +
+                cachingScore * 0.2
+            );
+
+            // Get daily trends
+            const dailyData = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt'
+                            }
+                        },
+                        cost: { $sum: { $add: ['$cost', { $ifNull: ['$orchestrationCost', 0] }] } },
+                        executions: { $sum: 1 }
+                    }
+                },
+                { $sort: { _id: 1 } }
+            ]);
+
+            const previousDailyData = await Usage.aggregate([
+                { $match: previousMatch },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$createdAt'
+                            }
+                        },
+                        cost: { $sum: { $add: ['$cost', { $ifNull: ['$orchestrationCost', 0] }] } },
+                        executions: { $sum: 1 }
+                    }
+                },
+                { $sort: { _id: 1 } }
+            ]);
+
+            const previousAvgCostPerExecution = previousUsage.length > 0
+                ? previousPeriodCost / previousUsage.length
+                : 0;
+
+            const costPerExecutionTrend = averageCostPerExecution < previousAvgCostPerExecution * 0.95
+                ? 'improving'
+                : averageCostPerExecution > previousAvgCostPerExecution * 1.05
+                ? 'degrading'
+                : 'stable';
+
+            return {
+                workflowId,
+                workflowName: workflowInfo.workflowName || 'Unknown Workflow',
+                platform: workflowInfo.automationPlatform || 'unknown',
+                timeRange: { startDate, endDate },
+                totalCost,
+                totalOrchestrationCost,
+                totalAICost,
+                previousPeriodCost,
+                costChange,
+                costChangePercentage: Math.round(costChangePercentage * 100) / 100,
+                totalExecutions,
+                averageCostPerExecution: Math.round(averageCostPerExecution * 100000) / 100000,
+                costPerStep,
+                costPerOutcome,
+                outcomes: outcomes.length > 0 ? outcomes : undefined,
+                efficiencyScore: Math.round(efficiencyScore * 100) / 100,
+                efficiencyFactors: {
+                    costPerExecution: Math.round(averageCostPerExecution * 100000) / 100000,
+                    orchestrationOverhead: Math.round(orchestrationOverheadPercentage * 100) / 100,
+                    modelEfficiency: modelEfficiencyScore,
+                    cachingUtilization: cachingScore
+                },
+                trends: {
+                    dailyCosts: dailyData.map((item: any) => ({
+                        date: item._id,
+                        cost: item.cost,
+                        executions: item.executions
+                    })),
+                    costPerExecutionTrend
+                }
+            };
+        } catch (error) {
+            loggingService.error('Error calculating workflow ROI', {
+                component: 'ROIMetricsService',
+                operation: 'calculateWorkflowROI',
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                workflowId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get workflow ROI comparison (rank workflows by efficiency)
+     */
+    static async getWorkflowROIComparison(
+        userId: string,
+        startDate: Date,
+        endDate: Date
+    ): Promise<Array<WorkflowROIMetrics & { rank: number; totalWorkflows: number }>> {
+        try {
+            const match: any = {
+                userId: new mongoose.Types.ObjectId(userId),
+                automationPlatform: { $exists: true, $ne: null },
+                workflowId: { $exists: true, $ne: null },
+                createdAt: { $gte: startDate, $lte: endDate }
+            };
+
+            // Get all unique workflows
+            const workflows = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: '$workflowId'
+                    }
+                }
+            ]);
+
+            // Calculate ROI for each workflow
+            const workflowROIs = await Promise.all(
+                workflows.map(async (wf: any) => {
+                    try {
+                        const roi = await this.calculateWorkflowROI(userId, wf._id, startDate, endDate);
+                        return roi;
+                    } catch (error) {
+                        loggingService.error('Error calculating ROI for workflow', {
+                            workflowId: wf._id,
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                        return null;
+                    }
+                })
+            );
+
+            // Filter out nulls and sort by efficiency score
+            const filteredROIs = workflowROIs
+                .filter((roi): roi is WorkflowROIMetrics => roi !== null)
+                .sort((a, b) => b.efficiencyScore - a.efficiencyScore);
+            
+            const validROIs = filteredROIs.map((roi, index) => ({
+                ...roi,
+                rank: index + 1,
+                totalWorkflows: filteredROIs.length
+            }));
+
+            return validROIs;
+        } catch (error) {
+            loggingService.error('Error getting workflow ROI comparison', {
+                component: 'ROIMetricsService',
+                operation: 'getWorkflowROIComparison',
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            throw error;
+        }
     }
 }
 

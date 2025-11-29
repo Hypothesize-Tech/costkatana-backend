@@ -354,6 +354,83 @@ export class PricingController {
         }
     }
 
+    // Get comparison table data - flattened model list optimized for table display
+    static getComparisonTable(_req: Request, res: Response): void {
+        try {
+            const { taskType } = _req.query;
+            
+            // Helper function to determine task types from capabilities
+            const getTaskTypes = (capabilities: string[] = []): ('chat' | 'code' | 'vision')[] => {
+                const taskTypes: ('chat' | 'code' | 'vision')[] = [];
+                const capsLower = capabilities.map(c => c.toLowerCase());
+                
+                // Check for chat capabilities
+                if (capsLower.some(c => c.includes('chat') || c.includes('completion') || c.includes('text-generation'))) {
+                    taskTypes.push('chat');
+                }
+                
+                // Check for code capabilities
+                if (capsLower.some(c => c.includes('code') || c.includes('function') || c.includes('programming'))) {
+                    taskTypes.push('code');
+                }
+                
+                // Check for vision capabilities
+                if (capsLower.some(c => c.includes('vision') || c.includes('multimodal') || c.includes('image'))) {
+                    taskTypes.push('vision');
+                }
+                
+                // Default to chat if no specific capabilities found
+                if (taskTypes.length === 0) {
+                    taskTypes.push('chat');
+                }
+                
+                return taskTypes;
+            };
+
+            // Get all models and flatten them
+            const allModels = MODEL_PRICING.map(model => {
+                const taskTypes = getTaskTypes(model.capabilities);
+                
+                return {
+                    modelId: model.modelId,
+                    modelName: model.modelName,
+                    provider: model.provider,
+                    inputPricePer1M: model.inputPrice, // Already per 1M tokens
+                    outputPricePer1M: model.outputPrice, // Already per 1M tokens
+                    contextWindow: model.contextWindow || 0,
+                    taskTypes,
+                    capabilities: model.capabilities || [],
+                    category: model.category || 'general',
+                    isLatest: model.isLatest || false
+                };
+            });
+
+            // Filter by task type if specified
+            let filteredModels = allModels;
+            if (taskType && taskType !== 'all') {
+                filteredModels = allModels.filter(model => 
+                    model.taskTypes.includes(taskType as 'chat' | 'code' | 'vision')
+                );
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    models: filteredModels,
+                    totalModels: filteredModels.length,
+                    totalProviders: new Set(filteredModels.map(m => m.provider)).size,
+                    lastUpdated: new Date()
+                }
+            });
+        } catch (error) {
+            loggingService.error('Error getting comparison table:', { error: error instanceof Error ? error.message : String(error) });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retrieve comparison table data'
+            });
+        }
+    }
+
     // Compare two specific models
     static async compareModels(req: Request, res: Response): Promise<void> {
         try {

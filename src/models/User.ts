@@ -28,6 +28,7 @@ export interface IUser {
         lastUsed?: Date;
         createdAt: Date;
         expiresAt?: Date;
+        isActive?: boolean;
     }>;
     apiKeys: Array<{
         id: string;
@@ -234,6 +235,10 @@ const userSchema = new Schema<IUser>({
             default: Date.now,
         },
         expiresAt: Date,
+        isActive: {
+            type: Boolean,
+            default: true,
+        },
     }],
     apiKeys: [{
         id: {

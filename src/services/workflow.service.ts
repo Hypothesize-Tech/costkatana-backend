@@ -5,6 +5,7 @@ import { loggingService } from './logging.service';
 export interface WorkflowSummary {
     workflowId: string;
     workflowName: string;
+    automationPlatform?: 'zapier' | 'make' | 'n8n'; // Add automation platform
     totalCost: number;
     totalTokens: number;
     requestCount: number;
@@ -50,7 +51,23 @@ export class WorkflowService {
      */
     static async getWorkflowDetails(workflowId: string, userId?: string): Promise<WorkflowSummary | null> {
         try {
-            const query: any = { workflowId };
+            // Handle automation workflow IDs (format: platform_workflowId)
+            let query: any;
+            if (workflowId.includes('_') && ['zapier', 'make', 'n8n'].some(platform => workflowId.startsWith(platform + '_'))) {
+                // Automation workflow ID format: platform_workflowId
+                const [platform, actualWorkflowId] = workflowId.split('_', 2);
+                query = {
+                    automationPlatform: platform,
+                    $or: [
+                        { workflowId: actualWorkflowId },
+                        { workflowName: actualWorkflowId }
+                    ]
+                };
+            } else {
+                // Regular workflow
+                query = { workflowId };
+            }
+            
             if (userId) {
                 query.userId = new mongoose.Types.ObjectId(userId);
             }
@@ -71,11 +88,11 @@ export class WorkflowService {
 
             // Build steps
             const steps: WorkflowStep[] = workflowRequests.map((req, index) => ({
-                step: req.workflowStep || `/step-${index + 1}`,
+                step: req.workflowStep || req.workflowName || `/step-${index + 1}`,
                 sequence: req.workflowSequence || index + 1,
                 cost: req.cost,
                 tokens: req.totalTokens,
-                responseTime: req.responseTime,
+                responseTime: req.responseTime || 0,
                 model: req.model,
                 service: req.service,
                 timestamp: req.createdAt
@@ -89,6 +106,7 @@ export class WorkflowService {
             return {
                 workflowId,
                 workflowName: workflowRequests[0].workflowName || 'Unknown Workflow',
+                automationPlatform: workflowRequests[0].automationPlatform || undefined,
                 totalCost,
                 totalTokens,
                 requestCount,
@@ -130,10 +148,13 @@ export class WorkflowService {
             const { page = 1, limit = 20, workflowName, startDate, endDate } = options;
             const skip = (page - 1) * limit;
 
-            // Build match query
+            // Build match query - include both regular workflows and automation workflows
             const matchQuery: any = {
                 userId: new mongoose.Types.ObjectId(userId),
-                workflowId: { $exists: true, $ne: null }
+                $or: [
+                    { workflowId: { $exists: true, $ne: null } },
+                    { automationPlatform: { $exists: true, $ne: null } }
+                ]
             };
 
             if (workflowName) {
@@ -150,9 +171,29 @@ export class WorkflowService {
             const pipeline = [
                 { $match: matchQuery },
                 {
+                    $addFields: {
+                        // Create a unique workflow key for grouping
+                        workflowKey: {
+                            $cond: {
+                                if: { $ne: ['$automationPlatform', null] },
+                                then: {
+                                    $concat: [
+                                        '$automationPlatform',
+                                        '_',
+                                        { $ifNull: ['$workflowId', '$workflowName'] }
+                                    ]
+                                },
+                                else: { $ifNull: ['$workflowId', { $concat: ['workflow_', { $ifNull: ['$workflowName', 'unknown'] }] }] }
+                            }
+                        }
+                    }
+                },
+                {
                     $group: {
-                        _id: '$workflowId',
+                        _id: '$workflowKey',
+                        workflowId: { $first: '$workflowId' },
                         workflowName: { $first: '$workflowName' },
+                        automationPlatform: { $first: '$automationPlatform' },
                         totalCost: { $sum: '$cost' },
                         totalTokens: { $sum: '$totalTokens' },
                         requestCount: { $sum: 1 },
@@ -167,7 +208,8 @@ export class WorkflowService {
                                 responseTime: '$responseTime',
                                 model: '$model',
                                 service: '$service',
-                                timestamp: '$createdAt'
+                                timestamp: '$createdAt',
+                                automationPlatform: '$automationPlatform'
                             }
                         }
                     }
@@ -187,7 +229,24 @@ export class WorkflowService {
                 Usage.aggregate(pipeline),
                 Usage.aggregate([
                     { $match: matchQuery },
-                    { $group: { _id: '$workflowId' } },
+                    {
+                        $addFields: {
+                            workflowKey: {
+                                $cond: {
+                                    if: { $ne: ['$automationPlatform', null] },
+                                    then: {
+                                        $concat: [
+                                            '$automationPlatform',
+                                            '_',
+                                            { $ifNull: ['$workflowId', '$workflowName'] }
+                                        ]
+                                    },
+                                    else: { $ifNull: ['$workflowId', { $concat: ['workflow_', { $ifNull: ['$workflowName', 'unknown'] }] }] }
+                                }
+                            }
+                        }
+                    },
+                    { $group: { _id: '$workflowKey' } },
                     { $count: 'total' }
                 ])
             ]);
@@ -199,6 +258,7 @@ export class WorkflowService {
             const formattedWorkflows: WorkflowSummary[] = workflows.map(wf => ({
                 workflowId: wf._id,
                 workflowName: wf.workflowName || 'Unknown Workflow',
+                automationPlatform: wf.automationPlatform || undefined, // Include automation platform
                 totalCost: wf.totalCost,
                 totalTokens: wf.totalTokens,
                 requestCount: wf.requestCount,

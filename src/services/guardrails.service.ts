@@ -7,8 +7,10 @@ import { EmailService } from './email.service';
 import { Response } from 'express';
 
 import { Usage } from '../models/Usage';
+import { AutomationConnection } from '../models/AutomationConnection';
 import mongoose from 'mongoose';
 import { MODEL_PRICING } from '../utils/pricing';
+import { AIRouterService } from './aiRouter.service';
 
 // Subscription plan limits based on costkxatana.com pricing
 export interface PlanLimits {
@@ -136,6 +138,97 @@ export class GuardrailsService {
     private static readonly WARNING_THRESHOLDS = [50, 75, 90, 95, 99];
 
     /**
+     * Check workflow quota for a user based on their subscription plan
+     * Returns violation if user has reached their workflow limit
+     */
+    static async checkWorkflowQuota(userId: string): Promise<GuardrailViolation | null> {
+        try {
+            const user = await this.getUserWithCache(userId);
+            if (!user) {
+                return {
+                    type: 'hard',
+                    metric: 'user',
+                    current: 0,
+                    limit: 0,
+                    percentage: 0,
+                    message: 'User not found',
+                    action: 'block',
+                    suggestions: []
+                };
+            }
+
+            const planName = user.subscription?.plan || 'free';
+            const planLimits = this.SUBSCRIPTION_PLANS[planName];
+            
+            if (!planLimits) {
+                loggingService.error('Unknown subscription plan:', { planName });
+                return null;
+            }
+
+            // Skip check for unlimited (-1) limits
+            if (planLimits.workflows === -1) {
+                return null;
+            }
+
+            // Count active automation connections (each connection represents a workflow)
+            const activeConnections = await AutomationConnection.countDocuments({
+                userId: new mongoose.Types.ObjectId(userId),
+                status: 'active'
+            });
+
+            const currentValue = activeConnections;
+            const limitValue = planLimits.workflows;
+            const percentage = (currentValue / limitValue) * 100;
+
+            // Hard limit reached
+            if (currentValue >= limitValue) {
+                return {
+                    type: 'hard',
+                    metric: 'workflows',
+                    current: currentValue,
+                    limit: limitValue,
+                    percentage: 100,
+                    message: `Workflow limit reached (${currentValue}/${limitValue}). Upgrade to create more workflows.`,
+                    action: 'block',
+                    suggestions: this.getUpgradeSuggestions(planName, 'workflows')
+                };
+            }
+
+            // Warning thresholds
+            for (const threshold of this.WARNING_THRESHOLDS) {
+                if (percentage >= threshold && percentage < threshold + 5) {
+                    // Get AI-powered contextual suggestions
+                    const suggestions = await this.getOptimizationSuggestions(userId, 'workflows', percentage);
+                    
+                    const violation: GuardrailViolation = {
+                        type: 'warning',
+                        metric: 'workflows',
+                        current: currentValue,
+                        limit: limitValue,
+                        percentage,
+                        message: `${threshold}% of workflow limit reached (${currentValue}/${limitValue})`,
+                        action: 'allow',
+                        suggestions
+                    };
+
+                    // Queue alert for background processing
+                    this.queueAlert(userId, violation);
+                    
+                    return violation;
+                }
+            }
+
+            return null;
+        } catch (error) {
+            loggingService.error('Error checking workflow quota:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            return null;
+        }
+    }
+
+    /**
      * Check if a user can make a request based on their guardrails with parallel validation
      */
     static async checkRequestGuardrails(
@@ -239,6 +332,9 @@ export class GuardrailsService {
             // Warning thresholds
             for (const threshold of this.WARNING_THRESHOLDS) {
                 if (percentage >= threshold && percentage < threshold + 5) {
+                    // Get AI-powered contextual suggestions
+                    const suggestions = await this.getOptimizationSuggestions(userId, metricName, percentage);
+                    
                     const violation: GuardrailViolation = {
                         type: 'warning',
                         metric: metricName,
@@ -247,7 +343,7 @@ export class GuardrailsService {
                         percentage,
                         message: `${threshold}% of monthly ${metricName} limit reached`,
                         action: 'allow',
-                        suggestions: this.getOptimizationSuggestions(metricName, percentage)
+                        suggestions
                     };
 
                     // Queue alert for background processing
@@ -259,6 +355,9 @@ export class GuardrailsService {
 
             // Soft throttling at 80% for free tier
             if (planName === 'free' && percentage >= 80) {
+                // Get AI-powered contextual suggestions
+                const suggestions = await this.getOptimizationSuggestions(userId, metricName, percentage);
+                
                 return {
                     type: 'soft',
                     metric: metricName,
@@ -267,7 +366,7 @@ export class GuardrailsService {
                     percentage,
                     message: `Approaching ${metricName} limit - throttling enabled`,
                     action: 'throttle',
-                    suggestions: this.getOptimizationSuggestions(metricName, percentage)
+                    suggestions
                 };
             }
 
@@ -437,31 +536,18 @@ export class GuardrailsService {
                 createdAt: { $gte: startOfMonth }
             }),
             
-            // Workflows count
-            Usage.aggregate([
-                {
-                    $match: {
-                        userId: userObjectId,
-                        workflowId: { $exists: true, $ne: null },
-                        createdAt: { $gte: startOfMonth }
-                    }
-                },
-                {
-                    $group: {
-                        _id: '$workflowId'
-                    }
-                },
-                {
-                    $count: 'totalWorkflows'
-                }
-            ])
+            // Workflows count - count active automation connections
+            AutomationConnection.countDocuments({
+                userId: userObjectId,
+                status: 'active'
+            })
         ]);
 
         return {
             projects: { count: projectCount },
             usage: usageData[0] || { totalTokens: 0, totalCost: 0, requestCount: 0 },
             logs: { count: logCount },
-            workflows: { count: workflowCount[0]?.totalWorkflows || 0 }
+            workflows: { count: workflowCount || 0 }
         };
     }
 
@@ -842,17 +928,31 @@ export class GuardrailsService {
         
         switch (currentPlan) {
             case 'free':
-                suggestions.push('Upgrade to Plus plan for 10x more tokens and requests');
-                suggestions.push('Plus plan includes unlimited logs and projects');
+                if (metric === 'workflows') {
+                    suggestions.push('Upgrade to Plus plan for 100 workflows (10x increase)');
+                    suggestions.push('Plus plan includes unlimited logs and projects');
+                } else {
+                    suggestions.push('Upgrade to Plus plan for 10x more tokens and requests');
+                    suggestions.push('Plus plan includes unlimited logs and projects');
+                }
                 suggestions.push('Get access to all AI models with Plus or Pro');
                 break;
             case 'plus':
-                suggestions.push('Upgrade to Pro plan for 50% more tokens per seat');
-                suggestions.push('Pro plan includes 20 seats at a flat rate');
+                if (metric === 'workflows') {
+                    suggestions.push('Upgrade to Pro plan for 100 workflows per user');
+                    suggestions.push('Pro plan includes 20 seats at a flat rate');
+                } else {
+                    suggestions.push('Upgrade to Pro plan for 50% more tokens per seat');
+                    suggestions.push('Pro plan includes 20 seats at a flat rate');
+                }
                 suggestions.push('Get priority support with Pro plan');
                 break;
             case 'pro':
-                suggestions.push('Contact sales for Enterprise plan with unlimited usage');
+                if (metric === 'workflows') {
+                    suggestions.push('Contact sales for Enterprise plan with unlimited workflows');
+                } else {
+                    suggestions.push('Contact sales for Enterprise plan with unlimited usage');
+                }
                 suggestions.push('Enterprise includes custom integrations and SLA');
                 break;
         }
@@ -864,25 +964,460 @@ export class GuardrailsService {
     }
 
     /**
-     * Get optimization suggestions
+     * Get AI-powered, context-aware optimization suggestions based on actual workflow usage
      */
-    private static getOptimizationSuggestions(
+    private static async getOptimizationSuggestions(
+        userId: string,
         metric: string, 
         percentage: number
-    ): string[] {
-        const suggestions = [];
+    ): Promise<string[]> {
+        try {
+            // Check cache first (cache key includes userId, metric, and percentage bucket)
+            const cacheKey = `suggestions:${userId}:${metric}:${Math.floor(percentage / 10) * 10}`;
+            const cached = this.usageCache.get(cacheKey);
+            if (cached) {
+                return cached;
+            }
+
+            // Get user's actual workflow usage and patterns
+            const workflowContext = await this.analyzeUserWorkflows(userId, metric);
+            
+            // Build AI prompt with context
+            const prompt = this.buildOptimizationPrompt(metric, percentage, workflowContext);
+            
+            // Use AWS Bedrock to generate contextual suggestions
+            const modelId = 'amazon.nova-pro-v1:0';
+            const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
+            
+            // Parse AI response
+            let suggestions: string[] = [];
+            if (aiResponse && typeof aiResponse === 'string') {
+                try {
+                    // Try to parse as JSON first
+                    const parsed = JSON.parse(aiResponse);
+                    if (Array.isArray(parsed.suggestions)) {
+                        suggestions = parsed.suggestions;
+                    } else if (Array.isArray(parsed)) {
+                        suggestions = parsed;
+                    } else if (parsed.recommendations && Array.isArray(parsed.recommendations)) {
+                        suggestions = parsed.recommendations.map((r: any) => 
+                            typeof r === 'string' ? r : r.description || r.suggestion || JSON.stringify(r)
+                        );
+                    }
+                } catch {
+                    // If not JSON, try to extract suggestions from text
+                    suggestions = this.extractSuggestionsFromText(aiResponse);
+                }
+            }
+
+            // Fallback to basic suggestions if AI fails or returns empty
+            if (suggestions.length === 0) {
+                suggestions = this.getFallbackSuggestions(metric, percentage, workflowContext);
+            }
+
+            // Limit to 5 most relevant suggestions
+            suggestions = suggestions.slice(0, 5);
+
+            // Cache for 5 minutes
+            this.usageCache.set(cacheKey, suggestions, 300000);
+            
+            return suggestions;
+        } catch (error) {
+            loggingService.error('Error getting AI optimization suggestions', {
+                component: 'GuardrailsService',
+                operation: 'getOptimizationSuggestions',
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                metric,
+                percentage
+            });
+            
+            // Return fallback suggestions on error
+            return this.getFallbackSuggestions(metric, percentage, {});
+        }
+    }
+
+    /**
+     * Analyze user's actual workflow usage patterns for context
+     */
+    private static async analyzeUserWorkflows(
+        userId: string,
+        metric: string
+    ): Promise<{
+        workflowCount: number;
+        activeWorkflows: Array<{
+            workflowId: string;
+            workflowName: string;
+            platform: string;
+            totalCost: number;
+            totalExecutions: number;
+            averageCostPerExecution: number;
+            topModels: Array<{ model: string; cost: number; percentage: number }>;
+        }>;
+        totalCost: number;
+        totalExecutions: number;
+        topExpensiveWorkflows: Array<{ workflowName: string; cost: number }>;
+        modelDistribution: Record<string, number>;
+        usagePatterns: {
+            peakHours: string[];
+            averageExecutionsPerDay: number;
+            costTrend: 'increasing' | 'decreasing' | 'stable';
+        };
+    }> {
+        try {
+            const userObjectId = new mongoose.Types.ObjectId(userId);
+            const startOfMonth = new Date();
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+
+            // Get workflow usage data
+            const workflowUsage = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: userObjectId,
+                        automationPlatform: { $exists: true, $ne: null },
+                        workflowId: { $exists: true, $ne: null },
+                        createdAt: { $gte: startOfMonth }
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            workflowId: '$workflowId',
+                            workflowName: '$workflowName',
+                            platform: '$automationPlatform'
+                        },
+                        totalCost: { $sum: '$cost' },
+                        totalExecutions: { $sum: 1 },
+                        models: {
+                            $push: {
+                                model: '$model',
+                                cost: '$cost'
+                            }
+                        }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 10 }
+            ]);
+
+            // Get model distribution
+            const modelUsage = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: userObjectId,
+                        createdAt: { $gte: startOfMonth }
+                    }
+                },
+                {
+                    $group: {
+                        _id: '$model',
+                        totalCost: { $sum: '$cost' },
+                        count: { $sum: 1 }
+                    }
+                },
+                { $sort: { totalCost: -1 } }
+            ]);
+
+            const modelDistribution: Record<string, number> = {};
+            let totalModelCost = 0;
+            modelUsage.forEach((m: any) => {
+                if (m._id) {
+                    modelDistribution[m._id] = m.totalCost;
+                    totalModelCost += m.totalCost;
+                }
+            });
+
+            // Calculate model percentages
+            Object.keys(modelDistribution).forEach(model => {
+                if (totalModelCost > 0) {
+                    modelDistribution[model] = (modelDistribution[model] / totalModelCost) * 100;
+                }
+            });
+
+            // Process workflow data
+            const activeWorkflows = workflowUsage.map((wf: any) => {
+                const totalCost = wf.totalCost || 0;
+                const totalExecutions = wf.totalExecutions || 1;
+                
+                // Calculate top models for this workflow
+                const modelMap = new Map<string, number>();
+                (wf.models || []).forEach((m: any) => {
+                    if (m.model) {
+                        modelMap.set(m.model, (modelMap.get(m.model) || 0) + (m.cost || 0));
+                    }
+                });
+
+                const topModels = Array.from(modelMap.entries())
+                    .map(([model, cost]) => ({
+                        model,
+                        cost,
+                        percentage: totalCost > 0 ? (cost / totalCost) * 100 : 0
+                    }))
+                    .sort((a, b) => b.cost - a.cost)
+                    .slice(0, 3);
+
+                return {
+                    workflowId: wf._id.workflowId || 'unknown',
+                    workflowName: wf._id.workflowName || 'Unknown Workflow',
+                    platform: wf._id.platform || 'unknown',
+                    totalCost,
+                    totalExecutions,
+                    averageCostPerExecution: totalExecutions > 0 ? totalCost / totalExecutions : 0,
+                    topModels
+                };
+            });
+
+            const totalCost = activeWorkflows.reduce((sum, wf) => sum + wf.totalCost, 0);
+            const totalExecutions = activeWorkflows.reduce((sum, wf) => sum + wf.totalExecutions, 0);
+
+            // Calculate actual peak hours from usage data
+            const hourlyUsage = await Usage.aggregate([
+                {
+                    $match: {
+                        userId: userObjectId,
+                        createdAt: { $gte: startOfMonth }
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            $hour: '$createdAt'
+                        },
+                        count: { $sum: 1 },
+                        totalCost: { $sum: '$cost' }
+                    }
+                },
+                { $sort: { count: -1 } },
+                { $limit: 3 }
+            ]);
+
+            const peakHours = hourlyUsage
+                .map((h: any) => {
+                    const hour = h._id ?? 0;
+                    return `${hour.toString().padStart(2, '0')}:00`;
+                })
+                .filter((h: string) => h !== '00:00' || hourlyUsage.length > 0);
+
+            // Calculate cost trend by comparing first half vs second half of month
+            const now = new Date();
+            const midMonth = new Date(now.getFullYear(), now.getMonth(), 15);
+            const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+            const currentDay = now.getDate();
+            
+            // Only calculate trend if we're past mid-month
+            let costTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+            if (currentDay >= 15) {
+                const [firstHalfCost, secondHalfCost] = await Promise.all([
+                    Usage.aggregate([
+                        {
+                            $match: {
+                                userId: userObjectId,
+                                createdAt: { $gte: startOfMonth, $lt: midMonth }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCost: { $sum: '$cost' }
+                            }
+                        }
+                    ]),
+                    Usage.aggregate([
+                        {
+                            $match: {
+                                userId: userObjectId,
+                                createdAt: { $gte: midMonth, $lte: now }
+                            }
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                totalCost: { $sum: '$cost' }
+                            }
+                        }
+                    ])
+                ]);
+
+                const firstHalf = firstHalfCost[0]?.totalCost ?? 0;
+                const secondHalf = secondHalfCost[0]?.totalCost ?? 0;
+                const firstHalfDays = 14;
+                const secondHalfDays = currentDay - 14;
+                
+                if (secondHalfDays > 0 && firstHalfDays > 0) {
+                    const firstHalfDaily = firstHalf / firstHalfDays;
+                    const secondHalfDaily = secondHalf / secondHalfDays;
+                    const changePercent = ((secondHalfDaily - firstHalfDaily) / firstHalfDaily) * 100;
+                    
+                    if (changePercent > 10) {
+                        costTrend = 'increasing';
+                    } else if (changePercent < -10) {
+                        costTrend = 'decreasing';
+                    } else {
+                        costTrend = 'stable';
+                    }
+                }
+            }
+
+            // Calculate accurate average executions per day
+            const daysSinceMonthStart = Math.max(1, currentDay);
+            const averageExecutionsPerDay = totalExecutions > 0 ? totalExecutions / daysSinceMonthStart : 0;
+
+            const usagePatterns = {
+                peakHours: peakHours.length > 0 ? peakHours : [],
+                averageExecutionsPerDay,
+                costTrend
+            };
+
+            return {
+                workflowCount: activeWorkflows.length,
+                activeWorkflows,
+                totalCost,
+                totalExecutions,
+                topExpensiveWorkflows: activeWorkflows
+                    .slice(0, 5)
+                    .map(wf => ({ workflowName: wf.workflowName, cost: wf.totalCost })),
+                modelDistribution,
+                usagePatterns
+            };
+        } catch (error) {
+            loggingService.error('Error analyzing user workflows', {
+                component: 'GuardrailsService',
+                operation: 'analyzeUserWorkflows',
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                metric
+            });
+            return {
+                workflowCount: 0,
+                activeWorkflows: [],
+                totalCost: 0,
+                totalExecutions: 0,
+                topExpensiveWorkflows: [],
+                modelDistribution: {},
+                usagePatterns: {
+                    peakHours: [],
+                    averageExecutionsPerDay: 0,
+                    costTrend: 'stable'
+                }
+            };
+        }
+    }
+
+    /**
+     * Build AI prompt with workflow context
+     */
+    private static buildOptimizationPrompt(
+        metric: string,
+        percentage: number,
+        workflowContext: any
+    ): string {
+        return `You are an AI cost optimization expert analyzing a user's AI usage patterns. Generate specific, actionable optimization suggestions based on their actual workflow data.
+
+USER CONTEXT:
+- Metric: ${metric}
+- Current Usage: ${percentage.toFixed(1)}% of limit
+- Active Workflows: ${workflowContext.workflowCount || 0}
+- Total Monthly Cost: $${(workflowContext.totalCost || 0).toFixed(2)}
+- Total Executions: ${workflowContext.totalExecutions || 0}
+
+TOP WORKFLOWS:
+${(workflowContext.activeWorkflows || []).slice(0, 5).map((wf: any, idx: number) => `
+${idx + 1}. ${wf.workflowName} (${wf.platform})
+   - Cost: $${wf.totalCost.toFixed(2)}
+   - Executions: ${wf.totalExecutions}
+   - Avg Cost/Execution: $${wf.averageCostPerExecution.toFixed(4)}
+   - Top Models: ${wf.topModels.map((m: any) => `${m.model} (${m.percentage.toFixed(1)}%)`).join(', ')}
+`).join('')}
+
+MODEL DISTRIBUTION:
+${Object.entries(workflowContext.modelDistribution || {}).slice(0, 5).map(([model, pct]) => 
+    `- ${model}: ${(pct as number).toFixed(1)}%`
+).join('\n')}
+
+USAGE PATTERNS:
+- Average Executions/Day: ${(workflowContext.usagePatterns?.averageExecutionsPerDay || 0).toFixed(1)}
+- Cost Trend: ${workflowContext.usagePatterns?.costTrend || 'stable'}
+
+INSTRUCTIONS:
+1. Analyze the user's actual workflow patterns and identify specific optimization opportunities
+2. Provide 3-5 highly specific, actionable suggestions tailored to their workflows
+3. Focus on workflows that are most expensive or inefficient
+4. Consider their model usage patterns and suggest model switches where appropriate
+5. Suggest workflow consolidation if multiple similar workflows exist
+6. Provide caching recommendations for frequently executed workflows
+7. If ${percentage}% > 90, include upgrade suggestions but prioritize optimization first
+
+CRITICAL: Be specific. Instead of "optimize workflows", say "Consolidate 'Customer Support Automation' and 'Support Ticket Processing' workflows - they have 80% overlap and cost $X/month combined."
+
+RESPONSE FORMAT - ONLY JSON, NO OTHER TEXT:
+{
+  "suggestions": [
+    "Specific actionable suggestion 1 based on their workflow 'WorkflowName'",
+    "Specific actionable suggestion 2 mentioning actual models or costs",
+    "Specific actionable suggestion 3 with concrete steps"
+  ]
+}
+
+Return ONLY the JSON object. No explanations, no markdown formatting.`;
+    }
+
+    /**
+     * Extract suggestions from AI text response
+     */
+    private static extractSuggestionsFromText(text: string): string[] {
+        const suggestions: string[] = [];
         
+        // Try to find numbered or bulleted lists
+        const lines = text.split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            // Match numbered lists (1., 2., etc.) or bullets (-, *, •)
+            const match = trimmed.match(/^[\d\-*•]\s*\.?\s*(.+)$/);
+            if (match && match[1]) {
+                suggestions.push(match[1].trim());
+            } else if (trimmed.length > 20 && trimmed.length < 200 && !trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+                // Potential suggestion line
+                suggestions.push(trimmed);
+            }
+        }
+        
+        return suggestions.slice(0, 5);
+    }
+
+    /**
+     * Fallback suggestions when AI is unavailable
+     */
+    private static getFallbackSuggestions(
+        metric: string,
+        percentage: number,
+        workflowContext: any
+    ): string[] {
+        const suggestions: string[] = [];
+        
+        // Use workflow context if available for better fallback
+        if (workflowContext.activeWorkflows && workflowContext.activeWorkflows.length > 0) {
+            const topWorkflow = workflowContext.activeWorkflows[0];
+            if (metric === 'workflows') {
+                suggestions.push(`Review '${topWorkflow.workflowName}' - it's your most expensive workflow ($${topWorkflow.totalCost.toFixed(2)}/month)`);
+                if (workflowContext.activeWorkflows.length > 5) {
+                    suggestions.push(`You have ${workflowContext.activeWorkflows.length} active workflows. Consider consolidating similar ones.`);
+                }
+            }
+        }
+        
+        // Add metric-specific fallbacks
         if (metric === 'tokens') {
-            suggestions.push('Use prompt compression techniques');
-            suggestions.push('Switch to cheaper models for simple tasks');
-            suggestions.push('Enable semantic caching to reduce redundant calls');
+            suggestions.push('Use prompt compression techniques to reduce token usage');
+            suggestions.push('Switch to cheaper models (e.g., Claude Haiku, GPT-3.5 Turbo) for simple tasks');
+            suggestions.push('Enable semantic caching to reduce redundant API calls');
             if (percentage > 90) {
                 suggestions.push('Consider upgrading your plan for more tokens');
             }
         } else if (metric === 'requests') {
-            suggestions.push('Batch multiple operations together');
-            suggestions.push('Implement client-side caching');
-            suggestions.push('Use webhooks instead of polling');
+            suggestions.push('Batch multiple operations together to reduce request count');
+            suggestions.push('Implement client-side caching for repeated requests');
+            suggestions.push('Use webhooks instead of polling where possible');
             if (percentage > 90) {
                 suggestions.push('Upgrade your plan for higher request limits');
             }
@@ -890,9 +1425,18 @@ export class GuardrailsService {
             suggestions.push('Reduce verbose logging for non-critical operations');
             suggestions.push('Archive old logs to external storage');
             suggestions.push('Upgrade to Plus for unlimited logs');
+        } else if (metric === 'workflows') {
+            if (suggestions.length === 0) {
+                suggestions.push('Review and consolidate similar workflows');
+                suggestions.push('Archive or deactivate unused workflows');
+                suggestions.push('Consider combining multiple workflows into one');
+            }
+            if (percentage > 90) {
+                suggestions.push('Upgrade your plan for more workflow capacity');
+            }
         }
         
-        return suggestions;
+        return suggestions.slice(0, 5);
     }
 
     // ============================================================================

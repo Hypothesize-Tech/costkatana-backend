@@ -655,9 +655,12 @@ export class WorkflowController {
             // Get workflow data directly from Usage collection
             const Usage = mongoose.model('Usage');
             
-            // Get all workflow usage records for this user
+            // Get all workflow usage records for this user (both regular workflows and automation workflows)
             const workflowUsage = await Usage.find({ 
-                tags: 'workflow',
+                $or: [
+                    { tags: 'workflow' },
+                    { automationPlatform: { $exists: true, $ne: null } }
+                ],
                 userId: new mongoose.Types.ObjectId(userId)
             }).sort({ createdAt: -1 }).lean();
             
@@ -672,24 +675,54 @@ export class WorkflowController {
                 const workflowsMap = new Map();
                 
                 workflowUsage.forEach((usage: any) => {
-                    if (!usage.workflowId) return;
+                    // For automation workflows, create a unique key that combines platform, workflowId, and workflowName
+                    // This ensures workflows from the same automation platform with the same name are grouped together
+                    let workflowKey: string | null = null;
                     
-                    if (!workflowsMap.has(usage.workflowId)) {
-                        workflowsMap.set(usage.workflowId, []);
+                    if (usage.automationPlatform) {
+                        // Automation workflow: group by platform + workflowId (if exists) or workflowName
+                        if (usage.workflowId) {
+                            workflowKey = `${usage.automationPlatform}_${usage.workflowId}`;
+                        } else if (usage.workflowName) {
+                            workflowKey = `${usage.automationPlatform}_${usage.workflowName}`;
+                        } else {
+                            // Fallback: use connection ID if available
+                            workflowKey = usage.automationConnectionId 
+                                ? `${usage.automationPlatform}_conn_${usage.automationConnectionId}`
+                                : `${usage.automationPlatform}_unknown_${usage._id}`;
+                        }
+                    } else if (usage.workflowId) {
+                        // Regular workflow: use workflowId
+                        workflowKey = usage.workflowId;
+                    } else if (usage.tags && usage.tags.includes('workflow') && usage.workflowName) {
+                        // Regular workflow without workflowId but with workflowName
+                        workflowKey = `workflow_${usage.workflowName}`;
                     }
                     
-                    workflowsMap.get(usage.workflowId).push(usage);
+                    if (!workflowKey) return;
+                    
+                    if (!workflowsMap.has(workflowKey)) {
+                        workflowsMap.set(workflowKey, []);
+                    }
+                    
+                    workflowsMap.get(workflowKey).push(usage);
                 });
                 
                 // Create summary for each workflow
                 const workflowSummaries: any[] = [];
                 
                 for (const [workflowId, steps] of workflowsMap.entries()) {
-                    // Sort steps by sequence
-                    steps.sort((a: any, b: any) => a.workflowSequence - b.workflowSequence);
+                    // Sort steps by sequence or createdAt
+                    steps.sort((a: any, b: any) => {
+                        if (a.workflowSequence !== undefined && b.workflowSequence !== undefined) {
+                            return a.workflowSequence - b.workflowSequence;
+                        }
+                        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+                    });
                     
                     // Get workflow name from first step
                     const workflowName = steps[0].workflowName || 'Unknown Workflow';
+                    const automationPlatform = steps[0].automationPlatform;
                     
                     // Calculate total cost and tokens
                     const totalCost = steps.reduce((sum: number, step: any) => sum + step.cost, 0);
@@ -706,19 +739,21 @@ export class WorkflowController {
                     const summary = {
                         workflowId,
                         workflowName,
+                        automationPlatform: automationPlatform || undefined, // Add automation platform info
                         totalCost,
                         totalTokens,
                         requestCount: steps.length,
                         averageCost: totalCost / steps.length,
                         steps: steps.map((step: any) => ({
-                            step: step.workflowStep,
-                            sequence: step.workflowSequence,
+                            step: step.workflowStep || step.workflowName || 'Step',
+                            sequence: step.workflowSequence || 0,
                             cost: step.cost,
                             tokens: step.totalTokens,
-                            responseTime: step.responseTime,
+                            responseTime: step.responseTime || 0,
                             model: step.model,
                             service: step.service,
-                            timestamp: step.createdAt
+                            timestamp: step.createdAt,
+                            automationPlatform: step.automationPlatform || undefined
                         })),
                         startTime,
                         endTime,
@@ -728,6 +763,23 @@ export class WorkflowController {
                     workflowSummaries.push(summary);
                 }
                 
+                // Sort workflows by endTime (most recent first) to ensure automation workflows are included
+                workflowSummaries.sort((a, b) => {
+                    const aTime = new Date(a.endTime).getTime();
+                    const bTime = new Date(b.endTime).getTime();
+                    return bTime - aTime; // Most recent first
+                });
+
+                // Log workflow summaries for debugging
+                loggingService.info('Workflow summaries created', {
+                    requestId: _req.headers['x-request-id'] as string,
+                    userId,
+                    totalWorkflows: workflowSummaries.length,
+                    automationWorkflows: workflowSummaries.filter(w => w.automationPlatform).length,
+                    regularWorkflows: workflowSummaries.filter(w => !w.automationPlatform).length,
+                    workflowIds: workflowSummaries.map(w => ({ id: w.workflowId, name: w.workflowName, platform: w.automationPlatform }))
+                });
+                
                 // Calculate total cost across all workflows
                 const totalCost = workflowSummaries.reduce((sum, workflow) => sum + workflow.totalCost, 0);
                 
@@ -736,7 +788,9 @@ export class WorkflowController {
                     overview: {
                         totalExecutions: workflowsMap.size,
                         successRate: 95, // Assuming 95% success rate
-                        averageDuration: workflowSummaries.reduce((sum, exec) => sum + exec.duration, 0) / workflowSummaries.length,
+                        averageDuration: workflowSummaries.length > 0 
+                            ? workflowSummaries.reduce((sum, exec) => sum + exec.duration, 0) / workflowSummaries.length 
+                            : 0,
                         totalCost,
                         activeWorkflows: 0 // No active workflows in this implementation
                     },
