@@ -59,6 +59,9 @@ export interface IUsage {
     workflowName?: string;
     workflowStep?: string;
     workflowSequence?: number;
+    // Automation platform tracking
+    automationPlatform?: 'zapier' | 'make' | 'n8n';
+    automationConnectionId?: string;
     // Template usage tracking
     templateUsage?: {
         templateId: mongoose.Types.ObjectId;
@@ -208,6 +211,15 @@ const usageSchema = new Schema<IUsage>({
         type: Number,
         min: 0
     },
+    // Automation platform tracking schema
+    automationPlatform: {
+        type: String,
+        enum: ['zapier', 'make', 'n8n']
+    },
+    automationConnectionId: {
+        type: String,
+        ref: 'AutomationConnection'
+    },
     // Template usage tracking schema
     templateUsage: {
         templateId: {
@@ -261,6 +273,12 @@ usageSchema.index({ prompt: 'text', completion: 'text' });
 usageSchema.index({ 'templateUsage.templateId': 1, createdAt: -1 });
 usageSchema.index({ 'templateUsage.context': 1, createdAt: -1 });
 usageSchema.index({ userId: 1, 'templateUsage.templateId': 1, createdAt: -1 });
+
+// 8. Automation platform tracking
+usageSchema.index({ automationPlatform: 1, createdAt: -1 });
+usageSchema.index({ automationConnectionId: 1, createdAt: -1 });
+usageSchema.index({ userId: 1, automationPlatform: 1, createdAt: -1 });
+usageSchema.index({ workflowId: 1, automationPlatform: 1, createdAt: -1 });
 
 // Virtual for cost per token
 usageSchema.virtual('costPerToken').get(function () {

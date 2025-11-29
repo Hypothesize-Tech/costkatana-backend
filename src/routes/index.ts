@@ -61,6 +61,7 @@ import referenceImageRoutes from './referenceImage.routes';
 import templateAnalyticsRoutes from './templateAnalytics.routes';
 import docsAnalyticsRoutes from './docsAnalytics.routes';
 import communityRoutes from './community.routes';
+import automationRoutes from './automation.routes';
 
 const router = Router();
 
@@ -138,5 +139,6 @@ router.use('/templates', referenceImageRoutes);
 router.use('/reference-image', referenceImageRoutes);
 router.use('/docs-analytics', docsAnalyticsRoutes);
 router.use('/community', communityRoutes);
+router.use('/automation', automationRoutes);
 
 export const apiRouter = router;

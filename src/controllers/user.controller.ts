@@ -1034,6 +1034,7 @@ export class UserController {
                 permissions,
                 createdAt: new Date(),
                 expiresAt: expiresAt ? new Date(expiresAt) : undefined,
+                isActive: true,
             };
 
             user.dashboardApiKeys.push(newApiKey);
@@ -1160,7 +1161,7 @@ export class UserController {
         try {
             const userId = req.user!.id;
             const { keyId } = req.params;
-            const { name, permissions, expiresAt } = req.body;
+            const { name, permissions, expiresAt, isActive } = req.body;
 
             const user: any = await User.findById(userId);
             if (!user) {
@@ -1196,6 +1197,10 @@ export class UserController {
 
             if (expiresAt !== undefined) {
                 apiKey.expiresAt = expiresAt ? new Date(expiresAt) : undefined;
+            }
+
+            if (isActive !== undefined) {
+                apiKey.isActive = isActive;
             }
 
             await user.save();

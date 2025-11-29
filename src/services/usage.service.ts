@@ -98,6 +98,9 @@ export class UsageService {
                 workflowName: data.workflowName,
                 workflowStep: data.workflowStep,
                 workflowSequence: data.workflowSequence,
+                // Add automation platform tracking fields
+                automationPlatform: data.automationPlatform,
+                automationConnectionId: data.automationConnectionId,
                 // Add email fields
                 userEmail: data.userEmail,
                 customerEmail: data.customerEmail
