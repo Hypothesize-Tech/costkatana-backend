@@ -17,6 +17,9 @@ router.get('/provider/:provider', PricingController.getProviderPricing);
 // Compare pricing across providers (public)
 router.post('/compare', PricingController.comparePricing);
 
+// Get comparison table data (public) - must come before /models to avoid route conflict
+router.get('/models/comparison-table', PricingController.getComparisonTable);
+
 // Get all available models for comparison (public)
 router.get('/models', PricingController.getAvailableModels);
 
