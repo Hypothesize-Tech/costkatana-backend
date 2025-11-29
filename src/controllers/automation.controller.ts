@@ -2,6 +2,10 @@ import { Response } from 'express';
 import { AutomationService } from '../services/automation.service';
 import { AutomationConnection } from '../models/AutomationConnection';
 import { loggingService } from '../services/logging.service';
+import { GuardrailsService } from '../services/guardrails.service';
+import { WorkflowOptimizationService } from '../services/workflowOptimization.service';
+import { WorkflowAlertingService } from '../services/workflowAlerting.service';
+import { WorkflowVersioningService } from '../services/workflowVersioning.service';
 import mongoose from 'mongoose';
 
 export class AutomationController {
@@ -145,10 +149,29 @@ export class AutomationController {
                 });
             }
 
+            // Check workflow quota before creating connection
+            const quotaCheck = await GuardrailsService.checkWorkflowQuota(userId);
+            if (quotaCheck && quotaCheck.type === 'hard') {
+                return res.status(403).json({
+                    success: false,
+                    message: quotaCheck.message,
+                    error: 'WORKFLOW_QUOTA_EXCEEDED',
+                    quota: {
+                        current: quotaCheck.current,
+                        limit: quotaCheck.limit,
+                        percentage: quotaCheck.percentage
+                    },
+                    suggestions: quotaCheck.suggestions
+                });
+            }
+
             // Generate connection ID and webhook URL
             const connectionId = AutomationService.generateConnectionId();
             const webhookUrl = AutomationService.generateWebhookUrl(connectionId);
 
+            // Get workflow quota status and store in metadata
+            const quotaStatus = await AutomationService.getWorkflowQuotaStatus(userId);
+            
             // Create connection with explicit _id
             const connection = new AutomationConnection({
                 _id: connectionId,
@@ -158,7 +181,15 @@ export class AutomationController {
                 description: description?.trim(),
                 webhookUrl,
                 apiKey: apiKey?.trim(),
-                status: 'active'
+                status: 'active',
+                metadata: {
+                    workflowQuota: {
+                        current: quotaStatus.current,
+                        limit: quotaStatus.limit,
+                        percentage: quotaStatus.percentage,
+                        plan: quotaStatus.plan
+                    }
+                }
             });
 
             await connection.save();
@@ -518,6 +549,48 @@ export class AutomationController {
     }
 
     /**
+     * Get orchestration overhead analytics
+     * GET /api/automation/orchestration-overhead
+     */
+    static async getOrchestrationOverhead(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { startDate, endDate, platform } = req.query;
+
+            const analytics = await AutomationService.getOrchestrationOverheadAnalytics(userId, {
+                startDate: startDate ? new Date(startDate as string) : undefined,
+                endDate: endDate ? new Date(endDate as string) : undefined,
+                platform: platform && ['zapier', 'make', 'n8n'].includes(platform as string) 
+                    ? platform as 'zapier' | 'make' | 'n8n' 
+                    : undefined
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: analytics
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting orchestration overhead', {
+                component: 'AutomationController',
+                operation: 'getOrchestrationOverhead',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get orchestration overhead'
+            });
+        }
+    }
+
+    /**
      * Get automation statistics
      * GET /api/automation/stats
      */
@@ -547,6 +620,421 @@ export class AutomationController {
             return res.status(500).json({
                 success: false,
                 message: error.message || 'Failed to get stats'
+            });
+        }
+    }
+
+    /**
+     * Get workflow quota status
+     * GET /api/automation/quota
+     */
+    static async getWorkflowQuota(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const quotaStatus = await AutomationService.getWorkflowQuotaStatus(userId);
+
+            return res.status(200).json({
+                success: true,
+                data: quotaStatus
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow quota', {
+                component: 'AutomationController',
+                operation: 'getWorkflowQuota',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow quota'
+            });
+        }
+    }
+
+    /**
+     * Get workflow optimization recommendations
+     * GET /api/automation/workflows/:workflowId/recommendations
+     */
+    static async getWorkflowRecommendations(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const { startDate, endDate } = req.query;
+
+            const recommendations = await WorkflowOptimizationService.getWorkflowOptimizationRecommendations(
+                userId,
+                workflowId,
+                startDate ? new Date(startDate as string) : undefined,
+                endDate ? new Date(endDate as string) : undefined
+            );
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    workflowId,
+                    recommendations,
+                    totalPotentialSavings: recommendations.reduce((sum, r) => sum + r.potentialSavings, 0)
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow recommendations', {
+                component: 'AutomationController',
+                operation: 'getWorkflowRecommendations',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow recommendations'
+            });
+        }
+    }
+
+    /**
+     * Get workflow performance metrics
+     * GET /api/automation/workflows/:workflowId/metrics
+     */
+    static async getWorkflowMetrics(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const { startDate, endDate } = req.query;
+
+            const metrics = await WorkflowOptimizationService.getWorkflowPerformanceMetrics(
+                userId,
+                workflowId,
+                startDate ? new Date(startDate as string) : undefined,
+                endDate ? new Date(endDate as string) : undefined
+            );
+
+            if (!metrics) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Workflow not found or has no usage data'
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: metrics
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow metrics', {
+                component: 'AutomationController',
+                operation: 'getWorkflowMetrics',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow metrics'
+            });
+        }
+    }
+
+    /**
+     * Get all workflow recommendations
+     * GET /api/automation/recommendations
+     */
+    static async getAllRecommendations(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { startDate, endDate } = req.query;
+
+            const recommendations = await WorkflowOptimizationService.getAllWorkflowRecommendations(
+                userId,
+                startDate ? new Date(startDate as string) : undefined,
+                endDate ? new Date(endDate as string) : undefined
+            );
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    workflows: recommendations,
+                    totalWorkflows: recommendations.length,
+                    totalPotentialSavings: recommendations.reduce((sum, w) => sum + w.totalPotentialSavings, 0)
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting all recommendations', {
+                component: 'AutomationController',
+                operation: 'getAllRecommendations',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get recommendations'
+            });
+        }
+    }
+
+    /**
+     * Get workflow ROI metrics
+     * GET /api/automation/workflows/:workflowId/roi
+     */
+    static async getWorkflowROI(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const { startDate, endDate } = req.query;
+
+            if (!startDate || !endDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'startDate and endDate are required'
+                });
+            }
+
+            const { ROIMetricsService } = await import('../services/roiMetrics.service');
+            const roi = await ROIMetricsService.calculateWorkflowROI(
+                userId,
+                workflowId,
+                new Date(startDate as string),
+                new Date(endDate as string)
+            );
+
+            return res.status(200).json({
+                success: true,
+                data: roi
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow ROI', {
+                component: 'AutomationController',
+                operation: 'getWorkflowROI',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow ROI'
+            });
+        }
+    }
+
+    /**
+     * Get workflow ROI comparison
+     * GET /api/automation/workflows/roi-comparison
+     */
+    static async getWorkflowROIComparison(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { startDate, endDate } = req.query;
+
+            if (!startDate || !endDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'startDate and endDate are required'
+                });
+            }
+
+            const { ROIMetricsService } = await import('../services/roiMetrics.service');
+            const comparison = await ROIMetricsService.getWorkflowROIComparison(
+                userId,
+                new Date(startDate as string),
+                new Date(endDate as string)
+            );
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    workflows: comparison,
+                    summary: {
+                        totalWorkflows: comparison.length,
+                        averageEfficiencyScore: comparison.length > 0
+                            ? comparison.reduce((sum, w) => sum + w.efficiencyScore, 0) / comparison.length
+                            : 0,
+                        totalCost: comparison.reduce((sum, w) => sum + w.totalCost, 0),
+                        totalExecutions: comparison.reduce((sum, w) => sum + w.totalExecutions, 0)
+                    }
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow ROI comparison', {
+                component: 'AutomationController',
+                operation: 'getWorkflowROIComparison',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow ROI comparison'
+            });
+        }
+    }
+
+    /**
+     * Check workflow alerts
+     * POST /api/automation/workflows/:workflowId/check-alerts
+     */
+    static async checkWorkflowAlerts(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const config = req.body;
+
+            const alerts = await WorkflowAlertingService.checkAllWorkflowAlerts(userId, {
+                ...config,
+                workflowId: workflowId || config.workflowId
+            });
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    alerts,
+                    count: alerts.length
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Error checking workflow alerts', {
+                component: 'AutomationController',
+                operation: 'checkWorkflowAlerts',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to check workflow alerts'
+            });
+        }
+    }
+
+    /**
+     * Get workflow version history
+     * GET /api/automation/workflows/:workflowId/versions
+     */
+    static async getWorkflowVersions(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const versions = await WorkflowVersioningService.getWorkflowVersionHistory(userId, workflowId);
+
+            return res.status(200).json({
+                success: true,
+                data: versions
+            });
+        } catch (error: any) {
+            loggingService.error('Error getting workflow versions', {
+                component: 'AutomationController',
+                operation: 'getWorkflowVersions',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to get workflow versions'
+            });
+        }
+    }
+
+    /**
+     * Compare workflow versions
+     * GET /api/automation/workflows/:workflowId/versions/compare
+     */
+    static async compareWorkflowVersions(req: any, res: Response): Promise<Response> {
+        try {
+            const userId = req.user?.id || req.userId;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Unauthorized'
+                });
+            }
+
+            const { workflowId } = req.params;
+            const { version1, version2 } = req.query;
+
+            if (!version1 || !version2) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'version1 and version2 query parameters are required'
+                });
+            }
+
+            const comparison = await WorkflowVersioningService.compareWorkflowVersions(
+                userId,
+                workflowId,
+                parseInt(version1 as string),
+                parseInt(version2 as string)
+            );
+
+            if (!comparison) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'One or both versions not found'
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: comparison
+            });
+        } catch (error: any) {
+            loggingService.error('Error comparing workflow versions', {
+                component: 'AutomationController',
+                operation: 'compareWorkflowVersions',
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: error.message || 'Failed to compare workflow versions'
             });
         }
     }

@@ -30,3 +30,5 @@ export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserM
 export { AILog, IAILog } from './AILog';
 export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversation';
 export { LogQueryAudit, ILogQueryAudit } from './LogQueryAudit';
+export { AutomationConnection, IAutomationConnection } from './AutomationConnection';
+export { WorkflowVersion, IWorkflowVersion } from './WorkflowVersion';

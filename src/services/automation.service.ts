@@ -3,6 +3,8 @@ import { AutomationConnection, IAutomationConnection } from '../models/Automatio
 import { Usage, IUsage } from '../models/Usage';
 import { UsageService } from './usage.service';
 import { loggingService } from './logging.service';
+import { GuardrailsService } from './guardrails.service';
+import { User } from '../models/User';
 import crypto from 'crypto';
 
 export interface AutomationWebhookPayload {
@@ -90,10 +92,93 @@ export interface AutomationStats {
 
 export class AutomationService {
     /**
+     * Calculate orchestration overhead cost for automation platforms
+     * This includes platform run fees, data operations, webhook volume, etc.
+     */
+    private static calculateOrchestrationCost(
+        platform: 'zapier' | 'make' | 'n8n',
+        stepType: string,
+        isAIStep: boolean,
+        totalCost: number
+    ): { orchestrationCost: number; overheadPercentage: number } {
+        // Platform-specific overhead rates
+        // These are estimates based on typical automation platform pricing
+        const platformOverheadRates: Record<string, { base: number; perStep: number; aiStepMultiplier: number; stepTypeMultipliers: Record<string, number> }> = {
+            zapier: {
+                base: 0.0001, // Base cost per execution
+                perStep: 0.00005, // Additional cost per step
+                aiStepMultiplier: 1.2, // AI steps may have higher overhead
+                stepTypeMultipliers: {
+                    'webhook': 1.0,
+                    'api_call': 1.1,
+                    'data_transform': 0.9,
+                    'filter': 0.8,
+                    'delay': 0.5,
+                    'default': 1.0
+                }
+            },
+            make: {
+                base: 0.0002, // Make typically charges per operation
+                perStep: 0.0001,
+                aiStepMultiplier: 1.3,
+                stepTypeMultipliers: {
+                    'webhook': 1.0,
+                    'api_call': 1.2,
+                    'data_transform': 1.0,
+                    'filter': 0.9,
+                    'delay': 0.6,
+                    'default': 1.0
+                }
+            },
+            n8n: {
+                base: 0.00005, // Self-hosted n8n has lower overhead, cloud has similar to Make
+                perStep: 0.00003,
+                aiStepMultiplier: 1.1,
+                stepTypeMultipliers: {
+                    'webhook': 0.9,
+                    'api_call': 1.0,
+                    'data_transform': 0.8,
+                    'filter': 0.7,
+                    'delay': 0.4,
+                    'default': 1.0
+                }
+            }
+        };
+
+        const rates = platformOverheadRates[platform] || platformOverheadRates.zapier;
+        let orchestrationCost = rates.base;
+
+        // Add per-step cost
+        orchestrationCost += rates.perStep;
+
+        // Apply step type multiplier
+        const stepTypeMultiplier = rates.stepTypeMultipliers[stepType] || rates.stepTypeMultipliers['default'];
+        orchestrationCost *= stepTypeMultiplier;
+
+        // Apply multiplier for AI steps (they often have more data processing)
+        if (isAIStep) {
+            orchestrationCost *= rates.aiStepMultiplier;
+        }
+
+        // Calculate overhead percentage
+        const totalWithOverhead = totalCost + orchestrationCost;
+        const overheadPercentage = totalWithOverhead > 0 
+            ? (orchestrationCost / totalWithOverhead) * 100 
+            : 0;
+
+        return {
+            orchestrationCost: Math.round(orchestrationCost * 100000) / 100000, // Round to 5 decimal places
+            overheadPercentage: Math.round(overheadPercentage * 100) / 100 // Round to 2 decimal places
+        };
+    }
+
+    /**
      * Generate unique webhook URL for a connection
      */
     static generateWebhookUrl(connectionId: string): string {
-        const baseUrl = 'http://localhost:8000';
+        const baseUrl = process.env.NODE_ENV === 'development' 
+            ? 'http://localhost:8000' 
+            : 'https://cost-katana-backend.store';
         const webhookPath = `/api/automation/webhook/${connectionId}`;
         return `${baseUrl}${webhookPath}`;
     }
@@ -455,6 +540,60 @@ export class AutomationService {
     }
 
     /**
+     * Extract and store workflow metadata from webhook payload
+     */
+    private static extractWorkflowMetadata(
+        payload: AutomationWebhookPayload | AutomationBatchWebhookPayload
+    ): {
+        stepCount: number;
+        aiStepCount: number;
+        nonAIStepCount: number;
+        stepTypes: Array<'ai' | 'action' | 'filter' | 'formatter' | 'webhook' | 'other'>;
+        triggerType?: 'scheduled' | 'webhook' | 'polling' | 'manual';
+        hasLoops?: boolean;
+        hasConcurrentBranches?: boolean;
+        complexityScore: number;
+    } {
+        const isBatch = 'steps' in payload && Array.isArray(payload.steps);
+        const steps = isBatch ? payload.steps : [payload as AutomationWebhookPayload];
+
+        const stepTypes = new Set<string>();
+        let aiStepCount = 0;
+        let nonAIStepCount = 0;
+
+        steps.forEach(step => {
+            const stepType = step.stepType || (step.isAIStep !== false ? 'ai' : 'other');
+            stepTypes.add(stepType);
+            if (step.isAIStep !== false) {
+                aiStepCount++;
+            } else {
+                nonAIStepCount++;
+            }
+        });
+
+        // Calculate complexity score (0-100)
+        // Factors: step count, AI steps, step variety
+        const stepCount = steps.length;
+        const stepVariety = stepTypes.size;
+        const complexityScore = Math.min(100, 
+            (stepCount * 5) + // More steps = more complex
+            (aiStepCount * 3) + // AI steps add complexity
+            (stepVariety * 10) // More step types = more complex
+        );
+
+        return {
+            stepCount,
+            aiStepCount,
+            nonAIStepCount,
+            stepTypes: Array.from(stepTypes) as Array<'ai' | 'action' | 'filter' | 'formatter' | 'webhook' | 'other'>,
+            triggerType: payload.metadata?.triggerType || 'webhook',
+            hasLoops: payload.metadata?.hasLoops || false,
+            hasConcurrentBranches: payload.metadata?.hasConcurrentBranches || false,
+            complexityScore: Math.round(complexityScore)
+        };
+    }
+
+    /**
      * Process webhook data and create usage record(s)
      * Supports both single step and batch/multi-step payloads
      */
@@ -500,6 +639,14 @@ export class AutomationService {
                 }
             }
 
+            // Calculate orchestration overhead
+            const overhead = this.calculateOrchestrationCost(
+                normalized.platform,
+                normalized.stepType || 'other',
+                normalized.isAIStep !== false,
+                normalized.cost
+            );
+
             // Create usage record
             const usageData: any = {
                 userId,
@@ -522,7 +669,9 @@ export class AutomationService {
                 workflowName: normalized.workflowName,
                 workflowStep: normalized.workflowStep,
                 automationPlatform: normalized.platform,
-                automationConnectionId: connectionId || undefined
+                automationConnectionId: connectionId || undefined,
+                orchestrationCost: overhead.orchestrationCost,
+                orchestrationOverheadPercentage: overhead.overheadPercentage
             };
 
             // Track usage
@@ -542,14 +691,64 @@ export class AutomationService {
                 connection.stats.averageCostPerRequest = connection.stats.totalCost / connection.stats.totalRequests;
                 connection.stats.averageTokensPerRequest = connection.stats.totalTokens / connection.stats.totalRequests;
                 
-                // Update metadata with last workflow name
-                if (normalized.workflowName) {
-                    connection.metadata = {
-                        ...connection.metadata,
-                        lastWorkflowName: normalized.workflowName
-                    };
-                }
+                // Extract and update workflow metadata
+                const workflowMetadata = this.extractWorkflowMetadata(payload);
+                
+                // Update metadata with last workflow name and workflow metadata
+                connection.metadata = {
+                    ...connection.metadata,
+                    lastWorkflowName: normalized.workflowName,
+                    workflowMetadata: {
+                        ...connection.metadata?.workflowMetadata,
+                        ...workflowMetadata
+                    }
+                };
                 await connection.save();
+            }
+
+            // Trigger workflow alert checks and version tracking in background (non-blocking)
+            if (normalized.workflowId) {
+                setImmediate(() => {
+                    (async () => {
+                        try {
+                            const { WorkflowAlertingService } = await import('./workflowAlerting.service');
+                            const { WorkflowVersioningService } = await import('./workflowVersioning.service');
+                            
+                            // Check alerts in parallel
+                            const alertPromises = [
+                                WorkflowAlertingService.checkWorkflowSpikeAlerts(userId, normalized.workflowId),
+                                WorkflowAlertingService.checkWorkflowInefficiencyAlerts(userId, normalized.workflowId),
+                                WorkflowAlertingService.checkWorkflowFailureAlerts(userId, normalized.workflowId)
+                            ];
+                            
+                            // Track workflow version if structure metadata is available
+                            const versionPromise = connection?.metadata?.workflowMetadata
+                                ? WorkflowVersioningService.createWorkflowVersion(
+                                      userId,
+                                      normalized.workflowId,
+                                      normalized.workflowName,
+                                      normalized.platform,
+                                      {
+                                          stepCount: connection.metadata.workflowMetadata.stepCount ?? 0,
+                                          aiStepCount: connection.metadata.workflowMetadata.aiStepCount ?? 0,
+                                          stepTypes: connection.metadata.workflowMetadata.stepTypes ?? [],
+                                          complexityScore: connection.metadata.workflowMetadata.complexityScore ?? 0
+                                      }
+                                  )
+                                : Promise.resolve(null);
+                            
+                            await Promise.all([...alertPromises, versionPromise]);
+                        } catch (error) {
+                            // Log but don't fail the webhook processing
+                            loggingService.error('Error in background workflow processing', {
+                                component: 'AutomationService',
+                                operation: 'processWebhookData',
+                                error: error instanceof Error ? error.message : String(error),
+                                workflowId: normalized.workflowId
+                            });
+                        }
+                    })();
+                });
             }
 
             loggingService.info('Automation webhook processed successfully', {
@@ -633,6 +832,14 @@ export class AutomationService {
                     normalized.workflowSequence = i + 1;
                 }
 
+                // Calculate orchestration overhead for this step
+                const overhead = this.calculateOrchestrationCost(
+                    platform,
+                    normalized.stepType || 'other',
+                    normalized.isAIStep !== false,
+                    normalized.cost
+                );
+
                 // Create usage record for this step
                 const usageData: any = {
                     userId,
@@ -662,7 +869,9 @@ export class AutomationService {
                     workflowStep: normalized.workflowStep,
                     workflowSequence: normalized.workflowSequence,
                     automationPlatform: platform,
-                    automationConnectionId: connectionId || undefined
+                    automationConnectionId: connectionId || undefined,
+                    orchestrationCost: overhead.orchestrationCost,
+                    orchestrationOverheadPercentage: overhead.overheadPercentage
                 };
 
                 const usage = await UsageService.trackUsage(usageData);
@@ -683,13 +892,40 @@ export class AutomationService {
                 connection.stats.averageCostPerRequest = connection.stats.totalCost / connection.stats.totalRequests;
                 connection.stats.averageTokensPerRequest = connection.stats.totalTokens / connection.stats.totalRequests;
                 
+                // Extract and update workflow metadata from batch payload
+                const workflowMetadata = this.extractWorkflowMetadata(batchPayload);
+                
                 if (workflowName) {
                     connection.metadata = {
                         ...connection.metadata,
-                        lastWorkflowName: workflowName
+                        lastWorkflowName: workflowName,
+                        workflowMetadata: {
+                            ...connection.metadata?.workflowMetadata,
+                            ...workflowMetadata
+                        }
                     };
                 }
                 await connection.save();
+            }
+
+            // Trigger workflow alert checks in background (non-blocking)
+            if (workflowId) {
+                setImmediate(async () => {
+                    try {
+                        const { WorkflowAlertingService } = await import('./workflowAlerting.service');
+                        await WorkflowAlertingService.checkWorkflowSpikeAlerts(userId, workflowId);
+                        await WorkflowAlertingService.checkWorkflowInefficiencyAlerts(userId, workflowId);
+                        await WorkflowAlertingService.checkWorkflowFailureAlerts(userId, workflowId);
+                    } catch (error) {
+                        // Log but don't fail the webhook processing
+                        loggingService.error('Error checking workflow alerts in background', {
+                            component: 'AutomationService',
+                            operation: 'processBatchWebhookData',
+                            error: error instanceof Error ? error.message : String(error),
+                            workflowId
+                        });
+                    }
+                });
             }
 
             loggingService.info('Automation batch webhook processed successfully', {
@@ -712,6 +948,95 @@ export class AutomationService {
                 error: error instanceof Error ? error.message : String(error),
                 userId,
                 connectionId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get orchestration overhead analytics
+     */
+    static async getOrchestrationOverheadAnalytics(
+        userId: string,
+        options: {
+            startDate?: Date;
+            endDate?: Date;
+            platform?: 'zapier' | 'make' | 'n8n';
+        } = {}
+    ): Promise<{
+        totalOrchestrationCost: number;
+        totalAICost: number;
+        totalCost: number;
+        averageOverheadPercentage: number;
+        platformBreakdown: Array<{
+            platform: string;
+            orchestrationCost: number;
+            aiCost: number;
+            totalCost: number;
+            overheadPercentage: number;
+        }>;
+    }> {
+        try {
+            const match: any = {
+                userId: new mongoose.Types.ObjectId(userId),
+                automationPlatform: { $exists: true, $ne: null },
+                orchestrationCost: { $exists: true, $gt: 0 }
+            };
+
+            if (options.startDate || options.endDate) {
+                match.createdAt = {};
+                if (options.startDate) match.createdAt.$gte = options.startDate;
+                if (options.endDate) match.createdAt.$lte = options.endDate;
+            }
+
+            if (options.platform) {
+                match.automationPlatform = options.platform;
+            }
+
+            const analytics = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: '$automationPlatform',
+                        totalOrchestrationCost: { $sum: '$orchestrationCost' },
+                        totalAICost: { $sum: '$cost' },
+                        totalCost: { $sum: { $add: ['$cost', { $ifNull: ['$orchestrationCost', 0] }] } },
+                        avgOverheadPercentage: { $avg: '$orchestrationOverheadPercentage' },
+                        count: { $sum: 1 }
+                    }
+                }
+            ]);
+
+            const platformBreakdown = analytics.map((item: any) => ({
+                platform: item._id,
+                orchestrationCost: item.totalOrchestrationCost || 0,
+                aiCost: item.totalAICost || 0,
+                totalCost: item.totalCost || 0,
+                overheadPercentage: item.totalCost > 0 
+                    ? ((item.totalOrchestrationCost || 0) / item.totalCost) * 100 
+                    : 0
+            }));
+
+            const totalOrchestrationCost = platformBreakdown.reduce((sum, p) => sum + p.orchestrationCost, 0);
+            const totalAICost = platformBreakdown.reduce((sum, p) => sum + p.aiCost, 0);
+            const totalCost = totalOrchestrationCost + totalAICost;
+            const averageOverheadPercentage = totalCost > 0 
+                ? (totalOrchestrationCost / totalCost) * 100 
+                : 0;
+
+            return {
+                totalOrchestrationCost,
+                totalAICost,
+                totalCost,
+                averageOverheadPercentage: Math.round(averageOverheadPercentage * 100) / 100,
+                platformBreakdown
+            };
+        } catch (error) {
+            loggingService.error('Error getting orchestration overhead analytics', {
+                component: 'AutomationService',
+                operation: 'getOrchestrationOverheadAnalytics',
+                error: error instanceof Error ? error.message : String(error),
+                userId
             });
             throw error;
         }
@@ -980,6 +1305,74 @@ export class AutomationService {
             loggingService.error('Error getting automation stats', {
                 component: 'AutomationService',
                 operation: 'getAutomationStats',
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get workflow quota status for a user
+     */
+    static async getWorkflowQuotaStatus(userId: string): Promise<{
+        current: number;
+        limit: number;
+        percentage: number;
+        plan: string;
+        canCreate: boolean;
+        violation?: {
+            type: string;
+            message: string;
+            suggestions: string[];
+        };
+    }> {
+        try {
+            const user = await User.findById(userId);
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            const planName = user.subscription?.plan || 'free';
+            
+            // Count active automation connections
+            const activeConnections = await AutomationConnection.countDocuments({
+                userId: new mongoose.Types.ObjectId(userId),
+                status: 'active'
+            });
+
+            // Get plan limits - access through type assertion (temporary until we add a getter)
+            const planLimits = (GuardrailsService as any).SUBSCRIPTION_PLANS?.[planName];
+            if (!planLimits) {
+                throw new Error('Unknown subscription plan');
+            }
+
+            const current = activeConnections;
+            const limit = planLimits.workflows === -1 ? Infinity : planLimits.workflows;
+            const limitValue = limit === Infinity ? -1 : limit;
+            const percentage = limit === Infinity ? 0 : (current / limit) * 100;
+            const canCreate = limit === Infinity || current < limit;
+
+            // Check for violations
+            const quotaCheck = await GuardrailsService.checkWorkflowQuota(userId);
+            const violation = quotaCheck ? {
+                type: quotaCheck.type,
+                message: quotaCheck.message,
+                suggestions: quotaCheck.suggestions
+            } : undefined;
+
+            return {
+                current,
+                limit: limitValue,
+                percentage,
+                plan: planName,
+                canCreate,
+                violation
+            };
+        } catch (error) {
+            loggingService.error('Error getting workflow quota status', {
+                component: 'AutomationService',
+                operation: 'getWorkflowQuotaStatus',
                 error: error instanceof Error ? error.message : String(error),
                 userId
             });

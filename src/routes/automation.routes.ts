@@ -24,6 +24,24 @@ router.get('/connections/:id/stats', AutomationController.getConnectionStats);
 // Analytics and statistics
 router.get('/analytics', AutomationController.getAnalytics);
 router.get('/stats', AutomationController.getStats);
+router.get('/orchestration-overhead', AutomationController.getOrchestrationOverhead);
+
+// Workflow quota
+router.get('/quota', AutomationController.getWorkflowQuota);
+
+// Workflow optimization
+router.get('/recommendations', AutomationController.getAllRecommendations);
+router.get('/workflows/:workflowId/recommendations', AutomationController.getWorkflowRecommendations);
+router.get('/workflows/:workflowId/metrics', AutomationController.getWorkflowMetrics);
+router.get('/workflows/:workflowId/roi', AutomationController.getWorkflowROI);
+router.get('/workflows/roi-comparison', AutomationController.getWorkflowROIComparison);
+
+// Workflow alerting
+router.post('/workflows/:workflowId/check-alerts', AutomationController.checkWorkflowAlerts);
+
+// Workflow versioning
+router.get('/workflows/:workflowId/versions', AutomationController.getWorkflowVersions);
+router.get('/workflows/:workflowId/versions/compare', AutomationController.compareWorkflowVersions);
 
 export default router;
 

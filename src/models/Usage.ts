@@ -62,6 +62,9 @@ export interface IUsage {
     // Automation platform tracking
     automationPlatform?: 'zapier' | 'make' | 'n8n';
     automationConnectionId?: string;
+    // Orchestration overhead tracking
+    orchestrationCost?: number; // Cost of automation platform itself (run fees, data ops, etc.)
+    orchestrationOverheadPercentage?: number; // Percentage of total cost that is orchestration overhead
     // Template usage tracking
     templateUsage?: {
         templateId: mongoose.Types.ObjectId;
@@ -219,6 +222,17 @@ const usageSchema = new Schema<IUsage>({
     automationConnectionId: {
         type: String,
         ref: 'AutomationConnection'
+    },
+    // Orchestration overhead tracking schema
+    orchestrationCost: {
+        type: Number,
+        min: 0,
+        default: 0
+    },
+    orchestrationOverheadPercentage: {
+        type: Number,
+        min: 0,
+        max: 100
     },
     // Template usage tracking schema
     templateUsage: {

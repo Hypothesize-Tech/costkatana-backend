@@ -13,6 +13,23 @@ export interface IAutomationConnection extends Document {
     metadata?: {
         workflowCount?: number;
         lastWorkflowName?: string;
+        workflowQuota?: {
+            current: number;
+            limit: number;
+            percentage: number;
+            plan: string;
+        };
+        // Integration metadata for workflow analysis
+        workflowMetadata?: {
+            stepCount?: number;
+            aiStepCount?: number;
+            nonAIStepCount?: number;
+            stepTypes?: Array<'ai' | 'action' | 'filter' | 'formatter' | 'webhook' | 'other'>;
+            triggerType?: 'scheduled' | 'webhook' | 'polling' | 'manual';
+            hasLoops?: boolean;
+            hasConcurrentBranches?: boolean;
+            complexityScore?: number; // 0-100
+        };
         [key: string]: any;
     };
     
