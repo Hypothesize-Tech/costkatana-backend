@@ -32,3 +32,5 @@ export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversat
 export { LogQueryAudit, ILogQueryAudit } from './LogQueryAudit';
 export { AutomationConnection, IAutomationConnection } from './AutomationConnection';
 export { WorkflowVersion, IWorkflowVersion } from './WorkflowVersion';
+export { GitHubCodeChunkModel, IGitHubCodeChunk } from './GitHubCodeChunk';
+export { SymbolIndexModel, ISymbolIndex } from './SymbolIndex';
