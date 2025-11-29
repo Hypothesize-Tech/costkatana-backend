@@ -450,11 +450,14 @@ ${content.substring(0, 3000)}${content.length > 3000 ? '\n... (truncated for bre
 `).join('\n')}
 
 ⚠️ CRITICAL: When updating these files, you MUST:
-1. Keep ALL existing code exactly as is
-2. Only ADD new CostKatana-related imports at the top
-3. Only ADD initialization calls where appropriate
+1. Keep ALL existing code exactly as is - NO EXCEPTIONS
+2. Only ADD new CostKatana-related imports at the top (after existing imports)
+3. Only ADD initialization calls where appropriate (after existing initialization)
 4. Do NOT remove, modify, or replace ANY existing functionality
 5. Do NOT change existing imports, middleware, routes, or handlers
+6. Do NOT comment out ANY existing code - ALL existing code must remain active
+7. Do NOT add "PRESERVE" or "EXISTING CODE" comments - just keep the code as-is
+8. The updated file should contain: [ALL ORIGINAL CODE] + [NEW CostKatana imports] + [NEW CostKatana initialization]
 ` : ''}
 
 Selected Features:
@@ -491,21 +494,61 @@ Before generating any file path, ask yourself:
 2. Does the file extension match .${fileExtension}? (Must be YES)
 3. Is the file in a source directory (src/, not dist/)? (Must be YES)
 
-CODE PRESERVATION (MANDATORY):
+CODE PRESERVATION (MANDATORY - ZERO TOLERANCE):
 - DO NOT DELETE any existing code, routes, or functionality
 - DO NOT REMOVE any imports, middleware, or configurations
 - DO NOT MODIFY existing function implementations
-- ONLY ADD CostKatana-related code:
-  * Import statement at the top: import costKatanaService from './costkatana${analysis.language === 'typescript' ? '' : '.js'}';
-  * Initialization call: costKatanaService.initialize();
-  * Optional: Add middleware if auto-tracking is enabled
-- PRESERVE ALL existing:
-  * Routes and route handlers
-  * Middleware configurations
-  * Database connections
-  * Error handlers
-  * Event listeners
-  * All existing imports and exports
+- DO NOT COMMENT OUT any existing code - keep everything active
+- DO NOT add "// EXISTING CODE PRESERVED" or similar comments
+- ONLY ADD CostKatana-related code (append, don't replace):
+  * Add import statement AFTER existing imports: import costKatanaService from './costkatana${analysis.language === 'typescript' ? '' : '.js'}';
+  * Add initialization call AFTER existing initialization: await costKatanaService.initialize();
+  * Optional: Add middleware AFTER existing middleware if auto-tracking is enabled
+- PRESERVE ALL existing code EXACTLY as-is:
+  * All routes and route handlers (keep 100% of them)
+  * All middleware configurations (keep 100% of them)
+  * All database connections (keep 100% of them)
+  * All error handlers (keep 100% of them)
+  * All event listeners (keep 100% of them)
+  * All existing imports and exports (keep 100% of them)
+  * All existing functions, classes, and logic (keep 100% of them)
+
+EXAMPLE OF CORRECT UPDATE:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BEFORE (original file):
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+// ... other existing imports ...
+
+const app = express();
+app.use(cors());
+app.use(helmet());
+// ... all existing middleware ...
+
+app.get('/api/users', (req, res) => {
+  // existing route handler
+});
+
+// AFTER (correct update - ONLY ADD, NEVER REMOVE):
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+// ... other existing imports ...
+import costKatanaService from './costkatana'; // ← ONLY ADD THIS
+
+const app = express();
+app.use(cors());
+app.use(helmet());
+// ... all existing middleware ...
+
+// Initialize CostKatana
+await costKatanaService.initialize(); // ← ONLY ADD THIS
+
+app.get('/api/users', (req, res) => {
+  // existing route handler - UNCHANGED
+});
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 CODE QUALITY REQUIREMENTS:
 ${analysis.language === 'typescript' ? `
@@ -945,14 +988,32 @@ Return a JSON object with this exact structure:
                 file.content = file.content.replace(/YOUR_API_KEY_HERE/gi, apiKey);
             });
 
-            // CRITICAL VALIDATION: Check for code deletion in server.ts/server.js files
+            // CRITICAL VALIDATION: Check for code deletion or excessive commenting
             result.files.forEach(file => {
                 const lowerPath = file.path.toLowerCase();
+                const content = file.content;
+                const lineCount = content.split('\n').length;
+                
+                // Check for excessive commented-out code (more than 20% of lines are preservation comments)
+                const commentPatterns = [
+                    /^\s*\/\/.*PRESERVE/i,
+                    /^\s*\/\/.*EXISTING.*CODE/i,
+                    /^\s*\/\/.*\[PRESERVE/i,
+                    /^\s*\/\/.*\[EXISTING/i,
+                    /^\s*#.*PRESERVE/i,
+                    /^\s*#.*EXISTING.*CODE/i
+                ];
+                
+                const commentedLines = content.split('\n').filter(line => {
+                    const trimmed = line.trim();
+                    return commentPatterns.some(pattern => pattern.test(trimmed));
+                }).length;
+                
+                const commentPercentage = lineCount > 0 ? (commentedLines / lineCount) * 100 : 0;
+                
+                // Check for suspicious patterns indicating code deletion (only for server files)
+                const missingPatterns: string[] = [];
                 if (lowerPath.includes('server') && (lowerPath.endsWith('.ts') || lowerPath.endsWith('.js'))) {
-                    const content = file.content;
-                    const lineCount = content.split('\n').length;
-                    
-                    // Check for suspicious patterns indicating code deletion
                     const suspiciousPatterns = [
                         { pattern: /app\.use\(['"]\/api\//g, name: 'API routes', minOccurrences: 1 },
                         { pattern: /app\.listen\(/g, name: 'Server listen', minOccurrences: 1 },
@@ -961,7 +1022,6 @@ Return a JSON object with this exact structure:
                         { pattern: /import.*from/g, name: 'Import statements', minOccurrences: 3 }
                     ];
                     
-                    const missingPatterns: string[] = [];
                     suspiciousPatterns.forEach(({ pattern, name, minOccurrences }) => {
                         const matches = content.match(pattern);
                         const count = matches ? matches.length : 0;
@@ -969,18 +1029,46 @@ Return a JSON object with this exact structure:
                             missingPatterns.push(`${name} (expected ${minOccurrences}, found ${count})`);
                         }
                     });
+                }
+                
+                // If file is suspiciously short, missing patterns, or has excessive comments, try to fix
+                if (lineCount < 50 || missingPatterns.length > 0 || commentPercentage > 20) {
+                    loggingService.warn('⚠️ WARNING: Generated file may have excessive comments or missing code', {
+                        userId,
+                        filePath: file.path,
+                        lineCount,
+                        commentPercentage: commentPercentage.toFixed(1) + '%',
+                        commentedLines,
+                        missingPatterns,
+                        contentLength: content.length,
+                        recommendation: 'The generated file may have excessive preservation comments or missing code. Review carefully.'
+                    });
                     
-                    // If file is suspiciously short or missing critical patterns, log warning
-                    if (lineCount < 50 || missingPatterns.length > 0) {
-                        loggingService.error('⚠️ CRITICAL: Generated server file may have deleted existing code!', {
-                            userId,
-                            filePath: file.path,
-                            lineCount,
-                            missingPatterns,
-                            contentLength: content.length,
-                            warning: 'The generated file appears to be missing critical code. This should be investigated!',
-                            recommendation: 'The AI may have deleted existing routes or middleware. Check the generated file carefully.'
-                        });
+                    // Try to fix excessive commenting by removing preservation comments
+                    if (commentPercentage > 20) {
+                        let fixedContent = content;
+                        
+                        // Remove common preservation comment patterns
+                        fixedContent = fixedContent.replace(/\/\/\s*\[PRESERVE[^\n]*\n/gi, '');
+                        fixedContent = fixedContent.replace(/\/\/\s*\[EXISTING[^\n]*\n/gi, '');
+                        fixedContent = fixedContent.replace(/\/\/\s*EXISTING CODE PRESERVED[^\n]*\n/gi, '');
+                        fixedContent = fixedContent.replace(/\/\/\s*PRESERVE ALL EXISTING[^\n]*\n/gi, '');
+                        fixedContent = fixedContent.replace(/#\s*\[PRESERVE[^\n]*\n/gi, '');
+                        fixedContent = fixedContent.replace(/#\s*\[EXISTING[^\n]*\n/gi, '');
+                        
+                        // Remove multi-line preservation comment blocks
+                        fixedContent = fixedContent.replace(/\/\/\s*\[PRESERVE ALL EXISTING[^\]]*\]/gis, '');
+                        fixedContent = fixedContent.replace(/#\s*\[PRESERVE ALL EXISTING[^\]]*\]/gis, '');
+                        
+                        if (fixedContent !== content) {
+                            file.content = fixedContent;
+                            loggingService.info('Removed excessive preservation comments from generated file', {
+                                userId,
+                                filePath: file.path,
+                                removedComments: content.length - fixedContent.length,
+                                linesRemoved: commentedLines
+                            });
+                        }
                     }
                 }
             });
@@ -1102,11 +1190,14 @@ ${content.substring(0, 3000)}${content.length > 3000 ? '\n... (truncated for bre
 `).join('\n')}
 
 ⚠️ CRITICAL: When updating these files, you MUST:
-1. Keep ALL existing code exactly as is
-2. Only ADD new CostKatana-related imports at the top
-3. Only ADD initialization calls where appropriate
+1. Keep ALL existing code exactly as is - NO EXCEPTIONS
+2. Only ADD new CostKatana-related imports at the top (after existing imports)
+3. Only ADD initialization calls where appropriate (after existing initialization)
 4. Do NOT remove, modify, or replace ANY existing functionality
 5. Do NOT change existing imports, routes, or handlers
+6. Do NOT comment out ANY existing code - ALL existing code must remain active and uncommented
+7. Do NOT add "PRESERVE" or "EXISTING CODE" comments - just keep the code as-is
+8. The updated file should contain: [ALL ORIGINAL CODE] + [NEW CostKatana imports] + [NEW CostKatana initialization]
 ` : ''}
 
 Selected Features:
@@ -1129,20 +1220,23 @@ FILE NAMING (MANDATORY):
 - Entry point file: ${mainEntryPoint}
 - NEVER generate wrong file extensions for Python projects
 
-CODE PRESERVATION (MANDATORY):
+CODE PRESERVATION (MANDATORY - ZERO TOLERANCE):
 - DO NOT DELETE any existing code, routes, or functionality
 - DO NOT REMOVE any imports, middleware, or configurations
 - DO NOT MODIFY existing function implementations
-- ONLY ADD CostKatana-related code:
-  * Import statement at the top: from costkatana_config import cost_katana
-  * Initialization call: cost_katana.initialize()
-  * Optional: Add middleware/decorator if framework supports it
-- PRESERVE ALL existing:
-  * Routes and route handlers
-  * Flask/Django/FastAPI configurations
-  * Database connections
-  * Error handlers
-  * All existing imports and exports
+- DO NOT COMMENT OUT any existing code - keep everything active
+- DO NOT add "# EXISTING CODE PRESERVED" or similar comments
+- ONLY ADD CostKatana-related code (append, don't replace):
+  * Add import statement AFTER existing imports: from costkatana_config import cost_katana
+  * Add initialization call AFTER existing initialization: cost_katana.initialize()
+  * Optional: Add middleware/decorator AFTER existing middleware if framework supports it
+- PRESERVE ALL existing code EXACTLY as-is:
+  * All routes and route handlers (keep 100% of them)
+  * All Flask/Django/FastAPI configurations (keep 100% of them)
+  * All database connections (keep 100% of them)
+  * All error handlers (keep 100% of them)
+  * All existing imports and exports (keep 100% of them)
+  * All existing functions, classes, and logic (keep 100% of them)
 
 Requirements:
 - Follow PEP 8 style guidelines

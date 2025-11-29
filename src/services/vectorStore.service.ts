@@ -105,6 +105,18 @@ export class VectorStoreService {
             loggingService.warn('⚠️ HNSWLib not available, using fallback vector store');
         }
         try {
+            // Check if code-specific embedding model is configured
+            const codeEmbeddingModel = process.env.CODE_EMBEDDING_MODEL; // e.g., 'jina-embeddings-v2', 'codebert', etc.
+            const useCodeEmbeddings = codeEmbeddingModel && codeEmbeddingModel !== 'titan';
+            
+            if (useCodeEmbeddings) {
+                // For code-specific models, you might need a different embedding service
+                // For now, fall back to Titan but log the preference
+                loggingService.info('Code-specific embedding model requested but not yet implemented, using Titan', {
+                    requestedModel: codeEmbeddingModel
+                });
+            }
+            
             // Initialize AWS Bedrock embeddings with correct model ID
             this.embeddings = new BedrockEmbeddings({
                 region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',

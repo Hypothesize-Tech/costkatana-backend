@@ -356,37 +356,67 @@ Return a JSON array of example file paths that are most relevant:
     }
 
     /**
-     * Find semantically relevant files using embeddings with multi-repo awareness (Cursor-like semantic search)
+     * Find semantically relevant files using hybrid search with multi-repo awareness (Cursor-like semantic search)
      */
     private static async findSemanticallyRelevantFiles(
         userRequest: string,
         codebaseIndex: CodebaseIndex,
-        userId?: string
+        userId?: string,
+        repoFullName?: string
     ): Promise<string[]> {
         const relevantPaths: string[] = [];
         
         try {
-            // Use vector store for semantic search
-            const vectorStoreService = new VectorStoreService();
-            await vectorStoreService.initialize();
+            // Use new hybrid search service for better retrieval
+            const { GitHubRetrievalService } = await import('./githubRetrieval.service');
             
-            // Create semantic search query from file paths and user request
-            const searchQuery = `${userRequest}. Codebase files: ${codebaseIndex.structure.sourceFiles.slice(0, 50).join(', ')}`;
+            const retrievalResult = await GitHubRetrievalService.retrieve(userRequest, {
+                repoFullName,
+                userId,
+                limit: 50,
+                rerank: true,
+                rerankTopK: 30,
+                maxContextTokens: 4000
+            });
             
-            // Search for relevant code snippets
-            const results = await vectorStoreService.search(searchQuery, 20);
-            
-            // Extract file paths from results
-            const vectorPaths = results
-                .map(r => r.metadata?.source || r.metadata?.filePath)
-                .filter((path): path is string => typeof path === 'string')
+            // Extract file paths from retrieval results
+            const vectorPaths = retrievalResult.assembledContext.chunks
+                .map(chunk => chunk.filePath)
                 .filter(path => codebaseIndex.files.some(f => f.path === path));
             
             relevantPaths.push(...vectorPaths);
+            
+            // Add exact matches if available
+            if (retrievalResult.exactMatches) {
+                const exactPaths = retrievalResult.exactMatches
+                    .map(match => match.filePath)
+                    .filter(path => !relevantPaths.includes(path));
+                relevantPaths.push(...exactPaths);
+            }
         } catch (error) {
-            loggingService.warn('Semantic search failed, using fallback', {
+            loggingService.warn('Hybrid search failed, using fallback', {
                 error: error instanceof Error ? error.message : 'Unknown'
             });
+            
+            // Fallback to old vector store method
+            try {
+                const vectorStoreService = new VectorStoreService();
+                await vectorStoreService.initialize();
+                
+                const searchQuery = `${userRequest}. Codebase files: ${codebaseIndex.structure.sourceFiles.slice(0, 50).join(', ')}`;
+                const results = await vectorStoreService.search(searchQuery, 20);
+                
+                const vectorPaths = results
+                    .map(r => r.metadata?.source || r.metadata?.filePath)
+                    .filter((path): path is string => typeof path === 'string')
+                    .filter(path => codebaseIndex.files.some(f => f.path === path));
+                
+                relevantPaths.push(...vectorPaths);
+            } catch (fallbackError) {
+                loggingService.warn('Fallback search also failed', {
+                    error: fallbackError instanceof Error ? fallbackError.message : 'Unknown'
+                });
+            }
         }
 
         // Multi-repo awareness: Use MultiRepoIntelligenceService for intelligent recommendations
@@ -1544,7 +1574,8 @@ Return a JSON object with this structure:
             const semanticallyRelevantFiles = await this.findSemanticallyRelevantFiles(
                 changeRequest,
                 codebaseIndex,
-                context.userId
+                context.userId,
+                repositoryFullName
             );
             
             // Use MultiRepoIntelligenceService to find integration points and recommendations
@@ -1770,8 +1801,7 @@ CRITICAL REQUIREMENTS:
 - Maintain code style, patterns, and architecture 100% consistent with the existing codebase
 - Ensure all imports, exports, and dependencies are correct and match existing patterns
 - Only modify files that actually need to change - don't make unnecessary changes
-- If adding dependencies, update the appropriate package manager file
-- Think like Cursor: understand relationships, not just individual files`;
+- If adding dependencies, update the appropriate package manager file`;
 
             const aiResponse = await AIRouterService.invokeModel(
                 prompt,
