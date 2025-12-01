@@ -13,6 +13,10 @@ import {
     AIProviderError 
 } from '../types/aiProvider.types';
 import { loggingService } from './logging.service';
+import { SubscriptionService } from './subscription.service';
+import { ObjectId } from 'mongoose';
+import { calculateCost } from '../utils/pricing';
+import { AIInvokeResponse } from '../types/aiProvider.types';
 
 export class AIRouterService {
     private static openaiProvider: OpenAIProvider | null = null;
@@ -48,12 +52,110 @@ export class AIRouterService {
     }
 
     /**
+     * Validate subscription before AI invocation
+     */
+    static async validateSubscriptionBeforeInvoke(
+        userId: string | ObjectId,
+        estimatedTokens: number,
+        model: string
+    ): Promise<{ valid: boolean; availableQuota?: { tokens: number; requests: number } }> {
+        // Convert userId to string early for consistent use
+        const userIdStr: string = typeof userId === 'string' ? userId : String(userId);
+        
+        try {
+            // Check subscription status and limits
+            // SubscriptionService.getSubscriptionByUserId accepts string | ObjectId
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userIdStr as string | ObjectId);
+            if (!subscription) {
+                throw new Error('Subscription not found');
+            }
+
+            // Check subscription status
+            if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+                throw new Error(`Subscription is ${subscription.status}. Please activate your subscription.`);
+            }
+
+            // Check model access
+            const allowedModels = subscription.allowedModels;
+            if (!allowedModels.includes('*') && !allowedModels.includes(model)) {
+                throw new Error(`Model ${model} is not available on your plan. Please upgrade.`);
+            }
+
+            // Check token quota
+            await SubscriptionService.validateAndReserveTokens(userIdStr, estimatedTokens);
+
+            // Check request quota
+            await SubscriptionService.checkRequestQuota(userIdStr as string | ObjectId);
+
+            const limit = subscription.limits.tokensPerMonth;
+            const used = subscription.usage.tokensUsed;
+            const availableTokens = limit === -1 ? Infinity : limit - used;
+
+            const requestLimit = subscription.limits.requestsPerMonth;
+            const usedRequests = subscription.usage.requestsUsed;
+            const availableRequests = requestLimit === -1 ? Infinity : requestLimit - usedRequests;
+
+            return {
+                valid: true,
+                availableQuota: {
+                    tokens: availableTokens,
+                    requests: availableRequests,
+                },
+            };
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Subscription validation failed', {
+                userId: userIdStr,
+                model,
+                error: errorMessage,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Track consumption after AI invocation
+     */
+    static async trackConsumptionAfterInvoke(
+        userId: string | ObjectId,
+        tokens: number,
+        cost: number
+    ): Promise<void> {
+        // Convert userId to string early for consistent use
+        const userIdStr: string = typeof userId === 'string' ? userId : String(userId);
+        
+        try {
+            // Consume tokens
+            await SubscriptionService.consumeTokens(userIdStr, tokens, cost);
+
+            // Consume request
+            await SubscriptionService.consumeRequest(userIdStr);
+
+            loggingService.debug('Consumption tracked', {
+                userId: userIdStr,
+                tokens,
+                cost,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Error tracking consumption', {
+                userId: userIdStr,
+                tokens,
+                cost,
+                error: errorMessage,
+            });
+            // Don't throw - consumption tracking failure shouldn't break the request
+        }
+    }
+
+    /**
      * Main entry point: Route and invoke AI model
      * This replaces BedrockService.invokeModel() throughout the codebase
      */
     static async invokeModel(
         prompt: string,
         model: string,
+        userId?: string | ObjectId,
         context?: {
             recentMessages?: Array<{ role: string; content: string }>;
             useSystemPrompt?: boolean;
@@ -67,13 +169,22 @@ export class AIRouterService {
         // Initialize providers if needed
         this.initializeProviders();
 
+        // Estimate tokens (rough estimate: 1 token ≈ 4 characters)
+        const estimatedTokens = Math.ceil(prompt.length / 4) + (context?.maxTokens ?? 1000);
+
+        // Validate subscription if userId is provided
+        if (userId) {
+            await this.validateSubscriptionBeforeInvoke(userId, estimatedTokens, model);
+        }
+
         // Detect provider from model name
         const providerType = ProviderUtils.detectProvider(model);
 
         loggingService.debug('AI Router: Routing request', {
             model,
             detectedProvider: providerType,
-            hasContext: !!context?.recentMessages
+            hasContext: !!context?.recentMessages,
+            userId: userId?.toString(),
         });
 
         // Convert context to AIInvokeOptions
@@ -90,19 +201,69 @@ export class AIRouterService {
             stopSequences: context.stopSequences
         } : undefined;
 
+        let response: string;
+        let actualTokens = estimatedTokens;
+        let cost = 0;
+        let inputTokens = 0;
+        let outputTokens = 0;
+
         try {
             // Route to appropriate provider
             switch (providerType) {
-                case AIProviderType.OpenAI:
-                    return await this.invokeOpenAI(prompt, model, options);
+                case AIProviderType.OpenAI: {
+                    const aiResponse: AIInvokeResponse = await this.invokeOpenAI(prompt, model, options);
+                    response = aiResponse.text;
+                    // Extract actual token usage from OpenAI response
+                    inputTokens = aiResponse.usage.inputTokens;
+                    outputTokens = aiResponse.usage.outputTokens;
+                    actualTokens = aiResponse.usage.totalTokens;
+                    // Calculate actual cost based on model pricing
+                    cost = calculateCost(inputTokens, outputTokens, 'openai', model);
+                    break;
+                }
 
-                case AIProviderType.Google:
-                    return await this.invokeGemini(prompt, model, options);
+                case AIProviderType.Google: {
+                    const aiResponse: AIInvokeResponse = await this.invokeGemini(prompt, model, options);
+                    response = aiResponse.text;
+                    // Extract actual token usage from Gemini response
+                    inputTokens = aiResponse.usage.inputTokens;
+                    outputTokens = aiResponse.usage.outputTokens;
+                    actualTokens = aiResponse.usage.totalTokens;
+                    // Calculate actual cost based on model pricing
+                    cost = calculateCost(inputTokens, outputTokens, 'google', model);
+                    break;
+                }
 
                 case AIProviderType.Bedrock:
-                default:
-                    return await this.invokeBedrock(prompt, model, context);
+                default: {
+                    response = await this.invokeBedrock(prompt, model, context);
+                    // BedrockService doesn't return token usage directly, so we estimate
+                    // The actual tokens are tracked internally in BedrockService
+                    inputTokens = Math.ceil(prompt.length / 4);
+                    outputTokens = Math.ceil(response.length / 4);
+                    actualTokens = inputTokens + outputTokens;
+                    // Calculate actual cost based on model pricing
+                    cost = calculateCost(inputTokens, outputTokens, 'aws-bedrock', model);
+                    break;
+                }
             }
+
+            // Track consumption after successful invocation
+            if (userId) {
+                await this.trackConsumptionAfterInvoke(userId, actualTokens, cost);
+            }
+
+            loggingService.debug('AI Router: Consumption tracked', {
+                userId: userId?.toString(),
+                model,
+                provider: providerType,
+                inputTokens,
+                outputTokens,
+                totalTokens: actualTokens,
+                cost,
+            });
+
+            return response;
         } catch (error) {
             loggingService.error('AI Router: Primary invocation failed', {
                 model,
@@ -114,7 +275,20 @@ export class AIRouterService {
             if (providerType !== AIProviderType.Bedrock) {
                 loggingService.info('AI Router: Attempting Bedrock fallback', { model });
                 try {
-                    return await this.invokeBedrock(prompt, model, context);
+                    response = await this.invokeBedrock(prompt, model, context);
+                    
+                    // Track consumption for fallback
+                    if (userId) {
+                        // Estimate tokens for Bedrock fallback
+                        inputTokens = Math.ceil(prompt.length / 4);
+                        outputTokens = Math.ceil(response.length / 4);
+                        actualTokens = inputTokens + outputTokens;
+                        // Calculate actual cost based on model pricing
+                        cost = calculateCost(inputTokens, outputTokens, 'aws-bedrock', model);
+                        await this.trackConsumptionAfterInvoke(userId, actualTokens, cost);
+                    }
+
+                    return response;
                 } catch (fallbackError) {
                     loggingService.error('AI Router: Bedrock fallback also failed', {
                         model,
@@ -135,7 +309,7 @@ export class AIRouterService {
         prompt: string,
         model: string,
         options?: AIInvokeOptions
-    ): Promise<string> {
+    ): Promise<AIInvokeResponse> {
         if (!this.openaiProvider) {
             throw new AIProviderError(
                 'OpenAI provider not available (API key not configured)',
@@ -146,7 +320,7 @@ export class AIRouterService {
         loggingService.debug('AI Router: Using OpenAI native SDK', { model });
 
         const response = await this.openaiProvider.invokeModel(prompt, model, options);
-        return response.text;
+        return response;
     }
 
     /**
@@ -156,7 +330,7 @@ export class AIRouterService {
         prompt: string,
         model: string,
         options?: AIInvokeOptions
-    ): Promise<string> {
+    ): Promise<AIInvokeResponse> {
         if (!this.geminiProvider) {
             throw new AIProviderError(
                 'Gemini provider not available (API key not configured)',
@@ -167,7 +341,7 @@ export class AIRouterService {
         loggingService.debug('AI Router: Using Gemini native SDK', { model });
 
         const response = await this.geminiProvider.invokeModel(prompt, model, options);
-        return response.text;
+        return response;
     }
 
     /**
@@ -186,7 +360,8 @@ export class AIRouterService {
         // For Bedrock, we might need to map OpenAI/Gemini model names to Bedrock equivalents
         const bedrockModel = this.mapToBedrockModel(model);
 
-        return await BedrockService.invokeModel(prompt, bedrockModel, context);
+        const result: string = await BedrockService.invokeModel(prompt, bedrockModel, context) as string;
+        return result;
     }
 
     /**

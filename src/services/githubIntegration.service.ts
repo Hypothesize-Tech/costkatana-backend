@@ -1,7 +1,9 @@
 import { GitHubService } from './github.service';
 import { GitHubAnalysisService, AnalysisResult } from './githubAnalysis.service';
 import { GitHubCodeGeneratorService, IntegrationCode } from './githubCodeGenerator.service';
+import { AIRouterService } from './aiRouter.service';
 import { GitHubConnection, GitHubIntegration, IGitHubIntegration, IFeatureConfig, IGitHubConnection, RepositoryUserMapping } from '../models';
+import { User } from '../models';
 import { loggingService } from './logging.service';
 import { Types } from 'mongoose';
 
@@ -293,6 +295,59 @@ export class GitHubIntegrationService {
                 startHeartbeat();
                 
                 try {
+                    // Get user's actual API key from their dashboard
+                    let userApiKey: string | undefined;
+                    try {
+                        const user = await User.findById(integration.userId).select('dashboardApiKeys');
+                        if (user?.dashboardApiKeys && user.dashboardApiKeys.length > 0) {
+                            // Find first active, non-expired API key
+                            const activeKey = user.dashboardApiKeys.find((key: any) => 
+                                key.isActive !== false && 
+                                (!key.expiresAt || new Date(key.expiresAt) > new Date())
+                            );
+                            
+                            if (activeKey?.encryptedKey) {
+                                try {
+                                    // Decrypt the API key
+                                    const { decrypt } = await import('../utils/helpers');
+                                    const [iv, authTag, encrypted] = activeKey.encryptedKey.split(':');
+                                    userApiKey = decrypt(encrypted, iv, authTag);
+                                    
+                                    loggingService.info('Retrieved user API key for code generation', {
+                                        userId: integration.userId,
+                                        keyId: activeKey.keyId,
+                                        keyName: activeKey.name,
+                                        hasKey: !!userApiKey
+                                    });
+                                } catch (decryptError: unknown) {
+                                    const errorMessage = decryptError instanceof Error ? decryptError.message : String(decryptError);
+                                    loggingService.warn('Failed to decrypt user API key', {
+                                        userId: integration.userId,
+                                        keyId: activeKey.keyId,
+                                        error: errorMessage
+                                    });
+                                }
+                            }
+                        }
+                    } catch (keyError: unknown) {
+                        const errorMessage = keyError instanceof Error ? keyError.message : String(keyError);
+                        loggingService.warn('Failed to retrieve user API key', {
+                            userId: integration.userId,
+                            error: errorMessage
+                        });
+                    }
+                    
+                    // Use user's API key if available, otherwise fall back to default or placeholder
+                    const apiKeyToUse = userApiKey ?? process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here';
+                    
+                    if (!userApiKey) {
+                        loggingService.info('Using fallback API key for code generation', {
+                            userId: integration.userId,
+                            hasDefaultEnv: !!process.env.COSTKATANA_DEFAULT_API_KEY,
+                            note: 'User should replace this with their own API key from dashboard'
+                        });
+                    }
+                    
                     generatedCode = await Promise.race([
                         GitHubCodeGeneratorService.generateIntegrationCode(
                             integration.userId,
@@ -301,8 +356,8 @@ export class GitHubIntegrationService {
                                 features: integration.selectedFeatures,
                                 analysis,
                                 repositoryName: integration.repositoryName,
-                                apiKey: process.env.COSTKATANA_DEFAULT_API_KEY ?? 'dak_your_key_here',
-                                existingFileContents // Pass existing file contents for preservation
+                                apiKey: apiKeyToUse,
+                                existingFileContents
                             }
                         ),
                         new Promise<IntegrationCode>((_, reject) => 
@@ -790,18 +845,302 @@ ${code.testingSteps.map((step, i) => `${i + 1}. ${step}`).join('\n')}
             throw new Error('GitHub connection not found');
         }
 
+        // Validate connection is active
+        if (!connection.isActive) {
+            integration.status = 'failed';
+            integration.errorMessage = 'GitHub connection is inactive. Please reconnect your GitHub account.';
+            await integration.save();
+            throw new Error('GitHub connection is inactive');
+        }
+
+        // Check if token is expired
+        if (connection.expiresAt && new Date() > connection.expiresAt) {
+            integration.status = 'failed';
+            integration.errorMessage = 'GitHub access token has expired. Please reconnect your GitHub account.';
+            await integration.save();
+            throw new Error('GitHub access token has expired');
+        }
+
         integration.status = 'updating';
+        integration.lastActivityAt = new Date();
         await integration.save();
 
-        // TODO: Implement change parsing and application
-        // For now, just log the change request
-        loggingService.info('Integration update requested', {
-            integrationId,
-            changes
-        });
+        try {
+            const [owner, repo] = integration.repositoryFullName.split('/');
+            if (!owner || !repo) {
+                throw new Error('Invalid repository full name');
+            }
 
-        integration.status = 'open';
-        await integration.save();
+            // Get existing files from the integration branch
+            const existingFiles: Record<string, string> = {};
+            const filesToCheck = [
+                `src/costkatana.${integration.analysisResults?.language === 'typescript' ? 'ts' : integration.analysisResults?.language === 'python' ? 'py' : 'js'}`,
+                'COSTKATANA_SETUP.md',
+                '.env.example'
+            ];
+
+            for (const filePath of filesToCheck) {
+                try {
+                    const content = await GitHubService.getFileContent(
+                        connection,
+                        owner,
+                        repo,
+                        filePath,
+                        integration.branchName
+                    );
+                    existingFiles[filePath] = content;
+                    loggingService.info('Retrieved existing file for update', {
+                        integrationId,
+                        filePath,
+                        contentLength: content.length
+                    });
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    // File might not exist, that's okay
+                    if (!errorMessage.includes('404') && !errorMessage.includes('Not Found')) {
+                        loggingService.warn('Failed to retrieve existing file', {
+                            integrationId,
+                            filePath,
+                            error: errorMessage
+                        });
+                    }
+                }
+            }
+
+            // Parse changes and generate updated code using AI
+            const analysis = integration.analysisResults;
+            if (!analysis) {
+                throw new Error('Integration analysis results not found. Please restart the integration.');
+            }
+
+            loggingService.info('Generating updated code based on chat changes', {
+                integrationId,
+                changes,
+                existingFilesCount: Object.keys(existingFiles).length
+            });
+
+            // Use AI to parse changes and generate updated code
+            const prompt = `You are an expert code assistant updating an existing CostKatana integration based on user feedback.
+
+EXISTING INTEGRATION CONTEXT:
+- Repository: ${integration.repositoryFullName}
+- Integration Type: ${integration.integrationType}
+- Language: ${analysis.language}
+- Framework: ${analysis.framework || 'None'}
+- Branch: ${integration.branchName}
+
+USER REQUESTED CHANGES:
+${changes}
+
+EXISTING FILES IN THE INTEGRATION:
+${Object.keys(existingFiles).length > 0 ? Object.entries(existingFiles).map(([path, content]) => `
+--- File: ${path} ---
+${content.substring(0, 5000)}${content.length > 5000 ? '\n... (truncated)' : ''}
+--- End of ${path} ---
+`).join('\n') : 'No existing files found'}
+
+SELECTED FEATURES:
+${integration.selectedFeatures.map(f => `- ${f.name}${f.config ? ': ' + JSON.stringify(f.config) : ''}`).join('\n')}
+
+YOUR TASK:
+1. Understand the user's requested changes
+2. Generate updated file contents that incorporate the changes
+3. Preserve all existing functionality unless explicitly requested to change
+4. Ensure code quality and consistency with the existing codebase
+
+Return ONLY a valid JSON object (no markdown, no explanation) with this exact structure:
+{
+  "files": [
+    {
+      "path": "relative/path/to/file",
+      "action": "update" | "create" | "delete",
+      "content": "COMPLETE file content here (required for update/create actions)"
+    }
+  ],
+  "commitMessage": "Clear, descriptive commit message explaining the changes",
+  "prUpdate": {
+    "body": "Optional updated PR description (if significant changes were made)"
+  }
+}
+
+CRITICAL REQUIREMENTS:
+- For "update" actions: Provide the COMPLETE file content with all changes integrated
+- Maintain code style, patterns, and architecture consistent with existing code
+- Only modify files that need to change based on the user's request
+- Preserve all existing functionality unless explicitly requested to change
+- Ensure all imports, exports, and dependencies are correct`;
+
+            const aiResponse = await AIRouterService.invokeModel(
+                integration.userId,
+                prompt,
+                'anthropic.claude-3-5-sonnet-20241022-v2:0'
+            );
+
+            // Parse AI response
+            const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+                throw new Error('Failed to parse AI response. The model did not return valid JSON.');
+            }
+
+            const parsedChanges = JSON.parse(jsonMatch[0]) as {
+                files: Array<{
+                    path: string;
+                    action: 'create' | 'update' | 'delete';
+                    content?: string;
+                }>;
+                commitMessage: string;
+                prUpdate?: {
+                    body?: string;
+                };
+            };
+
+            if (!parsedChanges.files || !Array.isArray(parsedChanges.files)) {
+                throw new Error('Invalid AI response: files array is missing or invalid');
+            }
+
+            loggingService.info('Parsed changes from AI', {
+                integrationId,
+                filesCount: parsedChanges.files.length,
+                commitMessage: parsedChanges.commitMessage
+            });
+
+            // Apply changes to the branch
+            const updatedFiles: string[] = [];
+            for (const file of parsedChanges.files) {
+                if (file.action === 'delete') {
+                    // For deletion, we need to use GitHub API to delete the file
+                    // This requires getting the file SHA first
+                    try {
+                        // Initialize GitHub service and get Octokit instance
+                        await GitHubService.initialize();
+                        const decryptedToken = connection.decryptToken();
+                        const { Octokit } = await import('@octokit/rest');
+                        const octokit = new Octokit({ auth: decryptedToken });
+
+                        const { data } = await octokit.rest.repos.getContent({
+                            owner,
+                            repo,
+                            path: file.path,
+                            ref: integration.branchName
+                        }) as { data: { sha: string; type: string } };
+
+                        if (data.type === 'file' && data.sha) {
+                            await octokit.rest.repos.deleteFile({
+                                owner,
+                                repo,
+                                path: file.path,
+                                message: `Remove ${file.path} - ${parsedChanges.commitMessage}`,
+                                branch: integration.branchName,
+                                sha: data.sha
+                            });
+
+                            updatedFiles.push(file.path);
+                            loggingService.info('Deleted file from integration', {
+                                integrationId,
+                                filePath: file.path
+                            });
+                        }
+                    } catch (error: unknown) {
+                        const errorMessage = error instanceof Error ? error.message : String(error);
+                        const errorStatus = (error as { status?: number }).status;
+                        if (errorStatus === 404 || errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+                            loggingService.warn('File not found for deletion, skipping', {
+                                integrationId,
+                                filePath: file.path
+                            });
+                        } else {
+                            throw error;
+                        }
+                    }
+                } else if (file.action === 'create' || file.action === 'update') {
+                    if (!file.content) {
+                        loggingService.warn('File action is create/update but content is missing, skipping', {
+                            integrationId,
+                            filePath: file.path
+                        });
+                        continue;
+                    }
+
+                    const result = await GitHubService.createOrUpdateFile(connection, {
+                        owner,
+                        repo,
+                        branch: integration.branchName,
+                        path: file.path,
+                        content: file.content,
+                        message: `${file.action === 'create' ? 'Add' : 'Update'} ${file.path} - ${parsedChanges.commitMessage}`
+                    });
+
+                    integration.commits.push({
+                        sha: result.commit,
+                        message: `${file.action === 'create' ? 'Add' : 'Update'} ${file.path}`,
+                        timestamp: new Date()
+                    });
+
+                    updatedFiles.push(file.path);
+                    loggingService.info('Updated file in integration', {
+                        integrationId,
+                        filePath: file.path,
+                        action: file.action
+                    });
+                }
+            }
+
+            await integration.save();
+
+            // Update PR if body was provided
+            if (parsedChanges.prUpdate?.body && integration.prNumber) {
+                try {
+                    await GitHubService.updatePullRequest(connection, {
+                        owner,
+                        repo,
+                        prNumber: integration.prNumber,
+                        body: parsedChanges.prUpdate.body
+                    });
+
+                    integration.prDescription = parsedChanges.prUpdate.body;
+                    await integration.save();
+
+                    loggingService.info('Updated PR description', {
+                        integrationId,
+                        prNumber: integration.prNumber
+                    });
+                } catch (error: unknown) {
+                    const errorMessage = error instanceof Error ? error.message : String(error);
+                    loggingService.warn('Failed to update PR description (non-critical)', {
+                        integrationId,
+                        prNumber: integration.prNumber,
+                        error: errorMessage
+                    });
+                }
+            }
+
+            integration.status = 'open';
+            integration.lastActivityAt = new Date();
+            await integration.save();
+
+            loggingService.info('Integration update completed successfully', {
+                integrationId,
+                updatedFilesCount: updatedFiles.length,
+                updatedFiles
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+
+            loggingService.error('Failed to update integration from chat', {
+                integrationId,
+                error: errorMessage,
+                stack: errorStack
+            });
+
+            integration.status = 'failed';
+            integration.errorMessage = `Failed to apply changes: ${errorMessage}`;
+            integration.errorStack = errorStack;
+            integration.lastActivityAt = new Date();
+            await integration.save();
+
+            throw error;
+        }
     }
 
     /**

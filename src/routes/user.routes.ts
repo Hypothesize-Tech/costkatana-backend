@@ -44,6 +44,25 @@ router.get('/alerts/history', asyncHandler(UserController.getAlertHistory));
 // Subscription routes
 router.get('/subscription', asyncHandler(UserController.getSubscription));
 router.put('/subscription', asyncHandler(UserController.updateSubscription));
+router.post('/subscription/upgrade', asyncHandler(UserController.upgradeSubscription));
+router.post('/subscription/create-stripe-setup-intent', asyncHandler(UserController.createStripeSetupIntent));
+router.post('/subscription/confirm-stripe-payment', asyncHandler(UserController.confirmStripePayment));
+router.post('/subscription/create-paypal-plan', asyncHandler(UserController.createPayPalPlan));
+router.post('/subscription/approve-paypal', asyncHandler(UserController.approvePayPalSubscription));
+router.post('/subscription/create-razorpay-order', asyncHandler(UserController.createRazorpayOrder));
+router.post('/subscription/confirm-razorpay-payment', asyncHandler(UserController.confirmRazorpayPayment));
+router.post('/subscription/downgrade', asyncHandler(UserController.downgradeSubscription));
+router.post('/subscription/cancel', asyncHandler(UserController.cancelSubscription));
+router.post('/subscription/reactivate', asyncHandler(UserController.reactivateSubscription));
+router.post('/subscription/pause', asyncHandler(UserController.pauseSubscription));
+router.post('/subscription/resume', asyncHandler(UserController.resumeSubscription));
+router.put('/subscription/payment-method', asyncHandler(UserController.updatePaymentMethod));
+router.put('/subscription/billing-cycle', asyncHandler(UserController.updateBillingCycle));
+router.post('/subscription/discount', asyncHandler(UserController.applyDiscountCode));
+router.get('/subscription/plans', asyncHandler(UserController.getAvailablePlans));
+router.get('/subscription/usage', asyncHandler(UserController.getUsageAnalytics));
+router.get('/subscription/history', asyncHandler(UserController.getSubscriptionHistory));
+router.get('/spending', asyncHandler(UserController.getUserSpending));
 
 // Preferences routes (including session replay settings)
 router.get('/preferences', asyncHandler(UserController.getPreferences));

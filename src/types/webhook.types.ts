@@ -61,7 +61,22 @@ export const WEBHOOK_EVENTS = {
     // Quality Events
     QUALITY_DEGRADED: 'quality.degraded',
     QUALITY_IMPROVED: 'quality.improved',
-    QUALITY_THRESHOLD_VIOLATED: 'quality.threshold_violated'
+    QUALITY_THRESHOLD_VIOLATED: 'quality.threshold_violated',
+    
+    // Subscription Events
+    SUBSCRIPTION_CREATED: 'subscription.created',
+    SUBSCRIPTION_UPGRADED: 'subscription.upgraded',
+    SUBSCRIPTION_DOWNGRADED: 'subscription.downgraded',
+    SUBSCRIPTION_CANCELED: 'subscription.canceled',
+    SUBSCRIPTION_REACTIVATED: 'subscription.reactivated',
+    SUBSCRIPTION_TRIAL_STARTED: 'subscription.trial_started',
+    SUBSCRIPTION_TRIAL_ENDING: 'subscription.trial_ending',
+    SUBSCRIPTION_TRIAL_EXPIRED: 'subscription.trial_expired',
+    SUBSCRIPTION_PAYMENT_FAILED: 'subscription.payment_failed',
+    SUBSCRIPTION_PAYMENT_SUCCEEDED: 'subscription.payment_succeeded',
+    SUBSCRIPTION_INVOICE_CREATED: 'subscription.invoice_created',
+    SUBSCRIPTION_USAGE_ALERT: 'subscription.usage_alert',
+    SUBSCRIPTION_LIMIT_EXCEEDED: 'subscription.limit_exceeded'
 } as const;
 
 export type WebhookEventType = typeof WEBHOOK_EVENTS[keyof typeof WEBHOOK_EVENTS];

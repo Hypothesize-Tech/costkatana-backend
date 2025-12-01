@@ -68,12 +68,17 @@ export class IntelligenceService {
             const filters: any = { isActive: true };
             
             // Filter by user tier for better targeting
-            if (context.user?.subscription?.plan) {
-                filters.$or = [
-                    { targetAudience: 'all' },
-                    { targetAudience: context.user.subscription.plan },
-                    { targetAudience: { $exists: false } }
-                ];
+            if (context.user?.subscriptionId) {
+                const { SubscriptionService } = await import('./subscription.service');
+                const userIdStr = (context.user as any)._id?.toString() || (context.user as any).id?.toString() || '';
+                const subscription = await SubscriptionService.getSubscriptionByUserId(userIdStr || context.user.subscriptionId);
+                if (subscription?.plan) {
+                    filters.$or = [
+                        { targetAudience: 'all' },
+                        { targetAudience: subscription.plan },
+                        { targetAudience: { $exists: false } }
+                    ];
+                }
             }
             
             return await Tip.find(filters).lean();
@@ -132,7 +137,19 @@ export class IntelligenceService {
 
         // Adjust for user tier
         if (user && tip.targetAudience && tip.targetAudience !== 'all') {
-            const userTier = user.subscription?.plan || 'free';
+            // Get subscription plan from subscriptionId if available
+            let userTier = 'free';
+            if ((user as any).subscriptionId) {
+                try {
+                    const { SubscriptionService } = await import('./subscription.service');
+                    const userIdStr = (user as any)._id?.toString() || (user as any).id?.toString() || '';
+                    const subscription = await SubscriptionService.getSubscriptionByUserId(userIdStr || (user as any).subscriptionId);
+                    userTier = subscription?.plan || 'free';
+                } catch (error) {
+                    // Fallback to free if subscription lookup fails
+                    userTier = 'free';
+                }
+            }
             if (tip.targetAudience !== userTier) {
                 relevanceScore *= 0.5; // Reduce relevance if not target audience
             }

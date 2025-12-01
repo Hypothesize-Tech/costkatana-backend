@@ -210,6 +210,31 @@ export class WorkflowOrchestratorService extends EventEmitter {
             tags?: string[];
         }
     ): Promise<WorkflowExecution> {
+        // Validate subscription before workflow execution
+        const { SubscriptionService } = await import('./subscription.service');
+        const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+        
+        if (!subscription) {
+            throw new Error('Subscription not found');
+        }
+
+        if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+            throw new Error(`Subscription is ${subscription.status}. Please activate your subscription.`);
+        }
+
+        // Check workflow quota
+        const limit = subscription.limits.workflows;
+        if (limit !== -1) {
+            const used = subscription.usage.workflowsUsed;
+            if (used >= limit) {
+                throw new Error(`Workflow quota exceeded. Limit: ${limit}, Used: ${used}. Please upgrade your plan.`);
+            }
+        }
+
+        // Check token and request quotas
+        await SubscriptionService.checkRequestQuota(userId);
+        await SubscriptionService.validateAndReserveTokens(userId, 1000); // Estimate 1000 tokens per workflow
+
         const template = await this.getWorkflowTemplate(templateId);
         if (!template) {
             throw new Error(`Workflow template ${templateId} not found`);
@@ -326,6 +351,32 @@ export class WorkflowOrchestratorService extends EventEmitter {
             execution.endTime = new Date();
             execution.duration = execution.endTime.getTime() - execution.startTime.getTime();
             execution.status = failedSteps.size > 0 ? 'failed' : 'completed';
+            
+            // Track consumption after workflow completion
+            if (execution.status === 'completed') {
+                try {
+                    const { SubscriptionService } = await import('./subscription.service');
+                    const totalTokens = execution.metadata?.totalTokens || 0;
+                    const totalCost = execution.metadata?.totalCost || 0;
+                    
+                    // Consume tokens and requests
+                    await SubscriptionService.consumeTokens(execution.userId, totalTokens, totalCost);
+                    await SubscriptionService.consumeRequest(execution.userId);
+                    
+                    // Increment workflow usage
+                    const subscription = await SubscriptionService.getSubscriptionByUserId(execution.userId);
+                    if (subscription) {
+                        subscription.usage.workflowsUsed += 1;
+                        await subscription.save();
+                    }
+                } catch (error: any) {
+                    loggingService.error('Error tracking workflow consumption', {
+                        executionId: execution.id,
+                        error: error.message,
+                    });
+                    // Don't throw - consumption tracking failure shouldn't break workflow
+                }
+            }
 
             // Calculate final metrics
             this.calculateExecutionMetrics(execution);

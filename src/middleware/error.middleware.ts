@@ -375,6 +375,13 @@ export const errorHandler = (
         step: 'send_response'
     });
 
+    // Add CORS headers to error response
+    const origin = req.headers.origin;
+    if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
     res.status(error.statusCode).json(response);
 
     loggingService.info('Error response sent successfully', {

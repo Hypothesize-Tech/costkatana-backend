@@ -17,8 +17,7 @@
     "otel:restart": "bash scripts/otel-restart.sh",
     "telemetry:verify": "node scripts/verify-telemetry.js",
     "telemetry:validate": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.validateTelemetryConfig())\"",
-    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\"",
-    "migrate:automation-workflows": "ts-node scripts/migrate-automation-workflows.ts"
+    "telemetry:test": "ts-node -e \"import('./src/observability/telemetryValidator').then(m => m.generateTestTelemetry())\""
   },
   "keywords": [
     "ai-cost-optimization",
@@ -51,7 +50,7 @@
     "@aws-sdk/s3-request-presigner": "^3.837.0",
     "@google/generative-ai": "^0.24.1",
     "@langchain/aws": "^0.1.12",
-    "@langchain/community": "^0.3.50",
+    "@langchain/community": "^0.3.58",
     "@langchain/core": "^0.3.79",
     "@langchain/langgraph": "^0.3.11",
     "@octokit/rest": "^20.1.2",
@@ -140,7 +139,10 @@
     "winston": "^3.11.0",
     "ws": "^8.18.3",
     "xlsx": "^0.18.5",
-    "zod": "^3.22.4"
+    "zod": "^3.22.4",
+    "stripe": "^17.3.1",
+    "razorpay": "^2.9.6",
+    "@paypal/checkout-server-sdk": "^1.0.3"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
@@ -155,6 +157,7 @@
     "@types/node": "^20.19.10",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^6.4.14",
+    "@types/stripe": "^8.0.417",
     "@types/pdf-parse": "^1.1.5",
     "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
@@ -174,6 +177,33 @@
   "engines": {
     "node": ">=18.0.0",
     "npm": ">=8.0.0"
+  },
+  "overrides": {
+    "@browserbasehq/stagehand": {
+      "openai": "$openai"
+    },
+    "tree-sitter-c": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-cpp": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-java": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-php": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-ruby": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-rust": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "tree-sitter-typescript": {
+      "tree-sitter": "$tree-sitter"
+    },
+    "@opentelemetry/api": "$@opentelemetry/api"
   },
   "repository": {
     "type": "git",

@@ -1451,6 +1451,27 @@ REPLY FORMAT (JSON only):
     }
 
     static async createOptimization(request: OptimizationRequest): Promise<IOptimization> {
+        // Validate subscription before optimization
+        const { SubscriptionService } = await import('./subscription.service');
+        const subscription = await SubscriptionService.getSubscriptionByUserId(request.userId);
+        
+        if (!subscription) {
+            throw new Error('Subscription not found');
+        }
+
+        if (subscription.status !== 'active' && subscription.status !== 'trialing') {
+            throw new Error(`Subscription is ${subscription.status}. Please activate your subscription.`);
+        }
+
+        // Check Cortex quota if Cortex is enabled
+        if (request.options?.enableCortex || request.cortexEnabled) {
+            await SubscriptionService.checkCortexQuota(request.userId);
+        }
+
+        // Check token and request quotas
+        const estimatedTokens = Math.ceil(request.prompt.length / 4) + 2000; // Estimate tokens needed
+        await SubscriptionService.validateAndReserveTokens(request.userId, estimatedTokens);
+        await SubscriptionService.checkRequestQuota(request.userId);
         try {
             const provider = this.getAIProviderFromString(request.service);
 
@@ -1915,6 +1936,35 @@ REPLY FORMAT (JSON only):
                     });
                 }
             });
+
+            // Track consumption after optimization
+            try {
+                const { SubscriptionService } = await import('./subscription.service');
+                const totalTokens = totalOriginalTokens + totalOptimizedTokens; // Total tokens used for optimization
+                const totalCost = unifiedCalc.originalCost + unifiedCalc.optimizedCost;
+                
+                // Consume tokens and requests
+                await SubscriptionService.consumeTokens(request.userId, totalTokens, totalCost);
+                await SubscriptionService.consumeRequest(request.userId);
+                
+                // Consume Cortex usage if Cortex was used
+                if (cortexResult && !cortexResult.cortexMetadata.error) {
+                    await SubscriptionService.consumeCortexUsage(request.userId);
+                }
+                
+                // Increment optimization count
+                const subscription = await SubscriptionService.getSubscriptionByUserId(request.userId);
+                if (subscription) {
+                    subscription.usage.optimizationsUsed += 1;
+                    await subscription.save();
+                }
+            } catch (error: any) {
+                loggingService.error('Error tracking optimization consumption', {
+                    userId: request.userId,
+                    error: error.message,
+                });
+                // Don't throw - consumption tracking failure shouldn't break optimization
+            }
 
             loggingService.info('Optimization created', { value:  { 
                 userId: request.userId,

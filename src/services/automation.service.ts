@@ -1333,7 +1333,9 @@ export class AutomationService {
                 throw new Error('User not found');
             }
 
-            const planName = user.subscription?.plan || 'free';
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            const planName = subscription?.plan || 'free';
             
             // Count active automation connections
             const activeConnections = await AutomationConnection.countDocuments({

@@ -80,15 +80,65 @@ export class CacheInvalidationService {
         userId: string
     ): Promise<void> {
         try {
-            // This would query the multi-repo index to find dependent repos
-            // For now, just log
             loggingService.info('Dependent repos invalidation requested', {
                 repoFullName,
                 userId
             });
 
-            // TODO: Query MultiRepoIndex to find repos that depend on this one
-            // and invalidate their caches as well
+            // Query MultiRepoIndex to find repos that depend on this one
+            const multiRepoIndex = await MultiRepoIndex.findOne({ userId });
+            if (!multiRepoIndex) {
+                loggingService.info('No multi-repo index found for user', {
+                    userId,
+                    repoFullName
+                });
+                return;
+            }
+
+            const dependentRepos = new Set<string>();
+
+            // Find repos that have cross-repo dependencies on this repo
+            // A dependency where toRepo === repoFullName means another repo depends on this one
+            const crossRepoDependents = multiRepoIndex.crossRepoDependencies
+                .filter(dep => dep.toRepo === repoFullName)
+                .map(dep => dep.fromRepo);
+
+            for (const dependentRepo of crossRepoDependents) {
+                dependentRepos.add(dependentRepo);
+            }
+
+            // Find repos that use shared utilities from this repo
+            // If a utility from this repo is used in other repos, those repos depend on this one
+            const sharedUtilityDependents = multiRepoIndex.sharedUtilities
+                .filter(utility => utility.repoFullName === repoFullName)
+                .flatMap(utility => utility.usedInRepos || []);
+
+            for (const dependentRepo of sharedUtilityDependents) {
+                if (dependentRepo !== repoFullName) {
+                    dependentRepos.add(dependentRepo);
+                }
+            }
+
+            if (dependentRepos.size === 0) {
+                loggingService.info('No dependent repositories found', {
+                    repoFullName,
+                    userId
+                });
+                return;
+            }
+
+            // Invalidate caches for all dependent repos
+            const dependentReposArray = Array.from(dependentRepos);
+            await this.invalidateRepos(dependentReposArray);
+
+            loggingService.info('Dependent repositories cache invalidated', {
+                repoFullName,
+                userId,
+                dependentReposCount: dependentRepos.size,
+                dependentRepos: dependentReposArray,
+                crossRepoDependentsCount: crossRepoDependents.length,
+                sharedUtilityDependentsCount: sharedUtilityDependents.length
+            });
         } catch (error) {
             loggingService.error('Dependent repos invalidation failed', {
                 repoFullName,
