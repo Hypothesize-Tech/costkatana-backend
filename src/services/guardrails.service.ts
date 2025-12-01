@@ -157,8 +157,25 @@ export class GuardrailsService {
                 };
             }
 
-            const planName = user.subscription?.plan || 'free';
-            const planLimits = this.SUBSCRIPTION_PLANS[planName];
+            // Get subscription from new Subscription model
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            const planName = subscription?.plan || 'free';
+            const planLimits = subscription ? SubscriptionService.getPlanLimits(planName) : this.SUBSCRIPTION_PLANS[planName];
+            
+            // Check subscription status
+            if (subscription && subscription.status !== 'active' && subscription.status !== 'trialing') {
+                return {
+                    type: 'hard',
+                    metric: 'subscription',
+                    current: 0,
+                    limit: 0,
+                    percentage: 0,
+                    message: `Subscription is ${subscription.status}. Please activate your subscription.`,
+                    action: 'block',
+                    suggestions: ['Reactivate your subscription or upgrade to continue']
+                };
+            }
             
             if (!planLimits) {
                 loggingService.error('Unknown subscription plan:', { planName });
@@ -258,8 +275,25 @@ export class GuardrailsService {
             }
 
             // Get plan limits
-            const planName = user.subscription?.plan || 'free';
-            const planLimits = this.SUBSCRIPTION_PLANS[planName];
+            // Get subscription from new Subscription model
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            const planName = subscription?.plan || 'free';
+            const planLimits = subscription ? SubscriptionService.getPlanLimits(planName) : this.SUBSCRIPTION_PLANS[planName];
+            
+            // Check subscription status
+            if (subscription && subscription.status !== 'active' && subscription.status !== 'trialing') {
+                return {
+                    type: 'hard',
+                    metric: 'subscription',
+                    current: 0,
+                    limit: 0,
+                    percentage: 0,
+                    message: `Subscription is ${subscription.status}. Please activate your subscription.`,
+                    action: 'block',
+                    suggestions: ['Reactivate your subscription or upgrade to continue']
+                };
+            }
             
             if (!planLimits) {
                 loggingService.error('Unknown subscription plan:', { planName });
@@ -268,7 +302,8 @@ export class GuardrailsService {
 
             // Check model access for free tier
             if (modelId && planName === 'free') {
-                if (!planLimits.models.includes(modelId)) {
+                const allowedModels = (planLimits as any).allowedModels || (planLimits as any).models || [];
+                if (!allowedModels.includes(modelId) && !allowedModels.includes('*')) {
                     return {
                         type: 'hard',
                         metric: 'model_access',
@@ -279,7 +314,7 @@ export class GuardrailsService {
                         action: 'block',
                         suggestions: [
                             'Upgrade to Plus or Pro plan to access premium models',
-                            `Available models for free tier: ${planLimits.models.join(', ')}`
+                            `Available models for free tier: ${allowedModels.join(', ')}`
                         ]
                     };
                 }
@@ -457,24 +492,48 @@ export class GuardrailsService {
                 };
             }
 
-            const startOfMonth = new Date();
-            startOfMonth.setDate(1);
-            startOfMonth.setHours(0, 0, 0, 0);
+            // Get subscription to use the correct period start date
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            
+            // Use subscription period start if available, otherwise use 1st of current month
+            let periodStart: Date;
+            if (subscription?.usage?.currentPeriodStart) {
+                periodStart = new Date(subscription.usage.currentPeriodStart);
+            } else {
+                periodStart = new Date();
+                periodStart.setDate(1);
+                periodStart.setHours(0, 0, 0, 0);
+            }
 
             // Unified database query using $facet for all metrics
             const [allMetrics] = await Promise.all([
-                this.getAllUsageMetrics(userId, startOfMonth)
+                this.getAllUsageMetrics(userId, periodStart)
             ]);
 
-            const usage: UsageMetrics = {
-                tokens: allMetrics.usage.totalTokens || 0,
-                requests: allMetrics.usage.requestCount || 0,
-                logs: allMetrics.logs.count || 0,
-                projects: allMetrics.projects.count || 0,
-                workflows: allMetrics.workflows.count || 0,
-                cost: allMetrics.usage.totalCost || 0,
-                period: 'monthly'
-            };
+            // If subscription exists, use subscription usage data (more accurate)
+            let usage: UsageMetrics;
+            if (subscription?.usage) {
+                usage = {
+                    tokens: subscription.usage.tokensUsed || allMetrics.usage.totalTokens || 0,
+                    requests: subscription.usage.requestsUsed || allMetrics.usage.requestCount || 0,
+                    logs: subscription.usage.logsUsed || allMetrics.logs.count || 0,
+                    projects: allMetrics.projects.count || 0,
+                    workflows: subscription.usage.workflowsUsed || allMetrics.workflows.count || 0,
+                    cost: allMetrics.usage.totalCost || 0, // Cost from actual usage records
+                    period: 'monthly'
+                };
+            } else {
+                usage = {
+                    tokens: allMetrics.usage.totalTokens || 0,
+                    requests: allMetrics.usage.requestCount || 0,
+                    logs: allMetrics.logs.count || 0,
+                    projects: allMetrics.projects.count || 0,
+                    workflows: allMetrics.workflows.count || 0,
+                    cost: allMetrics.usage.totalCost || 0,
+                    period: 'monthly'
+                };
+            }
 
             // Cache for 1 minute
             this.usageCache.set(cacheKey, usage, 60000);
@@ -599,8 +658,25 @@ export class GuardrailsService {
             if (!user) return null;
 
             const usage = await this.getCurrentUsage(userId);
-            const planName = user.subscription?.plan || 'free';
-            const planLimits = this.SUBSCRIPTION_PLANS[planName];
+            // Get subscription from new Subscription model
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            const planName = subscription?.plan || 'free';
+            const planLimits = subscription ? SubscriptionService.getPlanLimits(planName) : this.SUBSCRIPTION_PLANS[planName];
+            
+            // Check subscription status
+            if (subscription && subscription.status !== 'active' && subscription.status !== 'trialing') {
+                return {
+                    type: 'hard',
+                    metric: 'subscription',
+                    current: 0,
+                    limit: 0,
+                    percentage: 0,
+                    message: `Subscription is ${subscription.status}. Please activate your subscription.`,
+                    action: 'block',
+                    suggestions: ['Reactivate your subscription or upgrade to continue']
+                };
+            }
 
             // Calculate percentages
             const percentages = {
@@ -624,12 +700,18 @@ export class GuardrailsService {
 
             return {
                 current: usage,
-                limits: planLimits,
+                limits: {
+                    ...planLimits,
+                    models: subscription?.allowedModels || (planLimits as any).allowedModels || (planLimits as PlanLimits).models || []
+                },
                 percentages,
                 dailyTrend: dailyUsage,
                 predictions,
                 plan: planName,
-                recommendations: this.generateRecommendations(usage, planLimits, percentages)
+                recommendations: this.generateRecommendations(usage, { 
+                    ...planLimits, 
+                    models: subscription?.allowedModels || (planLimits as any).allowedModels || (planLimits as PlanLimits).models || []
+                }, percentages)
             };
         } catch (error) {
             loggingService.error('Error getting user usage stats:', { error: error instanceof Error ? error.message : String(error) });
@@ -1585,7 +1667,8 @@ Return ONLY the JSON object. No explanations, no markdown formatting.`;
 
         // Use projection to fetch only needed fields
         const user = await User.findById(userId)
-            .select('subscription.plan subscription.limits preferences.emailAlerts')
+            .select('preferences.emailAlerts subscriptionId')
+            .populate('subscriptionId', 'plan limits status')
             .lean();
             
         if (user) {

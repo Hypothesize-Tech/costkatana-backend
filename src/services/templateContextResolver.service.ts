@@ -186,6 +186,7 @@ Extracted value:`;
             const response = await AIRouterService.invokeModel(
                 extractionPrompt,
                 'amazon.nova-micro-v1:0',
+                undefined, // userId - not needed for template extraction
                 {
                     recentMessages: conversationHistory.slice(-3).map(msg => ({
                         role: msg.role,

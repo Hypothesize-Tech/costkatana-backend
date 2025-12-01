@@ -49,7 +49,7 @@ export class TracedAIService {
         let error: any;
         
         try {
-            response = await AIRouterService.invokeModel(prompt, model, context);
+            response = await AIRouterService.invokeModel(prompt, model, undefined, context);
             
             if (trace) {
                 try {

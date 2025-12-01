@@ -58,26 +58,7 @@ export interface IUser {
             fallbackToEmail?: boolean;
         };
     };
-    subscription: {
-        plan: 'free' | 'plus' | 'pro' | 'enterprise';
-        startDate: Date;
-        endDate?: Date;
-        seats?: number; // Number of seats for plus/pro plans
-        limits: {
-            apiCalls: number;
-            optimizations: number;
-            tokensPerMonth: number;
-            logsPerMonth: number;
-            projects: number;
-            workflows: number;
-        };
-        billing?: {
-            amount: number;
-            currency: string;
-            interval: 'monthly' | 'yearly';
-            nextBillingDate?: Date;
-        };
-    };
+    subscriptionId?: ObjectId; // Reference to Subscription model
     usage: {
         currentMonth: {
             apiCalls: number;
@@ -320,63 +301,10 @@ const userSchema = new Schema<IUser>({
             }
         }
     },
-    subscription: {
-        plan: {
-            type: String,
-            enum: ['free', 'plus', 'pro', 'enterprise'],
-            default: 'free',
-        },
-        startDate: {
-            type: Date,
-            default: Date.now,
-        },
-        endDate: Date,
-        seats: {
-            type: Number,
-            default: 1,
-        },
-        limits: {
-            apiCalls: {
-                type: Number,
-                default: 10000, // Free tier: 10K requests/month
-            },
-            optimizations: {
-                type: Number,
-                default: 10,
-            },
-            tokensPerMonth: {
-                type: Number,
-                default: 1000000, // Free tier: 1M tokens/month
-            },
-            logsPerMonth: {
-                type: Number,
-                default: 15000, // Free tier: 15K logs/month
-            },
-            projects: {
-                type: Number,
-                default: 5, // Free tier: 5 projects
-            },
-            workflows: {
-                type: Number,
-                default: 10, // Free tier: 10 workflows
-            },
-        },
-        billing: {
-            amount: {
-                type: Number,
-                default: 0,
-            },
-            currency: {
-                type: String,
-                default: 'USD',
-            },
-            interval: {
-                type: String,
-                enum: ['monthly', 'yearly'],
-                default: 'monthly',
-            },
-            nextBillingDate: Date,
-        },
+    subscriptionId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Subscription',
+        index: true,
     },
     usage: {
         currentMonth: {
@@ -577,8 +505,16 @@ userSchema.statics.resetAllMonthlyUsage = async function () {
     );
 };
 
+// Virtual populate for subscription
+userSchema.virtual('subscription', {
+    ref: 'Subscription',
+    localField: 'subscriptionId',
+    foreignField: '_id',
+    justOne: true,
+});
+
 // Indexes
-userSchema.index({ 'subscription.plan': 1 });
+userSchema.index({ subscriptionId: 1 });
 userSchema.index({ createdAt: -1 });
 userSchema.index({ 'dashboardApiKeys.keyId': 1, '_id': 1 });
 userSchema.index({ 'otherEmails.email': 1 });

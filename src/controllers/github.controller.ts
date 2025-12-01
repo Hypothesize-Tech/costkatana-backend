@@ -969,12 +969,340 @@ export class GitHubController {
      * Handle installation events
      */
     private static async handleInstallationEvent(payload: any): Promise<void> {
-        loggingService.info('GitHub App installation event', {
-            action: payload.action,
-            installationId: payload.installation?.id
-        });
+        try {
+            const action = payload.action;
+            const installation = payload.installation;
+            const installationId = installation?.id?.toString();
 
-        // TODO: Handle GitHub App installation/uninstallation
+            if (!installationId) {
+                loggingService.warn('GitHub App installation event missing installation ID', {
+                    action,
+                });
+                return;
+            }
+
+            loggingService.info('GitHub App installation event received', {
+                action,
+                installationId,
+                accountId: installation.account?.id,
+                accountLogin: installation.account?.login,
+            });
+
+            // Initialize GitHub service
+            await GitHubService.initialize();
+
+            switch (action) {
+                case 'created':
+                    await this.handleInstallationCreated(installation);
+                    break;
+
+                case 'deleted':
+                    await this.handleInstallationDeleted(installationId);
+                    break;
+
+                case 'suspend':
+                    await this.handleInstallationSuspended(installationId);
+                    break;
+
+                case 'unsuspend':
+                    await this.handleInstallationUnsuspended(installationId);
+                    break;
+
+                case 'new_permissions_accepted':
+                    await this.handleInstallationPermissionsUpdated(installation);
+                    break;
+
+                default:
+                    loggingService.info('Unhandled GitHub App installation action', {
+                        action,
+                        installationId,
+                    });
+            }
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle GitHub App installation event', {
+                action: payload.action,
+                installationId: payload.installation?.id,
+                error: errorMessage,
+                stack: error instanceof Error ? error.stack : undefined,
+            });
+        }
+    }
+
+    /**
+     * Handle installation created event
+     */
+    private static async handleInstallationCreated(installation: any): Promise<void> {
+        try {
+            const installationId = installation.id?.toString();
+            if (!installationId) {
+                loggingService.warn('Installation created event missing installation ID');
+                return;
+            }
+
+            // Check if connection already exists
+            let connection = await GitHubConnection.findOne({
+                installationId,
+            }).select('+accessToken');
+
+            if (connection) {
+                // Update existing connection
+                connection.isActive = true;
+                connection.githubUserId = installation.account?.id;
+                connection.githubUsername = installation.account?.login;
+                connection.avatarUrl = installation.account?.avatar_url;
+                connection.lastSyncedAt = new Date();
+                await connection.save();
+
+                loggingService.info('GitHub App installation connection updated', {
+                    installationId,
+                    userId: connection.userId,
+                    githubUsername: connection.githubUsername,
+                });
+            } else {
+                // Installation created but no user connection yet
+                // This can happen if installation was done outside our flow
+                // Store installation info for later linking
+                loggingService.info('GitHub App installation created but no user connection found', {
+                    installationId,
+                    accountLogin: installation.account?.login,
+                    accountId: installation.account?.id,
+                });
+            }
+
+            // If connection exists, sync repositories
+            if (connection) {
+                try {
+                    const repositories = await GitHubService.listUserRepositories(connection);
+                    connection.repositories = repositories;
+                    connection.lastSyncedAt = new Date();
+                    await connection.save();
+
+                    loggingService.info('Repositories synced for installation', {
+                        installationId,
+                        repositoriesCount: repositories.length,
+                    });
+                } catch (syncError: unknown) {
+                    const errorMessage = syncError instanceof Error ? syncError.message : String(syncError);
+                    loggingService.warn('Failed to sync repositories for installation', {
+                        installationId,
+                        error: errorMessage,
+                    });
+                }
+            }
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle installation created event', {
+                installationId: installation.id,
+                error: errorMessage,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Handle installation deleted event
+     */
+    private static async handleInstallationDeleted(installationId: string): Promise<void> {
+        try {
+            // Find all connections with this installation ID
+            const connections = await GitHubConnection.find({
+                installationId,
+            });
+
+            if (connections.length === 0) {
+                loggingService.info('No connections found for deleted installation', {
+                    installationId,
+                });
+                return;
+            }
+
+            // Mark all connections as inactive
+            for (const connection of connections) {
+                connection.isActive = false;
+                await connection.save();
+
+                loggingService.info('GitHub App connection deactivated due to installation deletion', {
+                    installationId,
+                    userId: connection.userId,
+                    connectionId: connection._id.toString(),
+                });
+            }
+
+            // Also mark related integrations as inactive or failed
+            const { GitHubIntegration } = await import('../models');
+            const integrations = await GitHubIntegration.find({
+                connectionId: { $in: connections.map(c => c._id) },
+                status: { $in: ['initializing', 'analyzing', 'generating', 'draft', 'open', 'updating'] },
+            });
+
+            for (const integration of integrations) {
+                if (integration.status === 'open' || integration.status === 'draft') {
+                    integration.status = 'closed';
+                } else {
+                    integration.status = 'failed';
+                    integration.errorMessage = 'GitHub App installation was deleted';
+                }
+                await integration.save();
+            }
+
+            loggingService.info('GitHub App installation deletion processed', {
+                installationId,
+                connectionsDeactivated: connections.length,
+                integrationsUpdated: integrations.length,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle installation deleted event', {
+                installationId,
+                error: errorMessage,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Handle installation suspended event
+     */
+    private static async handleInstallationSuspended(installationId: string): Promise<void> {
+        try {
+            const connections = await GitHubConnection.find({
+                installationId,
+                isActive: true,
+            });
+
+            for (const connection of connections) {
+                connection.isActive = false;
+                await connection.save();
+
+                loggingService.info('GitHub App connection suspended', {
+                    installationId,
+                    userId: connection.userId,
+                    connectionId: connection._id.toString(),
+                });
+            }
+
+            loggingService.info('GitHub App installation suspension processed', {
+                installationId,
+                connectionsSuspended: connections.length,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle installation suspended event', {
+                installationId,
+                error: errorMessage,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Handle installation unsuspended event
+     */
+    private static async handleInstallationUnsuspended(installationId: string): Promise<void> {
+        try {
+            const connections = await GitHubConnection.find({
+                installationId,
+            });
+
+            for (const connection of connections) {
+                connection.isActive = true;
+                connection.lastSyncedAt = new Date();
+                await connection.save();
+
+                // Sync repositories after unsuspension
+                try {
+                    const repositories = await GitHubService.listUserRepositories(connection);
+                    connection.repositories = repositories;
+                    await connection.save();
+                } catch (syncError: unknown) {
+                    const errorMessage = syncError instanceof Error ? syncError.message : String(syncError);
+                    loggingService.warn('Failed to sync repositories after unsuspension', {
+                        installationId,
+                        connectionId: connection._id.toString(),
+                        error: errorMessage,
+                    });
+                }
+
+                loggingService.info('GitHub App connection unsuspended', {
+                    installationId,
+                    userId: connection.userId,
+                    connectionId: connection._id.toString(),
+                });
+            }
+
+            loggingService.info('GitHub App installation unsuspension processed', {
+                installationId,
+                connectionsReactivated: connections.length,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle installation unsuspended event', {
+                installationId,
+                error: errorMessage,
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Handle installation permissions updated event
+     */
+    private static async handleInstallationPermissionsUpdated(installation: any): Promise<void> {
+        try {
+            const installationId = installation.id?.toString();
+            if (!installationId) {
+                loggingService.warn('Installation permissions updated event missing installation ID');
+                return;
+            }
+
+            const connections = await GitHubConnection.find({
+                installationId,
+            }).select('+accessToken');
+
+            for (const connection of connections) {
+                // Update connection metadata
+                connection.githubUserId = installation.account?.id;
+                connection.githubUsername = installation.account?.login;
+                connection.avatarUrl = installation.account?.avatar_url;
+                connection.isActive = true;
+                connection.lastSyncedAt = new Date();
+
+                // Sync repositories with new permissions
+                try {
+                    const repositories = await GitHubService.listUserRepositories(connection);
+                    connection.repositories = repositories;
+                    await connection.save();
+
+                    loggingService.info('Repositories synced after permissions update', {
+                        installationId,
+                        userId: connection.userId,
+                        repositoriesCount: repositories.length,
+                    });
+                } catch (syncError: unknown) {
+                    const errorMessage = syncError instanceof Error ? syncError.message : String(syncError);
+                    loggingService.warn('Failed to sync repositories after permissions update', {
+                        installationId,
+                        connectionId: connection._id.toString(),
+                        error: errorMessage,
+                    });
+                    // Still save the connection update even if sync fails
+                    await connection.save();
+                }
+            }
+
+            loggingService.info('GitHub App installation permissions update processed', {
+                installationId,
+                connectionsUpdated: connections.length,
+            });
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Failed to handle installation permissions updated event', {
+                installationId: installation.id,
+                error: errorMessage,
+            });
+            throw error;
+        }
     }
 }
 

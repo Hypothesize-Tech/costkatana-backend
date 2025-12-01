@@ -85,18 +85,19 @@ export class AdminRevenueAnalyticsService {
             const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
             // Get all users with subscriptions
-            const users = await User.find({ isActive: true }).select('subscription');
+            const users = await User.find({ isActive: true }).select('subscriptionId').populate('subscriptionId');
 
             // Calculate MRR (Monthly Recurring Revenue)
             let totalMRR = 0;
             const revenueByPlanMap = new Map<string, { count: number; revenue: number }>();
 
             for (const user of users) {
-                const plan = user.subscription?.plan || 'free';
-                const billing = user.subscription?.billing;
+                const subscription = (user as any).subscriptionId;
+                const plan = subscription?.plan || 'free';
+                const billing = subscription?.billing;
                 const interval = billing?.interval || 'monthly';
                 const amount = billing?.amount || 0;
-                const seats = user.subscription?.seats || 1;
+                const seats = subscription?.seats || 1;
 
                 if (plan !== 'free') {
                     let monthlyRevenue = amount;
@@ -174,15 +175,16 @@ export class AdminRevenueAnalyticsService {
                     { 'subscription.endDate': { $exists: false } },
                     { 'subscription.endDate': { $gte: startDate } }
                 ]
-            }).select('subscription');
+            }).select('subscriptionId').populate('subscriptionId');
 
             let revenue = 0;
             for (const user of users) {
-                const plan = user.subscription?.plan || 'free';
-                const billing = user.subscription?.billing;
+                const subscription = (user as any).subscriptionId;
+                const plan = subscription?.plan || 'free';
+                const billing = subscription?.billing;
                 const interval = billing?.interval || 'monthly';
                 const amount = billing?.amount || 0;
-                const seats = user.subscription?.seats || 1;
+                const seats = subscription?.seats || 1;
 
                 if (plan !== 'free') {
                     if (plan === 'plus') {
@@ -267,14 +269,8 @@ export class AdminRevenueAnalyticsService {
             // Build match query with date filters
             const matchQuery: any = { isActive: true };
             
-            if (startDate || endDate) {
-                matchQuery['subscription.startDate'] = {};
-                if (startDate) matchQuery['subscription.startDate'].$gte = startDate;
-                if (endDate) matchQuery['subscription.startDate'].$lte = endDate;
-            }
-
             // Get all subscriptions with optional date filtering
-            const subscriptions = await User.find(matchQuery).select('subscription createdAt');
+            const subscriptions = await User.find(matchQuery).select('subscriptionId createdAt').populate('subscriptionId');
 
             const planCounts = {
                 free: 0,
@@ -286,14 +282,15 @@ export class AdminRevenueAnalyticsService {
             let totalRevenue = 0;
 
             for (const user of subscriptions) {
-                const plan = user.subscription?.plan || 'free';
+                const subscription = (user as any).subscriptionId;
+                const plan = subscription?.plan || 'free';
                 planCounts[plan as keyof typeof planCounts]++;
 
                 if (plan !== 'free') {
-                    const billing = user.subscription?.billing;
+                    const billing = subscription?.billing;
                     const interval = billing?.interval || 'monthly';
                     const amount = billing?.amount || 0;
-                    const seats = user.subscription?.seats || 1;
+                    const seats = subscription?.seats || 1;
 
                     if (plan === 'plus') {
                         totalRevenue += seats * this.PLAN_PRICING.plus;
@@ -339,9 +336,10 @@ export class AdminRevenueAnalyticsService {
             // Filter active subscriptions based on date range
             const cutoffDate = endDate || now;
             const activeSubscriptions = subscriptions.filter(u => {
-                const plan = u.subscription?.plan || 'free';
-                const startDateCheck = !startDate || (u.subscription?.startDate && u.subscription.startDate <= cutoffDate);
-                const endDateCheck = !u.subscription?.endDate || u.subscription.endDate > cutoffDate;
+                const subscription = (u as any).subscriptionId;
+                const plan = subscription?.plan || 'free';
+                const startDateCheck = !startDate || (subscription?.startDate && subscription.startDate <= cutoffDate);
+                const endDateCheck = !subscription?.endDate || subscription.endDate > cutoffDate;
                 return plan !== 'free' && startDateCheck && endDateCheck;
             }).length;
 
@@ -477,14 +475,15 @@ export class AdminRevenueAnalyticsService {
                     $lte: futureDate
                 },
                 'subscription.plan': { $ne: 'free' }
-            }).select('email subscription').lean();
+            }).select('email subscriptionId').populate('subscriptionId').lean();
 
-            const renewals: UpcomingRenewals[] = users.map(user => {
-                const billing = user.subscription?.billing;
+            const renewals: UpcomingRenewals[] = users.map((user: any) => {
+                const subscription = user.subscriptionId;
+                const billing = subscription?.billing;
                 return {
                     userId: user._id.toString(),
                     userEmail: user.email,
-                    plan: user.subscription?.plan || '',
+                    plan: subscription?.plan || '',
                     amount: billing?.amount || 0,
                     nextBillingDate: billing?.nextBillingDate || new Date(),
                     interval: billing?.interval || 'monthly'

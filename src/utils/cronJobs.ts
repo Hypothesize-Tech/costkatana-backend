@@ -48,13 +48,14 @@ export const initializeCronJobs = () => {
             // Check users approaching limits
             const { User } = await import('../models/User');
             const freeUsers = await User.find({
-                'subscription.plan': 'free',
                 isActive: true
-            }).select('_id usage subscription');
+            }).select('_id usage subscriptionId').populate('subscriptionId');
 
             for (const user of freeUsers) {
                 const usage = user.usage?.currentMonth;
-                const limits = user.subscription?.limits;
+                const subscription = (user as any).subscriptionId;
+                if (!subscription || subscription.plan !== 'free') continue;
+                const limits = subscription?.limits;
                 
                 if (!usage || !limits) continue;
 
@@ -154,6 +155,155 @@ export const initializeCronJobs = () => {
                 operation: 'accountDeletionWarnings',
                 step: 'error',
                 schedule: '0 10 * * 0',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Daily Cortex usage reset - runs at midnight every day
+    cron.schedule('0 0 * * *', async () => {
+        loggingService.info('Running daily Cortex usage reset', {
+            component: 'cronJobs',
+            operation: 'dailyCortexReset',
+            step: 'start',
+            schedule: '0 0 * * *'
+        });
+        try {
+            const { SubscriptionService } = await import('../services/subscription.service');
+            await SubscriptionService.resetDailyCortexUsage();
+            loggingService.info('Daily Cortex usage reset completed', {
+                component: 'cronJobs',
+                operation: 'dailyCortexReset',
+                step: 'complete',
+                schedule: '0 0 * * *'
+            });
+        } catch (error) {
+            loggingService.error('Daily Cortex usage reset failed', {
+                component: 'cronJobs',
+                operation: 'dailyCortexReset',
+                step: 'error',
+                schedule: '0 0 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Trial expiration check - runs every hour
+    cron.schedule('0 * * * *', async () => {
+        loggingService.info('Running trial expiration check', {
+            component: 'cronJobs',
+            operation: 'trialExpirationCheck',
+            step: 'start',
+            schedule: '0 * * * *'
+        });
+        try {
+            const { SubscriptionService } = await import('../services/subscription.service');
+            await SubscriptionService.processTrialExpirations();
+            loggingService.info('Trial expiration check completed', {
+                component: 'cronJobs',
+                operation: 'trialExpirationCheck',
+                step: 'complete',
+                schedule: '0 * * * *'
+            });
+        } catch (error) {
+            loggingService.error('Trial expiration check failed', {
+                component: 'cronJobs',
+                operation: 'trialExpirationCheck',
+                step: 'error',
+                schedule: '0 * * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Scheduled cancellations - runs every hour
+    cron.schedule('0 * * * *', async () => {
+        loggingService.info('Running scheduled cancellations check', {
+            component: 'cronJobs',
+            operation: 'scheduledCancellations',
+            step: 'start',
+            schedule: '0 * * * *'
+        });
+        try {
+            const { SubscriptionService } = await import('../services/subscription.service');
+            await SubscriptionService.processCancellations();
+            loggingService.info('Scheduled cancellations check completed', {
+                component: 'cronJobs',
+                operation: 'scheduledCancellations',
+                step: 'complete',
+                schedule: '0 * * * *'
+            });
+        } catch (error) {
+            loggingService.error('Scheduled cancellations check failed', {
+                component: 'cronJobs',
+                operation: 'scheduledCancellations',
+                step: 'error',
+                schedule: '0 * * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Failed payment retries (dunning management) - runs every 6 hours
+    cron.schedule('0 */6 * * *', async () => {
+        loggingService.info('Running failed payment retries', {
+            component: 'cronJobs',
+            operation: 'failedPaymentRetries',
+            step: 'start',
+            schedule: '0 */6 * * *'
+        });
+        try {
+            const { SubscriptionService } = await import('../services/subscription.service');
+            await SubscriptionService.processFailedPayments();
+            loggingService.info('Failed payment retries completed', {
+                component: 'cronJobs',
+                operation: 'failedPaymentRetries',
+                step: 'complete',
+                schedule: '0 */6 * * *'
+            });
+        } catch (error) {
+            loggingService.error('Failed payment retries failed', {
+                component: 'cronJobs',
+                operation: 'failedPaymentRetries',
+                step: 'error',
+                schedule: '0 */6 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Usage alerts check - runs every 4 hours
+    cron.schedule('0 */4 * * *', async () => {
+        loggingService.info('Running usage alerts check', {
+            component: 'cronJobs',
+            operation: 'usageAlertsCheck',
+            step: 'start',
+            schedule: '0 */4 * * *'
+        });
+        try {
+            const { Subscription } = await import('../models/Subscription');
+            const subscriptions = await Subscription.find({
+                status: { $in: ['active', 'trialing'] },
+            }).select('userId');
+
+            const { SubscriptionService } = await import('../services/subscription.service');
+            for (const subscription of subscriptions) {
+                await SubscriptionService.checkUsageAlerts(subscription.userId);
+            }
+
+            loggingService.info('Usage alerts check completed', {
+                component: 'cronJobs',
+                operation: 'usageAlertsCheck',
+                step: 'complete',
+                schedule: '0 */4 * * *',
+                subscriptionsChecked: subscriptions.length
+            });
+        } catch (error) {
+            loggingService.error('Usage alerts check failed', {
+                component: 'cronJobs',
+                operation: 'usageAlertsCheck',
+                step: 'error',
+                schedule: '0 */4 * * *',
                 error: error instanceof Error ? error.message : String(error)
             });
         }

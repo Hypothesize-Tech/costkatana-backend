@@ -8,6 +8,10 @@ import { AppError } from '../middleware/error.middleware';
 import { S3Service } from '../services/s3.service';
 import { AuthService } from '../services/auth.service';
 import { accountClosureService } from '../services/accountClosure.service';
+import { SubscriptionService } from '../services/subscription.service';
+import { SubscriptionNotificationService } from '../services/subscriptionNotification.service';
+import { paymentGatewayManager } from '../services/paymentGateway/paymentGatewayManager.service';
+import { PaymentMethod } from '../models/PaymentMethod';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 
@@ -43,53 +47,28 @@ export class UserController {
     private static readonly MAX_DB_FAILURES = 5;
     private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
     private static lastDbFailureTime: number = 0;
+
+    /**
+     * Helper to add CORS headers to response
+     */
+    private static addCorsHeaders(req: any, res: Response): void {
+        const origin = req.headers.origin;
+        if (origin) {
+            res.setHeader('Access-Control-Allow-Origin', origin);
+            res.setHeader('Access-Control-Allow-Credentials', 'true');
+        }
+    }
     
     // Circuit breaker for S3 operations
     private static s3FailureCount: number = 0;
+    
+    // Stats timeout constant
+    private static readonly STATS_TIMEOUT = 30000; // 30 seconds
     private static readonly MAX_S3_FAILURES = 3;
     private static readonly S3_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
     private static lastS3FailureTime: number = 0;
     
-    // Request timeout configuration
-    private static readonly DEFAULT_TIMEOUT = 15000; // 15 seconds
-    private static readonly STATS_TIMEOUT = 30000; // 30 seconds for stats
-    private static readonly HISTORY_TIMEOUT = 25000; // 25 seconds for history
-    
-    // Pre-computed subscription limits
-    private static readonly SUBSCRIPTION_LIMITS = {
-        free: { 
-            apiCalls: 10000, 
-            optimizations: 10,
-            tokensPerMonth: 1000000,
-            logsPerMonth: 15000,
-            projects: 5,
-            workflows: 10
-        },
-        plus: { 
-            apiCalls: 50000, 
-            optimizations: 100,
-            tokensPerMonth: 10000000,
-            logsPerMonth: -1, // Unlimited
-            projects: -1,
-            workflows: 100
-        },
-        pro: { 
-            apiCalls: 100000, 
-            optimizations: 1000,
-            tokensPerMonth: 15000000,
-            logsPerMonth: -1,
-            projects: -1,
-            workflows: 100
-        },
-        enterprise: { 
-            apiCalls: -1, 
-            optimizations: -1,
-            tokensPerMonth: -1,
-            logsPerMonth: -1,
-            projects: -1,
-            workflows: -1
-        }
-    };
+
     
     // ObjectId conversion utilities
     private static objectIdCache = new Map<string, mongoose.Types.ObjectId>();
@@ -809,40 +788,29 @@ export class UserController {
         try {
             const userId = req.user!.id;
 
-            const user: any = await User.findById(userId).select('subscription usage');
-            if (!user) {
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!subscription) {
                 res.status(404).json({
                     success: false,
-                    message: 'User not found',
+                    message: 'Subscription not found',
                 });
+                return;
             }
 
-            const subscriptionData = {
-                plan: user.subscription.plan,
-                startDate: user.subscription.startDate,
-                endDate: user.subscription.endDate,
-                limits: user.subscription.limits,
-                usage: {
-                    apiCalls: user.usage.currentMonth.apiCalls,
-                    apiCallsLimit: user.subscription.limits.apiCalls,
-                    apiCallsPercentage: (user.usage.currentMonth.apiCalls / user.subscription.limits.apiCalls) * 100,
-                    optimizations: user.usage.currentMonth.optimizationsSaved,
-                    optimizationsLimit: user.subscription.limits.optimizations,
-                    optimizationsPercentage: (user.usage.currentMonth.optimizationsSaved / user.subscription.limits.optimizations) * 100,
-                },
-            };
+            const usageAnalytics = await SubscriptionService.getUsageAnalytics(userId);
 
             res.json({
                 success: true,
-                data: subscriptionData,
+                data: {
+                    ...subscription.toObject(),
+                    usageAnalytics,
+                },
             });
         } catch (error: any) {
             loggingService.error('Get subscription failed', {
                 requestId: req.headers['x-request-id'] as string,
                 userId: req.user!.id,
-                hasUserId: !!req.user!.id,
                 error: error.message || 'Unknown error',
-                stack: error.stack
             });
             next(error);
         }
@@ -869,25 +837,71 @@ export class UserController {
                 return;
             }
 
-            // Use pre-computed subscription limits
-            const planLimits = this.SUBSCRIPTION_LIMITS[plan as keyof typeof this.SUBSCRIPTION_LIMITS];
-
-            const user: any = await User.findByIdAndUpdate(
-                userId,
-                {
-                    'subscription.plan': plan,
-                    'subscription.limits': planLimits,
-                    'subscription.startDate': new Date(),
-                },
-                { new: true }
-            ).select('subscription');
-
-            if (!user) {
+            // Get current subscription
+            const currentSubscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!currentSubscription) {
                 res.status(404).json({
                     success: false,
-                    message: 'User not found',
+                    message: 'Subscription not found',
                 });
                 return;
+            }
+
+            // Determine if this is an upgrade or downgrade
+            const planHierarchy = ['free', 'plus', 'pro', 'enterprise'];
+            const currentIndex = planHierarchy.indexOf(currentSubscription.plan);
+            const newIndex = planHierarchy.indexOf(plan);
+
+            let updatedSubscription;
+            if (newIndex > currentIndex) {
+                // Upgrade - requires payment gateway
+                const { paymentGateway, paymentMethodId } = req.body;
+                if (!paymentGateway || !paymentMethodId) {
+                    res.status(400).json({
+                        success: false,
+                        message: 'Payment gateway and payment method required for upgrade',
+                    });
+                    return;
+                }
+
+                updatedSubscription = await SubscriptionService.upgradeSubscription(
+                    userId,
+                    plan as 'plus' | 'pro' | 'enterprise',
+                    paymentGateway,
+                    paymentMethodId,
+                    { interval: req.body.interval || 'monthly' }
+                );
+
+                // Send notification
+                const user = await User.findById(userId);
+                if (user) {
+                    await SubscriptionNotificationService.sendSubscriptionUpgradedEmail(
+                        user,
+                        currentSubscription.plan,
+                        plan
+                    );
+                }
+            } else if (newIndex < currentIndex) {
+                // Downgrade
+                updatedSubscription = await SubscriptionService.downgradeSubscription(
+                    userId,
+                    plan as 'free' | 'plus' | 'pro',
+                    req.body.scheduleForPeriodEnd !== false
+                );
+
+                // Send notification
+                const user = await User.findById(userId);
+                if (user) {
+                    await SubscriptionNotificationService.sendSubscriptionDowngradedEmail(
+                        user,
+                        currentSubscription.plan,
+                        plan,
+                        updatedSubscription.billing.nextBillingDate || new Date()
+                    );
+                }
+            } else {
+                // Same plan - no change needed
+                updatedSubscription = currentSubscription;
             }
 
             // Reset failure count on success
@@ -896,7 +910,7 @@ export class UserController {
             res.json({
                 success: true,
                 message: 'Subscription updated successfully',
-                data: user.subscription,
+                data: updatedSubscription,
             });
         } catch (error: any) {
             UserController.recordDbFailure();
@@ -1243,6 +1257,8 @@ export class UserController {
         const userId = req.user?.id;
 
         if (!userId) {
+            // Add CORS headers for error response
+            UserController.addCorsHeaders(req, res);
             res.status(401).json({
                 success: false,
                 message: 'Authentication required',
@@ -2242,5 +2258,1346 @@ export class UserController {
             });
             next(error);
         }
+    }
+
+    /**
+     * Upgrade subscription
+     * POST /api/user/subscription/upgrade
+     */
+    static async upgradeSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { plan, paymentGateway, paymentMethodId, interval, discountCode } = req.body;
+
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan for upgrade',
+                });
+                return;
+            }
+
+            if (!paymentGateway || !paymentMethodId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Payment gateway and payment method required',
+                });
+                return;
+            }
+
+            const currentSubscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!currentSubscription) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Subscription not found',
+                });
+                return;
+            }
+
+            const updatedSubscription = await SubscriptionService.upgradeSubscription(
+                userId,
+                plan,
+                paymentGateway,
+                paymentMethodId,
+                { interval: interval || 'monthly', discountCode }
+            );
+
+            // Send notification
+            const user = await User.findById(userId);
+            if (user) {
+                await SubscriptionNotificationService.sendSubscriptionUpgradedEmail(
+                    user,
+                    currentSubscription.plan,
+                    plan
+                );
+            }
+
+            res.json({
+                success: true,
+                message: 'Subscription upgraded successfully',
+                data: updatedSubscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Upgrade subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Create Stripe setup intent for payment method collection
+     * POST /api/user/subscription/create-stripe-setup-intent
+     */
+    static async createStripeSetupIntent(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            // Get user for customer creation
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Create or get Stripe customer
+            const customerResult = await paymentGatewayManager.createCustomer('stripe', {
+                email: user.email,
+                name: user.name || user.email,
+                userId: userId.toString(),
+            });
+
+            // Create setup intent using Stripe gateway
+            const stripeGateway = paymentGatewayManager.getGateway('stripe') as any;
+            
+            // Access Stripe instance - we need to create setup intent directly
+            // Import Stripe SDK
+            const Stripe = require('stripe') as any;
+            if (!process.env.STRIPE_SECRET_KEY) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Stripe is not configured',
+                });
+                return;
+            }
+            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+                apiVersion: '2024-12-18.acacia',
+            }) as any;
+
+            const setupIntent = await stripe.setupIntents.create({
+                customer: customerResult.customerId,
+                payment_method_types: ['card'],
+                usage: 'off_session', // For recurring payments
+            }) as any;
+
+            // Log gateway for debugging
+            loggingService.debug('Stripe gateway initialized', {
+                requestId,
+                userId,
+                gatewayType: stripeGateway.constructor.name,
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    clientSecret: setupIntent.client_secret as string,
+                    customerId: customerResult.customerId,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Create Stripe setup intent failed', {
+                requestId,
+                userId,
+                error: error.message as string,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Confirm Stripe payment and upgrade subscription
+     * POST /api/user/subscription/confirm-stripe-payment
+     */
+    static async confirmStripePayment(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { setupIntentId, paymentMethodId, plan, billingInterval, discountCode } = req.body as any;
+
+            if (!paymentMethodId || !plan) {
+                UserController.addCorsHeaders(req, res);
+                res.status(400).json({
+                    success: false,
+                    message: 'Payment method ID and plan are required',
+                });
+                return;
+            }
+
+            if (!['plus', 'pro', 'enterprise'].includes(plan as string)) {
+                UserController.addCorsHeaders(req, res);
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan',
+                });
+                return;
+            }
+
+            // Get user
+            const user = await User.findById(userId);
+            if (!user) {
+                UserController.addCorsHeaders(req, res);
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Access Stripe instance for payment method retrieval
+            const Stripe = require('stripe') as any;
+            if (!process.env.STRIPE_SECRET_KEY) {
+                UserController.addCorsHeaders(req, res);
+                res.status(500).json({
+                    success: false,
+                    message: 'Stripe is not configured',
+                });
+                return;
+            }
+            const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+                apiVersion: '2024-12-18.acacia',
+            }) as any;
+
+            // Get Stripe gateway service
+            const stripeGateway = paymentGatewayManager.getGateway('stripe') as any;
+
+            // Get payment method details first to check if it's already attached
+            const paymentMethodDetails = await stripeGateway.getPaymentMethod(paymentMethodId as string) as any;
+            
+            // Get or create Stripe customer
+            let gatewayCustomerId: string;
+            const existingPaymentMethod = await PaymentMethod.findOne({ userId, gateway: 'stripe' });
+            if (existingPaymentMethod) {
+                gatewayCustomerId = existingPaymentMethod.gatewayCustomerId;
+            } else {
+                const customerResult = await paymentGatewayManager.createCustomer('stripe', {
+                    email: user.email,
+                    name: user.name || user.email,
+                    userId: userId.toString(),
+                });
+                gatewayCustomerId = customerResult.customerId;
+            }
+
+            // Attach payment method to customer only if not already attached
+            // Check if payment method already has a customer attached
+            if (paymentMethodDetails.customer) {
+                // Payment method is already attached to a customer
+                if (paymentMethodDetails.customer !== gatewayCustomerId) {
+                    // It's attached to a different customer - this shouldn't happen in normal flow
+                    // but we'll log it and continue with the current customer
+                    loggingService.warn('Payment method attached to different customer', {
+                        requestId,
+                        userId,
+                        paymentMethodId: paymentMethodId as string,
+                        existingCustomer: paymentMethodDetails.customer,
+                        targetCustomer: gatewayCustomerId,
+                    });
+                }
+                // Payment method is already attached to the correct customer, no need to attach again
+            } else {
+                // Payment method is not attached to any customer, attach it now
+                try {
+                    await stripeGateway.attachPaymentMethodToCustomer(paymentMethodId as string, gatewayCustomerId);
+                } catch (attachError: any) {
+                    // If it's already attached (race condition), that's okay
+                    if (attachError.message && attachError.message.includes('already been attached')) {
+                        loggingService.info('Payment method already attached (race condition)', {
+                            requestId,
+                            userId,
+                            paymentMethodId: paymentMethodId as string,
+                        });
+                    } else {
+                        // Re-throw if it's a different error
+                        throw attachError;
+                    }
+                }
+            }
+
+            // Log setup intent ID for debugging
+            if (setupIntentId) {
+                loggingService.debug('Setup intent confirmed', {
+                    requestId,
+                    userId,
+                    setupIntentId: setupIntentId as string,
+                });
+            }
+
+            // Create or update payment method in database
+            let paymentMethod: any = await PaymentMethod.findOne({
+                gateway: 'stripe',
+                gatewayPaymentMethodId: paymentMethodId as string,
+                userId,
+            });
+
+            if (!paymentMethod) {
+                paymentMethod = new PaymentMethod({
+                    userId,
+                    gateway: 'stripe',
+                    gatewayCustomerId: gatewayCustomerId,
+                    gatewayPaymentMethodId: paymentMethodId as string,
+                    type: 'card',
+                    card: {
+                        last4: (paymentMethodDetails.card?.last4 || '') as string,
+                        brand: (paymentMethodDetails.card?.brand || '') as string,
+                        expiryMonth: (paymentMethodDetails.card?.exp_month || 0) as number,
+                        expiryYear: (paymentMethodDetails.card?.exp_year || 0) as number,
+                        maskedNumber: `**** **** **** ${paymentMethodDetails.card?.last4 || ''}`,
+                    },
+                    isDefault: true,
+                    isActive: true,
+                    setupForRecurring: true,
+                    recurringStatus: 'active',
+                });
+                await paymentMethod.save();
+            }
+
+            // Set as default payment method
+            await stripeGateway.setDefaultPaymentMethod(gatewayCustomerId, paymentMethodId as string);
+
+            // Log stripe instance for debugging
+            loggingService.debug('Stripe instance created', {
+                requestId,
+                userId,
+                stripeVersion: stripe.VERSION,
+            });
+
+            // Upgrade subscription
+            const updatedSubscription = await SubscriptionService.upgradeSubscription(
+                userId,
+                plan as 'plus' | 'pro' | 'enterprise',
+                'stripe',
+                paymentMethod._id.toString(),
+                { interval: (billingInterval as 'monthly' | 'yearly') || 'monthly', discountCode: discountCode as string }
+            );
+
+            res.json({
+                success: true,
+                message: 'Stripe payment confirmed and subscription upgraded successfully',
+                data: updatedSubscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Confirm Stripe payment failed', {
+                requestId,
+                userId,
+                error: error.message as string,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Create PayPal subscription plan
+     * POST /api/user/subscription/create-paypal-plan
+     */
+    static async createPayPalPlan(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { plan, billingInterval, amount, currency = 'USD' } = req.body;
+
+            if (!plan || !billingInterval || !amount) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Plan, billing interval, and amount are required',
+                });
+                return;
+            }
+
+            // Get user for email
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Create PayPal customer
+            const customerResult = await paymentGatewayManager.createCustomer('paypal', {
+                email: user.email,
+                name: user.name || user.email,
+                userId: userId.toString(),
+            });
+
+            // Create subscription in PayPal (this creates the billing plan first, then the subscription)
+            // The backend creates a PayPal billing plan and returns the plan ID to the frontend SDK
+            // The frontend SDK will use this plan ID to create the subscription when user approves
+            const paypalGateway = paymentGatewayManager.getGateway('paypal');
+            const subscriptionResult = await paypalGateway.createSubscription({
+                customerId: customerResult.customerId,
+                paymentMethodId: '', // Not needed for initial creation
+                planId: `${plan}_${billingInterval}`,
+                amount: parseFloat(amount),
+                currency: currency.toUpperCase(),
+                interval: billingInterval,
+                metadata: {
+                    userId: userId.toString(),
+                    plan: plan,
+                },
+            });
+
+            // Extract the plan ID from metadata (set by PayPal service)
+            const planId = subscriptionResult.metadata?.planId || subscriptionResult.subscriptionId;
+
+            res.json({
+                success: true,
+                data: {
+                    planId: planId, // PayPal billing plan ID for frontend SDK
+                    subscriptionId: subscriptionResult.subscriptionId, // Subscription ID for reference
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Create PayPal plan failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Handle PayPal subscription approval and upgrade
+     * POST /api/user/subscription/approve-paypal
+     */
+    static async approvePayPalSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { subscriptionId, plan, billingInterval, discountCode } = req.body;
+
+            if (!subscriptionId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'PayPal subscription ID is required',
+                });
+                return;
+            }
+
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan',
+                });
+                return;
+            }
+
+            // Get PayPal subscription details
+            const paypalGateway = paymentGatewayManager.getGateway('paypal');
+            const paypalSubscription = await paypalGateway.getSubscription(subscriptionId);
+
+            if (!paypalSubscription) {
+                res.status(404).json({
+                    success: false,
+                    message: 'PayPal subscription not found',
+                });
+                return;
+            }
+
+            // Get user email for PayPal customer ID
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Create or get PayPal customer
+            const customerResult = await paymentGatewayManager.createCustomer('paypal', {
+                email: user.email,
+                name: user.name || user.email,
+                userId: userId.toString(),
+            });
+
+            // Create payment method from PayPal subscription
+            const paymentMethodResult = await paymentGatewayManager.createPaymentMethod('paypal', {
+                type: 'paypal',
+                customerId: customerResult.customerId,
+                paypalEmail: user.email,
+            });
+
+            // Find or create payment method in database
+            let paymentMethod: any = await PaymentMethod.findOne({
+                gateway: 'paypal',
+                gatewayPaymentMethodId: paymentMethodResult.paymentMethodId,
+                userId,
+            });
+
+            if (!paymentMethod) {
+                paymentMethod = new PaymentMethod({
+                    userId,
+                    gateway: 'paypal',
+                    gatewayCustomerId: customerResult.customerId,
+                    gatewayPaymentMethodId: subscriptionId, // Use subscription ID as payment method ID
+                    type: 'paypal_account',
+                    paypalAccount: {
+                        email: user.email,
+                    },
+                    isDefault: true,
+                    isActive: true,
+                    setupForRecurring: true,
+                    recurringStatus: 'active',
+                });
+                await paymentMethod.save();
+            }
+
+            // Upgrade subscription
+            const updatedSubscription = await SubscriptionService.upgradeSubscription(
+                userId,
+                plan,
+                'paypal',
+                paymentMethod._id.toString(),
+                { interval: billingInterval || 'monthly', discountCode }
+            );
+
+            // Update subscription with PayPal subscription ID
+            updatedSubscription.gatewaySubscriptionId = subscriptionId;
+            await updatedSubscription.save();
+
+            res.json({
+                success: true,
+                message: 'PayPal subscription approved and subscription upgraded successfully',
+                data: updatedSubscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Approve PayPal subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Create Razorpay order for subscription
+     * POST /api/user/subscription/create-razorpay-order
+     */
+    static async createRazorpayOrder(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const body = req.body as any;
+            const { plan, billingInterval, amount, currency } = {
+                plan: body.plan as 'plus' | 'pro' | 'enterprise',
+                billingInterval: body.billingInterval as 'monthly' | 'yearly',
+                amount: body.amount as number,
+                currency: body.currency as string | undefined,
+            };
+
+            if (!plan || !billingInterval || !amount) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Plan, billing interval, and amount are required',
+                });
+                return;
+            }
+
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan for upgrade',
+                });
+                return;
+            }
+
+            // Get user
+            const user = await User.findById(userId);
+            if (!user) {
+                UserController.addCorsHeaders(req, res);
+                res.status(404).json({ success: false, message: 'User not found' });
+                return;
+            }
+
+            // Validate user email (required for Razorpay customer creation)
+            if (!user.email) {
+                UserController.addCorsHeaders(req, res);
+                res.status(400).json({
+                    success: false,
+                    message: 'User email is required to create a Razorpay order. Please update your profile with an email address.',
+                });
+                return;
+            }
+
+            // Check if Razorpay gateway is available and configured
+            if (!paymentGatewayManager.isGatewayAvailable('razorpay')) {
+                UserController.addCorsHeaders(req, res);
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay payment gateway is not available. Please check your Razorpay configuration.',
+                });
+                return;
+            }
+
+            const razorpayGateway = paymentGatewayManager.getGateway('razorpay') as any;
+            if (!razorpayGateway || !razorpayGateway.razorpay) {
+                UserController.addCorsHeaders(req, res);
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay SDK is not initialized. Please check that RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are set in your environment variables.',
+                });
+                return;
+            }
+
+            // Validate Razorpay credentials are configured
+            if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+                UserController.addCorsHeaders(req, res);
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay credentials are not configured. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables.',
+                });
+                return;
+            }
+
+            // Get or create Razorpay customer
+            let gatewayCustomerId: string;
+            const existingPaymentMethod = await PaymentMethod.findOne({ userId, gateway: 'razorpay' });
+            if (existingPaymentMethod) {
+                gatewayCustomerId = existingPaymentMethod.gatewayCustomerId;
+            } else {
+                try {
+                    const customerResult = await paymentGatewayManager.createCustomer('razorpay', {
+                        email: user.email,
+                        name: user.name || user.email || 'Customer',
+                        userId: userId.toString(),
+                    });
+                    gatewayCustomerId = customerResult.customerId;
+                } catch (customerError: any) {
+                    // If customer creation fails, log detailed error and return proper error response
+                    const errorMessage = customerError?.message || customerError?.error?.description || 'Failed to create Razorpay customer';
+                    const errorCode = customerError?.statusCode || customerError?.code || customerError?.error?.code;
+                    
+                    loggingService.error('Failed to create Razorpay customer', {
+                        requestId,
+                        userId,
+                        userEmail: user.email,
+                        error: errorMessage,
+                        errorCode,
+                        errorDetails: customerError,
+                        razorpayConfigured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+                    });
+                    
+                    UserController.addCorsHeaders(req, res);
+                    
+                    // Provide more specific error messages based on error type
+                    let userFriendlyMessage = 'Failed to create Razorpay customer. Please check your Razorpay configuration.';
+                    if (errorMessage.includes('not initialized') || errorMessage.includes('Install razorpay')) {
+                        userFriendlyMessage = 'Razorpay SDK is not properly initialized. Please check your server configuration.';
+                    } else if (errorMessage.includes('Email is required')) {
+                        userFriendlyMessage = 'Email address is required to create a Razorpay customer.';
+                    } else if (errorCode === 401 || errorMessage.includes('authentication') || errorMessage.includes('Unauthorized')) {
+                        userFriendlyMessage = 'Razorpay authentication failed. Please verify your RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are correct.';
+                    } else if (errorCode === 400) {
+                        userFriendlyMessage = `Invalid request to Razorpay: ${errorMessage}`;
+                    }
+                    
+                    res.status(500).json({
+                        success: false,
+                        message: userFriendlyMessage,
+                        error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+                        errorCode: process.env.NODE_ENV === 'development' ? errorCode : undefined,
+                    });
+                    return;
+                }
+            }
+
+            // Create Razorpay order
+
+            const amountInPaise = Math.round(amount * 100); // Convert to paise
+            const order = await razorpayGateway.razorpay.orders.create({
+                amount: amountInPaise,
+                currency: (currency || 'USD').toUpperCase(),
+                receipt: `sub_${plan}_${billingInterval}_${Date.now()}`,
+                notes: {
+                    userId: userId.toString(),
+                    plan,
+                    billingInterval,
+                    customerId: gatewayCustomerId,
+                },
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    orderId: order.id,
+                    amount: order.amount,
+                    currency: order.currency,
+                    keyId: process.env.RAZORPAY_KEY_ID,
+                },
+            });
+        } catch (error: any) {
+            // Extract error message from various error formats
+            let errorMessage = 'Failed to create Razorpay order';
+            if (error instanceof Error) {
+                errorMessage = error.message;
+            } else if (error?.message) {
+                errorMessage = error.message;
+            } else if (error?.error?.description) {
+                errorMessage = error.error.description;
+            } else if (typeof error === 'string') {
+                errorMessage = error;
+            }
+            
+            loggingService.error('Create Razorpay order failed', {
+                requestId,
+                userId,
+                error: errorMessage,
+                errorDetails: error,
+            });
+            UserController.addCorsHeaders(req, res);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to create Razorpay order',
+                error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+            });
+        }
+    }
+
+    /**
+     * Confirm Razorpay payment and upgrade subscription
+     * POST /api/user/subscription/confirm-razorpay-payment
+     */
+    static async confirmRazorpayPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const body = req.body as any;
+            const { paymentId, orderId, signature, plan, billingInterval, discountCode } = {
+                paymentId: body.paymentId as string,
+                orderId: body.orderId as string,
+                signature: body.signature as string,
+                plan: body.plan as 'plus' | 'pro' | 'enterprise',
+                billingInterval: body.billingInterval as 'monthly' | 'yearly',
+                discountCode: body.discountCode as string | undefined,
+            };
+
+            if (!paymentId || !orderId || !signature || !plan) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Payment ID, order ID, signature, and plan are required',
+                });
+                return;
+            }
+
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan for upgrade',
+                });
+                return;
+            }
+
+            // Get user
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({ success: false, message: 'User not found' });
+                return;
+            }
+
+            // Verify payment signature
+            const razorpayGateway = paymentGatewayManager.getGateway('razorpay') as any;
+            if (!razorpayGateway || !razorpayGateway.razorpay) {
+                res.status(500).json({ success: false, message: 'Razorpay is not configured' });
+                return;
+            }
+
+            const crypto = require('crypto');
+            const webhookSecret = process.env.RAZORPAY_KEY_SECRET || '';
+            const generatedSignature = crypto
+                .createHmac('sha256', webhookSecret)
+                .update(`${orderId}|${paymentId}`)
+                .digest('hex');
+
+            if (generatedSignature !== signature) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid payment signature',
+                });
+                return;
+            }
+
+            // Fetch payment details from Razorpay
+            const payment = await razorpayGateway.razorpay.payments.fetch(paymentId);
+
+            if (payment.status !== 'captured' && payment.status !== 'authorized') {
+                res.status(400).json({
+                    success: false,
+                    message: `Payment not successful. Status: ${payment.status}`,
+                });
+                return;
+            }
+
+            // Get or create Razorpay customer
+            let gatewayCustomerId: string;
+            const existingPaymentMethod = await PaymentMethod.findOne({ userId, gateway: 'razorpay' });
+            if (existingPaymentMethod) {
+                gatewayCustomerId = existingPaymentMethod.gatewayCustomerId;
+            } else {
+                const customerResult = await paymentGatewayManager.createCustomer('razorpay', {
+                    email: user.email,
+                    name: user.name || user.email,
+                    userId: userId.toString(),
+                });
+                gatewayCustomerId = customerResult.customerId;
+            }
+
+            // Create or update payment method in database
+            let paymentMethod = await PaymentMethod.findOne({
+                gateway: 'razorpay',
+                gatewayPaymentMethodId: paymentId,
+                userId,
+            });
+
+            if (!paymentMethod && payment.method) {
+                const cardDetails = payment.card || {};
+                paymentMethod = new PaymentMethod({
+                    userId: new mongoose.Types.ObjectId(userId.toString()),
+                    gateway: 'razorpay',
+                    gatewayCustomerId: gatewayCustomerId,
+                    gatewayPaymentMethodId: paymentId,
+                    type: payment.method === 'card' ? 'card' : payment.method,
+                    card: payment.method === 'card' ? {
+                        last4: cardDetails.last4 || '',
+                        brand: cardDetails.network || '',
+                        expiryMonth: cardDetails.expiry_month || 0,
+                        expiryYear: cardDetails.expiry_year || 0,
+                        maskedNumber: `**** **** **** ${cardDetails.last4 || ''}`,
+                    } : undefined,
+                    isDefault: true,
+                    isActive: true,
+                    setupForRecurring: true,
+                    recurringStatus: 'active',
+                });
+                await paymentMethod.save();
+            }
+
+            // Upgrade subscription
+            const paymentMethodId = paymentMethod && paymentMethod._id ? paymentMethod._id.toString() : '';
+            const updatedSubscription = await SubscriptionService.upgradeSubscription(
+                userId,
+                plan,
+                'razorpay',
+                paymentMethodId,
+                { interval: billingInterval || 'monthly', discountCode }
+            );
+
+            // Update subscription with Razorpay payment ID
+            updatedSubscription.gatewaySubscriptionId = paymentId;
+            await updatedSubscription.save();
+
+            res.json({
+                success: true,
+                message: 'Razorpay payment confirmed and subscription upgraded successfully',
+                data: updatedSubscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Confirm Razorpay payment failed', {
+                requestId,
+                userId,
+                error: error.message as string,
+            });
+            next(error);
+        }
+    }
+
+    /**
+     * Downgrade subscription
+     * POST /api/user/subscription/downgrade
+     */
+    static async downgradeSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { plan, scheduleForPeriodEnd } = req.body;
+
+            if (!['free', 'plus', 'pro'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan for downgrade',
+                });
+                return;
+            }
+
+            const currentSubscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!currentSubscription) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Subscription not found',
+                });
+                return;
+            }
+
+            const updatedSubscription = await SubscriptionService.downgradeSubscription(
+                userId,
+                plan,
+                scheduleForPeriodEnd !== false
+            );
+
+            // Send notification
+            const user = await User.findById(userId);
+            if (user) {
+                await SubscriptionNotificationService.sendSubscriptionDowngradedEmail(
+                    user,
+                    currentSubscription.plan,
+                    plan,
+                    updatedSubscription.billing.nextBillingDate || new Date()
+                );
+            }
+
+            res.json({
+                success: true,
+                message: 'Subscription downgraded successfully',
+                data: updatedSubscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Downgrade subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Cancel subscription
+     * POST /api/user/subscription/cancel
+     */
+    static async cancelSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { cancelAtPeriodEnd, reason } = req.body;
+
+            const subscription = await SubscriptionService.cancelSubscription(
+                userId,
+                cancelAtPeriodEnd !== false,
+                reason
+            );
+
+            // Send notification
+            const user = await User.findById(userId);
+            if (user) {
+                await SubscriptionNotificationService.sendSubscriptionCanceledEmail(
+                    user,
+                    subscription,
+                    new Date()
+                );
+            }
+
+            res.json({
+                success: true,
+                message: 'Subscription canceled successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Cancel subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Reactivate subscription
+     * POST /api/user/subscription/reactivate
+     */
+    static async reactivateSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const subscription = await SubscriptionService.reactivateSubscription(userId);
+
+            // Send notification
+            const user = await User.findById(userId);
+            if (user) {
+                await SubscriptionNotificationService.sendSubscriptionReactivatedEmail(user, subscription);
+            }
+
+            res.json({
+                success: true,
+                message: 'Subscription reactivated successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Reactivate subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Pause subscription
+     * POST /api/user/subscription/pause
+     */
+    static async pauseSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { reason } = req.body;
+            const subscription = await SubscriptionService.pauseSubscription(userId, reason);
+
+            res.json({
+                success: true,
+                message: 'Subscription paused successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Pause subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Resume subscription
+     * POST /api/user/subscription/resume
+     */
+    static async resumeSubscription(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const subscription = await SubscriptionService.resumeSubscription(userId);
+
+            res.json({
+                success: true,
+                message: 'Subscription resumed successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Resume subscription failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Update payment method
+     * PUT /api/user/subscription/payment-method
+     */
+    static async updatePaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { paymentMethodId } = req.body;
+
+            if (!paymentMethodId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Payment method ID required',
+                });
+                return;
+            }
+
+            const subscription = await SubscriptionService.updatePaymentMethod(userId, paymentMethodId);
+
+            res.json({
+                success: true,
+                message: 'Payment method updated successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Update payment method failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Update billing cycle
+     * PUT /api/user/subscription/billing-cycle
+     */
+    static async updateBillingCycle(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { interval } = req.body;
+
+            if (!['monthly', 'yearly'].includes(interval)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid billing interval. Must be monthly or yearly',
+                });
+                return;
+            }
+
+            const subscription = await SubscriptionService.updateBillingCycle(userId, interval);
+
+            res.json({
+                success: true,
+                message: 'Billing cycle updated successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Update billing cycle failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Apply discount code
+     * POST /api/user/subscription/discount
+     */
+    static async applyDiscountCode(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { code } = req.body;
+
+            if (!code) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Discount code required',
+                });
+                return;
+            }
+
+            const subscription = await SubscriptionService.applyDiscountCode(userId, code);
+
+            res.json({
+                success: true,
+                message: 'Discount code applied successfully',
+                data: subscription,
+            });
+        } catch (error: any) {
+            loggingService.error('Apply discount code failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Get available plans
+     * GET /api/user/subscription/plans
+     */
+    static async getAvailablePlans(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!subscription) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Subscription not found',
+                });
+                return;
+            }
+
+            const availableUpgrades = SubscriptionService.getAvailableUpgrades(subscription.plan);
+            const allPlans = ['free', 'plus', 'pro', 'enterprise'] as const;
+
+            const plans = allPlans.map(plan => {
+                const limits = SubscriptionService.getPlanLimits(plan);
+                const pricing = SubscriptionService.getPlanPricing(plan, 'monthly');
+                const yearlyPricing = SubscriptionService.getPlanPricing(plan, 'yearly');
+
+                return {
+                    plan,
+                    limits,
+                    pricing: {
+                        monthly: pricing.amount,
+                        yearly: yearlyPricing.amount,
+                        currency: pricing.currency,
+                    },
+                    canUpgrade: availableUpgrades.includes(plan as any),
+                    isCurrent: subscription.plan === plan,
+                };
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    currentPlan: subscription.plan,
+                    availableUpgrades,
+                    plans,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Get available plans failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Get usage analytics
+     * GET /api/user/subscription/usage
+     */
+    static async getUsageAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { period } = req.query;
+            const analytics = await SubscriptionService.getUsageAnalytics(
+                userId,
+                (period as 'daily' | 'weekly' | 'monthly') || 'monthly'
+            );
+
+            res.json({
+                success: true,
+                data: analytics,
+            });
+        } catch (error: any) {
+            loggingService.error('Get usage analytics failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Get user spending summary
+     * GET /api/user/spending
+     */
+    static async getUserSpending(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { AdminUserAnalyticsService } = await import('../services/adminUserAnalytics.service');
+            
+            const filters: any = {};
+
+            // Parse query parameters
+            if (req.query.startDate) {
+                filters.startDate = new Date(req.query.startDate);
+            }
+            if (req.query.endDate) {
+                filters.endDate = new Date(req.query.endDate);
+            }
+            if (req.query.service) {
+                filters.service = req.query.service;
+            }
+            if (req.query.model) {
+                filters.model = req.query.model;
+            }
+            if (req.query.projectId) {
+                filters.projectId = req.query.projectId;
+            }
+
+            const userSpending = await AdminUserAnalyticsService.getUserDetailedSpending(userId.toString(), filters);
+
+            if (!userSpending) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User spending data not found'
+                });
+                return;
+            }
+
+            loggingService.info('User spending retrieved', {
+                component: 'UserController',
+                operation: 'getUserSpending',
+                userId,
+                requestId
+            });
+
+            res.json({
+                success: true,
+                data: userSpending
+            });
+        } catch (error: any) {
+            loggingService.error('Get user spending failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Get subscription history
+     * GET /api/user/subscription/history
+     */
+    static async getSubscriptionHistory(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { SubscriptionHistory } = await import('../models/SubscriptionHistory');
+            const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            if (!subscription) {
+                res.status(404).json({
+                    success: false,
+                    message: 'Subscription not found',
+                });
+                return;
+            }
+
+            const history = await SubscriptionHistory.find({ subscriptionId: subscription._id })
+                .sort({ createdAt: -1 })
+                .limit(50);
+
+            res.json({
+                success: true,
+                data: history,
+            });
+        } catch (error: any) {
+            loggingService.error('Get subscription history failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
     }
 }

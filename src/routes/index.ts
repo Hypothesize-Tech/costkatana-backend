@@ -63,6 +63,8 @@ import templateAnalyticsRoutes from './templateAnalytics.routes';
 import docsAnalyticsRoutes from './docsAnalytics.routes';
 import communityRoutes from './community.routes';
 import automationRoutes from './automation.routes';
+import billingRoutes from './billing.routes';
+import paymentWebhookRoutes from './paymentWebhook.routes';
 
 const router = Router();
 
@@ -142,5 +144,7 @@ router.use('/reference-image', referenceImageRoutes);
 router.use('/docs-analytics', docsAnalyticsRoutes);
 router.use('/community', communityRoutes);
 router.use('/automation', automationRoutes);
+router.use('/billing', billingRoutes);
+router.use('/webhooks/payment', paymentWebhookRoutes);
 
 export const apiRouter = router;

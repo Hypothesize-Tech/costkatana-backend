@@ -711,7 +711,7 @@ export class MFAController {
                             name: user.name,
                             role: user.role,
                             emailVerified: user.emailVerified,
-                            subscription: user.subscription,
+                            subscriptionId: user.subscriptionId,
                         },
                         accessToken: tokens.accessToken,
                         refreshToken: tokens.refreshToken,

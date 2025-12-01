@@ -189,6 +189,14 @@ export class AuthService {
                 emailVerified: false,
             });
 
+            // Create default free subscription for new user
+            const { SubscriptionService } = await import('./subscription.service');
+            const subscription = await SubscriptionService.createDefaultSubscription((user as any)._id);
+            
+            // Update user with subscriptionId
+            user.subscriptionId = subscription._id as any;
+            await user.save();
+
             // Create default workspace for the user
             const { WorkspaceService } = await import('./workspace.service');
             const workspace = await WorkspaceService.createDefaultWorkspace(

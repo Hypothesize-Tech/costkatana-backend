@@ -359,22 +359,77 @@ export const sentryBusinessErrorMiddleware = (
 /**
  * Check if error is a validation error
  */
-function isValidationError(error: Error): boolean {
-  return error.name === 'ValidationError' ||
-         error.message.includes('validation') ||
-         error.message.includes('Validation');
+function isValidationError(error: any): boolean {
+  if (!error) return false;
+  
+  // Handle Error objects
+  if (error instanceof Error) {
+    if (error.name === 'ValidationError') return true;
+    const message = error.message || '';
+    if (message && typeof message === 'string') {
+      return message.includes('validation') || message.includes('Validation');
+    }
+    return false;
+  }
+  
+  // Handle plain objects
+  if (typeof error === 'object') {
+    if (error.name === 'ValidationError') return true;
+    const message = error.message || error.error?.message || '';
+    if (message && typeof message === 'string') {
+      return message.includes('validation') || message.includes('Validation');
+    }
+  }
+  
+  // Handle strings
+  if (typeof error === 'string') {
+    return error.toLowerCase().includes('validation');
+  }
+  
+  return false;
 }
 
 /**
  * Check if error is an authentication/authorization error
  */
-function isAuthError(error: Error): boolean {
-  return error.name === 'UnauthorizedError' ||
-         error.name === 'ForbiddenError' ||
-         error.message.includes('unauthorized') ||
-         error.message.includes('forbidden') ||
-         error.message.includes('authentication') ||
-         error.message.includes('authorization');
+function isAuthError(error: any): boolean {
+  if (!error) return false;
+  
+  // Handle Error objects
+  if (error instanceof Error) {
+    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError') return true;
+    const message = error.message || '';
+    if (message && typeof message === 'string') {
+      return message.includes('unauthorized') ||
+             message.includes('forbidden') ||
+             message.includes('authentication') ||
+             message.includes('authorization');
+    }
+    return false;
+  }
+  
+  // Handle plain objects
+  if (typeof error === 'object') {
+    if (error.name === 'UnauthorizedError' || error.name === 'ForbiddenError') return true;
+    const message = error.message || error.error?.message || '';
+    if (message && typeof message === 'string') {
+      return message.includes('unauthorized') ||
+             message.includes('forbidden') ||
+             message.includes('authentication') ||
+             message.includes('authorization');
+    }
+  }
+  
+  // Handle strings
+  if (typeof error === 'string') {
+    const lowerError = error.toLowerCase();
+    return lowerError.includes('unauthorized') ||
+           lowerError.includes('forbidden') ||
+           lowerError.includes('authentication') ||
+           lowerError.includes('authorization');
+  }
+  
+  return false;
 }
 
 /**
