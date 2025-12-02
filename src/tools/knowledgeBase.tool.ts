@@ -26,7 +26,7 @@ export class KnowledgeBaseTool extends Tool {
     - Cortex architecture (Encoder, Core Processor, Decoder)
     - Cortex impact analytics and justification system
     - Authentication patterns and API endpoints
-    - Backend API URL: https://cost-katana-backend.store
+    - Backend API URL: https://api.costkatana.com
     - Real-time monitoring and observability features
     - Webhook management and delivery systems
     - Workflow orchestration capabilities
@@ -747,22 +747,22 @@ Suggestions:
         // Handle backend URL queries
         if (lowerQuery.includes('backend') && lowerQuery.includes('url')) {
             return `🔗 **CostKatana Backend URL Information:**\n\n` +
-                   `**Backend API URL:** https://cost-katana-backend.store\n\n` +
+                   `**Backend API URL:** https://api.costkatana.com\n\n` +
                    `**Key Information:**\n` +
                    `• This is the primary API endpoint for all CostKatana services\n` +
                    `• Use this URL for API integrations and SDK configurations\n` +
                    `• The backend provides authentication, cost tracking, and optimization services\n` +
-                   `• Health check endpoint: https://cost-katana-backend.store/health\n\n` +
+                   `• Health check endpoint: https://api.costkatana.com/health\n\n` +
                    `**Configuration Examples:**\n` +
-                   `• Environment variable: \`COST_KATANA_BASE_URL=https://cost-katana-backend.store\`\n` +
-                   `• SDK configuration: \`baseUrl: 'https://cost-katana-backend.store'\`\n` +
-                   `• CLI configuration: \`cost-katana config --set baseUrl=https://cost-katana-backend.store\``;
+                   `• Environment variable: \`COST_KATANA_BASE_URL=https://api.costkatana.com\`\n` +
+                   `• SDK configuration: \`baseUrl: 'https://api.costkatana.com'\`\n` +
+                   `• CLI configuration: \`cost-katana config --set baseUrl=https://api.costkatana.com\``;
         }
 
         // Handle API endpoint queries
         if (lowerQuery.includes('api') && lowerQuery.includes('endpoint')) {
             return `🔌 **CostKatana API Endpoints:**\n\n` +
-                   `**Base URL:** https://cost-katana-backend.store\n\n` +
+                   `**Base URL:** https://api.costkatana.com\n\n` +
                    `**Key Endpoints:**\n` +
                    `• **Authentication:** \`POST /auth/login\` - User authentication\n` +
                    `• **Cost Tracking:** \`POST /api/track\` - Track API usage and costs\n` +
@@ -787,7 +787,7 @@ Suggestions:
                `• **cost-katana** - Python SDK for AI cost optimization with Cortex meta-language\n` +
                `  📦 Install: \`pip install cost-katana\`\n` +
                `  🔗 https://pypi.org/project/cost-katana/\n\n` +
-               `**Backend URL:** https://cost-katana-backend.store\n` +
+               `**Backend URL:** https://api.costkatana.com\n` +
                `**Documentation:** https://docs.costkatana.com\n` +
                `**Dashboard:** https://costkatana.com/dashboard\n\n` +
                `**Note:** CostKatana does NOT have packages like \`costkatana-cli\`, \`@costkatana/sdk\`, or other hypothetical packages. Please use the official packages listed above.`;

@@ -776,7 +776,7 @@ const response = await tracker.generateContent('Hello', {
 
 3. **✅ Check Network Connectivity**
    ```bash
-   curl -H "Authorization: Bearer $API_KEY" https://cost-katana-backend.store/health
+   curl -H "Authorization: Bearer $API_KEY" https://api.costkatana.com/health
    ```
 
 4. **✅ Try Alternative Models**

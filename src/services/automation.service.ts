@@ -178,7 +178,7 @@ export class AutomationService {
     static generateWebhookUrl(connectionId: string): string {
         const baseUrl = process.env.NODE_ENV === 'development' 
             ? 'http://localhost:8000' 
-            : 'https://cost-katana-backend.store';
+            : 'https://api.costkatana.com';
         const webhookPath = `/api/automation/webhook/${connectionId}`;
         return `${baseUrl}${webhookPath}`;
     }

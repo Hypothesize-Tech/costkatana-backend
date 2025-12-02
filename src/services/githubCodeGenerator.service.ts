@@ -1423,7 +1423,7 @@ Your task:
 Generate code examples showing how to add CostKatana tracking headers to HTTP requests for making AI API calls. The integration should:
 1. Add CostKatana-Auth header with Bearer token (API key)
 2. Optionally include CostKatana-Project-Id, CostKatana-Request-Id, CostKatana-Session-Id headers
-3. Proxy requests through CostKatana gateway: https://cost-katana-backend.store/api/gateway/v1/chat/completions
+3. Proxy requests through CostKatana gateway: https://api.costkatana.com/api/gateway/v1/chat/completions
 4. Support multiple HTTP client libraries (fetch, axios, requests, etc.) based on the project's detected language/framework
 5. Include error handling and logging
 6. Create a reusable helper/utility module
@@ -1472,7 +1472,7 @@ Return a JSON object with this exact structure:
   ],
   "envVars": {
     "COSTKATANA_API_KEY": "Your CostKatana API key",
-    "COSTKATANA_GATEWAY_URL": "https://cost-katana-backend.store/api/gateway/v1/chat/completions"
+    "COSTKATANA_GATEWAY_URL": "https://api.costkatana.com/api/gateway/v1/chat/completions"
   },
   "installCommands": [],
   "setupInstructions": "Detailed markdown instructions",
@@ -1715,7 +1715,7 @@ def get_model():
         const { analysis } = options;
         const isTypeScript = analysis.language === 'typescript';
         const ext = isTypeScript ? 'ts' : 'js';
-        const gatewayUrl = process.env.COSTKATANA_GATEWAY_URL ?? 'https://cost-katana-backend.store/api/gateway/v1/chat/completions';
+        const gatewayUrl = process.env.COSTKATANA_GATEWAY_URL ?? 'https://api.costkatana.com/api/gateway/v1/chat/completions';
 
         // Generate client utility based on language
         let clientFile = '';

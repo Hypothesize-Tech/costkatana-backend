@@ -26,7 +26,7 @@
       },
       "servers": [
         {
-          "url": "https://cost-katana-backend.store/api/chatgpt",
+          "url": "https://api.costkatana.com/api/chatgpt",
           "description": "Cost Katana AI Intelligence ChatGPT Integration API"
         }
       ],

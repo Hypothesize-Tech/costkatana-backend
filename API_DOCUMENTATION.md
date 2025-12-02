@@ -17,7 +17,7 @@
 
 ## 🌟 **Overview**
 
-**Base URL**: `https://cost-katana-backend.store/api` (Production) | `http://localhost:8000/api` (Development)
+**Base URL**: `https://api.costkatana.com/api` (Production) | `http://localhost:8000/api` (Development)
 
 **API Version**: v2.0 (AI-Powered Intelligence)
 
