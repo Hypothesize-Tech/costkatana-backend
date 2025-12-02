@@ -214,7 +214,7 @@ export class CursorController {
                 return;
             }
 
-            const magicLink = `https://cost-katana-backend.store/auth/magic-link?token=${Buffer.from(email).toString('base64')}&expires=${Date.now() + 900000}`;
+            const magicLink = `https://api.costkatana.com/auth/magic-link?token=${Buffer.from(email).toString('base64')}&expires=${Date.now() + 900000}`;
             
             const duration = Date.now() - startTime;
 

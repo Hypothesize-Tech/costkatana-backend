@@ -439,7 +439,7 @@ try {
 // Environment-based configuration (recommended)
 const config = {
   apiKey: process.env.API_KEY,
-  baseUrl: process.env.COST_KATANA_BASE_URL || 'https://cost-katana-backend.store',
+  baseUrl: process.env.COST_KATANA_BASE_URL || 'https://api.costkatana.com',
   defaultModel: process.env.COST_KATANA_DEFAULT_MODEL || 'nova-lite',
   costLimitPerDay: parseFloat(process.env.COST_KATANA_COST_LIMIT || '50.0'),
   enableAnalytics: process.env.NODE_ENV === 'production'

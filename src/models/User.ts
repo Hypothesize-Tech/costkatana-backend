@@ -73,6 +73,7 @@ export interface IUser {
     resetPasswordToken?: string;
     resetPasswordExpires?: Date;
     lastLogin?: Date;
+    country?: string; // ISO 3166-1 alpha-2 country code (e.g., 'IN', 'US', 'GB')
     mfa: {
         enabled: boolean;
         methods: Array<'email' | 'totp'>;
@@ -338,6 +339,12 @@ const userSchema = new Schema<IUser>({
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     lastLogin: Date,
+    country: {
+        type: String,
+        uppercase: true,
+        trim: true,
+        maxlength: 2, // ISO 3166-1 alpha-2 country code
+    },
     mfa: {
         enabled: {
             type: Boolean,

@@ -12,6 +12,7 @@ import { SubscriptionService } from '../services/subscription.service';
 import { SubscriptionNotificationService } from '../services/subscriptionNotification.service';
 import { paymentGatewayManager } from '../services/paymentGateway/paymentGatewayManager.service';
 import { PaymentMethod } from '../models/PaymentMethod';
+import { convertCurrency, getCurrencyForCountry, convertToSmallestUnit } from '../utils/currencyConverter';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 
@@ -2269,9 +2270,12 @@ export class UserController {
         if (!userId) return;
 
         try {
-            const { plan, paymentGateway, paymentMethodId, interval, discountCode } = req.body;
+            const { plan: planRaw, paymentGateway, paymentMethodId, interval, discountCode } = req.body;
+            
+            // Normalize plan name to lowercase
+            const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
-            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+            if (!plan || !['plus', 'pro', 'enterprise'].includes(plan)) {
                 res.status(400).json({
                     success: false,
                     message: 'Invalid plan for upgrade',
@@ -2413,7 +2417,10 @@ export class UserController {
         if (!userId) return;
 
         try {
-            const { setupIntentId, paymentMethodId, plan, billingInterval, discountCode } = req.body as any;
+            const { setupIntentId, paymentMethodId, plan: planRaw, billingInterval, discountCode } = req.body as any;
+            
+            // Normalize plan name to lowercase
+            const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
             if (!paymentMethodId || !plan) {
                 UserController.addCorsHeaders(req, res);
@@ -2424,7 +2431,7 @@ export class UserController {
                 return;
             }
 
-            if (!['plus', 'pro', 'enterprise'].includes(plan as string)) {
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
                 UserController.addCorsHeaders(req, res);
                 res.status(400).json({
                     success: false,
@@ -2595,7 +2602,10 @@ export class UserController {
         if (!userId) return;
 
         try {
-            const { plan, billingInterval, amount, currency = 'USD' } = req.body;
+            const { plan: planRaw, billingInterval, amount, currency = 'USD', discountCode } = req.body;
+            
+            // Normalize plan name to lowercase
+            const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
             if (!plan || !billingInterval || !amount) {
                 res.status(400).json({
@@ -2603,6 +2613,58 @@ export class UserController {
                     message: 'Plan, billing interval, and amount are required',
                 });
                 return;
+            }
+            
+            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid plan',
+                });
+                return;
+            }
+
+            // Apply discount if provided
+            let finalAmount = parseFloat(amount);
+            if (discountCode) {
+                try {
+                    const { Discount } = await import('../models/Discount');
+                    const codeUpper = discountCode.toUpperCase().trim();
+                    const discount = await Discount.findOne({
+                        code: codeUpper,
+                        isActive: true,
+                    });
+
+                    if (discount) {
+                        // Validate discount (basic checks)
+                        const now = new Date();
+                        if (now >= discount.validFrom && now <= discount.validUntil) {
+                            if (discount.maxUses === -1 || discount.currentUses < discount.maxUses) {
+                                const normalizedPlan = plan ? (plan as string).toLowerCase() : null;
+                                if (discount.applicablePlans.length === 0 || (normalizedPlan && discount.applicablePlans.includes(normalizedPlan as any))) {
+                                    if (!discount.minAmount || finalAmount >= discount.minAmount) {
+                                        // Calculate discount
+                                        let discountAmount = 0;
+                                        if (discount.type === 'percentage') {
+                                            discountAmount = (finalAmount * discount.amount) / 100;
+                                        } else {
+                                            discountAmount = discount.amount;
+                                        }
+                                        discountAmount = Math.min(discountAmount, finalAmount);
+                                        finalAmount = Math.max(0, finalAmount - discountAmount);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (discountError: any) {
+                    loggingService.warn('Error applying discount code in PayPal plan creation', {
+                        requestId,
+                        userId,
+                        discountCode,
+                        error: discountError?.message,
+                    });
+                    // Continue without discount if validation fails
+                }
             }
 
             // Get user for email
@@ -2630,12 +2692,13 @@ export class UserController {
                 customerId: customerResult.customerId,
                 paymentMethodId: '', // Not needed for initial creation
                 planId: `${plan}_${billingInterval}`,
-                amount: parseFloat(amount),
+                amount: finalAmount,
                 currency: currency.toUpperCase(),
                 interval: billingInterval,
                 metadata: {
                     userId: userId.toString(),
                     plan: plan,
+                    discountCode: discountCode || undefined,
                 },
             });
 
@@ -2669,7 +2732,10 @@ export class UserController {
         if (!userId) return;
 
         try {
-            const { subscriptionId, plan, billingInterval, discountCode } = req.body;
+            const { subscriptionId, plan: planRaw, billingInterval, discountCode } = req.body;
+            
+            // Normalize plan name to lowercase
+            const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
             if (!subscriptionId) {
                 res.status(400).json({
@@ -2679,7 +2745,7 @@ export class UserController {
                 return;
             }
 
-            if (!['plus', 'pro', 'enterprise'].includes(plan)) {
+            if (!plan || !['plus', 'pro', 'enterprise'].includes(plan)) {
                 res.status(400).json({
                     success: false,
                     message: 'Invalid plan',
@@ -2785,14 +2851,19 @@ export class UserController {
         const { requestId, userId } = UserController.validateAuthentication(req, res);
         if (!userId) return;
 
-        try {
-            const body = req.body as any;
-            const { plan, billingInterval, amount, currency } = {
-                plan: body.plan as 'plus' | 'pro' | 'enterprise',
-                billingInterval: body.billingInterval as 'monthly' | 'yearly',
-                amount: body.amount as number,
-                currency: body.currency as string | undefined,
-            };
+            try {
+                const body = req.body as any;
+                const { plan: planRaw, billingInterval, amount, currency, country, discountCode } = {
+                    plan: body.plan as string,
+                    billingInterval: body.billingInterval as 'monthly' | 'yearly',
+                    amount: body.amount as number,
+                    currency: body.currency as string | undefined,
+                    country: body.country as string | undefined,
+                    discountCode: body.discountCode as string | undefined,
+                };
+
+                // Normalize plan name to lowercase
+                const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
             if (!plan || !billingInterval || !amount) {
                 res.status(400).json({
@@ -2872,57 +2943,176 @@ export class UserController {
                     });
                     gatewayCustomerId = customerResult.customerId;
                 } catch (customerError: any) {
-                    // If customer creation fails, log detailed error and return proper error response
+                    // If customer creation fails, check if customer already exists
                     const errorMessage = customerError?.message || customerError?.error?.description || 'Failed to create Razorpay customer';
                     const errorCode = customerError?.statusCode || customerError?.code || customerError?.error?.code;
                     
-                    loggingService.error('Failed to create Razorpay customer', {
+                    // Check if error is due to customer already existing
+                    const isCustomerExistsError = errorMessage.includes('already exists') || 
+                                                 errorMessage.includes('Customer already exists') ||
+                                                 errorCode === 400;
+                    
+                    if (isCustomerExistsError) {
+                        // Try to find existing customer by email
+                        try {
+                            // Access Razorpay-specific method by casting to any
+                            const razorpayGatewayService = razorpayGateway as any;
+                            if (razorpayGatewayService && typeof razorpayGatewayService.findCustomerByEmail === 'function') {
+                                const existingCustomerId = await razorpayGatewayService.findCustomerByEmail(user.email);
+                                if (existingCustomerId) {
+                                    gatewayCustomerId = existingCustomerId;
+                                    loggingService.info('Found existing Razorpay customer', {
+                                        requestId,
+                                        userId,
+                                        userEmail: user.email,
+                                        customerId: existingCustomerId,
+                                    });
+                                } else {
+                                    // Customer exists but we couldn't find it, throw original error
+                                    throw customerError;
+                                }
+                            } else {
+                                // Method not available, throw original error
+                                throw customerError;
+                            }
+                        } catch (findError: any) {
+                            // If finding customer fails, log and throw original error
+                            loggingService.warn('Failed to find existing Razorpay customer', {
+                                requestId,
+                                userId,
+                                userEmail: user.email,
+                                findError: findError?.message || String(findError),
+                            });
+                            throw customerError;
+                        }
+                    } else {
+                        // Different error, log and throw
+                        loggingService.error('Failed to create Razorpay customer', {
+                            requestId,
+                            userId,
+                            userEmail: user.email,
+                            error: errorMessage,
+                            errorCode,
+                            errorDetails: customerError,
+                            razorpayConfigured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+                        });
+                        
+                        UserController.addCorsHeaders(req, res);
+                        
+                        // Provide more specific error messages based on error type
+                        let userFriendlyMessage = 'Failed to create Razorpay customer. Please check your Razorpay configuration.';
+                        if (errorMessage.includes('not initialized') || errorMessage.includes('Install razorpay')) {
+                            userFriendlyMessage = 'Razorpay SDK is not properly initialized. Please check your server configuration.';
+                        } else if (errorMessage.includes('Email is required')) {
+                            userFriendlyMessage = 'Email address is required to create a Razorpay customer.';
+                        } else if (errorCode === 401 || errorMessage.includes('authentication') || errorMessage.includes('Unauthorized')) {
+                            userFriendlyMessage = 'Razorpay authentication failed. Please verify your RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are correct.';
+                        }
+                        
+                        res.status(500).json({
+                            success: false,
+                            message: userFriendlyMessage,
+                            error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+                            errorCode: process.env.NODE_ENV === 'development' ? errorCode : undefined,
+                        });
+                        return;
+                    }
+                }
+            }
+
+            // Apply discount if provided
+            let finalAmount = amount;
+            if (discountCode) {
+                try {
+                    const { Discount } = await import('../models/Discount');
+                    const codeUpper = discountCode.toUpperCase().trim();
+                    const discount = await Discount.findOne({
+                        code: codeUpper,
+                        isActive: true,
+                    });
+
+                    if (discount) {
+                        // Validate discount (basic checks)
+                        const now = new Date();
+                        if (now >= discount.validFrom && now <= discount.validUntil) {
+                            if (discount.maxUses === -1 || discount.currentUses < discount.maxUses) {
+                                const normalizedPlan = plan ? (plan as string).toLowerCase() : null;
+                                if (discount.applicablePlans.length === 0 || (normalizedPlan && discount.applicablePlans.includes(normalizedPlan as any))) {
+                                    if (!discount.minAmount || amount >= discount.minAmount) {
+                                        // Calculate discount
+                                        let discountAmount = 0;
+                                        if (discount.type === 'percentage') {
+                                            discountAmount = (amount * discount.amount) / 100;
+                                        } else {
+                                            discountAmount = discount.amount;
+                                        }
+                                        discountAmount = Math.min(discountAmount, amount);
+                                        finalAmount = Math.max(0, amount - discountAmount);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (discountError: any) {
+                    loggingService.warn('Error applying discount code in order creation', {
                         requestId,
                         userId,
-                        userEmail: user.email,
-                        error: errorMessage,
-                        errorCode,
-                        errorDetails: customerError,
-                        razorpayConfigured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+                        discountCode,
+                        error: discountError?.message,
                     });
-                    
-                    UserController.addCorsHeaders(req, res);
-                    
-                    // Provide more specific error messages based on error type
-                    let userFriendlyMessage = 'Failed to create Razorpay customer. Please check your Razorpay configuration.';
-                    if (errorMessage.includes('not initialized') || errorMessage.includes('Install razorpay')) {
-                        userFriendlyMessage = 'Razorpay SDK is not properly initialized. Please check your server configuration.';
-                    } else if (errorMessage.includes('Email is required')) {
-                        userFriendlyMessage = 'Email address is required to create a Razorpay customer.';
-                    } else if (errorCode === 401 || errorMessage.includes('authentication') || errorMessage.includes('Unauthorized')) {
-                        userFriendlyMessage = 'Razorpay authentication failed. Please verify your RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are correct.';
-                    } else if (errorCode === 400) {
-                        userFriendlyMessage = `Invalid request to Razorpay: ${errorMessage}`;
-                    }
-                    
-                    res.status(500).json({
-                        success: false,
-                        message: userFriendlyMessage,
-                        error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
-                        errorCode: process.env.NODE_ENV === 'development' ? errorCode : undefined,
-                    });
-                    return;
+                    // Continue without discount if validation fails
                 }
             }
 
             // Create Razorpay order
+            // Determine currency based on country
+            const orderCurrency = country ? getCurrencyForCountry(country) : (currency || 'USD').toUpperCase();
+            
+            // Convert amount if currency is different (using dynamic exchange rates)
+            let orderAmount = finalAmount;
+            if (currency && currency.toUpperCase() !== orderCurrency) {
+                orderAmount = await convertCurrency(finalAmount, currency.toUpperCase(), orderCurrency);
+            }
+            
+            // Ensure minimum amount (Razorpay requires at least 1.00 in base currency)
+            const MINIMUM_ORDER_AMOUNT = 1.0; // 1 USD or 1 INR
+            if (orderAmount < MINIMUM_ORDER_AMOUNT) {
+                UserController.addCorsHeaders(req, res);
+                res.status(400).json({
+                    success: false,
+                    message: `Order amount after discount (${orderCurrency} ${orderAmount.toFixed(2)}) is below the minimum required amount of ${orderCurrency} ${MINIMUM_ORDER_AMOUNT.toFixed(2)}. Please adjust your discount code.`,
+                });
+                return;
+            }
 
-            const amountInPaise = Math.round(amount * 100); // Convert to paise
+            // Convert to smallest unit (paise for INR, cents for USD)
+            const amountInSmallestUnit = convertToSmallestUnit(orderAmount, orderCurrency);
+
+            const orderNotes: Record<string, any> = {
+                userId: userId.toString(),
+                plan,
+                billingInterval,
+                customerId: gatewayCustomerId,
+                originalAmount: amount,
+                finalAmount: finalAmount,
+                originalCurrency: currency || 'USD',
+            };
+
+            // Store country in order notes if provided
+            if (country) {
+                orderNotes.country = country;
+            }
+
+            // Store discount code in order notes if provided
+            if (discountCode) {
+                orderNotes.discountCode = discountCode.toUpperCase().trim();
+            }
+
             const order = await razorpayGateway.razorpay.orders.create({
-                amount: amountInPaise,
-                currency: (currency || 'USD').toUpperCase(),
+                amount: amountInSmallestUnit,
+                currency: orderCurrency,
                 receipt: `sub_${plan}_${billingInterval}_${Date.now()}`,
-                notes: {
-                    userId: userId.toString(),
-                    plan,
-                    billingInterval,
-                    customerId: gatewayCustomerId,
-                },
+                notes: orderNotes,
             });
 
             res.json({
@@ -2932,6 +3122,8 @@ export class UserController {
                     amount: order.amount,
                     currency: order.currency,
                     keyId: process.env.RAZORPAY_KEY_ID,
+                    country: country || null, // Return country for frontend confirmation
+                    convertedAmount: orderAmount, // Return converted amount for display
                 },
             });
         } catch (error: any) {
@@ -2947,18 +3139,34 @@ export class UserController {
                 errorMessage = error;
             }
             
+            // Check for minimum amount error
+            const isMinimumAmountError = 
+                errorMessage.includes('Order amount less than minimum') ||
+                errorMessage.includes('minimum amount allowed') ||
+                (error?.error?.code === 'BAD_REQUEST_ERROR' && errorMessage.includes('minimum'));
+            
             loggingService.error('Create Razorpay order failed', {
                 requestId,
                 userId,
                 error: errorMessage,
                 errorDetails: error,
+                isMinimumAmountError,
             });
+            
             UserController.addCorsHeaders(req, res);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to create Razorpay order',
-                error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
-            });
+            
+            if (isMinimumAmountError) {
+                res.status(400).json({
+                    success: false,
+                    message: `Order amount after discount is below the minimum required amount. Please adjust your discount code to ensure the final amount is at least $1.00 (or ₹1.00).`,
+                });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Failed to create Razorpay order',
+                    error: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+                });
+            }
         }
     }
 
@@ -2972,14 +3180,17 @@ export class UserController {
 
         try {
             const body = req.body as any;
-            const { paymentId, orderId, signature, plan, billingInterval, discountCode } = {
+            const { paymentId, orderId, signature, plan: planRaw, billingInterval, discountCode } = {
                 paymentId: body.paymentId as string,
                 orderId: body.orderId as string,
                 signature: body.signature as string,
-                plan: body.plan as 'plus' | 'pro' | 'enterprise',
+                plan: body.plan as string,
                 billingInterval: body.billingInterval as 'monthly' | 'yearly',
                 discountCode: body.discountCode as string | undefined,
             };
+            
+            // Normalize plan name to lowercase
+            const plan = planRaw ? (planRaw as string).toLowerCase() as 'plus' | 'pro' | 'enterprise' : undefined;
 
             if (!paymentId || !orderId || !signature || !plan) {
                 res.status(400).json({
@@ -3043,12 +3254,69 @@ export class UserController {
             if (existingPaymentMethod) {
                 gatewayCustomerId = existingPaymentMethod.gatewayCustomerId;
             } else {
-                const customerResult = await paymentGatewayManager.createCustomer('razorpay', {
-                    email: user.email,
-                    name: user.name || user.email,
-                    userId: userId.toString(),
-                });
-                gatewayCustomerId = customerResult.customerId;
+                try {
+                    const customerResult = await paymentGatewayManager.createCustomer('razorpay', {
+                        email: user.email,
+                        name: user.name || user.email || 'Customer',
+                        userId: userId.toString(),
+                    });
+                    gatewayCustomerId = customerResult.customerId;
+                } catch (customerError: any) {
+                    // If customer creation fails, check if customer already exists
+                    const errorMessage = customerError?.message || customerError?.error?.description || 'Failed to create Razorpay customer';
+                    const errorCode = customerError?.statusCode || customerError?.code || customerError?.error?.code;
+                    
+                    // Check if error is due to customer already existing
+                    const isCustomerExistsError = errorMessage.includes('already exists') || 
+                                                 errorMessage.includes('Customer already exists') ||
+                                                 errorCode === 400;
+                    
+                    if (isCustomerExistsError) {
+                        // Try to find existing customer by email
+                        try {
+                            // Access Razorpay-specific method by casting to any
+                            const razorpayGatewayService = razorpayGateway as any;
+                            if (razorpayGatewayService && typeof razorpayGatewayService.findCustomerByEmail === 'function') {
+                                const existingCustomerId = await razorpayGatewayService.findCustomerByEmail(user.email);
+                                if (existingCustomerId) {
+                                    gatewayCustomerId = existingCustomerId;
+                                    loggingService.info('Found existing Razorpay customer', {
+                                        requestId,
+                                        userId,
+                                        userEmail: user.email,
+                                        customerId: existingCustomerId,
+                                    });
+                                } else {
+                                    // Customer exists but we couldn't find it, throw original error
+                                    throw customerError;
+                                }
+                            } else {
+                                // Method not available, throw original error
+                                throw customerError;
+                            }
+                        } catch (findError: any) {
+                            // If finding customer fails, log and throw original error
+                            loggingService.warn('Failed to find existing Razorpay customer', {
+                                requestId,
+                                userId,
+                                userEmail: user.email,
+                                findError: findError?.message || String(findError),
+                            });
+                            throw customerError;
+                        }
+                    } else {
+                        // Different error, log and throw
+                        loggingService.error('Failed to create Razorpay customer', {
+                            requestId,
+                            userId,
+                            userEmail: user.email,
+                            error: errorMessage,
+                            errorCode,
+                            errorDetails: customerError,
+                        });
+                        throw customerError;
+                    }
+                }
             }
 
             // Create or update payment method in database
@@ -3082,18 +3350,24 @@ export class UserController {
             }
 
             // Upgrade subscription
+            // For Razorpay, we'll create a subscription in Razorpay
+            // The payment ID will be stored separately for reference
             const paymentMethodId = paymentMethod && paymentMethod._id ? paymentMethod._id.toString() : '';
             const updatedSubscription = await SubscriptionService.upgradeSubscription(
                 userId,
                 plan,
                 'razorpay',
                 paymentMethodId,
-                { interval: billingInterval || 'monthly', discountCode }
+                { 
+                    interval: billingInterval || 'monthly', 
+                    discountCode
+                }
             );
 
-            // Update subscription with Razorpay payment ID
-            updatedSubscription.gatewaySubscriptionId = paymentId;
-            await updatedSubscription.save();
+            // Store the payment ID for reference (in addition to the subscription ID)
+            if (paymentId && !updatedSubscription.gatewaySubscriptionId) {
+                updatedSubscription.gatewaySubscriptionId = paymentId;
+            }
 
             res.json({
                 success: true,
@@ -3367,6 +3641,136 @@ export class UserController {
             });
         } catch (error: any) {
             loggingService.error('Update billing cycle failed', {
+                requestId,
+                userId,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Validate discount code (for checkout preview)
+     * POST /api/user/subscription/validate-discount
+     */
+    static async validateDiscountCode(req: any, res: Response, next: NextFunction): Promise<void> {
+        const { requestId, userId } = UserController.validateAuthentication(req, res);
+        if (!userId) return;
+
+        try {
+            const { code, plan, amount } = req.body;
+
+            if (!code) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Discount code required',
+                });
+                return;
+            }
+
+            const { Discount } = await import('../models/Discount');
+            const codeUpper = code.toUpperCase().trim();
+            
+            const discount = await Discount.findOne({
+                code: codeUpper,
+                isActive: true,
+            });
+
+            if (!discount) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid or inactive discount code',
+                });
+                return;
+            }
+
+            // Check if discount is user-specific and matches
+            if (discount.userId) {
+                const userIdStr: string = typeof userId === 'string' ? userId : String(userId);
+                const discountUserIdStr: string = typeof discount.userId === 'string' 
+                    ? discount.userId 
+                    : String(discount.userId);
+                if (discountUserIdStr !== userIdStr) {
+                    res.status(403).json({
+                        success: false,
+                        message: 'This discount code is not available for your account',
+                    });
+                    return;
+                }
+            }
+
+            // Check if discount is still valid (date range)
+            const now = new Date();
+            if (now < discount.validFrom) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Discount code is not yet valid',
+                });
+                return;
+            }
+
+            if (now > discount.validUntil) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Discount code has expired',
+                });
+                return;
+            }
+
+            // Check if discount has exceeded max uses
+            if (discount.maxUses !== -1 && discount.currentUses >= discount.maxUses) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Discount code has reached its maximum usage limit',
+                });
+                return;
+            }
+
+            // Check if discount applies to the plan
+            // Normalize plan name to lowercase for comparison
+            const normalizedPlan = plan ? (plan as string).toLowerCase() : null;
+            if (normalizedPlan && discount.applicablePlans.length > 0 && !discount.applicablePlans.includes(normalizedPlan as any)) {
+                res.status(400).json({
+                    success: false,
+                    message: `This discount code is not applicable to ${plan} plan`,
+                });
+                return;
+            }
+
+            // Check minimum amount requirement if applicable
+            if (discount.minAmount && amount && amount < discount.minAmount) {
+                res.status(400).json({
+                    success: false,
+                    message: `This discount code requires a minimum purchase amount of $${discount.minAmount}`,
+                });
+                return;
+            }
+
+            // Calculate discount amount
+            let discountAmount = 0;
+            if (amount) {
+                if (discount.type === 'percentage') {
+                    discountAmount = (amount * discount.amount) / 100;
+                } else {
+                    discountAmount = discount.amount;
+                }
+                // Ensure discount doesn't exceed the amount
+                discountAmount = Math.min(discountAmount, amount);
+            }
+
+            res.json({
+                success: true,
+                data: {
+                    code: discount.code,
+                    type: discount.type,
+                    amount: discount.amount,
+                    discountAmount: discountAmount,
+                    finalAmount: amount ? Math.max(0, amount - discountAmount) : 0,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Validate discount code failed', {
                 requestId,
                 userId,
                 error: error.message,

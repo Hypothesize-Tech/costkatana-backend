@@ -58,6 +58,7 @@ router.post('/subscription/pause', asyncHandler(UserController.pauseSubscription
 router.post('/subscription/resume', asyncHandler(UserController.resumeSubscription));
 router.put('/subscription/payment-method', asyncHandler(UserController.updatePaymentMethod));
 router.put('/subscription/billing-cycle', asyncHandler(UserController.updateBillingCycle));
+router.post('/subscription/validate-discount', asyncHandler(UserController.validateDiscountCode));
 router.post('/subscription/discount', asyncHandler(UserController.applyDiscountCode));
 router.get('/subscription/plans', asyncHandler(UserController.getAvailablePlans));
 router.get('/subscription/usage', asyncHandler(UserController.getUsageAnalytics));

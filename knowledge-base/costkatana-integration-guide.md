@@ -107,7 +107,7 @@ pip install -e .
 ```bash
 # Common environment variables
 export API_KEY=dak_your_key_here
-export COST_KATANA_BASE_URL=https://cost-katana-backend.store
+export COST_KATANA_BASE_URL=https://api.costkatana.com
 export COST_KATANA_DEFAULT_MODEL=nova-lite
 export COST_KATANA_COST_LIMIT=50.0
 ```
@@ -117,7 +117,7 @@ export COST_KATANA_COST_LIMIT=50.0
 // ~/.cost-katana/config.json
 {
   "apiKey": "dak_your_key_here",
-  "baseUrl": "https://cost-katana-backend.store",
+  "baseUrl": "https://api.costkatana.com",
   "defaultModel": "nova-lite",
   "defaultTemperature": 0.7,
   "costLimitPerDay": 50.0,
