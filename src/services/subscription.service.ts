@@ -236,6 +236,7 @@ export class SubscriptionService {
         billingInfo?: {
             interval?: 'monthly' | 'yearly';
             discountCode?: string;
+            gatewaySubscriptionId?: string; // For one-time payments, pass the payment ID directly
         }
     ): Promise<ISubscription> {
         try {
@@ -256,11 +257,75 @@ export class SubscriptionService {
 
             // Calculate pricing
             const pricing = this.getPlanPricing(newPlan, billingInfo?.interval || 'monthly');
+            
+            // Apply discount if provided
+            let finalAmount = pricing.amount;
+            if (billingInfo?.discountCode) {
+                try {
+                    const codeUpper = billingInfo.discountCode.toUpperCase().trim();
+                    const discount = await Discount.findOne({
+                        code: codeUpper,
+                        isActive: true,
+                    });
+
+                    if (discount) {
+                        // Validate discount
+                        const nowDate = new Date();
+                        if (nowDate >= discount.validFrom && nowDate <= discount.validUntil) {
+                            if (discount.maxUses === -1 || discount.currentUses < discount.maxUses) {
+                                const normalizedPlan = newPlan ? (newPlan as string).toLowerCase() : null;
+                                if (discount.applicablePlans.length === 0 || (normalizedPlan && discount.applicablePlans.includes(normalizedPlan as any))) {
+                                    if (!discount.minAmount || pricing.amount >= discount.minAmount) {
+                                        // Calculate discount
+                                        let discountAmount = 0;
+                                        if (discount.type === 'percentage') {
+                                            discountAmount = (pricing.amount * discount.amount) / 100;
+                                        } else {
+                                            discountAmount = discount.amount;
+                                        }
+                                        discountAmount = Math.min(discountAmount, pricing.amount);
+                                        finalAmount = Math.max(0, pricing.amount - discountAmount);
+                                        
+                                        // Store discount info in subscription
+                                        subscription.discount = {
+                                            code: discount.code,
+                                            amount: discountAmount,
+                                            type: discount.type,
+                                            expiresAt: discount.validUntil,
+                                        };
+                                        
+                                        // Increment discount usage
+                                        discount.currentUses += 1;
+                                        await discount.save();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (discountError: any) {
+                    loggingService.warn('Error applying discount code during upgrade', {
+                        userId: typeof userId === 'string' ? userId : userId.toString(),
+                        discountCode: billingInfo.discountCode,
+                        error: discountError?.message,
+                    });
+                    // Continue without discount if validation fails
+                }
+            }
+            
             const proratedAmount = await this.calculateProration(oldPlan, newPlan, subscription.billing.nextBillingDate || now);
 
             // Create or update subscription in payment gateway
             let gatewaySubscriptionId = subscription.gatewaySubscriptionId;
-            if (!gatewaySubscriptionId || subscription.paymentGateway !== paymentGateway) {
+            
+            // If gatewaySubscriptionId is provided (e.g., from payment confirmation), use it directly
+            if (billingInfo?.gatewaySubscriptionId) {
+                gatewaySubscriptionId = billingInfo.gatewaySubscriptionId;
+                loggingService.info('Using provided gateway subscription ID', {
+                    userId: typeof userId === 'string' ? userId : userId.toString(),
+                    gatewaySubscriptionId,
+                    paymentGateway,
+                });
+            } else if (!gatewaySubscriptionId || subscription.paymentGateway !== paymentGateway) {
                 // Create new subscription in gateway
                 const gatewayResult = await paymentGatewayManager.createSubscription(
                     paymentGateway,
@@ -306,7 +371,7 @@ export class SubscriptionService {
             subscription.gatewaySubscriptionId = gatewaySubscriptionId;
             subscription.paymentMethodId = paymentMethod._id as any;
             subscription.billing = {
-                amount: pricing.amount,
+                amount: finalAmount,
                 currency: 'USD',
                 interval: billingInfo?.interval || 'monthly',
                 nextBillingDate: periodEnd,
@@ -1089,7 +1154,8 @@ export class SubscriptionService {
             }
 
             // Check if discount applies to the current plan
-            if (discount.applicablePlans.length > 0 && !discount.applicablePlans.includes(subscription.plan)) {
+            const normalizedPlan = subscription.plan ? (subscription.plan as string).toLowerCase() : null;
+            if (discount.applicablePlans.length > 0 && (!normalizedPlan || !discount.applicablePlans.includes(normalizedPlan as any))) {
                 throw new AppError(`This discount code is not applicable to your current plan (${subscription.plan})`, 400);
             }
 

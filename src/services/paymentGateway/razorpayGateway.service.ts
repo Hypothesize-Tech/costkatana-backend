@@ -63,10 +63,36 @@ export class RazorpayGatewayService implements IPaymentGateway {
             };
         } catch (error: any) {
             const errorMessage = error?.message || error?.error?.description || error?.error?.message || String(error);
+            const errorCode = error?.statusCode || error?.code || error?.error?.code;
+            
+            // Check if error is due to customer already existing
+            const isCustomerExistsError = errorMessage?.toLowerCase().includes('already exists') || 
+                                         errorMessage?.toLowerCase().includes('customer already exists') ||
+                                         errorMessage?.toLowerCase().includes('duplicate');
+            
+            if (isCustomerExistsError && params.email) {
+                // Try to find existing customer by email
+                loggingService.info('Customer already exists in Razorpay, searching by email', {
+                    email: params.email,
+                });
+                
+                const existingCustomerId = await this.findCustomerByEmail(params.email);
+                if (existingCustomerId) {
+                    loggingService.info('Found existing Razorpay customer', {
+                        customerId: existingCustomerId,
+                        email: params.email,
+                    });
+                    return {
+                        customerId: existingCustomerId,
+                        gateway: 'razorpay',
+                    };
+                }
+            }
+            
             const errorDetails = {
                 error: errorMessage,
                 errorType: error?.constructor?.name,
-                errorCode: error?.statusCode || error?.code,
+                errorCode: errorCode,
                 params: {
                     email: params.email,
                     name: params.name,
@@ -83,6 +109,41 @@ export class RazorpayGatewayService implements IPaymentGateway {
             throw new Error('Razorpay SDK not initialized');
         }
         return await this.razorpay.customers.fetch(customerId);
+    }
+
+    /**
+     * Find customer by email (searches through customers)
+     * Note: This is a workaround since Razorpay doesn't support direct email search
+     */
+    async findCustomerByEmail(email: string): Promise<string | null> {
+        if (!this.razorpay) {
+            throw new Error('Razorpay SDK not initialized');
+        }
+
+        try {
+            // Razorpay customers.list() supports count parameter
+            // We'll search through recent customers to find a match
+            const customers = await this.razorpay.customers.all({
+                count: 100, // Search through last 100 customers
+            });
+
+            // Search through the customers array
+            if (customers && customers.items) {
+                for (const customer of customers.items) {
+                    if (customer.email && customer.email.toLowerCase() === email.toLowerCase()) {
+                        return customer.id;
+                    }
+                }
+            }
+
+            return null;
+        } catch (error: any) {
+            loggingService.warn('Error searching for customer by email', {
+                email,
+                error: error?.message || String(error),
+            });
+            return null;
+        }
     }
 
     async updateCustomer(customerId: string, updates: Record<string, any>): Promise<any> {
@@ -437,11 +498,97 @@ export class RazorpayGatewayService implements IPaymentGateway {
         });
     }
 
+    /**
+     * Create or get a Razorpay plan
+     * Plans are required before creating subscriptions
+     */
+    async createOrGetPlan(params: {
+        planId: string;
+        amount: number;
+        currency: string;
+        interval: 'monthly' | 'yearly';
+    }): Promise<string> {
+        try {
+            if (!this.razorpay) {
+                throw new Error('Razorpay SDK not initialized');
+            }
+
+            // First, try to find existing plan by checking all plans
+            try {
+                const plans = await this.razorpay.plans.all({ count: 100 });
+                if (plans && plans.items) {
+                    const existingPlan = plans.items.find((plan: any) => 
+                        plan.item?.name === params.planId || 
+                        plan.id === params.planId
+                    );
+                    if (existingPlan) {
+                        loggingService.info('Found existing Razorpay plan', {
+                            planId: params.planId,
+                            razorpayPlanId: existingPlan.id,
+                        });
+                        return existingPlan.id;
+                    }
+                }
+            } catch (searchError: any) {
+                loggingService.warn('Error searching for existing Razorpay plan', {
+                    planId: params.planId,
+                    error: searchError?.message || String(searchError),
+                });
+            }
+
+            // Plan doesn't exist, create it
+            // Convert amount to smallest currency unit (cents for USD, paise for INR)
+            const currency = params.currency.toUpperCase();
+            const amountInSmallestUnit = Math.round(params.amount * 100); // Convert to cents (USD) or paise (INR)
+            
+            const planParams: any = {
+                period: params.interval === 'monthly' ? 'monthly' : 'yearly',
+                interval: 1,
+                item: {
+                    name: params.planId,
+                    amount: amountInSmallestUnit,
+                    currency: currency, // Use the provided currency (Razorpay supports USD, INR, etc.)
+                    description: `${params.planId} subscription plan - ${params.interval} billing`,
+                },
+                notes: {
+                    planId: params.planId,
+                    interval: params.interval,
+                },
+            };
+
+            const plan = await this.razorpay.plans.create(planParams);
+            
+            loggingService.info('Created new Razorpay plan', {
+                planId: params.planId,
+                razorpayPlanId: plan.id,
+                amount: params.amount,
+                interval: params.interval,
+            });
+
+            return plan.id;
+        } catch (error: any) {
+            const errorMessage = error?.message || error?.error?.description || error?.error?.message || String(error);
+            loggingService.error('Razorpay createPlan error', {
+                error: errorMessage,
+                params,
+            });
+            throw error;
+        }
+    }
+
     async createSubscription(params: CreateSubscriptionParams): Promise<CreateSubscriptionResult> {
         try {
             if (!this.razorpay) {
                 throw new Error('Razorpay SDK not initialized');
             }
+
+            // Create or get the plan first
+            const razorpayPlanId = await this.createOrGetPlan({
+                planId: params.planId,
+                amount: params.amount,
+                currency: params.currency,
+                interval: params.interval,
+            });
 
             // Convert amount to paise (Razorpay uses smallest currency unit)
             const subscriptionParams: {
@@ -451,7 +598,7 @@ export class RazorpayGatewayService implements IPaymentGateway {
                 start_at?: number;
                 notes: Record<string, unknown>;
             } = {
-                plan_id: params.planId, // You need to create plans in Razorpay first
+                plan_id: razorpayPlanId, // Use the created/found plan ID
                 customer_notify: 1,
                 total_count: 999, // Set to 999 for effectively unlimited recurring subscriptions (matches Razorpay plan configuration)
                 notes: params.metadata ?? {},
@@ -480,7 +627,19 @@ export class RazorpayGatewayService implements IPaymentGateway {
                 trialEnd: params.trialDays ? new Date(now.getTime() + params.trialDays * 24 * 60 * 60 * 1000) : undefined,
             };
         } catch (error: any) {
-            loggingService.error('Razorpay createSubscription error', { error: error.message });
+            const errorMessage = error?.message || error?.error?.description || error?.error?.message || String(error);
+            const errorCode = error?.statusCode || error?.code || error?.error?.code;
+            loggingService.error('Razorpay createSubscription error', {
+                error: errorMessage,
+                errorCode,
+                errorType: error?.constructor?.name,
+                params: {
+                    planId: params.planId,
+                    customerId: params.customerId,
+                    interval: params.interval,
+                },
+                fullError: error,
+            });
             throw error;
         }
     }
