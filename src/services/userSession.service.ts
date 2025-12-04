@@ -32,10 +32,10 @@ export class UserSessionService {
     ): Promise<{ userSession: IUserSession; isNewDevice: boolean }> {
         try {
             // Parse device information
-            const parsedDeviceInfo = this.detectDeviceInfo(deviceInfo.userAgent, deviceInfo.ipAddress);
+            const parsedDeviceInfo = await this.detectDeviceInfo(deviceInfo.userAgent, deviceInfo.ipAddress);
             
             // Get location from IP
-            const location = this.getLocationFromIP(deviceInfo.ipAddress);
+            const location = await this.getLocationFromIP(deviceInfo.ipAddress);
             
             // Generate session ID
             const userSessionId = generateToken(32);
@@ -411,7 +411,7 @@ export class UserSessionService {
     /**
      * Detect device information from user agent
      */
-    static detectDeviceInfo(userAgent: string, ipAddress: string): ParsedDeviceInfo {
+    static async detectDeviceInfo(userAgent: string, ipAddress: string): Promise<ParsedDeviceInfo> {
         const ua = userAgent.toLowerCase();
         
         // Detect browser
@@ -453,7 +453,7 @@ export class UserSessionService {
         }
         
         // Get location from IP to enhance device name
-        const location = this.getLocationFromIP(ipAddress);
+        const location = await this.getLocationFromIP(ipAddress);
         const locationText = location.city && location.country
             ? `${location.city}, ${location.country}`
             : location.country ?? location.city ?? '';
@@ -472,14 +472,75 @@ export class UserSessionService {
 
     /**
      * Get location from IP address
+     * For localhost/private IPs, attempts to get actual location via external API
      */
-    static getLocationFromIP(ipAddress: string): { city?: string; country?: string } {
+    static async getLocationFromIP(ipAddress: string): Promise<{ city?: string; country?: string }> {
         try {
-            // Skip localhost and private IPs
-            if (ipAddress === '::1' || ipAddress === '127.0.0.1' || ipAddress.startsWith('192.168.') || ipAddress.startsWith('10.')) {
-                return { city: 'Local', country: 'Local' };
+            // Check if it's localhost or private IP
+            const isLocalhost = ipAddress === '::1' || ipAddress === '127.0.0.1' || 
+                               ipAddress.startsWith('192.168.') || ipAddress.startsWith('10.') ||
+                               ipAddress.startsWith('172.16.') || ipAddress.startsWith('172.17.') ||
+                               ipAddress.startsWith('172.18.') || ipAddress.startsWith('172.19.') ||
+                               ipAddress.startsWith('172.20.') || ipAddress.startsWith('172.21.') ||
+                               ipAddress.startsWith('172.22.') || ipAddress.startsWith('172.23.') ||
+                               ipAddress.startsWith('172.24.') || ipAddress.startsWith('172.25.') ||
+                               ipAddress.startsWith('172.26.') || ipAddress.startsWith('172.27.') ||
+                               ipAddress.startsWith('172.28.') || ipAddress.startsWith('172.29.') ||
+                               ipAddress.startsWith('172.30.') || ipAddress.startsWith('172.31.');
+            
+            if (isLocalhost) {
+                // Try to get actual location via external API for localhost
+                try {
+                    const response = await fetch('https://ipapi.co/json/', {
+                        headers: {
+                            'Accept': 'application/json',
+                        },
+                        signal: AbortSignal.timeout(3000) // 3 second timeout
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json() as { city?: string; country_name?: string; country_code?: string };
+                        if (data?.city && data?.country_name) {
+                            return {
+                                city: String(data.city),
+                                country: String(data.country_name)
+                            };
+                        } else if (data?.country_name) {
+                            return {
+                                country: String(data.country_name)
+                            };
+                        } else if (data?.country_code) {
+                            return {
+                                country: String(data.country_code)
+                            };
+                        }
+                    }
+                } catch (apiError) {
+                    // Fallback to environment variable or default
+                    loggingService.debug('Failed to get location from external API for localhost', {
+                        component: 'UserSessionService',
+                        operation: 'getLocationFromIP',
+                        ipAddress,
+                        error: apiError instanceof Error ? apiError.message : String(apiError)
+                    });
+                }
+                
+                // Fallback: Use environment variables for local development
+                const defaultCity = process.env.DEFAULT_LOCATION_CITY;
+                const defaultCountry = process.env.DEFAULT_LOCATION_COUNTRY;
+                
+                if (defaultCity || defaultCountry) {
+                    return {
+                        city: defaultCity,
+                        country: defaultCountry
+                    };
+                }
+                
+                // Last resort: Return empty instead of "Local, Local"
+                return {};
             }
             
+            // For public IPs, use geoip-lite
             const geo = geoip.lookup(ipAddress);
             if (geo) {
                 return {

@@ -19,6 +19,9 @@ jobs:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      # Task definition and service name (with defaults if not in secrets)
+      ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION || 'ck-prod-td' }}
+      ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME || 'ck-prod-td-service-lggotxj9' }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
@@ -53,28 +56,99 @@ jobs:
           echo "✅ Image pushed successfully to ECR"
 
       - name: Update ECS Task Definition
+        id: task-def
         run: |
-          # Fetch the current task definition
-          task_def=$(aws ecs describe-task-definition --task-definition arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/hypothesize-ai-cost-optimizer)
+          echo "📋 Fetching current task definition: ${ECS_TASK_DEFINITION}"
+          
+          # Fetch the current task definition (get latest revision)
+          task_def=$(aws ecs describe-task-definition \
+            --task-definition "${ECS_TASK_DEFINITION}" \
+            --region "${AWS_REGION}" \
+            --query 'taskDefinition' \
+            --output json)
 
-          # Clean the task definition by removing unwanted fields
+          if [ -z "$task_def" ] || [ "$task_def" == "null" ]; then
+            echo "❌ Failed to fetch task definition"
+            exit 1
+          fi
+
+          echo "✅ Task definition fetched successfully"
+
+          # Clean the task definition by removing unwanted fields and update image
           new_task_def=$(echo "$task_def" | jq '
-            .taskDefinition |
             del(.status, .revision, .taskDefinitionArn, .requiresAttributes, .registeredAt, .registeredBy, .compatibilities) |
             .containerDefinitions[0].image = "'${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:latest'"
           ')
 
           # Save the cleaned task definition to a file
           echo "$new_task_def" > ecsTaskDef.json
+          echo "✅ Task definition prepared"
 
       - name: Register Updated Task Definition
+        id: register-task
         run: |
-          aws ecs register-task-definition --cli-input-json file://ecsTaskDef.json
+          echo "📝 Registering new task definition..."
+          
+          register_output=$(aws ecs register-task-definition \
+            --cli-input-json file://ecsTaskDef.json \
+            --region "${AWS_REGION}")
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to register task definition"
+            exit 1
+          fi
+
+          # Extract the new task definition ARN
+          TASK_DEF_ARN=$(echo "$register_output" | jq -r '.taskDefinition.taskDefinitionArn')
+          TASK_DEF_REVISION=$(echo "$register_output" | jq -r '.taskDefinition.revision')
+          
+          echo "✅ Task definition registered: ${TASK_DEF_ARN}"
+          echo "task-def-arn=${TASK_DEF_ARN}" >> $GITHUB_OUTPUT
+          echo "task-def-revision=${TASK_DEF_REVISION}" >> $GITHUB_OUTPUT
+          echo "task-def-family=${ECS_TASK_DEFINITION}" >> $GITHUB_OUTPUT
 
       - name: Update ECS Service to Use New Task Definition
         run: |
-          aws ecs update-service \
+          echo "🚀 Updating ECS service: ${ECS_SERVICE_NAME}"
+          echo "   Task Definition: ${ECS_TASK_DEFINITION}:${{ steps.register-task.outputs.task-def-revision }}"
+          
+          # Update service with explicit task definition
+          update_output=$(aws ecs update-service \
             --cluster "${ECS_CLUSTER}" \
-            --service "hypothesize-ai-cost-optimizer-service-jczpswhs" \
+            --service "${ECS_SERVICE_NAME}" \
+            --task-definition "${ECS_TASK_DEFINITION}:${{ steps.register-task.outputs.task-def-revision }}" \
             --desired-count 4 \
-            --force-new-deployment
+            --force-new-deployment \
+            --region "${AWS_REGION}")
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to update ECS service"
+            exit 1
+          fi
+
+          echo "✅ Service update initiated"
+          echo "$update_output" | jq '{serviceName: .service.serviceName, status: .service.status, taskDefinition: .service.taskDefinition, desiredCount: .service.desiredCount}'
+
+      - name: Wait for Service to Stabilize
+        run: |
+          echo "⏳ Waiting for service deployment to stabilize (this may take 5-10 minutes)..."
+          
+          aws ecs wait services-stable \
+            --cluster "${ECS_CLUSTER}" \
+            --services "${ECS_SERVICE_NAME}" \
+            --region "${AWS_REGION}"
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Service deployment completed successfully!"
+            
+            # Get final service status
+            aws ecs describe-services \
+              --cluster "${ECS_CLUSTER}" \
+              --services "${ECS_SERVICE_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'services[0].{ServiceName:serviceName,Status:status,TaskDefinition:taskDefinition,RunningCount:runningCount,DesiredCount:desiredCount}' \
+              --output json | jq .
+          else
+            echo "❌ Service deployment failed or timed out"
+            exit 1
+          fi
