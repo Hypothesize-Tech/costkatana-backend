@@ -24,6 +24,7 @@ import {
     trackUserSession,
     trackOptimizationEvents
 } from './middleware/mixpanel.middleware';
+import { trackUserSessionActivity } from './middleware/userSession.middleware';
 import { stream } from './utils/logger';
 import { apiRouter } from './routes';
 import { intelligenceService } from './services/intelligence.service';
@@ -151,6 +152,9 @@ app.use(trackAnalyticsEvents);
 app.use(trackProjectEvents);
 app.use(trackUserSession);
 app.use(trackOptimizationEvents);
+
+// User session activity tracking middleware
+app.use(trackUserSessionActivity);
 
 // Trace interceptor middleware
 app.use(traceInterceptor);

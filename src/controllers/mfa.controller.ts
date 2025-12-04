@@ -643,8 +643,12 @@ export class MFAController {
                     return;
                 }
 
+                // Get device info for session creation
+                const { userAgent, ipAddress } = MFAController.getDeviceInfo(req);
+                const deviceInfo = { userAgent, ipAddress };
+                
                 // Complete the login process
-                const { tokens } = await AuthService.completeLogin(user);
+                const { tokens } = await AuthService.completeLogin(user, deviceInfo);
 
                 // Check if user wants to remember device
                 let trustedDeviceAdded = false;

@@ -23,7 +23,34 @@ export const updateProfileSchema = z.object({
         emailAlerts: z.boolean().optional(),
         alertThreshold: z.number().positive().optional(),
         optimizationSuggestions: z.boolean().optional(),
-    }).optional(),
+        enableSessionReplay: z.boolean().optional(),
+        sessionReplayTimeout: z.number().optional(),
+        lastDigestSent: z.string().datetime().optional(),
+        maxConcurrentUserSessions: z.number().optional(),
+        userSessionNotificationEnabled: z.boolean().optional(),
+        language: z.string().optional(),
+        timezone: z.string().optional(),
+        dateFormat: z.string().optional(),
+        currency: z.string().optional(),
+        theme: z.string().optional(),
+        emailDigest: z.string().optional(),
+        autoOptimize: z.boolean().optional(),
+        showCostInHeader: z.boolean().optional(),
+        enableBetaFeatures: z.boolean().optional(),
+        weeklyReports: z.boolean().optional(),
+        emailEngagement: z.object({
+            totalSent: z.number().optional(),
+            totalOpened: z.number().optional(),
+            totalClicked: z.number().optional(),
+            consecutiveIgnored: z.number().optional(),
+            lastOpened: z.string().datetime().optional(),
+        }).optional(),
+        integrations: z.object({
+            alertTypeRouting: z.record(z.array(z.string())).optional(),
+            defaultChannels: z.array(z.string()).optional(),
+            fallbackToEmail: z.boolean().optional(),
+        }).optional(),
+    }).passthrough().optional(), // passthrough allows additional fields
 });
 
 // Usage validation schemas

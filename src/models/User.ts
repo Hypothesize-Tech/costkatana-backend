@@ -45,6 +45,8 @@ export interface IUser {
         enableSessionReplay?: boolean;
         sessionReplayTimeout?: number;
         lastDigestSent?: Date;
+        maxConcurrentUserSessions?: number;
+        userSessionNotificationEnabled?: boolean;
         emailEngagement?: {
             totalSent: number;
             totalOpened: number;
@@ -264,6 +266,14 @@ const userSchema = new Schema<IUser>({
             default: 100,
         },
         optimizationSuggestions: {
+            type: Boolean,
+            default: true,
+        },
+        maxConcurrentUserSessions: {
+            type: Number,
+            default: 10,
+        },
+        userSessionNotificationEnabled: {
             type: Boolean,
             default: true,
         },
