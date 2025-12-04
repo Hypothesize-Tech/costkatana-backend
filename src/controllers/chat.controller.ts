@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { ChatService } from '../services/chat.service';
+import { LLMSecurityService } from '../services/llmSecurity.service';
+import { v4 as uuidv4 } from 'uuid';
 
 export interface AuthenticatedRequest extends Request {
     userId?: string;
@@ -74,6 +76,82 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                 message: 'modelId is required'
             });
             return;
+        }
+
+        // SECURITY CHECK: Comprehensive threat detection before processing message
+        // This checks for all 15 threat categories including HTML content
+        if (message) {
+            try {
+                const requestId = req.headers['x-request-id'] as string || 
+                                 `chat_${Date.now()}_${uuidv4()}`;
+                
+                // Extract IP address and user agent for logging
+                const ipAddress = req.ip || 
+                                req.headers['x-forwarded-for']?.toString().split(',')[0] || 
+                                req.socket.remoteAddress || 
+                                'unknown';
+                const userAgent = req.headers['user-agent'] || 'unknown';
+
+                // Estimate cost for this request (rough estimate: ~$0.01 per 1000 tokens)
+                // message is guaranteed to be defined here due to the if (message) check above
+                const messageLength = message ? message.length : 0;
+                const estimatedTokens = Math.ceil(messageLength / 4) + (maxTokens || 1000);
+                const estimatedCost = estimatedTokens * 0.00001; // Rough estimate
+
+                // Perform comprehensive security check
+                const securityCheck = await LLMSecurityService.performSecurityCheck(
+                    message,
+                    requestId,
+                    userId,
+                    {
+                        estimatedCost,
+                        provenanceSource: 'chat-api',
+                        ipAddress,
+                        userAgent,
+                        source: 'chat-api'
+                    }
+                );
+
+                // If threat detected, block the request
+                if (securityCheck.result.isBlocked) {
+                    loggingService.warn('Chat message blocked by security', {
+                        requestId,
+                        userId,
+                        modelId,
+                        threatCategory: securityCheck.result.threatCategory,
+                        confidence: securityCheck.result.confidence,
+                        stage: securityCheck.result.stage,
+                        reason: securityCheck.result.reason
+                    });
+
+                    res.status(403).json({
+                        success: false,
+                        message: securityCheck.result.reason || 'Message blocked by security system',
+                        error: 'SECURITY_BLOCK',
+                        threatCategory: securityCheck.result.threatCategory,
+                        confidence: securityCheck.result.confidence,
+                        stage: securityCheck.result.stage
+                    });
+                    return;
+                }
+
+                loggingService.debug('Chat message security check passed', {
+                    requestId,
+                    userId,
+                    modelId,
+                    messageLength: message.length
+                });
+
+            } catch (error: any) {
+                // Log security check failures but allow request to proceed (fail-open)
+                loggingService.error('Chat message security check failed, allowing request', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    modelId,
+                    messageLength: message?.length || 0
+                });
+                // Continue to process the message if security check fails
+            }
         }
 
         const result = await ChatService.sendMessage({

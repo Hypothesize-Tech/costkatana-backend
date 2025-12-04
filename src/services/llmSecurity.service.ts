@@ -62,6 +62,9 @@ export class LLMSecurityService {
             toolCalls?: any[];
             provenanceSource?: string;
             estimatedCost?: number;
+            ipAddress?: string;
+            userAgent?: string;
+            source?: string;
         }
     ): Promise<{
         result: ThreatDetectionResult;
@@ -74,13 +77,19 @@ export class LLMSecurityService {
             // Get firewall configuration (could be user-specific in the future)
             const config = PromptFirewallService.getDefaultConfig();
             
-            // Run comprehensive security check
+            // Run comprehensive security check (now handles HTML and metadata)
             const securityResult = await PromptFirewallService.checkPrompt(
                 prompt,
                 config,
                 requestId,
                 context?.estimatedCost || 0.01,
-                context
+                {
+                    ...context,
+                    userId,
+                    ipAddress: context?.ipAddress,
+                    userAgent: context?.userAgent,
+                    source: context?.source
+                }
             );
 
             // Create trace event for security check

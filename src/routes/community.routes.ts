@@ -678,14 +678,24 @@ router.post('/chat/messages', authenticate, async (req: Request, res: Response):
         const isAdmin = user.isAdmin || user.role === 'admin';
         const finalSenderType = senderType || (isAdmin ? 'support' : 'user');
 
-        const message = await liveChatService.sendMessage({
-            sessionId,
-            senderId: user.userId,
-            senderName: user.userName,
-            senderType: finalSenderType as 'user' | 'support' | 'system' | 'ai',
-            content,
-            messageType,
-        });
+        // Extract IP address and user agent for security logging
+        const ipAddress = req.ip || 
+                         req.headers['x-forwarded-for']?.toString().split(',')[0] || 
+                         req.socket.remoteAddress || 
+                         'unknown';
+        const userAgent = req.headers['user-agent'] || 'unknown';
+
+        try {
+            const message = await liveChatService.sendMessage({
+                sessionId,
+                senderId: user.userId,
+                senderName: user.userName,
+                senderType: finalSenderType as 'user' | 'support' | 'system' | 'ai',
+                content,
+                messageType,
+                ipAddress,
+                userAgent
+            });
 
         // If user message and no admin active, trigger AI response (async)
         if (finalSenderType === 'user') {
@@ -824,7 +834,30 @@ router.post('/chat/messages', authenticate, async (req: Request, res: Response):
             });
         }
 
-        res.status(201).json({ success: true, data: message });
+            res.status(201).json({ success: true, data: message });
+        } catch (error: any) {
+            // Handle security blocks
+            if (error.isSecurityBlock) {
+                loggingService.warn('Live chat message blocked by security', {
+                    sessionId,
+                    userId: user.userId,
+                    threatCategory: error.threatCategory,
+                    confidence: error.confidence
+                });
+
+                res.status(403).json({
+                    success: false,
+                    error: 'SECURITY_BLOCK',
+                    message: error.message || 'Message blocked by security system',
+                    threatCategory: error.threatCategory,
+                    confidence: error.confidence
+                });
+                return;
+            }
+
+            loggingService.error('Error sending message', { error });
+            res.status(500).json({ error: 'Failed to send message' });
+        }
     } catch (error) {
         loggingService.error('Error sending message', { error });
         res.status(500).json({ error: 'Failed to send message' });

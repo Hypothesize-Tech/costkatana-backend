@@ -17,6 +17,8 @@ import { SubscriptionService } from './subscription.service';
 import { ObjectId } from 'mongoose';
 import { calculateCost } from '../utils/pricing';
 import { AIInvokeResponse } from '../types/aiProvider.types';
+import { LLMSecurityService } from './llmSecurity.service';
+import { v4 as uuidv4 } from 'uuid';
 
 export class AIRouterService {
     private static openaiProvider: OpenAIProvider | null = null;
@@ -151,6 +153,7 @@ export class AIRouterService {
     /**
      * Main entry point: Route and invoke AI model
      * This replaces BedrockService.invokeModel() throughout the codebase
+     * Now includes comprehensive security checks for all threat categories
      */
     static async invokeModel(
         prompt: string,
@@ -168,6 +171,74 @@ export class AIRouterService {
     ): Promise<string> {
         // Initialize providers if needed
         this.initializeProviders();
+
+        // Generate request ID for security tracking
+        const requestId = `airouter_${Date.now()}_${uuidv4()}`;
+
+        // SECURITY CHECK: Comprehensive threat detection before processing
+        // This checks for all 15 threat categories including HTML content
+        try {
+            const userIdStr = userId ? (typeof userId === 'string' ? userId : String(userId)) : undefined;
+            
+            // Estimate cost for security analytics
+            const estimatedTokens = Math.ceil(prompt.length / 4) + (context?.maxTokens ?? 1000);
+            const estimatedCost = this.estimateRequestCost(model, estimatedTokens);
+
+            // Perform comprehensive security check
+            // Note: IP and user agent not available in service context, but source is tracked
+            const securityCheck = await LLMSecurityService.performSecurityCheck(
+                prompt,
+                requestId,
+                userIdStr,
+                {
+                    estimatedCost,
+                    provenanceSource: 'ai-router',
+                    source: 'ai-router'
+                }
+            );
+
+            // If threat detected, block the request
+            if (securityCheck.result.isBlocked) {
+                const errorMessage = `Request blocked by security system: ${securityCheck.result.reason}`;
+                loggingService.warn('AI Router: Request blocked by security', {
+                    requestId,
+                    userId: userIdStr,
+                    model,
+                    threatCategory: securityCheck.result.threatCategory,
+                    confidence: securityCheck.result.confidence,
+                    stage: securityCheck.result.stage
+                });
+
+                // Throw error with threat details
+                const securityError: any = new Error(errorMessage);
+                securityError.isSecurityBlock = true;
+                securityError.threatCategory = securityCheck.result.threatCategory;
+                securityError.confidence = securityCheck.result.confidence;
+                securityError.stage = securityCheck.result.stage;
+                throw securityError;
+            }
+
+            loggingService.debug('AI Router: Security check passed', {
+                requestId,
+                userId: userIdStr,
+                model,
+                promptLength: prompt.length
+            });
+
+        } catch (error: any) {
+            // Re-throw security blocks
+            if (error.isSecurityBlock) {
+                throw error;
+            }
+
+            // Log security check failures but allow request to proceed (fail-open)
+            loggingService.error('AI Router: Security check failed, allowing request', {
+                error: error instanceof Error ? error.message : String(error),
+                requestId,
+                userId: userId ? String(userId) : undefined,
+                model
+            });
+        }
 
         // Estimate tokens (rough estimate: 1 token ≈ 4 characters)
         const estimatedTokens = Math.ceil(prompt.length / 4) + (context?.maxTokens ?? 1000);
@@ -403,6 +474,42 @@ export class AIRouterService {
             gemini: GeminiProvider.isAvailable(),
             bedrock: true // Bedrock is always available as fallback
         };
+    }
+
+    /**
+     * Estimate request cost for security analytics
+     */
+    private static estimateRequestCost(model: string, tokens: number): number {
+        // Rough cost estimates per 1M tokens
+        const modelPricing: Record<string, { input: number; output: number }> = {
+            'gpt-4': { input: 30, output: 60 },
+            'gpt-3.5': { input: 0.5, output: 1.5 },
+            'claude': { input: 3, output: 15 },
+            'gemini': { input: 0.25, output: 0.5 },
+            'nova': { input: 0.8, output: 3.2 },
+            'default': { input: 1, output: 3 }
+        };
+
+        const modelLower = model.toLowerCase();
+        let pricing = modelPricing.default;
+
+        if (modelLower.includes('gpt-4')) {
+            pricing = modelPricing['gpt-4'];
+        } else if (modelLower.includes('gpt-3.5') || modelLower.includes('gpt-4o-mini')) {
+            pricing = modelPricing['gpt-3.5'];
+        } else if (modelLower.includes('claude')) {
+            pricing = modelPricing.claude;
+        } else if (modelLower.includes('gemini')) {
+            pricing = modelPricing.gemini;
+        } else if (modelLower.includes('nova')) {
+            pricing = modelPricing.nova;
+        }
+
+        // Estimate 80% input, 20% output tokens
+        const inputTokens = Math.ceil(tokens * 0.8);
+        const outputTokens = Math.ceil(tokens * 0.2);
+
+        return (inputTokens / 1_000_000) * pricing.input + (outputTokens / 1_000_000) * pricing.output;
     }
 
     /**
