@@ -172,7 +172,101 @@ export class UserController {
                 updatedFields.push('avatar');
             }
             if (preferences) {
-                user.preferences = { ...user.preferences, ...preferences };
+                // Ensure preferences object exists
+                if (!user.preferences) {
+                    user.preferences = {} as typeof user.preferences;
+                }
+                
+                // Convert user preferences to plain object for safe manipulation
+                const existingPrefs = JSON.parse(JSON.stringify(user.preferences || {}));
+                
+                // Build clean preferences object, filtering out undefined values
+                const cleanPreferences: Record<string, unknown> = {};
+                
+                Object.keys(preferences).forEach((key) => {
+                    const value = (preferences as Record<string, unknown>)[key];
+                    
+                    // Skip undefined/null values
+                    if (value === undefined || value === null) {
+                        return;
+                    }
+                    
+                    // Handle nested objects (emailEngagement, integrations)
+                    if (typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+                        const existingNested = (existingPrefs as Record<string, unknown>)?.[key];
+                        
+                        // Special handling for integrations.alertTypeRouting (Mongoose Map type)
+                        if (key === 'integrations') {
+                            const integrationsValue = value as Record<string, unknown>;
+                            const existingIntegrations = existingNested as Record<string, unknown> | undefined;
+                            
+                            // Build merged integrations object
+                            const mergedIntegrations: Record<string, unknown> = {};
+                            
+                            // Handle alertTypeRouting - convert plain object to Map if needed
+                            if (integrationsValue.alertTypeRouting !== undefined) {
+                                if (integrationsValue.alertTypeRouting && typeof integrationsValue.alertTypeRouting === 'object' && !Array.isArray(integrationsValue.alertTypeRouting)) {
+                                    const routingObj = integrationsValue.alertTypeRouting as Record<string, string[]>;
+                                    // Convert plain object to Map for Mongoose
+                                    mergedIntegrations.alertTypeRouting = new Map(Object.entries(routingObj));
+                                } else if (existingIntegrations?.alertTypeRouting instanceof Map) {
+                                    // Preserve existing Map if no new value
+                                    mergedIntegrations.alertTypeRouting = existingIntegrations.alertTypeRouting;
+                                }
+                            } else if (existingIntegrations?.alertTypeRouting instanceof Map) {
+                                // Preserve existing Map if not provided
+                                mergedIntegrations.alertTypeRouting = existingIntegrations.alertTypeRouting;
+                            }
+                            
+                            // Handle other integration fields
+                            if (integrationsValue.defaultChannels !== undefined) {
+                                mergedIntegrations.defaultChannels = integrationsValue.defaultChannels;
+                            } else if (existingIntegrations?.defaultChannels !== undefined) {
+                                mergedIntegrations.defaultChannels = existingIntegrations.defaultChannels;
+                            }
+                            
+                            if (integrationsValue.fallbackToEmail !== undefined) {
+                                mergedIntegrations.fallbackToEmail = integrationsValue.fallbackToEmail;
+                            } else if (existingIntegrations?.fallbackToEmail !== undefined) {
+                                mergedIntegrations.fallbackToEmail = existingIntegrations.fallbackToEmail;
+                            }
+                            
+                            // Only set if we have valid values
+                            if (Object.keys(mergedIntegrations).length > 0) {
+                                cleanPreferences[key] = mergedIntegrations;
+                            }
+                        } else {
+                            // Regular nested object handling (emailEngagement, etc.)
+                            // Deep merge nested objects, filtering out undefined values
+                            const nestedClean: Record<string, unknown> = {};
+                            Object.keys(value as Record<string, unknown>).forEach((nestedKey) => {
+                                const nestedValue = (value as Record<string, unknown>)[nestedKey];
+                                if (nestedValue !== undefined && nestedValue !== null) {
+                                    nestedClean[nestedKey] = nestedValue;
+                                }
+                            });
+                            
+                            // Only update if we have valid nested values
+                            if (Object.keys(nestedClean).length > 0) {
+                                // Merge with existing nested object if it exists
+                                if (existingNested && typeof existingNested === 'object' && existingNested !== null && !Array.isArray(existingNested) && !(existingNested instanceof Date) && !(existingNested instanceof Map)) {
+                                    cleanPreferences[key] = { ...existingNested, ...nestedClean };
+                                } else {
+                                    cleanPreferences[key] = nestedClean;
+                                }
+                            }
+                        }
+                    } else {
+                        // Primitive values or arrays - set directly
+                        cleanPreferences[key] = value;
+                    }
+                });
+                
+                // Merge clean preferences with existing preferences
+                user.preferences = { ...existingPrefs, ...cleanPreferences } as typeof user.preferences;
+                
+                // Mark preferences as modified for Mongoose to ensure nested objects are saved
+                user.markModified('preferences');
                 updatedFields.push('preferences');
             }
 

@@ -369,12 +369,29 @@ export class AuthController {
     static async logout(req: any, res: Response): Promise<any> {
         const startTime = Date.now();
         const userId = req.user?.id || 'unknown';
+        const userSessionId = req.user?.jti;
 
         try {
             loggingService.info('User logout initiated', {
                 userId,
+                userSessionId,
                 requestId: req.headers['x-request-id'] as string
             });
+
+            // Revoke current user session if sessionId is available
+            if (userSessionId) {
+                try {
+                    const { UserSessionService } = await import('../services/userSession.service');
+                    await UserSessionService.revokeUserSession(userId, userSessionId);
+                } catch (sessionError) {
+                    // Don't fail logout if session revocation fails
+                    loggingService.warn('Error revoking user session on logout', {
+                        userId,
+                        userSessionId,
+                        error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+                    });
+                }
+            }
 
             res.clearCookie('refreshToken');
 
@@ -382,6 +399,7 @@ export class AuthController {
 
             loggingService.info('User logout completed successfully', {
                 userId,
+                userSessionId,
                 duration,
                 requestId: req.headers['x-request-id'] as string
             });
@@ -392,7 +410,8 @@ export class AuthController {
                 category: 'user_management',
                 value: duration,
                 metadata: {
-                    userId
+                    userId,
+                    userSessionId
                 }
             });
 

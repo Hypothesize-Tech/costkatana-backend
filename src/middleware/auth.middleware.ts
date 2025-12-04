@@ -306,60 +306,95 @@ export const authenticate = async (
                     role: user.role
                 });
 
-                // If jti claim exists, it's an API key auth via JWT, validate it
+                // If jti claim exists, check if it's an API key or user session
+                // API keys have jti matching dashboardApiKeys.keyId
+                // User sessions have jti matching userSessionId (not in dashboardApiKeys)
                 if (payload.jti) {
-                    loggingService.info('Step 4: Validating API key via JWT', {
-                        component: 'AuthMiddleware',
-                        operation: 'authenticate',
-                        type: 'authentication',
-                        step: 'validate_api_key_jwt'
-                    });
                     const userApiKey = user.dashboardApiKeys.find((key: any) => key.keyId === payload.jti);
-
-                    if (!userApiKey) {
-                        loggingService.warn('Invalid API key ID in JWT', {
+                    
+                    // If jti matches a dashboard API key, it's API key authentication
+                    if (userApiKey) {
+                        loggingService.info('Step 4: Validating API key via JWT', {
                             component: 'AuthMiddleware',
                             operation: 'authenticate',
                             type: 'authentication',
-                            step: 'validate_api_key_jwt',
-                            userId: payload.id,
-                            error: 'invalid_api_key_id'
+                            step: 'validate_api_key_jwt'
                         });
-                        return res.status(401).json({
-                            success: false,
-                            message: 'Invalid API Key',
-                        });
-                    }
 
-                    // Check expiration
-                    if (userApiKey.expiresAt && new Date() > userApiKey.expiresAt) {
-                        loggingService.warn('API key has expired', {
+                        // Check expiration
+                        if (userApiKey.expiresAt && new Date() > userApiKey.expiresAt) {
+                            loggingService.warn('API key has expired', {
+                                component: 'AuthMiddleware',
+                                operation: 'authenticate',
+                                type: 'authentication',
+                                step: 'check_expiry',
+                                userId: payload.id,
+                                apiKeyId: payload.jti,
+                                expiresAt: userApiKey.expiresAt
+                            });
+                            return res.status(401).json({
+                                success: false,
+                                message: 'API key has expired',
+                            });
+                        }
+
+                        // Update last used
+                        userApiKey.lastUsed = new Date();
+                        await user.save();
+
+                        loggingService.info('API key validated successfully via JWT', {
                             component: 'AuthMiddleware',
                             operation: 'authenticate',
                             type: 'authentication',
-                            step: 'check_expiry',
+                            step: 'api_key_validated_jwt',
                             userId: payload.id,
-                            apiKeyId: payload.jti,
-                            expiresAt: userApiKey.expiresAt
+                            apiKeyId: payload.jti
                         });
-                        return res.status(401).json({
-                            success: false,
-                            message: 'API key has expired',
+                    } else {
+                        // jti exists but doesn't match an API key, so it's a userSessionId
+                        // Validate that the session is still active
+                        loggingService.debug('JWT token contains userSessionId (not API key)', {
+                            component: 'AuthMiddleware',
+                            operation: 'authenticate',
+                            type: 'authentication',
+                            step: 'session_token_detected',
+                            userId: payload.id,
+                            userSessionId: payload.jti
                         });
+
+                        // Validate session is active (for session-based auth)
+                        try {
+                            const { UserSessionService } = await import('../services/userSession.service');
+                            const isSessionValid = await UserSessionService.validateSession(payload.jti);
+                            
+                            if (!isSessionValid) {
+                                loggingService.warn('Session has been revoked or is invalid', {
+                                    component: 'AuthMiddleware',
+                                    operation: 'authenticate',
+                                    type: 'authentication',
+                                    step: 'session_validation_failed',
+                                    userId: payload.id,
+                                    userSessionId: payload.jti
+                                });
+                                return res.status(401).json({
+                                    success: false,
+                                    message: 'Session has been revoked',
+                                });
+                            }
+                        } catch (sessionError) {
+                            // If session validation fails, log but don't block (could be a transient error)
+                            // However, if session doesn't exist, we should reject
+                            loggingService.warn('Error validating session in auth middleware', {
+                                component: 'AuthMiddleware',
+                                operation: 'authenticate',
+                                type: 'authentication',
+                                step: 'session_validation_error',
+                                userId: payload.id,
+                                userSessionId: payload.jti,
+                                error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+                            });
+                        }
                     }
-
-                    // Update last used
-                    userApiKey.lastUsed = new Date();
-                    await user.save();
-
-                    loggingService.info('API key validated successfully via JWT', {
-                        component: 'AuthMiddleware',
-                        operation: 'authenticate',
-                        type: 'authentication',
-                        step: 'api_key_validated_jwt',
-                        userId: payload.id,
-                        apiKeyId: payload.jti
-                    });
                 }
 
                 loggingService.info('Step 5: Setting user context', {
@@ -374,6 +409,7 @@ export const authenticate = async (
                     role: user.role as 'user' | 'admin',
                     workspaceId: user.workspaceId?.toString(),
                     apiKeyAuth: !!payload.jti,
+                    jti: payload.jti, // Include userSessionId from JWT
                     permissions: payload.jti ? user.dashboardApiKeys.find((key: any) => key.keyId === payload.jti)?.permissions || ['read'] : ['read', 'write', 'admin'],
                 };
                 req.userId = payload.id;
@@ -552,6 +588,7 @@ export const optionalAuth = async (
                         role: user.role as 'user' | 'admin',
                         workspaceId: user.workspaceId?.toString(),
                         apiKeyAuth: false,
+                        jti: payload.jti, // Include userSessionId from JWT
                         permissions: ['read', 'write', 'admin'],
                     };
                     req.userId = payload.id;

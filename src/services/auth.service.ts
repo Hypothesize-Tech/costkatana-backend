@@ -33,7 +33,7 @@ export class AuthService {
     private static readonly MAX_DB_FAILURES = 5;
     private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
     private static lastDbFailureTime: number = 0;
-    static generateTokens(user: IUser): AuthTokens {
+    static generateTokens(user: IUser, userSessionId?: string): AuthTokens {
         // Use cached user ID string conversion
         const userIdKey = (user as any)._id?.toString() || '';
         let id: string;
@@ -55,6 +55,7 @@ export class AuthService {
             id,
             email: user.email,
             role: user.role,
+            ...(userSessionId && { jti: userSessionId }), // Include userSessionId in JWT ID field only if it exists
         };
 
         const accessToken = jwt.sign(
@@ -333,7 +334,7 @@ export class AuthService {
             this.dbFailureCount = 0;
 
             // Complete login (no MFA required or trusted device)
-            return this.completeLogin(user);
+            return this.completeLogin(user, deviceInfo);
         } catch (error: unknown) {
             this.recordDbFailure();
             const executionTime = Date.now() - startTime;
@@ -346,7 +347,7 @@ export class AuthService {
         }
     }
 
-    static async completeLogin(user: any): Promise<{ user: any; tokens: AuthTokens }> {
+    static async completeLogin(user: any, deviceInfo?: { userAgent: string; ipAddress: string }): Promise<{ user: any; tokens: AuthTokens }> {
         const startTime = Date.now();
         
         try {
@@ -365,8 +366,87 @@ export class AuthService {
                 })
             ]);
 
-            // Generate tokens (synchronous operation)
-            const authTokens = this.generateTokens(user);
+            // Create user session first if device info is provided, then generate tokens with sessionId
+            let userSessionId: string | undefined;
+            let isNewDevice = false;
+            
+            if (deviceInfo) {
+                try {
+                    const { UserSessionService } = await import('./userSession.service');
+                    const { UserSessionEmailService } = await import('./userSessionEmail.service');
+                    
+                    // Create user session (we'll generate tokens after)
+                    // First create a temporary refresh token to hash
+                    const tempRefreshToken = generateToken(64);
+                    const { userSession, isNewDevice: newDevice } = await UserSessionService.createUserSession(
+                        user._id.toString(),
+                        deviceInfo,
+                        tempRefreshToken
+                    );
+                    
+                    userSessionId = userSession.userSessionId;
+                    isNewDevice = newDevice;
+                    
+                    // Send email notification if new device and notifications enabled
+                    if (isNewDevice && (user.preferences?.userSessionNotificationEnabled !== false)) {
+                        const revokeUrl = UserSessionEmailService.generateRevokeSessionUrl(
+                            userSession.userSessionId,
+                            userSession.revokeToken!
+                        );
+                        
+                        // Generate password reset token for change password link
+                        // We'll create a reset token directly without sending email
+                        const resetToken = generateToken();
+                        const userWithResetToken = await User.findById(user._id);
+                        if (userWithResetToken) {
+                            userWithResetToken.resetPasswordToken = resetToken;
+                            userWithResetToken.resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
+                            await userWithResetToken.save();
+                        }
+                        
+                        const changePasswordUrl = UserSessionEmailService.generateChangePasswordUrl(
+                            user._id.toString(),
+                            resetToken
+                        );
+                        
+                        await UserSessionEmailService.sendNewDeviceLoginEmail(
+                            user,
+                            userSession,
+                            revokeUrl,
+                            changePasswordUrl
+                        );
+                    }
+                } catch (sessionError) {
+                    // Don't fail login if session creation fails
+                    loggingService.error('Error creating user session during login', {
+                        userId: user._id.toString(),
+                        error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+                    });
+                }
+            }
+
+            // Generate tokens with userSessionId in jti field
+            const authTokens = this.generateTokens(user, userSessionId);
+            
+            // Update session with actual refresh token hash if session was created
+            if (userSessionId && deviceInfo) {
+                try {
+                    const { UserSession } = await import('../models/UserSession');
+                    const crypto = await import('crypto');
+                    // Update the session with the actual refresh token hash
+                    const session = await UserSession.findOne({ userSessionId });
+                    if (session) {
+                        session.refreshTokenHash = crypto.createHash('sha256').update(authTokens.refreshToken).digest('hex');
+                        await session.save();
+                    }
+                } catch (updateError) {
+                    loggingService.error('Error updating session with refresh token hash', {
+                        userId: user._id.toString(),
+                        userSessionId,
+                        error: updateError instanceof Error ? updateError.message : String(updateError)
+                    });
+                }
+            }
 
             const executionTime = Date.now() - startTime;
             loggingService.info(`User logged in: ${user.email}`, {
@@ -398,8 +478,45 @@ export class AuthService {
                 throw new Error('User not found or inactive');
             }
 
-            // Generate new tokens
-            const tokens = this.generateTokens(user);
+            // Get userSessionId from token (jti field)
+            const userSessionId = payload.jti;
+            
+            // Validate session if userSessionId exists (for session-based auth)
+            if (userSessionId) {
+                const { UserSessionService } = await import('./userSession.service');
+                const isSessionValid = await UserSessionService.validateSessionForRefresh(userSessionId, refreshToken);
+                
+                if (!isSessionValid) {
+                    loggingService.warn('Session validation failed during token refresh', {
+                        userId: payload.id,
+                        userSessionId
+                    });
+                    throw new Error('Session has been revoked or is invalid');
+                }
+            }
+            
+            // Generate new tokens with same sessionId (preserve sessionId if it exists)
+            const tokens = this.generateTokens(user, userSessionId);
+            
+            // Update user session activity if sessionId exists (do this AFTER generating tokens to avoid blocking)
+            if (userSessionId) {
+                // Update asynchronously - don't block token refresh
+                (async () => {
+                    try {
+                        const { UserSessionService } = await import('./userSession.service');
+                        await UserSessionService.updateUserSessionActivity(userSessionId);
+                    } catch (sessionError) {
+                        // Don't fail token refresh if session update fails - fail silently
+                        loggingService.debug('Error updating session activity on token refresh', {
+                            userId: payload.id,
+                            userSessionId,
+                            error: sessionError instanceof Error ? sessionError.message : String(sessionError)
+                        });
+                    }
+                })().catch(() => {
+                    // Ignore errors in async update
+                });
+            }
 
             const executionTime = Date.now() - startTime;
             loggingService.debug('Tokens refreshed successfully', {
