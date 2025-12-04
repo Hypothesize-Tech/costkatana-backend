@@ -1519,7 +1519,16 @@ export class GatewayController {
             const requestId = req.headers['x-request-id'] as string || 
                              `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-            // Run comprehensive security check
+            // Extract IP address and user agent for logging
+            const ipAddress = req.ip || 
+                            req.headers['x-forwarded-for']?.toString().split(',')[0] || 
+                            req.socket.remoteAddress || 
+                            'unknown';
+            const userAgent = req.headers['user-agent'] || 'unknown';
+
+            // Run comprehensive security check (automatically handles HTML content)
+            // The LLMSecurityService -> PromptFirewallService -> HTMLSecurityService chain
+            // will extract text from HTML and scan for all threat categories
             const securityCheck = await LLMSecurityService.performSecurityCheck(
                 prompt,
                 requestId,
@@ -1527,7 +1536,10 @@ export class GatewayController {
                 {
                     toolCalls,
                     provenanceSource: context.targetUrl,
-                    estimatedCost
+                    estimatedCost,
+                    ipAddress,
+                    userAgent,
+                    source: 'gateway'
                 }
             );
 

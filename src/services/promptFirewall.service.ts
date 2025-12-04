@@ -1,6 +1,7 @@
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { HTMLSecurityService } from './htmlSecurity.service';
 
 export interface ThreatDetectionResult {
     isBlocked: boolean;
@@ -81,7 +82,13 @@ export class PromptFirewallService {
         /child\s+(?:abuse|exploitation)/i,
         /hate\s+speech/i,
         /terrorist/i,
-        /violence\s+against/i
+        /violence\s+against/i,
+        /(?:create|make|generate|produce).*harmful/i,
+        /harmful\s+content/i,
+        /(?:hurt|harm|damage|injure).*others/i,
+        /(?:how|way|method).*hurt/i,
+        /dangerous\s+content/i,
+        /malicious\s+content/i
     ];
 
     // Circuit breaker for external services
@@ -112,6 +119,7 @@ export class PromptFirewallService {
 
     /**
      * Main firewall check - processes prompt through security layers
+     * Now supports HTML content scanning
      */
     static async checkPrompt(
         prompt: string,
@@ -123,30 +131,111 @@ export class PromptFirewallService {
             toolCalls?: any[];
             userId?: string;
             provenanceSource?: string;
+            ipAddress?: string;
+            userAgent?: string;
+            source?: string;
         }
     ): Promise<ThreatDetectionResult> {
         try {
             this.initialize();
 
+            // Pre-process: Extract text from HTML if present
+            const preparedContent = HTMLSecurityService.prepareContentForScanning(prompt);
+            const textToScan = preparedContent.textToScan;
+            const isHTML = preparedContent.isHTML;
+
+            // Log HTML detection
+            if (isHTML) {
+                loggingService.debug('HTML content detected, extracted text for scanning', {
+                    requestId,
+                    originalLength: prompt.length,
+                    extractedLength: textToScan.length,
+                    htmlMetadata: preparedContent.metadata
+                });
+            }
+
             // Stage 1: Basic Prompt Guard (Fast injection detection)
             if (config.enableBasicFirewall) {
-                const promptGuardResult = await this.runPromptGuard(prompt, config.promptGuardThreshold);
+                const promptGuardResult = await this.runPromptGuard(textToScan, config.promptGuardThreshold);
                 
                 if (promptGuardResult.isBlocked) {
-                    await this.logThreatDetection(requestId, promptGuardResult, estimatedCost, context?.userId, prompt);
+                    // Add HTML metadata to result
+                    if (isHTML) {
+                        promptGuardResult.details = {
+                            ...promptGuardResult.details,
+                            htmlDetected: true,
+                            htmlMetadata: preparedContent.metadata
+                        };
+                    }
+                    await this.logThreatDetection(
+                        requestId, 
+                        promptGuardResult, 
+                        estimatedCost, 
+                        context?.userId, 
+                        prompt,
+                        {
+                            ipAddress: context?.ipAddress,
+                            userAgent: context?.userAgent,
+                            source: context?.source
+                        }
+                    );
                     return promptGuardResult;
                 }
             }
 
-            // Stage 2: Advanced Llama Guard (Deep content analysis)
+            // Stage 2: Advanced AI-based detection (Deep content analysis for all threat categories)
             if (config.enableAdvancedFirewall) {
-                const llamaGuardResult = await this.runLlamaGuard(prompt, config.llamaGuardThreshold);
+                const aiDetectionResult = await this.runAIDetection(textToScan, config.llamaGuardThreshold, isHTML, preparedContent.metadata);
                 
-                if (llamaGuardResult.isBlocked) {
-                    await this.logThreatDetection(requestId, llamaGuardResult, estimatedCost, context?.userId, prompt);
-                    return llamaGuardResult;
+                // Log ALL threats detected by AI, even if confidence is below blocking threshold
+                // This ensures compliance tracking and monitoring
+                if (aiDetectionResult.threatCategory && aiDetectionResult.confidence > 0.3) {
+                    await this.logThreatDetection(
+                        requestId, 
+                        aiDetectionResult, 
+                        estimatedCost, 
+                        context?.userId, 
+                        prompt,
+                        {
+                            ipAddress: context?.ipAddress,
+                            userAgent: context?.userAgent,
+                            source: context?.source
+                        }
+                    );
+                }
+                
+                if (aiDetectionResult.isBlocked) {
+                    return aiDetectionResult;
                 }
             }
+            
+            // Final fallback: Check for harmful content patterns even if advanced firewall is disabled
+            // This ensures we catch threats even when AI detection is unavailable
+            const fallbackCheck = this.fallbackContentCheck(textToScan);
+            if (fallbackCheck.isBlocked) {
+                await this.logThreatDetection(
+                    requestId,
+                    fallbackCheck,
+                    estimatedCost,
+                    context?.userId,
+                    prompt,
+                    {
+                        ipAddress: context?.ipAddress,
+                        userAgent: context?.userAgent,
+                        source: context?.source
+                    }
+                );
+                return fallbackCheck;
+            }
+            
+            // Return safe result if no threats detected
+            return {
+                isBlocked: false,
+                confidence: 0.0,
+                reason: 'No threats detected',
+                stage: config.enableAdvancedFirewall ? 'llama-guard' : 'prompt-guard',
+                containmentAction: 'allow'
+            };
 
             // If we reach here, prompt passed all checks
             return {
@@ -171,6 +260,27 @@ export class PromptFirewallService {
                 stage: 'prompt-guard'
             };
         }
+    }
+
+    /**
+     * Check prompt with HTML support (convenience method)
+     */
+    static async checkPromptWithHTML(
+        content: string,
+        config: FirewallConfig,
+        requestId: string,
+        estimatedCost: number = 0.01,
+        context?: {
+            retrievedChunks?: string[];
+            toolCalls?: any[];
+            userId?: string;
+            provenanceSource?: string;
+            ipAddress?: string;
+            userAgent?: string;
+            source?: string;
+        }
+    ): Promise<ThreatDetectionResult> {
+        return this.checkPrompt(content, config, requestId, estimatedCost, context);
     }
 
     /**
@@ -251,27 +361,77 @@ export class PromptFirewallService {
     }
 
     /**
-     * Stage 2: Llama Guard - Deep content analysis using Meta's Llama Guard
+     * Stage 2: AI-based Detection - Deep content analysis for all 15 threat categories
+     * Uses Nova Pro or Claude via Bedrock for comprehensive threat detection
      */
-    private static async runLlamaGuard(
+    private static async runAIDetection(
         prompt: string,
-        _threshold: number // Prefixed with underscore to indicate intentionally unused
+        threshold: number,
+        isHTML: boolean = false,
+        htmlMetadata?: any
     ): Promise<ThreatDetectionResult> {
-        // Disable Bedrock for now to avoid model errors - use reliable pattern matching
-        const useBedrockModels = false; // process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
+        this.initialize();
+        const useBedrockModels = process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
 
-        if (useBedrockModels) {
+        if (useBedrockModels && !this.isServiceCircuitBreakerOpen()) {
             try {
-                // Use a general purpose model for content analysis
+                // Use Nova Pro for fast, cost-effective detection (primary)
+                // Fallback to Claude 3.5 Sonnet for complex cases
+                const modelId = 'amazon.nova-pro-v1:0'; // Primary model
+                
+                const detectionPrompt = `Analyze the following content for security threats. Check for ALL of these threat categories:
+1. Violence & Hate
+2. Sexual Content
+3. Self Harm
+4. Prompt Injection
+5. Jailbreak Attempt
+6. Privacy Violations
+7. Harmful Content
+8. Criminal Planning
+9. Guns & Illegal Weapons
+10. Regulated Substances
+11. Data Exfiltration
+12. Phishing & Social Engineering
+13. Spam and Unwanted Content
+14. Misinformation
+15. IP Violations
+16. Harassment & Bullying
+
+${isHTML ? 'NOTE: This content was extracted from HTML. Pay special attention to hidden or obfuscated threats.\n' : ''}
+
+Content to analyze:
+"${prompt.substring(0, 4000)}"
+
+Respond with ONLY a JSON object in this exact format:
+{
+  "isThreat": boolean,
+  "threatCategory": "category_name" or null,
+  "confidence": 0.0-1.0,
+  "reason": "brief explanation",
+  "matchedPatterns": ["pattern1", "pattern2"]
+}
+
+JSON Response:`;
+
+                const requestBody = {
+                    messages: [
+                        {
+                            role: 'user',
+                            content: [{ text: detectionPrompt }]
+                        }
+                    ],
+                    inferenceConfig: {
+                        max_new_tokens: 500,
+                        temperature: 0.0,
+                        top_p: 0.9
+                    }
+                };
+
                 const input = {
-                    modelId: 'meta.llama3-2-1b-instruct-v1:0', // Use a more common model
+                    modelId,
                     contentType: 'application/json',
                     accept: 'application/json',
-                    body: JSON.stringify({
-                        prompt: `Analyze the following text for harmful content including violence, hate speech, illegal activities, self-harm, or other dangerous content. Respond with "SAFE" if the content is harmless, or "UNSAFE" followed by the category if it contains harmful content:\n\n"${prompt}"\n\nAssessment:`,
-                        max_tokens: 50,
-                        temperature: 0.0
-                    })
+                    body: JSON.stringify(requestBody)
                 };
 
                 const command = new InvokeModelCommand(input);
@@ -285,42 +445,88 @@ export class PromptFirewallService {
                         jitterFactor: 0.2
                     },
                     {
-                        modelId: 'meta.llama3-2-1b-instruct-v1:0',
-                        operation: 'llamaGuard'
+                        modelId,
+                        operation: 'aiThreatDetection'
                     }
                 );
                 
                 const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-                const assessment = responseBody.generation?.trim() || '';
+                // Nova Pro response format
+                const responseText = responseBody.output?.message?.content?.[0]?.text || 
+                                   responseBody.output?.text || 
+                                   responseBody.content?.[0]?.text || 
+                                   responseBody.text || 
+                                   responseBody.generation || 
+                                   '';
                 
-                // Parse response
-                const isUnsafe = assessment.toUpperCase().includes('UNSAFE');
-                const violatedCategories = this.extractViolatedCategoriesFromAssessment(assessment);
+                // Parse JSON response
+                let detectionResult: any = null;
+                try {
+                    // Extract JSON from response (might be wrapped in markdown code blocks)
+                    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        detectionResult = JSON.parse(jsonMatch[0]);
+                    }
+                } catch (parseError) {
+                    loggingService.warn('Failed to parse AI detection response, using fallback', {
+                        error: parseError instanceof Error ? parseError.message : String(parseError),
+                        responseText: responseText.substring(0, 200)
+                    });
+                }
+
+                if (detectionResult && detectionResult.isThreat) {
+                    // Reset failure count on success
+                    this.serviceFailureCount = 0;
+                    
+                    // Normalize threat category to match ThreatLog enum
+                    const normalizedCategory = this.normalizeThreatCategory(detectionResult.threatCategory || 'harmful_content');
+                    
+                    return {
+                        isBlocked: true,
+                        threatCategory: normalizedCategory,
+                        confidence: detectionResult.confidence || 0.9,
+                        reason: detectionResult.reason || 'AI detected security threat',
+                        stage: 'llama-guard',
+                        matchedPatterns: detectionResult.matchedPatterns || [],
+                        riskScore: detectionResult.confidence || 0.9,
+                        containmentAction: (detectionResult.confidence || 0.9) > 0.8 ? 'block' : 'sandbox',
+                        details: {
+                            method: 'ai_detection_nova_pro',
+                            modelId,
+                            isHTML,
+                            htmlMetadata,
+                            originalCategory: detectionResult.threatCategory
+                        }
+                    };
+                }
+
+                // Reset failure count on success
+                this.serviceFailureCount = 0;
                 
                 return {
-                    isBlocked: isUnsafe,
-                    threatCategory: isUnsafe ? violatedCategories[0] : undefined,
-                    confidence: isUnsafe ? 0.9 : 0.1,
-                    reason: isUnsafe 
-                        ? `Content violates safety policies: ${violatedCategories.join(', ')}`
-                        : 'Content complies with safety policies',
+                    isBlocked: false,
+                    confidence: detectionResult?.confidence || 0.1,
+                    reason: 'No threats detected by AI analysis',
                     stage: 'llama-guard',
                     details: {
-                        assessment,
-                        violatedCategories,
-                        method: 'bedrock_llama'
+                        method: 'ai_detection_nova_pro',
+                        modelId,
+                        isHTML
                     }
                 };
 
             } catch (error) {
-                loggingService.warn('Bedrock Llama Guard failed, using fallback', { value:  { value: error as Error } });
-                // Fall through to pattern matching
+                this.recordServiceFailure();
+                loggingService.warn('AI detection failed, using fallback', { 
+                    error: error instanceof Error ? error.message : String(error)
+                });
             }
         }
 
-        // Use pattern matching (always works)
+        // Fallback to pattern matching
         return this.fallbackContentCheck(prompt);
     }
+
 
     /**
      * Optimized fallback prompt injection check using pre-compiled patterns
@@ -421,352 +627,22 @@ export class PromptFirewallService {
 
 
 
-    /**
-     * Extract violated categories from custom assessment text
-     */
-    private static extractViolatedCategoriesFromAssessment(assessment: string): string[] {
-        const lowerAssessment = assessment.toLowerCase();
-        
-        if (lowerAssessment.includes('violence') || lowerAssessment.includes('hate')) {
-            return ['Violence and Hate'];
-        }
-        if (lowerAssessment.includes('sexual')) {
-            return ['Sexual Content'];
-        }
-        if (lowerAssessment.includes('criminal') || lowerAssessment.includes('illegal')) {
-            return ['Criminal Planning'];
-        }
-        if (lowerAssessment.includes('weapon') || lowerAssessment.includes('gun')) {
-            return ['Guns and Illegal Weapons'];
-        }
-        if (lowerAssessment.includes('drug') || lowerAssessment.includes('substance')) {
-            return ['Regulated or Controlled Substances'];
-        }
-        if (lowerAssessment.includes('self-harm') || lowerAssessment.includes('suicide')) {
-            return ['Self-Harm'];
-        }
-        if (lowerAssessment.includes('jailbreak') || lowerAssessment.includes('bypass')) {
-            return ['Jailbreaking'];
-        }
-        if (lowerAssessment.includes('data') || lowerAssessment.includes('exfiltration')) {
-            return ['Data Exfiltration'];
-        }
-        if (lowerAssessment.includes('phishing') || lowerAssessment.includes('scam')) {
-            return ['Phishing and Social Engineering'];
-        }
-        if (lowerAssessment.includes('spam')) {
-            return ['Spam and Unwanted Content'];
-        }
-        if (lowerAssessment.includes('misinformation') || lowerAssessment.includes('false')) {
-            return ['Misinformation'];
-        }
-        if (lowerAssessment.includes('privacy')) {
-            return ['Privacy Violations'];
-        }
-        if (lowerAssessment.includes('copyright') || lowerAssessment.includes('intellectual')) {
-            return ['Intellectual Property Violations'];
-        }
-        if (lowerAssessment.includes('harassment') || lowerAssessment.includes('bullying')) {
-            return ['Harassment and Bullying'];
-        }
-        
-        return ['Harmful Content'];
-    }
+
 
     /**
-     * Stage 3: RAG Security - Analyze retrieved chunks for data exfiltration attempts
-     * (Not used directly in basic firewall - used by LLMSecurityService)
-     */
-    static async runRAGSecurityCheck(
-        prompt: string,
-        retrievedChunks: string[],
-        threshold: number,
-        provenanceSource?: string
-    ): Promise<ThreatDetectionResult> {
-        try {
-            const ragPatterns = [
-                // Data exfiltration attempts
-                /(?:show|list|extract|get|find|display)\s+(?:all\s+)?(?:sensitive|confidential|private|secret)\s+(?:data|information|files|documents)/i,
-                /(?:dump|export|download|copy)\s+(?:entire\s+)?(?:database|knowledge|content)/i,
-                /(?:what\s+)?(?:personal|private|sensitive)\s+(?:data|information)\s+(?:do\s+you\s+have|is\s+available)/i,
-                /(?:show|tell)\s+me\s+(?:everything|all)\s+(?:about|from)/i,
-                
-                // System prompt extraction
-                /(?:what\s+is\s+your\s+)?(?:system\s+)?(?:prompt|instructions)/i,
-                /(?:show|display|reveal)\s+(?:your\s+)?(?:initial\s+)?(?:system\s+)?(?:prompt|instructions)/i,
-                /(?:how\s+were\s+you\s+)?(?:programmed|configured|set\s+up)/i,
-                
-                // RAG-specific attacks
-                /(?:ignore\s+)?(?:knowledge\s+base|vector\s+store|embeddings|chunks)/i,
-                /(?:retrieve|search)\s+(?:from\s+)?(?:different|other|all)\s+(?:sources|documents|files)/i,
-                /(?:access\s+)?(?:source\s+)?(?:documents|files)\s+(?:directly|raw)/i,
-                
-                // Cross-context injection
-                /(?:override|replace|modify)\s+(?:retrieved|context|knowledge)/i,
-                /(?:inject|insert|add)\s+(?:new\s+)?(?:context|information|data)/i
-            ];
-
-            let riskScore = 0;
-            const matchedPatterns: string[] = [];
-
-            // Check prompt for RAG-specific threats
-            for (const pattern of ragPatterns) {
-                if (pattern.test(prompt)) {
-                    riskScore += 0.3;
-                    matchedPatterns.push(pattern.source);
-                }
-            }
-
-            // Analyze retrieved chunks for sensitive content
-            let sensitiveContentScore = 0;
-            const sensitivePatterns = [
-                /(?:password|secret|key|token|credential)/i,
-                /(?:ssn|social\s+security|tax\s+id)/i,
-                /(?:credit\s+card|card\s+number|cvv)/i,
-                /(?:api\s+key|private\s+key|auth\s+token)/i,
-                /(?:internal|confidential|proprietary)/i
-            ];
-
-            for (const chunk of retrievedChunks) {
-                for (const pattern of sensitivePatterns) {
-                    if (pattern.test(chunk)) {
-                        sensitiveContentScore += 0.2;
-                        matchedPatterns.push(`sensitive_content: ${pattern.source}`);
-                    }
-                }
-            }
-
-            const totalScore = Math.min(1.0, riskScore + sensitiveContentScore);
-            const isBlocked = totalScore > threshold;
-
-            let containmentAction: 'block' | 'sandbox' | 'human_review' | 'allow' = 'allow';
-            if (isBlocked) {
-                if (totalScore > 0.8) {
-                    containmentAction = 'block';
-                } else if (totalScore > 0.6) {
-                    containmentAction = 'human_review';
-                } else {
-                    containmentAction = 'sandbox';
-                }
-            }
-
-            return {
-                isBlocked,
-                threatCategory: isBlocked ? 'data_exfiltration' : undefined,
-                confidence: totalScore,
-                reason: isBlocked 
-                    ? `RAG security threat detected: potential data exfiltration or context manipulation`
-                    : 'No RAG security threats detected',
-                stage: 'rag-guard',
-                matchedPatterns,
-                riskScore: totalScore,
-                containmentAction,
-                provenanceSource,
-                details: {
-                    promptRiskScore: riskScore,
-                    sensitiveContentScore,
-                    retrievedChunksCount: retrievedChunks.length,
-                    method: 'rag_security_patterns'
-                }
-            };
-
-        } catch (error) {
-            loggingService.warn('RAG security check failed, allowing request', { value:  { value: error as Error } });
-            return {
-                isBlocked: false,
-                confidence: 0.0,
-                reason: 'RAG security check failed - allowing request',
-                stage: 'rag-guard',
-                containmentAction: 'allow'
-            };
-        }
-    }
-
-    /**
-     * Stage 4: Tool Security - Validate tool calls and arguments
-     * (Not used directly in basic firewall - used by LLMSecurityService)
-     */
-    static async runToolSecurityCheck(
-        toolCalls: any[],
-        threshold: number,
-        _userId?: string
-    ): Promise<ThreatDetectionResult> {
-        try {
-            // Define allowed tools and their security policies
-            interface ToolSecurityPolicy {
-                allowedOperations?: string[];
-                forbiddenOperations?: string[];
-                maxDocuments?: number;
-                maxCostThreshold?: number;
-                allowedDomains?: string[];
-                forbiddenDomains?: string[];
-                maxRequests?: number;
-                maxCostImpact?: number;
-                requiresApproval: boolean;
-            }
-
-            const toolSecurityPolicies: Record<string, ToolSecurityPolicy> = {
-                'mongodb_reader': {
-                    allowedOperations: ['find', 'findOne', 'countDocuments', 'aggregate'],
-                    forbiddenOperations: ['drop', 'remove', 'deleteOne', 'deleteMany', 'updateOne', 'updateMany'],
-                    maxDocuments: 100,
-                    requiresApproval: false
-                },
-                'analytics_manager': {
-                    allowedOperations: ['dashboard', 'token_usage', 'model_performance', 'usage_patterns'],
-                    maxCostThreshold: 10.0,
-                    requiresApproval: false
-                },
-                'web_scraper': {
-                    allowedDomains: ['github.com', 'stackoverflow.com', 'docs.python.org', 'nodejs.org'],
-                    forbiddenDomains: ['localhost', '127.0.0.1', '0.0.0.0', 'internal', 'admin'],
-                    maxRequests: 5,
-                    requiresApproval: true
-                },
-                'optimization_manager': {
-                    maxCostImpact: 100.0,
-                    requiresApproval: false
-                },
-                'project_manager': {
-                    allowedOperations: ['list', 'get', 'analyze'],
-                    forbiddenOperations: ['delete', 'purge', 'reset'],
-                    requiresApproval: false
-                }
-            };
-
-            let riskScore = 0;
-            const violations: string[] = [];
-            let requiresHumanApproval = false;
-
-            for (const toolCall of toolCalls) {
-                const toolName = toolCall.function?.name || toolCall.name;
-                const toolArgs = toolCall.function?.arguments || toolCall.arguments;
-
-                // Check if tool is whitelisted
-                if (!toolSecurityPolicies[toolName as keyof typeof toolSecurityPolicies]) {
-                    riskScore += 0.4;
-                    violations.push(`Unknown/unauthorized tool: ${toolName}`);
-                    requiresHumanApproval = true;
-                    continue;
-                }
-
-                const policy = toolSecurityPolicies[toolName as keyof typeof toolSecurityPolicies];
-
-                // Parse arguments safely
-                let args: any = {};
-                try {
-                    args = typeof toolArgs === 'string' ? JSON.parse(toolArgs) : toolArgs;
-                } catch (error) {
-                    riskScore += 0.3;
-                    violations.push(`Invalid arguments for tool: ${toolName}`);
-                    continue;
-                }
-
-                // Tool-specific validations
-                switch (toolName) {
-                    case 'mongodb_reader':
-                        if (policy.forbiddenOperations?.includes(args.operation)) {
-                            riskScore += 0.6;
-                            violations.push(`Forbidden MongoDB operation: ${args.operation}`);
-                        }
-                        if (args.query && this.containsDangerousMongoDB(JSON.stringify(args.query))) {
-                            riskScore += 0.8;
-                            violations.push('Potentially dangerous MongoDB query detected');
-                        }
-                        break;
-
-                    case 'web_scraper':
-                        const url = args.url || '';
-                        if (policy.forbiddenDomains?.some((domain: string) => url.includes(domain))) {
-                            riskScore += 0.7;
-                            violations.push(`Access to forbidden domain in URL: ${url}`);
-                        }
-                        if (!policy.allowedDomains?.some((domain: string) => url.includes(domain))) {
-                            riskScore += 0.5;
-                            violations.push(`Access to non-whitelisted domain: ${url}`);
-                            requiresHumanApproval = true;
-                        }
-                        break;
-
-                    case 'project_manager':
-                        if (policy.forbiddenOperations?.includes(args.operation)) {
-                            riskScore += 0.7;
-                            violations.push(`Forbidden project operation: ${args.operation}`);
-                        }
-                        break;
-                }
-
-                // Check if tool requires approval
-                if (policy.requiresApproval) {
-                    requiresHumanApproval = true;
-                }
-            }
-
-            const isBlocked = riskScore > threshold;
-
-            let containmentAction: 'block' | 'sandbox' | 'human_review' | 'allow' = 'allow';
-            if (isBlocked) {
-                containmentAction = 'block';
-            } else if (requiresHumanApproval || riskScore > threshold * 0.7) {
-                containmentAction = 'human_review';
-            } else if (riskScore > threshold * 0.5) {
-                containmentAction = 'sandbox';
-            }
-
-            return {
-                isBlocked,
-                threatCategory: isBlocked ? 'unauthorized_tool_access' : undefined,
-                confidence: riskScore,
-                reason: isBlocked 
-                    ? `Tool security violations detected: ${violations.join(', ')}`
-                    : requiresHumanApproval 
-                        ? 'Tool calls require human approval'
-                        : 'All tool calls authorized',
-                stage: 'tool-guard',
-                matchedPatterns: violations,
-                riskScore,
-                containmentAction,
-                details: {
-                    toolCallsCount: toolCalls.length,
-                    violations,
-                    requiresHumanApproval,
-                    method: 'tool_security_validation'
-                }
-            };
-
-        } catch (error) {
-            loggingService.warn('Tool security check failed, blocking request', { value:  { value: error as Error } });
-            return {
-                isBlocked: true,
-                confidence: 1.0,
-                reason: 'Tool security check failed - blocking for safety',
-                stage: 'tool-guard',
-                containmentAction: 'block'
-            };
-        }
-    }
-
-    /**
-     * Check for dangerous MongoDB operations
-     */
-    private static containsDangerousMongoDB(queryString: string): boolean {
-        const dangerousOperations = [
-            '$eval', '$where', '$function', '$accumulator',
-            '$javascript', '$code', 'ObjectId.', 'function()'
-        ];
-        
-        return dangerousOperations.some(op => queryString.includes(op));
-    }
-
-    /**
-     * Log threat detection for analytics
+     * Log threat detection for analytics and compliance
      */
     private static async logThreatDetection(
         requestId: string,
         result: ThreatDetectionResult,
         estimatedCost: number,
         userId?: string,
-        originalPrompt?: string
+        originalPrompt?: string,
+        metadata?: {
+            ipAddress?: string;
+            userAgent?: string;
+            source?: string; // 'chat-api', 'gateway', 'ai-router', etc.
+        }
     ): Promise<void> {
         try {
             // Import ThreatLog model dynamically to avoid circular dependencies
@@ -775,25 +651,35 @@ export class PromptFirewallService {
             const threatLog = new ThreatLog({
                 requestId,
                 userId: userId ? new (await import('mongoose')).Types.ObjectId(userId) : undefined,
-                threatCategory: result.threatCategory,
+                threatCategory: result.threatCategory || 'harmful_content',
                 confidence: result.confidence,
                 stage: result.stage,
                 reason: result.reason,
-                details: result.details,
+                details: {
+                    ...result.details,
+                    source: metadata?.source || 'unknown',
+                    containmentAction: result.containmentAction,
+                    matchedPatterns: result.matchedPatterns,
+                    riskScore: result.riskScore
+                },
                 costSaved: estimatedCost,
                 timestamp: new Date(),
                 promptHash: originalPrompt ? this.hashPrompt(originalPrompt) : undefined,
-                promptPreview: originalPrompt ? this.sanitizePromptForPreview(originalPrompt) : undefined
+                promptPreview: originalPrompt ? this.sanitizePromptForPreview(originalPrompt) : undefined,
+                ipAddress: metadata?.ipAddress,
+                userAgent: metadata?.userAgent
             });
 
             await threatLog.save();
 
-            loggingService.info('Threat detected and logged', { value:  { 
+            loggingService.info('Threat detected and logged to database', { value:  { 
                 requestId,
                 threatCategory: result.threatCategory,
                 confidence: result.confidence,
                 stage: result.stage,
-                costSaved: estimatedCost
+                costSaved: estimatedCost,
+                source: metadata?.source,
+                userId
              } });
 
         } catch (error) {
@@ -803,6 +689,54 @@ export class PromptFirewallService {
                 threatCategory: result.threatCategory
             });
         }
+    }
+
+    /**
+     * Normalize threat category name to match ThreatLog enum
+     */
+    private static normalizeThreatCategory(category: string | null | undefined): string {
+        if (!category) {
+            return 'harmful_content';
+        }
+
+        const categoryMap: Record<string, string> = {
+            'violence & hate': 'violence_and_hate',
+            'violence_and_hate': 'violence_and_hate',
+            'sexual content': 'sexual_content',
+            'sexual_content': 'sexual_content',
+            'self harm': 'self_harm',
+            'self_harm': 'self_harm',
+            'prompt injection': 'prompt_injection',
+            'prompt_injection': 'prompt_injection',
+            'jailbreak attempt': 'jailbreak_attempt',
+            'jailbreak_attempt': 'jailbreak_attempt',
+            'jailbreaking': 'jailbreak_attempt',
+            'privacy violations': 'privacy_violations',
+            'privacy_violations': 'privacy_violations',
+            'harmful content': 'harmful_content',
+            'harmful_content': 'harmful_content',
+            'criminal planning': 'criminal_planning',
+            'criminal_planning': 'criminal_planning',
+            'guns & illegal weapons': 'guns_and_illegal_weapons',
+            'guns_and_illegal_weapons': 'guns_and_illegal_weapons',
+            'regulated substances': 'regulated_substances',
+            'regulated_substances': 'regulated_substances',
+            'data exfiltration': 'data_exfiltration',
+            'data_exfiltration': 'data_exfiltration',
+            'phishing & social engineering': 'phishing_and_social_engineering',
+            'phishing_and_social_engineering': 'phishing_and_social_engineering',
+            'spam and unwanted content': 'spam_and_unwanted_content',
+            'spam_and_unwanted_content': 'spam_and_unwanted_content',
+            'misinformation': 'misinformation',
+            'ip violations': 'intellectual_property_violations',
+            'intellectual property violations': 'intellectual_property_violations',
+            'intellectual_property_violations': 'intellectual_property_violations',
+            'harassment & bullying': 'harassment_and_bullying',
+            'harassment_and_bullying': 'harassment_and_bullying'
+        };
+
+        const normalized = category.toLowerCase().trim();
+        return categoryMap[normalized] || 'harmful_content';
     }
 
     /**
@@ -903,7 +837,7 @@ export class PromptFirewallService {
     static getDefaultConfig(): FirewallConfig {
         return {
             enableBasicFirewall: true,
-            enableAdvancedFirewall: false,
+            enableAdvancedFirewall: true, // Enable AI-based detection by default for comprehensive threat detection
             enableRAGSecurity: true,
             enableToolSecurity: true,
             promptGuardThreshold: 0.5, // 50% confidence threshold
@@ -1038,12 +972,4 @@ export class PromptFirewallService {
         this.lastServiceFailureTime = Date.now();
     }
 
-    /**
-     * Cleanup method for graceful shutdown
-     */
-    static cleanup(): void {
-        // Reset circuit breaker state
-        this.serviceFailureCount = 0;
-        this.lastServiceFailureTime = 0;
-    }
 }

@@ -140,7 +140,49 @@ export class LiveChatService {
         messageType?: 'text' | 'code' | 'link' | 'image' | 'file';
         attachments?: { name: string; url: string; type: string; size: number }[];
         isAiGenerated?: boolean;
+        ipAddress?: string;
+        userAgent?: string;
     }): Promise<IChatMessage> {
+        // SECURITY CHECK: Only check user messages (not admin/support/system messages)
+        if (data.senderType === 'user' && data.content) {
+            try {
+                const { LLMSecurityService } = await import('./llmSecurity.service');
+                const { v4: uuidv4 } = await import('uuid');
+                
+                const requestId = `livechat_${Date.now()}_${uuidv4()}`;
+                const securityCheck = await LLMSecurityService.performSecurityCheck(
+                    data.content,
+                    requestId,
+                    data.senderId,
+                    {
+                        estimatedCost: 0.01,
+                        provenanceSource: 'live-chat',
+                        ipAddress: data.ipAddress,
+                        userAgent: data.userAgent,
+                        source: 'live-chat'
+                    }
+                );
+
+                if (securityCheck.result.isBlocked) {
+                    const error: any = new Error(securityCheck.result.reason || 'Message blocked by security system');
+                    error.isSecurityBlock = true;
+                    error.threatCategory = securityCheck.result.threatCategory;
+                    error.confidence = securityCheck.result.confidence;
+                    throw error;
+                }
+            } catch (error: any) {
+                if (error.isSecurityBlock) {
+                    throw error;
+                }
+                // Log but allow if security check fails
+                loggingService.error('Live chat security check failed, allowing message', {
+                    error: error instanceof Error ? error.message : String(error),
+                    sessionId: data.sessionId,
+                    senderId: data.senderId
+                });
+            }
+        }
+
         const message = await ChatMessage.create({
             sessionId: new Types.ObjectId(data.sessionId),
             senderId: new Types.ObjectId(data.senderId),
