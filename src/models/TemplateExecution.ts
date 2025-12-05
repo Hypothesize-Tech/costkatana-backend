@@ -53,7 +53,6 @@ const TemplateExecutionSchema = new Schema<ITemplateExecution>({
     modelUsed: {
         type: String,
         required: true,
-        index: true
     },
     modelRecommended: {
         type: String

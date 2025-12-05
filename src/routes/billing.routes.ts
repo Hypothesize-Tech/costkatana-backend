@@ -15,6 +15,8 @@ router.get('/invoices/:invoiceId', asyncHandler(BillingController.getInvoice));
 
 // Payment method routes
 router.get('/payment-methods', asyncHandler(BillingController.getPaymentMethods));
+router.post('/payment-methods/razorpay/create-order', asyncHandler(BillingController.createRazorpayPaymentMethodOrder));
+router.post('/payment-methods/razorpay/save', asyncHandler(BillingController.saveRazorpayPaymentMethod));
 router.post('/payment-methods', asyncHandler(BillingController.addPaymentMethod));
 router.put('/payment-methods/:paymentMethodId', asyncHandler(BillingController.updatePaymentMethod));
 router.delete('/payment-methods/:paymentMethodId', asyncHandler(BillingController.removePaymentMethod));

@@ -91,7 +91,6 @@ const workspaceSchema = new Schema<IWorkspace>(
 
 // Indexes
 workspaceSchema.index({ ownerId: 1 });
-workspaceSchema.index({ slug: 1 });
 workspaceSchema.index({ isActive: 1 });
 
 export const Workspace = model<IWorkspace>('Workspace', workspaceSchema);

@@ -135,7 +135,6 @@ const automationConnectionSchema = new Schema<IAutomationConnection>({
 // Indexes
 automationConnectionSchema.index({ userId: 1, platform: 1 });
 automationConnectionSchema.index({ userId: 1, status: 1 });
-automationConnectionSchema.index({ webhookUrl: 1 });
 automationConnectionSchema.index({ 'stats.lastActivityAt': -1 });
 
 // Method to update statistics

@@ -40,7 +40,6 @@ const LogQueryAuditSchema = new Schema({
         type: String,
         enum: ['success', 'blocked', 'error'],
         required: true,
-        index: true
     },
     error: String,
     ipAddress: String,
@@ -48,7 +47,6 @@ const LogQueryAuditSchema = new Schema({
     timestamp: {
         type: Date,
         default: Date.now,
-        index: true
     }
 });
 
