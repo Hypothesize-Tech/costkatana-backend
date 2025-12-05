@@ -84,21 +84,18 @@ const subscriptionSchema = new Schema<ISubscription>({
         ref: 'User',
         required: true,
         unique: true,
-        index: true,
     },
     plan: {
         type: String,
         enum: ['free', 'plus', 'pro', 'enterprise'],
         required: true,
         default: 'free',
-        index: true,
     },
     status: {
         type: String,
         enum: ['active', 'trialing', 'past_due', 'canceled', 'unpaid', 'incomplete', 'paused'],
         required: true,
         default: 'active',
-        index: true,
     },
     startDate: {
         type: Date,

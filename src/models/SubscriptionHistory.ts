@@ -19,19 +19,16 @@ const subscriptionHistorySchema = new Schema<ISubscriptionHistory>({
         type: Schema.Types.ObjectId,
         ref: 'Subscription',
         required: true,
-        index: true,
     },
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true,
-        index: true,
     },
     changeType: {
         type: String,
         enum: ['upgrade', 'downgrade', 'cancel', 'reactivate', 'pause', 'resume', 'payment_method_update', 'billing_cycle_update', 'discount_applied', 'discount_removed', 'trial_started', 'trial_ended', 'payment_failed', 'payment_succeeded', 'status_change'],
         required: true,
-        index: true,
     },
     oldPlan: {
         type: String,

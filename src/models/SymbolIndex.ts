@@ -117,7 +117,6 @@ const SymbolIndexSchema = new Schema<ISymbolIndex>({
         type: Schema.Types.ObjectId,
         ref: 'GitHubCodeChunk',
         required: true,
-        index: true
     },
     status: {
         type: String,

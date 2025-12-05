@@ -77,26 +77,22 @@ const invoiceSchema = new Schema<IInvoice>({
         type: Schema.Types.ObjectId,
         ref: 'Subscription',
         required: true,
-        index: true,
     },
     userId: {
         type: Schema.Types.ObjectId,
         ref: 'User',
         required: true,
-        index: true,
     },
     invoiceNumber: {
         type: String,
         required: true,
         unique: true,
-        index: true,
     },
     status: {
         type: String,
         enum: ['paid', 'pending', 'failed', 'refunded', 'voided'],
         required: true,
         default: 'pending',
-        index: true,
     },
     subtotal: {
         type: Number,

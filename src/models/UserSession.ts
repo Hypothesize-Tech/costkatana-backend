@@ -70,21 +70,17 @@ const UserSessionSchema = new Schema<IUserSession>({
     expiresAt: {
         type: Date,
         required: true,
-        index: true
     },
     isActive: {
         type: Boolean,
         default: true,
-        index: true
     },
     refreshTokenHash: {
         type: String,
         required: true,
-        index: true
     },
     revokeToken: {
         type: String,
-        index: true
     }
 }, {
     timestamps: true,

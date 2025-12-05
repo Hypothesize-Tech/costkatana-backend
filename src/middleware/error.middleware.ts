@@ -27,7 +27,8 @@ export class AppError extends Error {
 export const errorHandler = (
     err: Error | AppError | ZodError,
     req: any,
-    res: Response
+    res: Response,
+    next?: NextFunction
 ) => {
     const startTime = Date.now();
     
@@ -380,6 +381,21 @@ export const errorHandler = (
     if (origin) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    // Ensure JSON content type
+    res.setHeader('Content-Type', 'application/json');
+    
+    // Check if response was already sent
+    if (res.headersSent) {
+        loggingService.warn('Response already sent, cannot send error response', {
+            component: 'ErrorMiddleware',
+            operation: 'errorHandler',
+            type: 'error_handling',
+            step: 'response_already_sent',
+            statusCode: error.statusCode
+        });
+        return;
     }
 
     res.status(error.statusCode).json(response);

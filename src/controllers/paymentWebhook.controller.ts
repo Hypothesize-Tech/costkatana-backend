@@ -486,8 +486,29 @@ export class PaymentWebhookController {
                 gatewaySubscriptionId: payment.subscription_id,
             });
 
-            if (subscription) {
-                const invoice = await SubscriptionService.generateInvoice(
+            if (!subscription) {
+                loggingService.warn('Subscription not found for Razorpay payment', {
+                    paymentId: payment.id,
+                    subscriptionId: payment.subscription_id,
+                });
+                return;
+            }
+
+            // First, check if an invoice already exists for this payment
+            let invoice = await Invoice.findOne({
+                $or: [
+                    { gatewayTransactionId: payment.id },
+                    { 
+                        userId: subscription.userId,
+                        subscriptionId: subscription._id,
+                        status: 'pending',
+                    },
+                ],
+            }).sort({ createdAt: -1 }); // Get the most recent pending invoice
+
+            // If no invoice exists, create a new one
+            if (!invoice) {
+                const generatedInvoice = await SubscriptionService.generateInvoice(
                     subscription.userId,
                     subscription,
                     [
@@ -500,20 +521,39 @@ export class PaymentWebhookController {
                         },
                     ]
                 );
+                // Find the saved invoice document
+                invoice = await Invoice.findById(generatedInvoice._id);
+            }
 
+            if (!invoice) {
+                loggingService.error('Failed to create or find invoice for Razorpay payment', {
+                    userId: (subscription.userId as any).toString(),
+                    paymentId: payment.id,
+                });
+                return;
+            }
+
+            // Update invoice status to paid
                 invoice.status = 'paid';
                 invoice.paymentDate = new Date(payment.created_at * 1000);
                 invoice.gatewayTransactionId = payment.id;
                 await invoice.save();
 
                 const user = await User.findById(subscription.userId);
-                if (user) {
-                    await SubscriptionNotificationService.sendPaymentSucceededEmail(user, invoice);
+            if (user && invoice) {
+                await SubscriptionNotificationService.sendPaymentSucceededEmail(user, invoice as any);
                 }
-            }
+
+            loggingService.info('Razorpay payment succeeded', {
+                invoiceId: (invoice._id as any).toString(),
+                invoiceNumber: invoice.invoiceNumber,
+                amount: payment.amount / 100,
+                paymentId: payment.id,
+            });
         } catch (error: any) {
             loggingService.error('Error handling Razorpay payment succeeded', {
                 error: error.message,
+                stack: error.stack,
             });
         }
     }

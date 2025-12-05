@@ -4,6 +4,7 @@ import { Invoice } from '../models/Invoice';
 import { PaymentMethod } from '../models/PaymentMethod';
 import { paymentGatewayManager } from '../services/paymentGateway/paymentGatewayManager.service';
 import { loggingService } from '../services/logging.service';
+import { convertToSmallestUnit } from '../utils/currencyConverter';
 
 export class BillingController {
     /**
@@ -435,6 +436,311 @@ export class BillingController {
             });
         } catch (error: any) {
             loggingService.error('Get upcoming invoice failed', {
+                userId: req.user!.id,
+                error: error.message,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Create Razorpay order for payment method collection
+     * POST /api/billing/payment-methods/razorpay/create-order
+     */
+    static async createRazorpayPaymentMethodOrder(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { amount, currency } = req.body;
+
+            // Default to minimal amount if not provided
+            // Razorpay requires minimum 1.00 in base currency (1 USD or 1 INR)
+            const MINIMUM_ORDER_AMOUNT = 1.0;
+            const orderAmount = amount || MINIMUM_ORDER_AMOUNT;
+            const orderCurrency = (currency || 'USD').toUpperCase();
+
+            // Validate minimum amount
+            if (orderAmount < MINIMUM_ORDER_AMOUNT) {
+                res.status(400).json({
+                    success: false,
+                    message: `Order amount (${orderCurrency} ${orderAmount.toFixed(2)}) is below the minimum required amount of ${orderCurrency} ${MINIMUM_ORDER_AMOUNT.toFixed(2)}.`,
+                });
+                return;
+            }
+
+            // Get user
+            const { User } = await import('../models/User');
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Validate user email (required for Razorpay customer creation)
+            if (!user.email) {
+                res.status(400).json({
+                    success: false,
+                    message: 'User email is required. Please update your profile with an email address.',
+                });
+                return;
+            }
+
+            // Check if Razorpay gateway is available
+            if (!paymentGatewayManager.isGatewayAvailable('razorpay')) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay payment gateway is not available',
+                });
+                return;
+            }
+
+            const razorpayGateway = paymentGatewayManager.getGateway('razorpay') as any;
+            if (!razorpayGateway || !razorpayGateway.razorpay) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay SDK is not initialized',
+                });
+                return;
+            }
+
+            // Get or create Razorpay customer (for future use, not required for order creation)
+            const existingPaymentMethod = await PaymentMethod.findOne({ userId, gateway: 'razorpay' });
+            if (!existingPaymentMethod) {
+                // Create customer if it doesn't exist (for future payment method attachment)
+                try {
+                    await paymentGatewayManager.createCustomer('razorpay', {
+                        email: user.email,
+                        name: user.name || user.email,
+                        userId: userId.toString(),
+                    });
+                } catch (customerError: any) {
+                    // Log but don't fail - customer creation is not required for order creation
+                    loggingService.warn('Failed to create Razorpay customer during order creation', {
+                        userId,
+                        error: customerError?.message || String(customerError),
+                    });
+                }
+            }
+
+            // Convert amount to smallest currency unit (cents for USD, paise for INR)
+            const amountInSmallestUnit = convertToSmallestUnit(orderAmount, orderCurrency);
+
+            // Create Razorpay order
+            // Receipt must be max 40 characters (Razorpay requirement)
+            // Format: pm_<shortUserId>_<shortTimestamp>
+            const shortUserId = userId.toString().substring(0, 12); // First 12 chars of userId
+            const shortTimestamp = Date.now().toString().slice(-8); // Last 8 digits of timestamp
+            const receipt = `pm_${shortUserId}_${shortTimestamp}`; // Max length: 3 + 12 + 1 + 8 = 24 chars
+            
+            let order;
+            try {
+                order = await razorpayGateway.razorpay.orders.create({
+                    amount: amountInSmallestUnit,
+                    currency: orderCurrency,
+                    receipt: receipt,
+                    notes: {
+                        userId: userId.toString(),
+                        purpose: 'payment_method_collection',
+                    },
+                });
+            } catch (razorpayError: any) {
+                loggingService.error('Razorpay order creation failed', {
+                    userId,
+                    amount: amountInSmallestUnit,
+                    currency: orderCurrency,
+                    error: razorpayError?.message || String(razorpayError),
+                    errorDetails: razorpayError?.error || razorpayError,
+                });
+                res.status(400).json({
+                    success: false,
+                    message: razorpayError?.error?.description || razorpayError?.message || 'Failed to create Razorpay order',
+                });
+                return;
+            }
+
+            loggingService.info('Razorpay order created for payment method collection', {
+                userId,
+                orderId: order.id,
+                amount: orderAmount,
+                currency: orderCurrency,
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    orderId: order.id,
+                    keyId: process.env.RAZORPAY_KEY_ID,
+                    amount: amountInSmallestUnit,
+                    currency: orderCurrency,
+                    convertedAmount: orderAmount,
+                },
+            });
+        } catch (error: any) {
+            loggingService.error('Create Razorpay payment method order failed', {
+                userId: req.user!.id,
+                error: error.message,
+                errorStack: error.stack,
+                errorDetails: error,
+                requestBody: req.body,
+            });
+            next(error);
+        }
+        return;
+    }
+
+    /**
+     * Save Razorpay payment method after successful checkout
+     * POST /api/billing/payment-methods/razorpay/save
+     */
+    static async saveRazorpayPaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+        try {
+            const userId = req.user!.id;
+            const { paymentId, orderId, signature, setAsDefault } = req.body;
+
+            if (!paymentId || !orderId || !signature) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Payment ID, Order ID, and signature are required',
+                });
+                return;
+            }
+
+            // Get user for customer creation
+            const { User } = await import('../models/User');
+            const user = await User.findById(userId);
+            if (!user) {
+                res.status(404).json({
+                    success: false,
+                    message: 'User not found',
+                });
+                return;
+            }
+
+            // Verify payment signature
+            const razorpayGateway = paymentGatewayManager.getGateway('razorpay') as any;
+            if (!razorpayGateway || !razorpayGateway.razorpay) {
+                res.status(500).json({
+                    success: false,
+                    message: 'Razorpay gateway is not available',
+                });
+                return;
+            }
+
+            // Verify signature
+            const crypto = require('crypto');
+            const text = `${orderId}|${paymentId}`;
+            const generatedSignature = crypto
+                .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
+                .update(text)
+                .digest('hex');
+
+            if (generatedSignature !== signature) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Invalid payment signature',
+                });
+                return;
+            }
+
+            // Fetch payment details from Razorpay
+            const payment = await razorpayGateway.razorpay.payments.fetch(paymentId);
+
+            // Create or get Razorpay customer
+            let gatewayCustomerId: string;
+            const existingPaymentMethod = await PaymentMethod.findOne({ userId, gateway: 'razorpay' });
+            if (existingPaymentMethod) {
+                gatewayCustomerId = existingPaymentMethod.gatewayCustomerId;
+            } else {
+                const customerResult = await paymentGatewayManager.createCustomer('razorpay', {
+                    email: user.email,
+                    name: user.name || user.email,
+                    userId: userId.toString(),
+                });
+                gatewayCustomerId = customerResult.customerId;
+            }
+
+            // Extract payment method details from payment
+            const paymentMethodType = payment.method || 'card';
+            let paymentMethodData: any = {
+                gateway: 'razorpay',
+                gatewayCustomerId,
+                gatewayPaymentMethodId: paymentId, // Use payment ID as payment method ID
+                type: paymentMethodType,
+                isDefault: setAsDefault || false,
+                isActive: true,
+                setupForRecurring: true,
+                recurringStatus: 'active',
+            };
+
+            // Extract card details if available
+            if (payment.card) {
+                paymentMethodData.card = {
+                    last4: payment.card.last4 || '',
+                    brand: payment.card.network?.toLowerCase() || 'unknown',
+                    expiryMonth: payment.card.expiry_month || null,
+                    expiryYear: payment.card.expiry_year || null,
+                    maskedNumber: `**** **** **** ${payment.card.last4 || ''}`,
+                };
+            }
+
+            // Extract UPI details if available
+            if (payment.vpa) {
+                paymentMethodData.type = 'upi';
+                paymentMethodData.upi = {
+                    upiId: payment.vpa,
+                    vpa: payment.vpa,
+                };
+            }
+
+            // Check if payment method already exists
+            let paymentMethod = await PaymentMethod.findOne({
+                userId,
+                gateway: 'razorpay',
+                gatewayPaymentMethodId: paymentId,
+            });
+
+            if (paymentMethod) {
+                // Update existing payment method
+                Object.assign(paymentMethod, paymentMethodData);
+                await paymentMethod.save();
+            } else {
+                // Create new payment method
+                paymentMethod = new PaymentMethod(paymentMethodData);
+                paymentMethod.userId = userId;
+                await paymentMethod.save();
+            }
+
+            // If set as default, unset other defaults
+            if (setAsDefault) {
+                await PaymentMethod.updateMany(
+                    { userId, _id: { $ne: paymentMethod._id } },
+                    { $set: { isDefault: false } }
+                );
+
+                // Set as default in gateway if supported
+                try {
+                    await razorpayGateway.setDefaultPaymentMethod(
+                        gatewayCustomerId,
+                        paymentId
+                    );
+                } catch (error: any) {
+                    // Razorpay may not support setting default payment method directly
+                    loggingService.warn('Failed to set default payment method in Razorpay', {
+                        error: error.message,
+                    });
+                }
+            }
+
+            res.json({
+                success: true,
+                message: 'Payment method saved successfully',
+                data: paymentMethod,
+            });
+        } catch (error: any) {
+            loggingService.error('Save Razorpay payment method failed', {
                 userId: req.user!.id,
                 error: error.message,
             });

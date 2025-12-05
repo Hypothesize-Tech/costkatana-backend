@@ -74,13 +74,11 @@ const paymentMethodSchema = new Schema<IPaymentMethod>({
     gatewayCustomerId: {
         type: String,
         required: true,
-        index: true,
     },
     gatewayPaymentMethodId: {
         type: String,
         required: true,
         unique: true,
-        index: true,
     },
     type: {
         type: String,
