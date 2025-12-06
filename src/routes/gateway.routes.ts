@@ -6,6 +6,7 @@ import {
     gatewayRateLimit, 
     addGatewayResponseHeaders 
 } from '../middleware/gateway.middleware';
+import { priorityQueueMiddleware, getQueueStatus } from '../middleware/priorityQueue.middleware';
 import { authenticate } from '../middleware/auth.middleware';
 import { loggingService } from '../services/logging.service';
 
@@ -22,6 +23,14 @@ router.get('/health', GatewayController.healthCheck);
 router.get('/stats', 
     authenticate,
     GatewayController.getStats
+);
+
+/**
+ * Priority Queue Status (requires authentication)
+ */
+router.get('/queue/status',
+    authenticate,
+    getQueueStatus
 );
 
 /**
@@ -63,6 +72,7 @@ router.use('/', [
     addGatewayResponseHeaders,     // Add response headers
     gatewayAuth,                   // Authenticate using CostKatana-Auth header
     processGatewayHeaders,         // Process all CostKATANA headers
+    priorityQueueMiddleware,       // Handle request prioritization
     gatewayRateLimit(1000, 60000), // Rate limit: 1000 requests per minute
 ]);
 

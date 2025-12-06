@@ -6,6 +6,7 @@ import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
 import { GatewayCortexService } from '../services/gatewayCortex.service';
+import { latencyRouterService } from '../services/latencyRouter.service';
 import https from 'https';
 
 // Create a connection pool for better performance
@@ -111,10 +112,16 @@ export class GatewayController {
             if (!budgetCheck.allowed) {
                 res.status(429).json({
                     error: 'Budget limit exceeded',
-                    message: budgetCheck.allowed ? 'Budget limit exceeded' : 'Budget limit exceeded',
+                    message: (budgetCheck as { allowed: boolean; message?: string }).message || 'Budget limit exceeded',
                     budgetId: context.budgetId
                 });
                 return;
+            }
+            
+            // Store reservation ID in context for later confirmation/release
+            const reservationId = (budgetCheck as { allowed: boolean; reservationId?: string }).reservationId;
+            if (reservationId) {
+                context.budgetReservationId = reservationId;
             }
 
             // Handle firewall blocking
@@ -306,6 +313,14 @@ export class GatewayController {
             if (requestSuccess && !context.failoverEnabled) {
                 const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
                 GatewayController.updateCircuitBreaker(provider, true);
+                
+                // Track latency for routing decisions
+                const latency = Date.now() - context.startTime;
+                const model = req.body?.model || context.modelOverride || 'unknown';
+                
+                this.queueBackgroundOperation(async () => {
+                    await latencyRouterService.trackModelLatency(provider, model, latency, true);
+                });
             }
 
             // Parallel response processing and moderation
@@ -317,6 +332,15 @@ export class GatewayController {
                 return [processed, moderated];
             });
 
+            // Confirm budget reservation with actual cost
+            if (context.budgetReservationId) {
+                const actualCost = context.cost || 0;
+                this.queueBackgroundOperation(async () => {
+                    const { BudgetService } = await import('../services/budget.service');
+                    await BudgetService.confirmBudget(context.budgetReservationId!, actualCost);
+                });
+            }
+            
             // Non-blocking background operations
             const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
             this.queueBackgroundOperation(async () => {
@@ -370,6 +394,25 @@ export class GatewayController {
             res.send(moderatedResponse.response);
 
         } catch (error: any) {
+            // Release budget reservation on error
+            if (context.budgetReservationId) {
+                this.queueBackgroundOperation(async () => {
+                    const { BudgetService } = await import('../services/budget.service');
+                    await BudgetService.releaseBudget(context.budgetReservationId!);
+                });
+            }
+            
+            // Track latency for failed requests
+            if (!context.failoverEnabled) {
+                const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
+                const latency = Date.now() - context.startTime;
+                const model = req.body?.model || context.modelOverride || 'unknown';
+                
+                this.queueBackgroundOperation(async () => {
+                    await latencyRouterService.trackModelLatency(provider, model, latency, false);
+                });
+            }
+            
             loggingService.error('Gateway proxy error', {
                 error: error.message || 'Unknown error',
                 stack: error.stack,
@@ -423,11 +466,14 @@ export class GatewayController {
             }
             
             // Check Redis cache with semantic matching
+            // Check for opt-out header
+            const disableSemanticCache = req.headers['costkatana-disable-semantic-cache'] === 'true';
+            
             const cacheResult = await redisService.checkCache(prompt, {
                 userId: context.cacheUserScope ? context.userId : undefined,
                 model: req.body?.model,
                 provider: context.provider,
-                enableSemantic: context.semanticCacheEnabled !== false,
+                enableSemantic: !disableSemanticCache && context.semanticCacheEnabled !== false,
                 enableDeduplication: context.deduplicationEnabled !== false,
                 similarityThreshold: context.similarityThreshold || 0.85
             });
@@ -485,6 +531,9 @@ export class GatewayController {
                 const cost = req.gatewayContext?.cost || 0;
                 
                 // Store in Redis with semantic embedding
+                // Check for opt-out header
+                const disableSemanticCache = req.headers['costkatana-disable-semantic-cache'] === 'true';
+                
                 await redisService.storeCache(prompt, response, {
                     userId: context.cacheUserScope ? context.userId : undefined,
                     model: req.body?.model,
@@ -492,7 +541,7 @@ export class GatewayController {
                     ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
                     tokens: inputTokens + outputTokens,
                     cost,
-                    enableSemantic: context.semanticCacheEnabled !== false,
+                    enableSemantic: !disableSemanticCache && context.semanticCacheEnabled !== false,
                     enableDeduplication: context.deduplicationEnabled !== false
                 });
                 
@@ -516,15 +565,22 @@ export class GatewayController {
 
 
     /**
-     * Check budget constraints before making request
+     * Check budget constraints before making request with pre-flight estimation
      */
-    private static async checkBudgetConstraints(req: Request): Promise<{ allowed: boolean; message?: string }> {
+    private static async checkBudgetConstraints(req: Request): Promise<{ 
+        allowed: boolean; 
+        message?: string; 
+        reservationId?: string;
+    }> {
         const context = req.gatewayContext!;
         
         try {
             if (!context.budgetId || !context.userId) {
                 return { allowed: true };
             }
+
+            // Import BudgetService dynamically to avoid circular dependency
+            const { BudgetService } = await import('../services/budget.service');
 
             // Get project for budget check
             const projects = await ProjectService.getUserProjects(context.userId);
@@ -534,18 +590,47 @@ export class GatewayController {
                 return { allowed: false, message: 'Budget ID not found' };
             }
 
-            // Simple budget check - in production, this would estimate the cost first
+            // Estimate request cost before making the call
+            const prompt = GatewayController.extractPromptFromRequest(req.body);
+            const estimatedInputTokens = prompt ? Math.ceil(prompt.length / 4) : 100;
+            const model = req.body?.model || context.modelOverride || 'gpt-3.5-turbo';
+            
+            const estimatedCost = await BudgetService.estimateRequestCost(
+                model,
+                estimatedInputTokens
+            );
+            
+            // Get current spending including reserved budget
             const currentSpending = project.spending.current;
+            const reservedBudget = await BudgetService.getReservedBudget(context.userId);
+            const totalCommitted = currentSpending + reservedBudget;
             const budgetAmount = project.budget.amount;
             
-            if (currentSpending >= budgetAmount) {
+            // Check if adding this request would exceed budget
+            if (totalCommitted + estimatedCost > budgetAmount) {
                 return { 
                     allowed: false, 
-                    message: `Budget limit of ${budgetAmount} ${project.budget.currency} exceeded. Current: ${currentSpending}` 
+                    message: `Budget limit of ${budgetAmount} ${project.budget.currency} would be exceeded. Current: ${currentSpending.toFixed(4)}, Reserved: ${reservedBudget.toFixed(4)}, Estimated: ${estimatedCost.toFixed(4)}` 
                 };
             }
 
-            return { allowed: true };
+            // Reserve the budget
+            const reservationId = await BudgetService.reserveBudget(
+                context.userId,
+                estimatedCost,
+                context.budgetId
+            );
+            
+            loggingService.info('Pre-flight budget check passed', {
+                userId: context.userId,
+                currentSpending,
+                reservedBudget,
+                estimatedCost,
+                budgetAmount,
+                reservationId
+            });
+
+            return { allowed: true, reservationId };
         } catch (error: any) {
             loggingService.error('Budget check error', {
                 error: error.message || 'Unknown error',

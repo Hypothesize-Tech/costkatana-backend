@@ -2,9 +2,13 @@
  * Cortex Model Router Service
  * 
  * Intelligently routes Cortex processing requests to the most appropriate models
- * based on complexity analysis, cost constraints, and user preferences.
+ * based on complexity analysis, cost constraints, user preferences, and real-time latency.
  * Implements adaptive routing for optimal performance and cost efficiency.
  */
+
+import { latencyRouterService, ModelOption as LatencyModelOption } from './latencyRouter.service';
+import { loggingService } from './logging.service';
+
 // ============================================================================
 // TYPES AND INTERFACES
 // ============================================================================
@@ -296,6 +300,98 @@ export class CortexModelRouterService {
             confidence: Math.min(0.95, complexity.confidence + 0.1),
             costEstimate
         };
+    }
+
+    /**
+     * Make routing decision with real-time latency consideration
+     */
+    public async makeRoutingDecisionWithLatency(
+        complexity: PromptComplexityAnalysis,
+        preferences: Partial<RoutingPreferences> = {}
+    ): Promise<RoutingDecision> {
+        const defaultPreferences: RoutingPreferences = {
+            priority: 'balanced',
+            ...preferences
+        };
+
+        try {
+            // Get base decision without latency
+            const baseDecision = this.makeRoutingDecision(complexity, defaultPreferences);
+            
+            // If maxProcessingTime is specified, use latency-based routing
+            if (defaultPreferences.maxProcessingTime) {
+                loggingService.info('🔄 Using latency-based routing', {
+                    maxLatency: defaultPreferences.maxProcessingTime,
+                    baseTier: baseDecision.selectedTier.name
+                });
+                
+                // Prepare model options for latency routing
+                const modelOptions: LatencyModelOption[] = [
+                    {
+                        provider: 'anthropic',
+                        model: baseDecision.selectedTier.models.core,
+                        estimatedCost: baseDecision.costEstimate.estimatedCost,
+                        capabilities: baseDecision.selectedTier.characteristics.capabilities
+                    }
+                ];
+                
+                // Add alternative models from other tiers
+                for (const [tierName, tier] of Object.entries(MODEL_TIERS)) {
+                    if (tierName !== complexity.recommendedTier && this.tierCanHandle(tier, complexity)) {
+                        const altCostEstimate = this.estimateCost(tier, complexity);
+                        modelOptions.push({
+                            provider: 'anthropic',
+                            model: tier.models.core,
+                            estimatedCost: altCostEstimate.estimatedCost,
+                            capabilities: tier.characteristics.capabilities
+                        });
+                    }
+                }
+                
+                // Select by latency
+                const latencyDecision = await latencyRouterService.selectModelByLatency(
+                    defaultPreferences.maxProcessingTime,
+                    modelOptions
+                );
+                
+                if (latencyDecision) {
+                    // Find the tier for the selected model
+                    const selectedTierEntry = Object.entries(MODEL_TIERS).find(([_, tier]) => 
+                        tier.models.core === latencyDecision.selectedModel
+                    );
+                    
+                    if (selectedTierEntry) {
+                        const [tierName, selectedTier] = selectedTierEntry;
+                        const costEstimate = this.estimateCost(selectedTier, complexity);
+                        
+                        loggingService.info('✅ Latency-based routing selected model', {
+                            model: latencyDecision.selectedModel,
+                            tier: tierName,
+                            latencyP95: latencyDecision.latencyP95,
+                            confidence: latencyDecision.confidence
+                        });
+                        
+                        return {
+                            selectedTier,
+                            reasoning: `${latencyDecision.reasoning}. ${this.generateReasoning(selectedTier, complexity, defaultPreferences)}`,
+                            confidence: Math.min(0.95, latencyDecision.confidence * complexity.confidence),
+                            costEstimate
+                        };
+                    }
+                }
+            }
+            
+            // Fallback to base decision
+            return baseDecision;
+            
+        } catch (error) {
+            loggingService.warn('Latency-based routing failed, using base decision', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to original decision
+            return this.makeRoutingDecision(complexity, defaultPreferences);
+        }
     }
 
     /**

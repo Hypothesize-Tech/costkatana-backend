@@ -1,6 +1,8 @@
 import { loggingService } from './logging.service';
 import { Usage } from '../models';
+import { redisService } from './redis.service';
 import mongoose from 'mongoose';
+import * as crypto from 'crypto';
 import { webhookEventEmitter } from './webhookEventEmitter.service';
 import { WEBHOOK_EVENTS, WebhookEventType } from '../types/webhook.types';
 
@@ -34,7 +36,27 @@ interface BudgetStatus {
   }>;
 }
 
+interface BudgetReservation {
+  reservationId: string;
+  userId: string;
+  estimatedCost: number;
+  timestamp: number;
+  expiresAt: number;
+}
+
+interface PricingCacheEntry {
+  inputPrice: number;
+  outputPrice: number;
+  lastUpdated: number;
+}
+
 export class BudgetService {
+  // Cache TTL for pricing data (5 minutes)
+  private static readonly PRICING_CACHE_TTL = 5 * 60 * 1000;
+  
+  // Reservation TTL (2 minutes - enough time for LLM call)
+  private static readonly RESERVATION_TTL = 2 * 60 * 1000;
+  
   /**
    * Get month date range for budget calculations
    */
@@ -392,5 +414,303 @@ export class BudgetService {
     });
 
     return recommendations;
+  }
+
+  /**
+   * Estimate request cost before making the LLM call
+   * Uses hybrid pricing: cached prices from Redis with fallback to static pricing
+   */
+  static async estimateRequestCost(
+    model: string,
+    inputTokens: number,
+    outputTokensEstimate?: number
+  ): Promise<number> {
+    try {
+      // Default output tokens estimate if not provided
+      const outputTokens = outputTokensEstimate || Math.ceil(inputTokens * 0.5);
+      
+      // Try to get pricing from cache first
+      const cachedPricing = await this.getCachedPricing(model);
+      
+      if (cachedPricing) {
+        const inputCost = (inputTokens / 1_000_000) * cachedPricing.inputPrice;
+        const outputCost = (outputTokens / 1_000_000) * cachedPricing.outputPrice;
+        
+        loggingService.debug('Cost estimated from cache', {
+          model,
+          inputTokens,
+          outputTokens,
+          estimatedCost: inputCost + outputCost,
+          source: 'cache'
+        });
+        
+        return inputCost + outputCost;
+      }
+      
+      // Fallback to static pricing
+      const staticPricing = await this.getStaticPricing(model);
+      
+      if (staticPricing) {
+        const inputCost = (inputTokens / 1_000_000) * staticPricing.inputPrice;
+        const outputCost = (outputTokens / 1_000_000) * staticPricing.outputPrice;
+        
+        // Cache the pricing for future requests
+        await this.cachePricing(model, staticPricing.inputPrice, staticPricing.outputPrice);
+        
+        loggingService.debug('Cost estimated from static pricing', {
+          model,
+          inputTokens,
+          outputTokens,
+          estimatedCost: inputCost + outputCost,
+          source: 'static'
+        });
+        
+        return inputCost + outputCost;
+      }
+      
+      // Ultimate fallback: conservative estimate
+      const conservativeEstimate = ((inputTokens + outputTokens) / 1_000_000) * 0.015;
+      
+      loggingService.warn('Using conservative cost estimate', {
+        model,
+        inputTokens,
+        outputTokens,
+        estimatedCost: conservativeEstimate
+      });
+      
+      return conservativeEstimate;
+      
+    } catch (error) {
+      loggingService.error('Error estimating request cost', {
+        error: error instanceof Error ? error.message : String(error),
+        model,
+        inputTokens
+      });
+      
+      // Return conservative estimate on error
+      return ((inputTokens + (outputTokensEstimate || inputTokens * 0.5)) / 1_000_000) * 0.015;
+    }
+  }
+
+  /**
+   * Reserve budget before making LLM call
+   */
+  static async reserveBudget(
+    userId: string,
+    estimatedCost: number,
+    projectId?: string
+  ): Promise<string> {
+    try {
+      const reservationId = crypto.randomBytes(16).toString('hex');
+      const timestamp = Date.now();
+      const expiresAt = timestamp + this.RESERVATION_TTL;
+      
+      const reservation: BudgetReservation = {
+        reservationId,
+        userId,
+        estimatedCost,
+        timestamp,
+        expiresAt
+      };
+      
+      // Store reservation in Redis with TTL
+      const key = `budget:reservation:${reservationId}`;
+      await redisService.set(key, reservation, Math.ceil(this.RESERVATION_TTL / 1000));
+      
+      // Track reserved amount for user
+      const userReservedKey = `budget:reserved:${userId}`;
+      await redisService.incr(userReservedKey, estimatedCost);
+      await redisService.client.expire(userReservedKey, 300); // 5 minutes expiry
+      
+      loggingService.info('Budget reserved', {
+        reservationId,
+        userId,
+        estimatedCost,
+        projectId
+      });
+      
+      return reservationId;
+      
+    } catch (error) {
+      loggingService.error('Error reserving budget', {
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        estimatedCost
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Release budget reservation (if request fails)
+   */
+  static async releaseBudget(reservationId: string): Promise<void> {
+    try {
+      const key = `budget:reservation:${reservationId}`;
+      const reservation = await redisService.get(key) as BudgetReservation | null;
+      
+      if (reservation) {
+        // Remove from reserved amount
+        const userReservedKey = `budget:reserved:${reservation.userId}`;
+        await redisService.incr(userReservedKey, -reservation.estimatedCost);
+        
+        // Delete reservation
+        await redisService.del(key);
+        
+        loggingService.info('Budget released', {
+          reservationId,
+          userId: reservation.userId,
+          estimatedCost: reservation.estimatedCost
+        });
+      }
+    } catch (error) {
+      loggingService.error('Error releasing budget', {
+        error: error instanceof Error ? error.message : String(error),
+        reservationId
+      });
+    }
+  }
+
+  /**
+   * Confirm budget usage (after successful LLM call)
+   */
+  static async confirmBudget(
+    reservationId: string,
+    actualCost: number
+  ): Promise<void> {
+    try {
+      const key = `budget:reservation:${reservationId}`;
+      const reservation = await redisService.get(key) as BudgetReservation | null;
+      
+      if (reservation) {
+        // Remove from reserved amount
+        const userReservedKey = `budget:reserved:${reservation.userId}`;
+        await redisService.incr(userReservedKey, -reservation.estimatedCost);
+        
+        // Delete reservation
+        await redisService.del(key);
+        
+        const difference = actualCost - reservation.estimatedCost;
+        
+        loggingService.info('Budget confirmed', {
+          reservationId,
+          userId: reservation.userId,
+          estimatedCost: reservation.estimatedCost,
+          actualCost,
+          difference
+        });
+      }
+    } catch (error) {
+      loggingService.error('Error confirming budget', {
+        error: error instanceof Error ? error.message : String(error),
+        reservationId,
+        actualCost
+      });
+    }
+  }
+
+  /**
+   * Get currently reserved budget for a user
+   */
+  static async getReservedBudget(userId: string): Promise<number> {
+    try {
+      const userReservedKey = `budget:reserved:${userId}`;
+      const reserved = await redisService.get(userReservedKey);
+      return reserved ? parseFloat(reserved) : 0;
+    } catch (error) {
+      loggingService.error('Error getting reserved budget', {
+        error: error instanceof Error ? error.message : String(error),
+        userId
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Get cached pricing for a model
+   */
+  private static async getCachedPricing(model: string): Promise<PricingCacheEntry | null> {
+    try {
+      const key = `pricing:cache:${model}`;
+      const cached = await redisService.get(key);
+      
+      if (cached) {
+        const now = Date.now();
+        if (now - cached.lastUpdated < this.PRICING_CACHE_TTL) {
+          return cached;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      loggingService.warn('Error getting cached pricing', {
+        error: error instanceof Error ? error.message : String(error),
+        model
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Cache pricing data
+   */
+  private static async cachePricing(
+    model: string,
+    inputPrice: number,
+    outputPrice: number
+  ): Promise<void> {
+    try {
+      const key = `pricing:cache:${model}`;
+      const entry: PricingCacheEntry = {
+        inputPrice,
+        outputPrice,
+        lastUpdated: Date.now()
+      };
+      
+      await redisService.set(key, entry, Math.ceil(this.PRICING_CACHE_TTL / 1000));
+    } catch (error) {
+      loggingService.warn('Error caching pricing', {
+        error: error instanceof Error ? error.message : String(error),
+        model
+      });
+    }
+  }
+
+  /**
+   * Get static pricing from model pricing data
+   */
+  private static async getStaticPricing(model: string): Promise<{ inputPrice: number; outputPrice: number } | null> {
+    try {
+      // Import dynamically to avoid circular dependency
+      const modelPricingModule = await import('../data/modelPricing');
+      // modelPricingData is exported as a named export
+      const modelPricingData = (modelPricingModule as { modelPricingData: any[] }).modelPricingData;
+      
+      if (!modelPricingData || !Array.isArray(modelPricingData)) {
+        return null;
+      }
+      
+      // Find model in pricing data
+      const modelData = modelPricingData.find((m: any) => 
+        m.model === model || 
+        m.model.toLowerCase().includes(model.toLowerCase()) ||
+        model.toLowerCase().includes(m.model.toLowerCase())
+      );
+      
+      if (modelData) {
+        return {
+          inputPrice: modelData.inputPrice,
+          outputPrice: modelData.outputPrice
+        };
+      }
+      
+      return null;
+    } catch (error) {
+      loggingService.warn('Error getting static pricing', {
+        error: error instanceof Error ? error.message : String(error),
+        model
+      });
+      return null;
+    }
   }
 }

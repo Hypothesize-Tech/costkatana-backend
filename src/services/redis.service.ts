@@ -592,7 +592,9 @@ export class RedisService {
             }
 
             // Strategy 3: Semantic similarity cache
-            if (enableSemantic && process.env.ENABLE_SEMANTIC_CACHE === 'true') {
+            // Enabled by default, can be disabled via enableSemantic parameter or env var
+            const semanticEnabled = enableSemantic && process.env.ENABLE_SEMANTIC_CACHE !== 'false';
+            if (semanticEnabled) {
                 const embedding = await this.generateEmbedding(prompt);
                 const semanticResults = await this.findSemanticMatches(
                     embedding,
@@ -737,7 +739,9 @@ export class RedisService {
             }
 
             // Store semantic cache
-            if (enableSemantic && process.env.ENABLE_SEMANTIC_CACHE === 'true') {
+            // Enabled by default, can be disabled via enableSemantic parameter or env var
+            const semanticEnabled = enableSemantic && process.env.ENABLE_SEMANTIC_CACHE !== 'false';
+            if (semanticEnabled) {
                 const embedding = await this.generateEmbedding(prompt);
                 const semanticKey = `${this.SEMANTIC_PREFIX}${exactKey}`;
                 const semanticEntry: SemanticCacheEntry = {

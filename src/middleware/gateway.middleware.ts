@@ -79,8 +79,8 @@ declare global {
                 cortexHybridExecution?: boolean;
                 cortexFragmentCache?: boolean;
                 cortexMetadata?: any;
-                // Auto-track configuration
                 autoTrack?: boolean;
+                budgetReservationId?: string;
             };
         }
     }
