@@ -4,6 +4,9 @@ import { OptimizationService } from '../services/optimization.service';
 import { optimizationRequestSchema, paginationSchema } from '../utils/validators';
 import { loggingService } from '../services/logging.service';
 import { S3Service } from '../services/s3.service';
+import { PromptCompilerService } from '../compiler/promptCompiler.service';
+import { ParallelExecutionOptimizerService } from '../compiler/parallelExecutionOptimizer.service';
+import { ProactiveSuggestionsService } from '../services/proactiveSuggestions.service';
 
 /**
  * Model mapping from short names to full AWS Bedrock model IDs
@@ -73,9 +76,75 @@ export class OptimizationController {
                     requestId: req.headers['x-request-id'] as string
                 });
 
+            // 🚀 P2: Prompt compiler integration - PRODUCTION READY
+            let optimizedPrompt = validatedData.prompt;
+            let promptCompilationMetadata: any = undefined;
+            
+            const enableCompiler = req.headers['x-costkatana-enable-compiler'] === 'true' || req.query.enableCompiler === 'true';
+            const optimizationLevel = parseInt(req.headers['x-costkatana-optimization-level'] as string) || 2;
+            
+            if (enableCompiler && validatedData.prompt && validatedData.prompt.length > 150) {
+                try {
+                    loggingService.info('🔧 Prompt compiler processing started', {
+                        userId,
+                        promptLength: validatedData.prompt.length,
+                        optimizationLevel,
+                        requestId: req.headers['x-request-id'] as string
+                    });
+                    
+                    const compilationResult = await PromptCompilerService.compile(validatedData.prompt, {
+                        optimizationLevel: optimizationLevel as 0 | 1 | 2 | 3,
+                        preserveQuality: true,
+                        enableParallelization: true
+                    });
+                    
+                    if (compilationResult.success && compilationResult.metrics.tokenReduction > 5) {
+                        optimizedPrompt = compilationResult.optimizedPrompt;
+                        promptCompilationMetadata = {
+                            originalTokens: compilationResult.metrics.originalTokens,
+                            optimizedTokens: compilationResult.metrics.optimizedTokens,
+                            tokenReduction: compilationResult.metrics.tokenReduction,
+                            optimizationPasses: compilationResult.metrics.optimizationPasses.map(p => ({
+                                pass: p.passName,
+                                applied: p.applied,
+                                transformations: p.transformations.length
+                            })),
+                            parallelizationAnalysis: compilationResult.ast ? 
+                                ParallelExecutionOptimizerService.analyzeParallelizationOpportunities(compilationResult.ast) : 
+                                undefined
+                        };
+                        
+                        loggingService.info('✅ Prompt compiler optimization successful', {
+                            userId,
+                            originalTokens: compilationResult.metrics.originalTokens,
+                            optimizedTokens: compilationResult.metrics.optimizedTokens,
+                            reduction: `${compilationResult.metrics.tokenReduction.toFixed(1)}%`,
+                            passes: compilationResult.metrics.optimizationPasses.length,
+                            parallelizationPct: promptCompilationMetadata.parallelizationAnalysis?.parallelizationPercentage,
+                            requestId: req.headers['x-request-id'] as string
+                        });
+                    } else {
+                        loggingService.info('Prompt compiler: No significant optimization found', {
+                            userId,
+                            reduction: compilationResult.metrics.tokenReduction,
+                            requestId: req.headers['x-request-id'] as string
+                        });
+                    }
+                } catch (error) {
+                    loggingService.warn('Prompt compiler failed, using original prompt', {
+                        userId,
+                        error: error instanceof Error ? error.message : String(error),
+                        requestId: req.headers['x-request-id'] as string
+                    });
+                }
+            }
+            
+            // 🚀 P1: Generate proactive suggestions after optimization
+            const generateSuggestions = req.headers['x-costkatana-proactive-suggestions'] !== 'false';
+
             const optimization = await OptimizationService.createOptimization({
                 userId,
-                prompt: validatedData.prompt,
+                prompt: optimizedPrompt, // Use compiler-optimized prompt if available
                 service: validatedData.service,
                 model: validatedData.model,
                 context: validatedData.context,
@@ -117,8 +186,25 @@ export class OptimizationController {
                 tokensSaved: optimization.tokensSaved,
                 hasSuggestions: !!optimization.suggestions,
                 hasMetadata: !!optimization.metadata,
+                promptCompilationApplied: !!promptCompilationMetadata,
                 requestId: req.headers['x-request-id'] as string
             });
+            
+            // 🚀 Generate proactive suggestions asynchronously (non-blocking)
+            if (generateSuggestions && optimization.tokensSaved && optimization.tokensSaved > 0) {
+                ProactiveSuggestionsService.pushOptimizationCompletedSuggestion(
+                    userId,
+                    optimization.tokensSaved,
+                    optimization.costSaved || 0,
+                    optimization.improvementPercentage || 0
+                ).catch((error: Error) => {
+                    loggingService.warn('Failed to generate proactive suggestions', {
+                        error: error.message,
+                        userId,
+                        requestId: req.headers['x-request-id'] as string
+                    });
+                });
+            }
 
             // Log business event
             loggingService.logBusiness({

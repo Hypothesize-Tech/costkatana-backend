@@ -544,13 +544,47 @@ export class UsageController {
                 }
             });
 
+            // Parse dates and ensure endDate includes the entire day
+            let startDate: Date | undefined;
+            let endDate: Date | undefined;
+            
+            if (req.query.startDate) {
+                const parsedStartDate = new Date(req.query.startDate as string);
+                if (!isNaN(parsedStartDate.getTime())) {
+                    startDate = parsedStartDate;
+                    // Set to start of day (00:00:00.000)
+                    startDate.setUTCHours(0, 0, 0, 0);
+                } else {
+                    loggingService.warn('Invalid startDate provided', {
+                        requestId: req.headers['x-request-id'] as string,
+                        userId,
+                        invalidDate: req.query.startDate
+                    });
+                }
+            }
+            
+            if (req.query.endDate) {
+                const parsedEndDate = new Date(req.query.endDate as string);
+                if (!isNaN(parsedEndDate.getTime())) {
+                    endDate = parsedEndDate;
+                    // Set to end of day (23:59:59.999) to include all documents created on that day
+                    endDate.setUTCHours(23, 59, 59, 999);
+                } else {
+                    loggingService.warn('Invalid endDate provided', {
+                        requestId: req.headers['x-request-id'] as string,
+                        userId,
+                        invalidDate: req.query.endDate
+                    });
+                }
+            }
+
             const filters = {
                 userId,
                 projectId: req.query.projectId as string,
                 service: req.query.service as string,
                 model: req.query.model as string,
-                startDate: req.query.startDate ? new Date(req.query.startDate as string) : undefined,
-                endDate: req.query.endDate ? new Date(req.query.endDate as string) : undefined,
+                startDate,
+                endDate,
                 tags: req.query.tags ? (req.query.tags as string).split(',') : undefined,
                 minCost: req.query.minCost ? parseFloat(req.query.minCost as string) : undefined,
                 maxCost: req.query.maxCost ? parseFloat(req.query.maxCost as string) : undefined,
@@ -558,11 +592,22 @@ export class UsageController {
                 propertyExists: propertyExists.length > 0 ? propertyExists : undefined,
             };
 
-            // Log custom properties for debugging
-            loggingService.info('Raw query parameters received', {
+            // Log query parameters and filters for debugging
+            loggingService.info('Usage API request received', {
                 requestId: req.headers['x-request-id'] as string,
                 userId,
                 queryParams: req.query,
+                filters: {
+                    userId: filters.userId,
+                    projectId: filters.projectId,
+                    service: filters.service,
+                    model: filters.model,
+                    startDate: filters.startDate?.toISOString(),
+                    endDate: filters.endDate?.toISOString(),
+                    tags: filters.tags,
+                    minCost: filters.minCost,
+                    maxCost: filters.maxCost,
+                },
                 hasCustomProperties: Object.keys(customProperties).length > 0
             });
             if (Object.keys(customProperties).length > 0) {

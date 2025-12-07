@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import * as crypto from 'crypto';
 import { webhookEventEmitter } from './webhookEventEmitter.service';
 import { WEBHOOK_EVENTS, WebhookEventType } from '../types/webhook.types';
+import { costStreamingService } from './costStreaming.service';
 
 interface BudgetStatus {
   overall: {
@@ -493,6 +494,200 @@ export class BudgetService {
   }
 
   /**
+   * Pre-flight budget check with enforcement
+   * Checks if user has sufficient budget before allowing request
+   */
+  static async preFlightBudgetCheck(
+    userId: string,
+    estimatedCost: number,
+    projectId?: string,
+    workspaceId?: string,
+    options: {
+      enforceHardLimits?: boolean;
+      allowDowngrade?: boolean;
+      planTier?: 'free' | 'plus' | 'pro' | 'enterprise';
+    } = {}
+  ): Promise<{
+    allowed: boolean;
+    reason?: string;
+    recommendedAction?: string;
+    remainingBudget: number;
+    reservationId?: string;
+    cheaperAlternatives?: Array<{
+      model: string;
+      provider: string;
+      estimatedCost: number;
+      savings: number;
+    }>;
+  }> {
+    try {
+      const { enforceHardLimits = true, allowDowngrade = true, planTier = 'plus' } = options;
+
+      // Get current budget status
+      const budgetStatus = await this.getBudgetStatus(userId, projectId);
+      const remainingBudget = budgetStatus.overall.remaining;
+      const reservedBudget = await this.getReservedBudget(userId);
+      const availableBudget = remainingBudget - reservedBudget;
+
+      // Define thresholds based on plan tier
+      const thresholds = {
+        free: { soft: 0.8, hard: 0.95 },
+        plus: { soft: 0.85, hard: 0.98 },
+        pro: { soft: 0.9, hard: 0.99 },
+        enterprise: { soft: 0.95, hard: 1.0 }
+      };
+
+      const threshold = thresholds[planTier] || thresholds.plus;
+      const usagePercentage = budgetStatus.overall.usagePercentage / 100;
+
+      // Hard limit check
+      if (enforceHardLimits && availableBudget < estimatedCost) {
+        // Generate cheaper alternatives
+        const cheaperAlternatives = await this.findCheaperAlternatives(
+          estimatedCost,
+          availableBudget,
+          projectId
+        );
+
+        // 🚨 P0: Emit real-time SSE budget exceeded alert
+        setImmediate(async () => {
+          try {
+            const { RealtimeUpdateService } = await import('./realtime-update.service');
+            RealtimeUpdateService.emitBudgetExceeded(userId, {
+              budgetId: projectId || 'default',
+              estimatedCost,
+              budgetRemaining: availableBudget,
+              blocked: true,
+              cheaperAlternatives,
+              message: `Request blocked: $${estimatedCost.toFixed(4)} required, only $${availableBudget.toFixed(4)} available`
+            });
+          } catch (error) {
+            loggingService.error('Failed to emit budget exceeded SSE', {
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        });
+
+        // Emit budget warning event (legacy streaming)
+        costStreamingService.emitCostEvent({
+          eventType: 'budget_warning',
+          timestamp: new Date(),
+          userId,
+          workspaceId,
+          data: {
+            estimatedCost,
+            budgetRemaining: availableBudget,
+            metadata: {
+              reason: 'insufficient_budget',
+              severity: 'critical',
+              cheaperAlternatives: cheaperAlternatives.length
+            }
+          }
+        });
+
+        return {
+          allowed: false,
+          reason: `Insufficient budget: $${availableBudget.toFixed(4)} available, $${estimatedCost.toFixed(4)} required`,
+          recommendedAction: allowDowngrade 
+            ? 'Consider using a cheaper model from alternatives or increase your budget'
+            : 'Increase your budget to continue',
+          remainingBudget: availableBudget,
+          cheaperAlternatives
+        };
+      }
+
+      // Soft limit warning (approaching limit)
+      if (usagePercentage >= threshold.soft && usagePercentage < threshold.hard) {
+        const severity: 'low' | 'medium' | 'high' = 
+          usagePercentage >= 0.95 ? 'high' : 
+          usagePercentage >= 0.85 ? 'medium' : 'low';
+
+        loggingService.warn('User approaching budget limit', {
+          userId,
+          usagePercentage,
+          remainingBudget: availableBudget,
+          estimatedCost,
+          severity
+        });
+
+        // 🚨 P0: Emit real-time SSE threshold alert
+        setImmediate(async () => {
+          try {
+            const { RealtimeUpdateService } = await import('./realtime-update.service');
+            
+            // Calculate projected exhaustion
+            const currentSpend = budgetStatus.overall.used;
+            const dailySpendRate = currentSpend / 30; // Rough estimate
+            const daysRemaining = availableBudget / dailySpendRate;
+            const exhaustionDate = new Date();
+            exhaustionDate.setDate(exhaustionDate.getDate() + Math.floor(daysRemaining));
+
+            RealtimeUpdateService.emitBudgetThreshold(userId, {
+              threshold: threshold.soft,
+              usagePercentage,
+              budgetRemaining: availableBudget,
+              projectedExhaustion: {
+                daysRemaining: Math.floor(daysRemaining),
+                exhaustionDate
+              },
+              recommendations: [
+                'Review your highest-cost requests',
+                'Enable Cortex optimization for 40-75% savings',
+                'Use semantic caching to reduce repeated requests',
+                'Consider switching to more efficient models'
+              ]
+            });
+          } catch (error) {
+            loggingService.error('Failed to emit budget threshold SSE', {
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        });
+
+        // Emit warning event (legacy streaming)
+        costStreamingService.emitCostEvent({
+          eventType: 'budget_warning',
+          timestamp: new Date(),
+          userId,
+          workspaceId,
+          data: {
+            estimatedCost,
+            budgetRemaining: availableBudget,
+            metadata: {
+              reason: 'approaching_limit',
+              severity,
+              threshold: threshold.soft
+            }
+          }
+        });
+      }
+
+      // Reserve budget if check passes
+      const reservationId = await this.reserveBudget(userId, estimatedCost, projectId);
+
+      return {
+        allowed: true,
+        remainingBudget: availableBudget - estimatedCost,
+        reservationId
+      };
+
+    } catch (error) {
+      loggingService.error('Pre-flight budget check failed', {
+        error: error instanceof Error ? error.message : String(error),
+        userId,
+        estimatedCost
+      });
+      
+      // Fail-open in case of errors (but log them)
+      return {
+        allowed: true,
+        reason: 'Budget check bypassed due to error',
+        remainingBudget: 0
+      };
+    }
+  }
+
+  /**
    * Reserve budget before making LLM call
    */
   static async reserveBudget(
@@ -711,6 +906,80 @@ export class BudgetService {
         model
       });
       return null;
+    }
+  }
+
+  /**
+   * Find cheaper model alternatives when budget is insufficient
+   */
+  private static async findCheaperAlternatives(
+    currentEstimatedCost: number,
+    availableBudget: number,
+    projectId?: string
+  ): Promise<Array<{
+    model: string;
+    provider: string;
+    estimatedCost: number;
+    savings: number;
+  }>> {
+    try {
+      // Import model pricing data
+      const modelPricingModule = await import('../data/modelPricing');
+      const modelPricingData = (modelPricingModule as { modelPricingData: any[] }).modelPricingData;
+      
+      if (!modelPricingData || !Array.isArray(modelPricingData)) {
+        return [];
+      }
+
+      // Calculate target cost (must be under available budget)
+      const targetCost = availableBudget * 0.95; // Use 95% of available budget as safety margin
+      const savingsRequired = currentEstimatedCost - targetCost;
+
+      if (savingsRequired <= 0) {
+        return [];
+      }
+
+      // Find models that would fit within budget
+      const alternatives = modelPricingData
+        .map((modelData: any) => {
+          // Estimate cost for this model (assuming similar token usage)
+          const avgCost = (modelData.inputPrice + modelData.outputPrice) / 2;
+          const estimatedCost = currentEstimatedCost * (avgCost / (currentEstimatedCost / 1000)); // Rough estimate
+          const savings = currentEstimatedCost - estimatedCost;
+
+          return {
+            model: modelData.model,
+            provider: modelData.provider || 'unknown',
+            estimatedCost: Math.max(0.0001, estimatedCost), // Minimum $0.0001
+            savings,
+            fitsInBudget: estimatedCost <= availableBudget
+          };
+        })
+        .filter((alt: any) => alt.fitsInBudget && alt.savings > 0)
+        .sort((a: any, b: any) => b.savings - a.savings)
+        .slice(0, 5)
+        .map(({ model, provider, estimatedCost, savings }: any) => ({
+          model,
+          provider,
+          estimatedCost,
+          savings
+        }));
+
+      loggingService.info('Generated cheaper alternatives', {
+        projectId,
+        currentEstimatedCost,
+        availableBudget,
+        alternativesCount: alternatives.length
+      });
+
+      return alternatives;
+    } catch (error) {
+      loggingService.error('Error finding cheaper alternatives', {
+        error: error instanceof Error ? error.message : String(error),
+        currentEstimatedCost,
+        availableBudget
+      });
+      return [];
     }
   }
 }

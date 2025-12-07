@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { AILog, IAILog } from '../models/AILog';
 import { loggingService } from './logging.service';
 import { CloudWatchService } from './cloudwatch.service';
+import { PricingRegistryService } from './pricingRegistry.service';
 import mongoose from 'mongoose';
 
 /**
@@ -519,65 +520,37 @@ export class AILoggerService {
     }
     
     /**
-     * Utility: Estimate cost (rough approximation when not provided)
+     * Utility: Estimate cost using PricingRegistry (single source of truth)
      */
     private estimateCost(service: string, aiModel: string, inputTokens: number, outputTokens: number): number {
-        // Service-specific default costs (per 1K tokens)
-        const serviceDefaults: Record<string, { input: number; output: number }> = {
-            'aws-bedrock': { input: 0.001, output: 0.002 },
-            'openai': { input: 0.0015, output: 0.002 },
-            'anthropic': { input: 0.008, output: 0.024 },
-            'google-ai': { input: 0.00025, output: 0.0005 },
-            'cohere': { input: 0.0015, output: 0.002 },
-            'huggingface': { input: 0.0001, output: 0.0002 }
-        };
-        
-        // Model-specific cost estimates (per 1K tokens)
-        const modelCosts: Record<string, { input: number; output: number }> = {
-            // Anthropic Claude
-            'claude-3-opus': { input: 0.015, output: 0.075 },
-            'claude-3-5-sonnet': { input: 0.003, output: 0.015 },
-            'claude-3-sonnet': { input: 0.003, output: 0.015 },
-            'claude-3-haiku': { input: 0.00025, output: 0.00125 },
+        try {
+            // Use PricingRegistry for all cost calculations
+            const pricingRegistry = PricingRegistryService.getInstance();
             
-            // OpenAI GPT
-            'gpt-4-turbo': { input: 0.01, output: 0.03 },
-            'gpt-4': { input: 0.03, output: 0.06 },
-            'gpt-3.5-turbo': { input: 0.0005, output: 0.0015 },
+            // Try to find model in registry
+            const result = pricingRegistry.calculateCost({
+                inputTokens,
+                outputTokens,
+                modelId: aiModel
+            });
             
-            // AWS Nova
-            'nova-pro': { input: 0.0008, output: 0.0032 },
-            'nova-lite': { input: 0.00006, output: 0.00024 },
-            'nova-micro': { input: 0.000035, output: 0.00014 },
-            
-            // Google Gemini
-            'gemini-pro': { input: 0.00025, output: 0.0005 },
-            'gemini-ultra': { input: 0.00125, output: 0.00375 },
-            
-            // Meta Llama
-            'llama-3-70b': { input: 0.00099, output: 0.00099 },
-            'llama-3-8b': { input: 0.00015, output: 0.00015 }
-        };
-        
-        // Try to find model-specific pricing first
-        const normalizedModel = aiModel.toLowerCase();
-        for (const [key, value] of Object.entries(modelCosts)) {
-            if (normalizedModel.includes(key)) {
-                return ((inputTokens / 1000) * value.input) + ((outputTokens / 1000) * value.output);
+            if (result === null) {
+                throw new Error('Model not found in pricing registry');
             }
+            
+            return result.totalCost;
+            
+        } catch (error) {
+            // Fallback for models not in registry
+            loggingService.warn('Cost estimation fallback', {
+                service,
+                model: aiModel,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Ultimate fallback: $0.001 per 1K tokens
+            return ((inputTokens + outputTokens) / 1000) * 0.001;
         }
-        
-        // Fall back to service-specific default pricing
-        const normalizedService = service.toLowerCase();
-        for (const [key, value] of Object.entries(serviceDefaults)) {
-            if (normalizedService.includes(key)) {
-                return ((inputTokens / 1000) * value.input) + ((outputTokens / 1000) * value.output);
-            }
-        }
-        
-        // Ultimate fallback
-        const fallbackCost = { input: 0.001, output: 0.002 };
-        return ((inputTokens / 1000) * fallbackCost.input) + ((outputTokens / 1000) * fallbackCost.output);
     }
     
     /**

@@ -1,6 +1,7 @@
 import { Telemetry, ITelemetry } from '../models/Telemetry';
 import { context, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { loggingService } from './logging.service';
+import { costStreamingService } from './costStreaming.service';
 import os from 'os';
 
 export interface TelemetryQuery {
@@ -246,6 +247,39 @@ export class TelemetryService {
 
       const telemetry = new Telemetry(telemetryData);
       await telemetry.save();
+      
+      // Emit cost event to streaming service (non-blocking)
+      setImmediate(() => {
+        try {
+          if (telemetryData.cost_usd && telemetryData.cost_usd > 0) {
+            costStreamingService.emitCostEvent({
+              eventType: 'cost_tracked',
+              timestamp: telemetryData.timestamp as Date,
+              userId: telemetryData.user_id !== 'unknown' ? telemetryData.user_id : undefined,
+              workspaceId: telemetryData.workspace_id !== 'unknown' ? telemetryData.workspace_id : undefined,
+              data: {
+                model: telemetryData.gen_ai_model,
+                vendor: telemetryData.gen_ai_system,
+                cost: telemetryData.cost_usd,
+                tokens: (telemetryData.prompt_tokens || 0) + (telemetryData.completion_tokens || 0),
+                latency: telemetryData.duration_ms,
+                operation: telemetryData.operation_name,
+                template: telemetryData.attributes?.template_id,
+                cacheHit: telemetryData.attributes?.cache_hit,
+                metadata: {
+                  traceId: telemetryData.trace_id,
+                  spanId: telemetryData.span_id,
+                  status: telemetryData.status
+                }
+              }
+            });
+          }
+        } catch (error) {
+          loggingService.debug('Failed to emit cost streaming event', {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      });
       
       // Check for manual sessions and link them (non-blocking)
       setImmediate(async () => {

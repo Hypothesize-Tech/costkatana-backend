@@ -76,6 +76,16 @@ export interface CostTrends {
   };
 }
 
+export interface FeatureAttribution {
+  feature: string;
+  category: 'workflow' | 'template' | 'agent' | 'chat' | 'gateway' | 'optimization' | 'unknown';
+  cost: number;
+  tokens: number;
+  requests: number;
+  confidence: number;
+  metadata?: Record<string, any>;
+}
+
 export class UnexplainedCostService {
   private static instance: UnexplainedCostService;
   
@@ -96,6 +106,192 @@ export class UnexplainedCostService {
       UnexplainedCostService.instance = new UnexplainedCostService();
     }
     return UnexplainedCostService.instance;
+  }
+
+  /**
+   * 🎯 P1: AI-powered automatic feature detection and cost attribution
+   */
+  static async detectAndAttributeFeature(
+    userId: string,
+    telemetryData: {
+      operation?: string;
+      model?: string;
+      cost: number;
+      tokens: number;
+      metadata?: Record<string, any>;
+    }
+  ): Promise<FeatureAttribution> {
+    try {
+      // Extract feature from metadata
+      const metadata = telemetryData.metadata || {};
+      
+      // Deterministic feature detection (fast path)
+      if (metadata.workflowId || metadata.workflowName) {
+        return {
+          feature: metadata.workflowName || `workflow-${metadata.workflowId}`,
+          category: 'workflow',
+          cost: telemetryData.cost,
+          tokens: telemetryData.tokens,
+          requests: 1,
+          confidence: 1.0,
+          metadata: { workflowId: metadata.workflowId, workflowStep: metadata.workflowStep }
+        };
+      }
+
+      if (metadata.promptTemplateId) {
+        return {
+          feature: `template-${metadata.promptTemplateId}`,
+          category: 'template',
+          cost: telemetryData.cost,
+          tokens: telemetryData.tokens,
+          requests: 1,
+          confidence: 1.0,
+          metadata: { templateId: metadata.promptTemplateId }
+        };
+      }
+
+      if (metadata.agentName || metadata.agentId) {
+        return {
+          feature: metadata.agentName || `agent-${metadata.agentId}`,
+          category: 'agent',
+          cost: telemetryData.cost,
+          tokens: telemetryData.tokens,
+          requests: 1,
+          confidence: 1.0,
+          metadata: { agentId: metadata.agentId }
+        };
+      }
+
+      // AI-powered feature detection (slow path) - use for unknown operations
+      if (this.shouldUseAIAttribution()) {
+        return await this.aiPoweredFeatureDetection(userId, telemetryData);
+      }
+
+      // Fallback: operation-based attribution
+      const operation = telemetryData.operation || 'unknown';
+      const category = this.inferCategoryFromOperation(operation);
+
+      return {
+        feature: operation,
+        category,
+        cost: telemetryData.cost,
+        tokens: telemetryData.tokens,
+        requests: 1,
+        confidence: 0.6,
+        metadata
+      };
+
+    } catch (error) {
+      loggingService.error('Feature attribution failed', {
+        error: error instanceof Error ? error.message : String(error),
+        userId
+      });
+
+      // Fallback to basic attribution
+      return {
+        feature: 'unknown',
+        category: 'unknown',
+        cost: telemetryData.cost,
+        tokens: telemetryData.tokens,
+        requests: 1,
+        confidence: 0.3
+      };
+    }
+  }
+
+  /**
+   * 🎯 P1: AI-powered feature detection for complex scenarios
+   */
+  private static async aiPoweredFeatureDetection(
+    userId: string,
+    telemetryData: any
+  ): Promise<FeatureAttribution> {
+    try {
+      const prompt = `Analyze this AI request and identify the feature/use case:
+
+Operation: ${telemetryData.operation || 'N/A'}
+Model: ${telemetryData.model || 'N/A'}
+Metadata: ${JSON.stringify(telemetryData.metadata || {}, null, 2)}
+
+Identify:
+1. Feature name (be specific, e.g., "document-summarization", "code-review", "customer-support-chat")
+2. Category (workflow, template, agent, chat, gateway, optimization, unknown)
+3. Confidence (0-1)
+
+Respond in JSON format:
+{
+  "feature": "feature-name",
+  "category": "category",
+  "confidence": 0.85
+}`;
+
+      const response = await AIRouterService.invokeModel(
+        prompt,
+        'amazon.nova-micro-v1:0', // Use cheap model for attribution
+        userId,
+        {
+          temperature: 0.3
+        }
+      );
+
+      const result = JSON.parse(response);
+
+      return {
+        feature: result.feature || 'unknown',
+        category: result.category || 'unknown',
+        cost: telemetryData.cost,
+        tokens: telemetryData.tokens,
+        requests: 1,
+        confidence: result.confidence || 0.7,
+        metadata: telemetryData.metadata
+      };
+
+    } catch (error) {
+      loggingService.warn('AI-powered attribution failed, using fallback', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      
+      return {
+        feature: telemetryData.operation || 'unknown',
+        category: 'unknown',
+        cost: telemetryData.cost,
+        tokens: telemetryData.tokens,
+        requests: 1,
+        confidence: 0.5,
+        metadata: telemetryData.metadata
+      };
+    }
+  }
+
+  /**
+   * Infer category from operation string
+   */
+  private static inferCategoryFromOperation(operation: string): FeatureAttribution['category'] {
+    const lower = operation.toLowerCase();
+    if (lower.includes('workflow')) return 'workflow';
+    if (lower.includes('template')) return 'template';
+    if (lower.includes('agent')) return 'agent';
+    if (lower.includes('chat')) return 'chat';
+    if (lower.includes('gateway') || lower.includes('proxy')) return 'gateway';
+    if (lower.includes('optim')) return 'optimization';
+    return 'unknown';
+  }
+
+  /**
+   * Check if AI attribution should be used
+   */
+  private static shouldUseAIAttribution(): boolean {
+    // Check circuit breaker
+    if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
+      if (Date.now() - this.lastAiFailureTime < this.AI_CIRCUIT_BREAKER_RESET_TIME) {
+        return false; // Circuit breaker open
+      }
+      // Reset circuit breaker
+      this.aiFailureCount = 0;
+    }
+    
+    // Use AI attribution for 10% of requests to balance cost and accuracy
+    return Math.random() < 0.1;
   }
 
   /**

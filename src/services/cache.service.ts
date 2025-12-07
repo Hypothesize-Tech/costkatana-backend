@@ -328,6 +328,84 @@ export class CacheService {
     }
 
     /**
+     * Get keys matching a pattern (supports Redis-style patterns)
+     * Pattern examples: "key:*", "user:123:*", "*:cache"
+     * Note: This is primarily for Redis. In-memory cache pattern matching is limited.
+     */
+    public async keys(pattern: string): Promise<string[]> {
+        const keys: string[] = [];
+
+        // Try Redis first (supports full pattern matching)
+        if (redisService.isConnected) {
+            try {
+                // Use Redis SCAN for better performance with large key sets
+                // Fallback to KEYS if SCAN is not available
+                if (typeof (redisService as any).scan === 'function') {
+                    const scannedKeys: string[] = [];
+                    let cursor = '0';
+                    
+                    do {
+                        const result = await (redisService as any).scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+                        cursor = result[0];
+                        if (Array.isArray(result[1])) {
+                            scannedKeys.push(...result[1]);
+                        }
+                    } while (cursor !== '0');
+                    
+                    keys.push(...scannedKeys);
+                } else if (typeof (redisService as any).keys === 'function') {
+                    // Fallback to KEYS command (use with caution in production)
+                    const redisKeys = await (redisService as any).keys(pattern);
+                    if (Array.isArray(redisKeys)) {
+                        keys.push(...redisKeys);
+                    }
+                }
+            } catch (error) {
+                loggingService.warn('Redis keys operation failed', {
+                    pattern,
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        }
+
+        // Fallback: Pattern match in-memory cache (limited pattern support)
+        if (keys.length === 0 || pattern.includes('*')) {
+            const patternRegex = this.patternToRegex(pattern);
+            for (const key of this.inMemoryCache.keys()) {
+                if (patternRegex.test(key)) {
+                    if (!keys.includes(key)) {
+                        keys.push(key);
+                    }
+                }
+            }
+        }
+
+        if (this.ENABLE_DEBUG_LOGS) {
+            loggingService.debug('Cache keys operation completed', {
+                pattern,
+                keyCount: keys.length,
+                source: redisService.isConnected ? 'redis+memory' : 'memory'
+            });
+        }
+
+        return keys;
+    }
+
+    /**
+     * Convert Redis-style pattern to regex
+     * Supports: * (matches any), ? (matches single char)
+     */
+    private patternToRegex(pattern: string): RegExp {
+        // Escape special regex characters except * and ?
+        let regexPattern = pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*/g, '.*')
+            .replace(/\?/g, '.');
+        
+        return new RegExp(`^${regexPattern}$`);
+    }
+
+    /**
      * Update cache statistics with memory leak prevention
      */
     private updateStats(key: string, operation: 'hits' | 'misses' | 'sets'): void {

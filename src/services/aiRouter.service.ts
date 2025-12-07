@@ -19,6 +19,9 @@ import { calculateCost } from '../utils/pricing';
 import { AIInvokeResponse } from '../types/aiProvider.types';
 import { LLMSecurityService } from './llmSecurity.service';
 import { v4 as uuidv4 } from 'uuid';
+import { IntelligentRouterService } from './intelligentRouter.service';
+import { ModelRegistryService } from './modelRegistry.service';
+import { PricingRegistryService } from './pricingRegistry.service';
 
 export class AIRouterService {
     private static openaiProvider: OpenAIProvider | null = null;
@@ -562,6 +565,119 @@ export class AIRouterService {
     static async extractJson(text: string): Promise<string> {
         // Delegate to BedrockService.extractJson which has robust extraction logic
         return await BedrockService.extractJson(text);
+    }
+
+    /**
+     * Get optimal model using intelligent routing
+     * Returns the best model based on requirements and strategy
+     */
+    static async getOptimalModel(options: {
+        strategy?: 'cost_optimized' | 'quality_optimized' | 'balanced' | 'latency_optimized';
+        capabilities?: string[];
+        estimatedInputTokens?: number;
+        estimatedOutputTokens?: number;
+        maxCostPerRequest?: number;
+        maxLatencyMs?: number;
+    }): Promise<string | null> {
+        try {
+            const intelligentRouter = IntelligentRouterService.getInstance();
+            
+            const result = await intelligentRouter.route({
+                strategy: options.strategy || 'balanced',
+                requirements: {
+                    requiredCapabilities: options.capabilities as any[]
+                },
+                estimatedInputTokens: options.estimatedInputTokens,
+                estimatedOutputTokens: options.estimatedOutputTokens,
+                constraints: {
+                    maxCostPerRequest: options.maxCostPerRequest,
+                    maxLatencyMs: options.maxLatencyMs
+                }
+            });
+
+            if (!result) {
+                loggingService.warn('No optimal model found', options);
+                return null;
+            }
+
+            loggingService.info('Optimal model selected', {
+                modelId: result.modelId,
+                strategy: options.strategy,
+                estimatedCost: result.estimatedCost,
+                score: result.score
+            });
+
+            return result.modelId;
+        } catch (error) {
+            loggingService.error('Error getting optimal model', {
+                error: error instanceof Error ? error.message : String(error),
+                options
+            });
+            return null;
+        }
+    }
+
+    /**
+     * Get cheapest model for given capabilities
+     */
+    static async getCheapestModel(
+        capabilities: string[],
+        estimatedTokens: number = 1500
+    ): Promise<string | null> {
+        return this.getOptimalModel({
+            strategy: 'cost_optimized',
+            capabilities,
+            estimatedInputTokens: Math.floor(estimatedTokens * 0.7),
+            estimatedOutputTokens: Math.floor(estimatedTokens * 0.3)
+        });
+    }
+
+    /**
+     * Get highest quality model for given capabilities
+     */
+    static async getHighestQualityModel(
+        capabilities: string[],
+        estimatedTokens: number = 1500
+    ): Promise<string | null> {
+        return this.getOptimalModel({
+            strategy: 'quality_optimized',
+            capabilities,
+            estimatedInputTokens: Math.floor(estimatedTokens * 0.7),
+            estimatedOutputTokens: Math.floor(estimatedTokens * 0.3)
+        });
+    }
+
+    /**
+     * Get registry-based model information
+     */
+    static getModelInfo(modelId: string): any {
+        const modelRegistry = ModelRegistryService.getInstance();
+        return modelRegistry.getModel(modelId);
+    }
+
+    /**
+     * Get registry-based pricing information
+     */
+    static getModelPricing(modelId: string): any {
+        const pricingRegistry = PricingRegistryService.getInstance();
+        return pricingRegistry.getPricing(modelId);
+    }
+
+    /**
+     * Calculate cost using pricing registry
+     */
+    static calculateCostWithRegistry(
+        modelId: string,
+        inputTokens: number,
+        outputTokens: number
+    ): number {
+        const pricingRegistry = PricingRegistryService.getInstance();
+        const result = pricingRegistry.calculateCost({
+            modelId,
+            inputTokens,
+            outputTokens
+        });
+        return result?.totalCost || 0;
     }
 }
 

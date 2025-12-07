@@ -45,14 +45,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-5-pro',
     modelName: 'GPT-5 pro',
     provider: 'OpenAI',
-    inputPrice: 2.50,
-    outputPrice: 20.00,
+    inputPrice: 15.00,
+    outputPrice: 120.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 128000,
     capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents', 'premium'],
     category: 'text',
     isLatest: true,
-    notes: 'Version of GPT-5 that produces smarter and more precise responses'
+    notes: 'Version of GPT-5 that produces smarter and more precise responses. Batch: $7.50/$60.00'
   },
   {
     modelId: 'gpt-5-codex',
@@ -134,7 +134,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'analysis'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Latest GPT-4o model with multimodal capabilities'
+    notes: 'Latest GPT-4o model with multimodal capabilities. Cached: $1.25. Batch: $1.25/$5.00'
   },
   {
     modelId: 'gpt-4o-2024-05-13',
@@ -173,7 +173,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'realtime', 'multimodal'],
     category: 'realtime',
     isLatest: true,
-    notes: 'GPT-4o with realtime processing capabilities'
+    notes: 'GPT-4o with realtime processing capabilities. Cached: $2.50. Audio: $40/$80 per 1M'
   },
   {
     modelId: 'gpt-4o-mini-2024-07-18',
@@ -212,7 +212,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'realtime', 'efficient'],
     category: 'realtime',
     isLatest: true,
-    notes: 'GPT-4o Mini with realtime processing capabilities'
+    notes: 'GPT-4o Mini with realtime processing capabilities. Cached: $0.30. Audio: $10/$20 per 1M'
   },
 
   // === O-Series Models (Latest) ===
@@ -339,27 +339,27 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'sora-2',
     modelName: 'Sora 2',
     provider: 'OpenAI',
-    inputPrice: 0.05,
-    outputPrice: 0.05,
+    inputPrice: 0.10,
+    outputPrice: 0.10,
     unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'audio', 'synced-audio'],
     category: 'video',
     isLatest: true,
-    notes: 'Flagship video generation with synced audio'
+    notes: 'Flagship video generation with synced audio. $0.10/sec (720p)'
   },
   {
     modelId: 'sora-2-pro',
     modelName: 'Sora 2 Pro',
     provider: 'OpenAI',
-    inputPrice: 0.10,
-    outputPrice: 0.10,
+    inputPrice: 0.30,
+    outputPrice: 0.30,
     unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'audio', 'synced-audio', 'advanced'],
     category: 'video',
     isLatest: true,
-    notes: 'Most advanced synced-audio video generation'
+    notes: 'Most advanced synced-audio video generation. $0.30/sec (720p), $0.50/sec (1024p)'
   },
 
   // === Image Generation Models ===
@@ -367,27 +367,27 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-image-1',
     modelName: 'GPT Image 1',
     provider: 'OpenAI',
-    inputPrice: 0.04,
-    outputPrice: 0.04,
+    inputPrice: 5.00,
+    outputPrice: 0.00,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image'],
     category: 'image',
     isLatest: true,
-    notes: 'State-of-the-art image generation model'
+    notes: 'State-of-the-art image generation model. Cached: $1.25. Low: $0.011, Med: $0.042, High: $0.167/img'
   },
   {
     modelId: 'gpt-image-1-mini',
     modelName: 'gpt-image-1-mini',
     provider: 'OpenAI',
-    inputPrice: 0.02,
-    outputPrice: 0.02,
+    inputPrice: 2.00,
+    outputPrice: 0.00,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image', 'cost-efficient'],
     category: 'image',
     isLatest: true,
-    notes: 'A cost-efficient version of GPT Image 1'
+    notes: 'A cost-efficient version of GPT Image 1. Cached: $0.20. Low: $0.005, Med: $0.011, High: $0.036/img'
   },
   {
     modelId: 'dall-e-3',
@@ -421,14 +421,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-realtime',
     modelName: 'gpt-realtime',
     provider: 'OpenAI',
-    inputPrice: 5.00,
-    outputPrice: 20.00,
+    inputPrice: 4.00,
+    outputPrice: 16.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 128000,
     capabilities: ['text', 'audio', 'realtime', 'multimodal'],
     category: 'realtime',
     isLatest: true,
-    notes: 'Model capable of realtime text and audio inputs and outputs'
+    notes: 'Model capable of realtime text and audio inputs and outputs. Cached: $0.40. Audio: $32/$64 per 1M'
   },
   {
     modelId: 'gpt-realtime-mini',
@@ -441,7 +441,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'realtime', 'efficient'],
     category: 'realtime',
     isLatest: true,
-    notes: 'A cost-efficient version of GPT Realtime'
+    notes: 'A cost-efficient version of GPT Realtime. Cached: $0.06. Audio: $10/$20 per 1M'
   },
   {
     modelId: 'gpt-audio',
@@ -460,14 +460,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-audio-mini',
     modelName: 'gpt-audio-mini',
     provider: 'OpenAI',
-    inputPrice: 0.15,
-    outputPrice: 0.60,
+    inputPrice: 0.60,
+    outputPrice: 2.40,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 128000,
     capabilities: ['text', 'audio', 'efficient'],
     category: 'audio',
     isLatest: true,
-    notes: 'A cost-efficient version of GPT Audio'
+    notes: 'A cost-efficient version of GPT Audio. Audio: $10/$20 per 1M'
   },
 
   // === Transcription Models ===
@@ -475,14 +475,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-4o-transcribe',
     modelName: 'GPT-4o Transcribe',
     provider: 'OpenAI',
-    inputPrice: 0.15,
-    outputPrice: 0.15,
+    inputPrice: 2.50,
+    outputPrice: 10.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 0,
     capabilities: ['audio', 'transcription', 'speech-to-text'],
     category: 'audio',
     isLatest: true,
-    notes: 'Speech-to-text model powered by GPT-4o'
+    notes: 'Speech-to-text model powered by GPT-4o. ~$0.006/min'
   },
   {
     modelId: 'gpt-4o-transcribe-diarize',
@@ -501,14 +501,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-4o-mini-transcribe',
     modelName: 'GPT-4o mini Transcribe',
     provider: 'OpenAI',
-    inputPrice: 0.10,
-    outputPrice: 0.10,
+    inputPrice: 1.25,
+    outputPrice: 5.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 0,
     capabilities: ['audio', 'transcription', 'speech-to-text', 'efficient'],
     category: 'audio',
     isLatest: true,
-    notes: 'Speech-to-text model powered by GPT-4o mini'
+    notes: 'Speech-to-text model powered by GPT-4o mini. ~$0.003/min'
   },
   {
     modelId: 'whisper-1',
@@ -529,14 +529,14 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-4o-mini-tts',
     modelName: 'GPT-4o mini TTS',
     provider: 'OpenAI',
-    inputPrice: 0.15,
-    outputPrice: 0.15,
+    inputPrice: 0.60,
+    outputPrice: 0.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 0,
     capabilities: ['audio', 'text-to-speech', 'tts'],
     category: 'audio',
     isLatest: true,
-    notes: 'Text-to-speech model powered by GPT-4o mini'
+    notes: 'Text-to-speech model powered by GPT-4o mini. ~$0.015/min'
   },
   {
     modelId: 'tts-1',
@@ -570,8 +570,8 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-oss-120b',
     modelName: 'gpt-oss-120b',
     provider: 'OpenAI',
-    inputPrice: 0.0, // Open-weight, pricing varies by deployment
-    outputPrice: 0.0,
+    inputPrice: 2.00,
+    outputPrice: 8.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 131072,
     capabilities: ['text', 'open-source', 'open-weight'],
@@ -583,8 +583,8 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'gpt-oss-20b',
     modelName: 'gpt-oss-20b',
     provider: 'OpenAI',
-    inputPrice: 0.0, // Open-weight, pricing varies by deployment
-    outputPrice: 0.0,
+    inputPrice: 0.50,
+    outputPrice: 2.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 131072,
     capabilities: ['text', 'open-source', 'open-weight', 'low-latency'],
@@ -631,7 +631,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'search', 'multimodal'],
     category: 'search',
     isLatest: true,
-    notes: 'GPT-4o Mini with search capabilities for enhanced information retrieval'
+    notes: 'GPT-4o Mini with search capabilities for enhanced information retrieval. Web search: $10/1k calls'
   },
   {
     modelId: 'gpt-4o-search-preview-2025-03-11',
@@ -644,7 +644,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'search', 'multimodal'],
     category: 'search',
     isLatest: true,
-    notes: 'GPT-4o with search capabilities for enhanced information retrieval'
+    notes: 'GPT-4o with search capabilities for enhanced information retrieval. Web search: $25/1k calls'
   },
   {
     modelId: 'computer-use-preview-2025-03-11',
@@ -657,7 +657,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'computer-use', 'automation'],
     category: 'computer-use',
     isLatest: true,
-    notes: 'Model optimized for computer use and automation tasks'
+    notes: 'Model optimized for computer use and automation tasks. Batch: $1.50/$6.00'
   },
 
   // === Embedding Models ===
@@ -706,8 +706,8 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'chatgpt-4o-latest',
     modelName: 'ChatGPT-4o',
     provider: 'OpenAI',
-    inputPrice: 2.50,
-    outputPrice: 10.00,
+    inputPrice: 5.00,
+    outputPrice: 15.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 128000,
     capabilities: ['text', 'vision', 'multimodal', 'chat'],
@@ -773,27 +773,27 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelId: 'babbage-002',
     modelName: 'babbage-002',
     provider: 'OpenAI',
-    inputPrice: 0.0,
-    outputPrice: 0.0,
+    inputPrice: 0.40,
+    outputPrice: 0.40,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 16384,
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Deprecated - Replacement for the GPT-3 ada and babbage base models'
+    notes: 'Deprecated - Replacement for the GPT-3 ada and babbage base models. Batch: $0.20/$0.20'
   },
   {
     modelId: 'davinci-002',
     modelName: 'davinci-002',
     provider: 'OpenAI',
-    inputPrice: 0.0,
-    outputPrice: 0.0,
+    inputPrice: 2.00,
+    outputPrice: 2.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 16384,
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Deprecated - Replacement for the GPT-3 curie and davinci base models'
+    notes: 'Deprecated - Replacement for the GPT-3 curie and davinci base models. Batch: $1.00/$1.00'
   },
   {
     modelId: 'gpt-4o-mini',

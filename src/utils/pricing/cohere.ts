@@ -9,7 +9,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 10.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 256000,
-        capabilities: ['text', 'agentic', 'multilingual', 'human-evaluations'],
+        capabilities: ['text', 'reasoning', 'enterprise', 'agents'],
         category: 'text',
         isLatest: true,
         notes: 'Most performant model to date, excelling at tool use, agents, RAG, and multilingual use cases'
@@ -22,7 +22,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.15,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'rag', 'tool-use', 'agents'],
+        capabilities: ['text', 'edge', 'commodity-gpu'],
         category: 'text',
         isLatest: true,
         notes: 'Small, fast update delivered in December 2024, excels at RAG, tool use, and complex reasoning'
@@ -61,7 +61,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 10.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'enterprise', 'rag', 'tools', 'multilingual'],
+        capabilities: ['text', 'reasoning'],
         category: 'text',
         isLatest: true,
         notes: 'Instruction-following conversational model for complex RAG workflows and multi-step tool use'
@@ -74,7 +74,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'rag', 'tools', 'agents'],
+        capabilities: ['text', 'efficiency', 'performance'],
         category: 'text',
         isLatest: true,
         notes: 'Update of Command R model delivered in August 2024'
@@ -122,11 +122,11 @@ export const COHERE_PRICING: ModelPricing[] = [
         modelId: 'command-light',
         modelName: 'Command Light',
         provider: 'Cohere',
-        inputPrice: 0.15,
+        inputPrice: 0.30,
         outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 4096,
-        capabilities: ['text', 'lightweight', 'fast'],
+        capabilities: ['text', 'fast'],
         category: 'text',
         isLatest: false,
         notes: 'Smaller, faster version of command, almost as capable but much faster'
@@ -152,7 +152,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['embedding', 'multimodal', 'semantic-search', 'rag'],
+        capabilities: ['embedding', 'multimodal', 'multilingual'],
         category: 'embedding',
         isLatest: true,
         notes: 'Leading multimodal embedding model for text and images, acts as intelligent retrieval engine for semantic search and RAG systems'
@@ -217,7 +217,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 2.00,
         unit: PricingUnit.PER_1K_TOKENS,
         contextWindow: 4096,
-        capabilities: ['rerank', 'semantic-search', 'retrieval'],
+        capabilities: ['search', 'reranking', 'multilingual'],
         category: 'rerank',
         isLatest: true,
         notes: 'Provides powerful semantic boost to search quality of any keyword or vector search system, $2.00 per 1K searches'

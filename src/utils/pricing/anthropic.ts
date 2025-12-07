@@ -10,10 +10,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        capabilities: ['text', 'reasoning', 'coding', 'agents'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta)'
+        notes: 'Latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta). Cached: $0.30. Batch: $1.50/$7.50'
     },
     {
         modelId: 'anthropic.claude-sonnet-4-5-v1:0',
@@ -36,10 +36,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 5.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        capabilities: ['text', 'fast'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude Haiku model with improved performance and capabilities'
+        notes: 'Latest Claude Haiku model with improved performance and capabilities. Cached: $0.10. Batch: $0.50/$2.50'
     },
     {
         modelId: 'anthropic.claude-haiku-4-5-v1:0',
@@ -54,6 +54,19 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         isLatest: true,
         notes: 'Claude Haiku 4.5 via AWS Bedrock - latest Claude Haiku model'
     },
+    {
+        modelId: 'claude-opus-4-5',
+        modelName: 'Claude Opus 4.5',
+        provider: 'Anthropic',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'reasoning', 'premium'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Latest Claude Opus model with enhanced capabilities. Cached: $0.50. Batch: $2.50/$12.50'
+    },
 
     // === Claude 4 Series ===
     {
@@ -64,10 +77,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 75.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        capabilities: ['text', 'reasoning'],
         category: 'text',
         isLatest: true,
-        notes: 'Most capable and intelligent Claude model yet - superior reasoning and advanced coding'
+        notes: 'Most capable and intelligent Claude model yet - superior reasoning and advanced coding. Cached: $1.50'
     },
     {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
@@ -90,10 +103,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 75.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        capabilities: ['text', 'reasoning'],
         category: 'text',
         isLatest: true,
-        notes: 'Previous flagship model with very high intelligence and capability'
+        notes: 'Previous flagship model with very high intelligence and capability. Cached: $1.50'
     },
     {
         modelId: 'anthropic.claude-opus-4-20250514-v1:0',
@@ -116,10 +129,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        capabilities: ['text', 'reasoning', 'coding'],
         category: 'text',
         isLatest: true,
-        notes: 'High-performance model with exceptional reasoning and efficiency (1M context beta available)'
+        notes: 'High-performance model with exceptional reasoning and efficiency (1M context beta available). Cached: $0.30'
     },
     {
         modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
@@ -144,10 +157,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        capabilities: ['text', 'reasoning', 'coding'],
         category: 'text',
         isLatest: false,
-        notes: 'High-performance model with early extended thinking (Oct 2024 cutoff, 64k output) - DEPRECATED'
+        notes: 'High-performance model with early extended thinking (Oct 2024 cutoff, 64k output) - DEPRECATED. Cached: $0.30'
     },
     {
         modelId: 'anthropic.claude-3-7-sonnet-20250219-v1:0',
@@ -211,10 +224,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 4.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        capabilities: ['text', 'fast'],
         category: 'text',
         isLatest: false,
-        notes: 'Fast Claude model (July 2024 cutoff, 8k output) - superseded by Haiku 4.5'
+        notes: 'Fast Claude model (July 2024 cutoff, 8k output) - superseded by Haiku 4.5. Cached: $0.08'
     },
     {
         modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
@@ -265,10 +278,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 1.25,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multilingual'],
+        capabilities: ['text', 'fast'],
         category: 'text',
         isLatest: false,
-        notes: 'Fast and compact model (Aug 2023 cutoff, 4k output)'
+        notes: 'Fast and compact model (Aug 2023 cutoff, 4k output). Cached: $0.03'
     },
     {
         modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
