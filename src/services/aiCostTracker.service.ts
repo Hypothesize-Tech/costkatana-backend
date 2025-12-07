@@ -57,77 +57,15 @@ class CircuitBreaker {
     }
 }
 
-// Dead letter queue for failed operations
-class DeadLetterQueue {
-    private queue: Array<{
-        request: any;
-        response: any;
-        userId: string;
-        metadata?: any;
-        timestamp: number;
-        retryCount: number;
-    }> = [];
-    private processing = false;
-
-    add(item: { request: any; response: any; userId: string; metadata?: any }): void {
-        this.queue.push({
-            ...item,
-            timestamp: Date.now(),
-            retryCount: 0
-        });
-        
-        if (!this.processing) {
-            this.processQueue();
-        }
-    }
-
-    private async processQueue(): Promise<void> {
-        this.processing = true;
-        
-        while (this.queue.length > 0) {
-            const item = this.queue.shift()!;
-            
-            try {
-                // Retry with exponential backoff
-                const delay = Math.min(1000 * Math.pow(2, item.retryCount), 30000);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                
-                await AICostTrackerService.trackRequestInternal(
-                    item.request,
-                    item.response,
-                    item.userId,
-                    item.metadata
-                );
-                
-                loggingService.info('Successfully processed dead letter queue item', {
-                    userId: item.userId,
-                    retryCount: item.retryCount
-                });
-            } catch (error) {
-                item.retryCount++;
-                
-                if (item.retryCount < 3 && Date.now() - item.timestamp < 300000) { // 5 minutes
-                    this.queue.push(item);
-                } else {
-                    loggingService.error('Dead letter queue item permanently failed', {
-                        userId: item.userId,
-                        retryCount: item.retryCount,
-                        error: error instanceof Error ? error.message : String(error)
-                    });
-                }
-            }
-        }
-        
-        this.processing = false;
-    }
-}
+// Import BullMQ-based DeadLetterQueue
+import { DeadLetterQueue } from '../queues/deadLetter.queue';
 
 export class AICostTrackerService {
     private static config: TrackerConfig | null = null;
     private static initialized = false;
     private static configPromise: Promise<TrackerConfig> | null = null;
     private static circuitBreaker = new CircuitBreaker();
-    private static deadLetterQueue = new DeadLetterQueue();
+    private static deadLetterQueueInitialized = false;
     
     // Pre-computed provider mappings for performance
     private static readonly PROVIDER_MAP = new Map<string, AIProvider>([
@@ -324,7 +262,7 @@ export class AICostTrackerService {
             this.performanceMetrics.failedRequests++;
             
             // Async error logging and dead letter queue
-            setImmediate(() => {
+            setImmediate(async () => {
                 loggingService.error('Usage tracking failed', {
                     error: error instanceof Error ? error.message : String(error),
                     userId,
@@ -332,8 +270,35 @@ export class AICostTrackerService {
                     metadata
                 });
                 
+                // Ensure dead letter queue is initialized
+                if (!this.deadLetterQueueInitialized) {
+                    await DeadLetterQueue.initialize();
+                    // Register handler for cost tracking retries
+                    DeadLetterQueue.registerHandler('track-cost', async (data) => {
+                        await AICostTrackerService.trackRequestInternal(
+                            data.request,
+                            data.response,
+                            data.userId,
+                            data.metadata
+                        );
+                    });
+                    this.deadLetterQueueInitialized = true;
+                }
+                
                 // Add to dead letter queue for retry
-                this.deadLetterQueue.add({ request, response, userId, metadata });
+                await DeadLetterQueue.add({
+                    operation: 'track-cost',
+                    request,
+                    response,
+                    userId,
+                    metadata,
+                    originalError: error instanceof Error ? error.message : String(error),
+                    timestamp: Date.now()
+                }).catch(err => {
+                    loggingService.error('Failed to add to dead letter queue', {
+                        error: err instanceof Error ? err.message : String(err)
+                    });
+                });
             });
             
             // Don't throw - allow request to continue
@@ -467,6 +432,104 @@ export class AICostTrackerService {
                 Usage.create(usageRecord),
                 this.updateUserUsage(userId, estimatedCost, finalTotalTokens)
             ]);
+
+            // 🌊 Real-time cost streaming to dashboard (non-blocking, P0 feature)
+            setImmediate(async () => {
+                try {
+                    const { costStreamingService } = await import('./costStreaming.service');
+                    const { UnexplainedCostService } = await import('./unexplainedCost.service');
+                    const { TrueCostService } = await import('./trueCost.service');
+
+                    // 🎯 P0: Calculate true cost (API + infrastructure)
+                    // Extract requestId from metadata (could be in metadata.requestId or metadata.metadata.requestId)
+                    const requestId = (metadata as any)?.requestId || 
+                                    (metadata as any)?.metadata?.requestId || 
+                                    `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    const trueCost = await TrueCostService.calculateTrueCost({
+                        requestId,
+                        userId,
+                        timestamp: new Date(),
+                        model: request.model,
+                        provider: providerString,
+                        inputTokens: finalPromptTokens,
+                        outputTokens: finalCompletionTokens,
+                        totalTokens: finalTotalTokens,
+                        latencyMs: metadata?.metadata?.executionTime || 1000,
+                        vectorDBQueries: 0, // Would be tracked separately
+                        embeddingsGenerated: 0,
+                        cacheHits: 0, // Would come from cache service
+                        cacheMisses: 0,
+                        logVolumeBytes: JSON.stringify(request).length + JSON.stringify(response).length,
+                        responseBytes: JSON.stringify(response).length,
+                        projectId: metadata?.projectId,
+                        workflowId: metadata?.workflowId
+                    });
+
+                    // 🎯 P1: AI-powered automatic feature attribution
+                    const featureAttribution = await UnexplainedCostService.detectAndAttributeFeature(
+                        userId,
+                        {
+                            operation: metadata?.workflowName || metadata?.endpoint || 'ai.request',
+                            model: request.model,
+                            cost: estimatedCost,
+                            tokens: finalTotalTokens,
+                            metadata: {
+                                service: metadata?.service,
+                                workflowId: metadata?.workflowId,
+                                workflowName: metadata?.workflowName,
+                                promptTemplateId: metadata?.promptTemplateId,
+                                projectId: metadata?.projectId,
+                                agentId: (metadata?.metadata as any)?.agentId,
+                                agentName: (metadata?.metadata as any)?.agentName
+                            }
+                        }
+                    );
+
+                    costStreamingService.emitCostEvent({
+                        eventType: 'cost_tracked',
+                        timestamp: new Date(),
+                        userId,
+                        workspaceId: metadata?.metadata?.workspace?.id,
+                        data: {
+                            model: request.model,
+                            vendor: providerString,
+                            cost: estimatedCost,
+                            tokens: finalTotalTokens,
+                            operation: featureAttribution.feature,
+                            template: metadata?.promptTemplateId,
+                            metadata: {
+                                trueCost: trueCost.totalCost, // 🎯 P0: Include true cost in metadata
+                                promptTokens: finalPromptTokens,
+                                completionTokens: finalCompletionTokens,
+                                service: metadata?.service,
+                                workflowId: metadata?.workflowId,
+                                projectId: metadata?.projectId,
+                                // 🎯 P0: True cost breakdown
+                                trueCostBreakdown: {
+                                    apiCost: trueCost.apiCost,
+                                    infrastructureCost: trueCost.totalCost - trueCost.apiCost,
+                                    vectorDBCost: trueCost.vectorDBCost,
+                                    storageCost: trueCost.storageCost,
+                                    networkCost: trueCost.networkCost,
+                                    computeCost: trueCost.computeCost,
+                                    cachingCost: trueCost.cachingCost,
+                                    loggingCost: trueCost.loggingCost,
+                                    observabilityCost: trueCost.observabilityCost
+                                },
+                                // 🎯 P1: Feature attribution metadata
+                                featureCategory: featureAttribution.category,
+                                featureConfidence: featureAttribution.confidence,
+                                featureAttribution: featureAttribution.metadata
+                            }
+                        }
+                    });
+                } catch (streamError) {
+                    // Fail silently - cost streaming is non-critical
+                    loggingService.debug('Cost streaming failed (non-critical)', {
+                        error: streamError instanceof Error ? streamError.message : String(streamError)
+                    });
+                }
+            });
 
             // Handle session replay if enabled (non-blocking)
             if (this.config?.tracking?.enableSessionReplay) {

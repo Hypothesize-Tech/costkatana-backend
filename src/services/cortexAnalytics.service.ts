@@ -8,7 +8,7 @@ import { loggingService } from './logging.service';
 import { AIRouterService } from './aiRouter.service';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
-import { estimateCost } from '../utils/pricing';
+import { PricingRegistryService } from './pricingRegistry.service';
 
 export interface CortexImpactMetrics {
     tokenReduction: {
@@ -240,68 +240,59 @@ Return ONLY a JSON object with these exact fields:
     }
     
     /**
-     * Calculate cost impact
+     * Calculate cost impact using PricingRegistry (single source of truth)
      */
     private static calculateCostImpact(
         tokenMetrics: CortexImpactMetrics['tokenReduction'],
         model: string
     ): CortexImpactMetrics['costImpact'] {
-        // Use the same estimateCost function for consistency
-        let provider = 'OpenAI'; // Default provider
-        
-        // Determine provider from model name
-        if (model.includes('claude')) provider = 'Anthropic';
-        else if (model.includes('nova')) provider = 'AWS Bedrock';
-        else if (model.includes('gpt')) provider = 'OpenAI';
-        else if (model.includes('gemini')) provider = 'Google AI';
-        
-        // Calculate costs using the unified pricing service
-        // For original: assume typical prompt (withoutCortex) and completion (150 tokens)
-        const originalPromptTokens = Math.round(tokenMetrics.withoutCortex * 0.7); // Assume 70% is prompt
-        const originalCompletionTokens = Math.round(tokenMetrics.withoutCortex * 0.3); // Assume 30% is completion
-        
-        let originalCostEstimate;
         try {
-            originalCostEstimate = estimateCost(
-                originalPromptTokens,
-                originalCompletionTokens,
-                provider,
-                model
-            );
+            const pricingRegistry = PricingRegistryService.getInstance();
+            
+            // For original: assume typical prompt (withoutCortex) and completion (150 tokens)
+            const originalPromptTokens = Math.round(tokenMetrics.withoutCortex * 0.7); // Assume 70% is prompt
+            const originalCompletionTokens = Math.round(tokenMetrics.withoutCortex * 0.3); // Assume 30% is completion
+            
+            const originalCostEstimate = pricingRegistry.calculateCost({
+                inputTokens: originalPromptTokens,
+                outputTokens: originalCompletionTokens,
+                modelId: model
+            });
+            
+            // For optimized: all tokens are in the response (no additional completion needed)
+            const optimizedCostEstimate = pricingRegistry.calculateCost({
+                inputTokens: 0, // No prompt tokens for optimized
+                outputTokens: tokenMetrics.withCortex, // All tokens are output
+                modelId: model
+            });
+            
+            const originalCost = originalCostEstimate?.totalCost ?? 0;
+            const optimizedCost = optimizedCostEstimate?.totalCost ?? 0;
+            const costSavings = originalCost - optimizedCost;
+            const savingsPercentage = originalCost > 0 
+                ? (costSavings / originalCost) * 100 
+                : 0;
+            
+            return {
+                estimatedCostWithoutCortex: Math.round(originalCost * 10000) / 10000,
+                actualCostWithCortex: Math.round(optimizedCost * 10000) / 10000,
+                costSavings: Math.round(costSavings * 10000) / 10000,
+                savingsPercentage: Math.round(savingsPercentage * 10) / 10
+            };
         } catch (error) {
-            // Fallback pricing if model not found
-            originalCostEstimate = {
-                totalCost: (tokenMetrics.withoutCortex / 1_000_000) * 0.75 // Default fallback
+            // Fallback for unknown models
+            const fallbackOriginal = (tokenMetrics.withoutCortex / 1_000_000) * 0.75;
+            const fallbackOptimized = (tokenMetrics.withCortex / 1_000_000) * 0.60;
+            const costSavings = fallbackOriginal - fallbackOptimized;
+            const savingsPercentage = fallbackOriginal > 0 ? (costSavings / fallbackOriginal) * 100 : 0;
+            
+            return {
+                estimatedCostWithoutCortex: Math.round(fallbackOriginal * 10000) / 10000,
+                actualCostWithCortex: Math.round(fallbackOptimized * 10000) / 10000,
+                costSavings: Math.round(costSavings * 10000) / 10000,
+                savingsPercentage: Math.round(savingsPercentage * 10) / 10
             };
         }
-        
-        // For optimized: all tokens are in the response (no additional completion needed)
-        let optimizedCostEstimate;
-        try {
-            optimizedCostEstimate = estimateCost(
-                0, // No prompt tokens for optimized
-                tokenMetrics.withCortex, // All tokens are output
-                provider,
-                model
-            );
-        } catch (error) {
-            // Fallback pricing if model not found
-            optimizedCostEstimate = {
-                totalCost: (tokenMetrics.withCortex / 1_000_000) * 0.60 // Default fallback for output
-            };
-        }
-        
-        const costSavings = originalCostEstimate.totalCost - optimizedCostEstimate.totalCost;
-        const savingsPercentage = originalCostEstimate.totalCost > 0 
-            ? (costSavings / originalCostEstimate.totalCost) * 100 
-            : 0;
-        
-        return {
-            estimatedCostWithoutCortex: Math.round(originalCostEstimate.totalCost * 10000) / 10000,
-            actualCostWithCortex: Math.round(optimizedCostEstimate.totalCost * 10000) / 10000,
-            costSavings: Math.round(costSavings * 10000) / 10000,
-            savingsPercentage: Math.round(savingsPercentage * 10) / 10
-        };
     }
     
     /**

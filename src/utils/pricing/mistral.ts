@@ -49,7 +49,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 5.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 40000,
-        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        capabilities: ['text', 'reasoning'],
         category: 'reasoning',
         isLatest: true,
         notes: 'Our frontier-class multimodal reasoning model released September 2025 (v25.09).'
@@ -166,7 +166,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 3.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 0,
-        capabilities: ['ocr', 'document-understanding', 'annotations', 'text-extraction'],
+        capabilities: ['ocr', 'multimodal', 'text'],
         category: 'document',
         isLatest: true,
         notes: 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.'
@@ -218,7 +218,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 6.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'reasoning', 'complex-tasks', 'high-complexity'],
+        capabilities: ['text', 'agentic', 'multimodal', 'reasoning'],
         category: 'text',
         isLatest: true,
         notes: 'Our top-tier large model for high-complexity tasks with the latest version released November 2024.'
@@ -280,10 +280,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         modelName: 'Mistral Embed',
         provider: 'Mistral AI',
         inputPrice: 0.1,
-        outputPrice: 0.1,
+        outputPrice: 0.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 8192,
-        capabilities: ['embedding', 'text', 'semantic'],
+        capabilities: ['text', 'embedding'],
         category: 'embedding',
         isLatest: true,
         notes: 'Our state-of-the-art semantic for extracting representation of text extracts.'
@@ -293,10 +293,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         modelName: 'Codestral Embed',
         provider: 'Mistral AI',
         inputPrice: 0.15,
-        outputPrice: 0.15,
+        outputPrice: 0.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 8192,
-        capabilities: ['embedding', 'code', 'semantic'],
+        capabilities: ['coding', 'embedding'],
         category: 'embedding',
         isLatest: true,
         notes: 'Our state-of-the-art semantic for extracting representation of code extracts.'
@@ -350,7 +350,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 1.5,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 40000,
-        capabilities: ['text', 'reasoning', 'thinking', 'domain-specific', 'multilingual', 'multimodal'],
+        capabilities: ['text', 'reasoning', 'lightweight'],
         category: 'reasoning',
         isLatest: true,
         notes: 'Our small multimodal reasoning model released September 2025 (v25.09).'
@@ -389,7 +389,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.1,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 32000,
-        capabilities: ['audio', 'instruct', 'multimodal'],
+        capabilities: ['voice', 'text'],
         category: 'audio',
         isLatest: true,
         notes: 'Our first model with audio input capabilities for instruct use cases.'
@@ -415,7 +415,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.1,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 32000,
-        capabilities: ['audio', 'instruct', 'mini'],
+        capabilities: ['voice', 'text'],
         category: 'audio',
         isLatest: true,
         notes: 'A mini version of our first audio input model.'
@@ -467,7 +467,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.3,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'multimodal', 'multilingual', 'open-source'],
+        capabilities: ['text', 'agentic', 'multimodal', 'lightweight'],
         category: 'multimodal',
         isLatest: true,
         notes: 'An update to our previous small model, released June 2025.'
@@ -506,7 +506,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.3,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['code', 'agents', 'open-source', 'codebase-exploration', 'multi-file-editing'],
+        capabilities: ['coding', 'agentic', 'text', 'lightweight'],
         category: 'code',
         isLatest: true,
         notes: 'An update to our open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.'

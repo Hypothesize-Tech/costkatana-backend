@@ -42,6 +42,10 @@ declare global {
                 outputTokens?: number;
                 cost?: number;
                 isFailoverRequest?: boolean;
+                workspaceId?: string;
+                simulationId?: string;
+                estimatedCost?: number;
+                budgetReservationId?: string;
                 // CPI system properties
                 availableProviders?: string[];
                 selectedModel?: string;

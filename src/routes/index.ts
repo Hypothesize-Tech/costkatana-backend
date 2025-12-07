@@ -66,6 +66,13 @@ import communityRoutes from './community.routes';
 import automationRoutes from './automation.routes';
 import billingRoutes from './billing.routes';
 import paymentWebhookRoutes from './paymentWebhook.routes';
+import brainRoutes from './brain.routes';
+import costStreamingRoutes from './costStreaming.routes';
+import costIntelligenceRoutes from './costIntelligence.routes';
+import costIntelligenceConfigRoutes from './costIntelligenceConfig.routes';
+import agentGovernanceRoutes from './agentGovernance.routes';
+import dataNetworkEffectsRoutes from './dataNetworkEffects.routes';
+import proactiveSuggestionsRoutes from './proactiveSuggestions.routes';
 
 const router = Router();
 
@@ -148,5 +155,12 @@ router.use('/community', communityRoutes);
 router.use('/automation', automationRoutes);
 router.use('/billing', billingRoutes);
 router.use('/webhooks/payment', paymentWebhookRoutes);
+router.use('/brain', brainRoutes);
+router.use('/cost-streaming', costStreamingRoutes);
+router.use('/cost-intelligence', costIntelligenceRoutes);
+router.use('/cost-intelligence-config', costIntelligenceConfigRoutes);
+router.use('/agent-governance', agentGovernanceRoutes);
+router.use('/data-network-effects', dataNetworkEffectsRoutes);
+router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
 
 export const apiRouter = router;

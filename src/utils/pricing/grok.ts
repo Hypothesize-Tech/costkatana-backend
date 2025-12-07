@@ -1,7 +1,34 @@
 import { ModelPricing, PricingUnit } from './types';
 
 export const GROK_PRICING: ModelPricing[] = [
-  // === Grok 4 Fast Series (Latest) ===
+  // === Grok 4.1 Fast Series (Latest) ===
+  {
+    modelId: 'grok-4-1-fast-reasoning',
+    modelName: 'Grok 4.1 Fast Reasoning',
+    provider: 'xAI',
+    inputPrice: 0.20,
+    outputPrice: 0.50,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 2000000,
+    capabilities: ['text', 'vision', 'reasoning', 'agents', 'tools'],
+    category: 'text',
+    isLatest: true,
+    notes: 'Latest cost-efficient reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
+  },
+  {
+    modelId: 'grok-4-1-fast-non-reasoning',
+    modelName: 'Grok 4.1 Fast Non-Reasoning',
+    provider: 'xAI',
+    inputPrice: 0.20,
+    outputPrice: 0.50,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 2000000,
+    capabilities: ['text', 'vision', 'fast'],
+    category: 'text',
+    isLatest: true,
+    notes: 'Latest cost-efficient non-reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
+  },
+  // === Grok 4 Fast Series ===
   {
     modelId: 'grok-4-fast-reasoning',
     modelName: 'Grok 4 Fast Reasoning',
@@ -10,10 +37,10 @@ export const GROK_PRICING: ModelPricing[] = [
     outputPrice: 0.50,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2000000,
-    capabilities: ['text', 'reasoning', 'function-calling', 'structured-outputs'],
+    capabilities: ['text', 'vision', 'reasoning', 'agents'],
     category: 'text',
     isLatest: true,
-    notes: 'Latest cost-efficient reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
+    notes: 'Cost-efficient reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
   },
   {
     modelId: 'grok-4-fast-non-reasoning',
@@ -23,10 +50,10 @@ export const GROK_PRICING: ModelPricing[] = [
     outputPrice: 0.50,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2000000,
-    capabilities: ['text', 'function-calling', 'structured-outputs'],
+    capabilities: ['text', 'vision', 'fast'],
     category: 'text',
     isLatest: true,
-    notes: 'Latest cost-efficient non-reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
+    notes: 'Cost-efficient non-reasoning model with 2M context window. Lightning fast, low cost. 4M TPM, 480 RPM rate limits'
   },
   {
     modelId: 'grok-code-fast-1',

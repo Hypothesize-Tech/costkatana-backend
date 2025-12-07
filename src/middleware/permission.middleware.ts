@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { permissionService, Permissions } from '../services/permission.service';
 import { AppError } from './error.middleware';
 import { loggingService } from '../services/logging.service';
+import { agentIdentityService } from '../services/agentIdentity.service';
 
 // Extend Express Request type to include workspace info
 declare global {
@@ -16,10 +17,50 @@ declare global {
 
 /**
  * Middleware to require specific permission
+ * Supports both user and agent RBAC
  */
 export const requirePermission = (permission: keyof Permissions) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
+      // Check if this is an agent request
+      const isAgentRequest = req.gatewayContext?.isAgentRequest;
+      
+      if (isAgentRequest && req.gatewayContext?.agentToken) {
+        loggingService.info('Agent permission check', {
+          component: 'PermissionMiddleware',
+          operation: 'requirePermission',
+          agentId: req.gatewayContext.agentId,
+          permission
+        });
+        
+        // Agent RBAC check
+        const agentIdentity = await agentIdentityService.authenticateAgent(req.gatewayContext.agentToken);
+        if (!agentIdentity) {
+          throw new AppError('Agent authentication failed', 401);
+        }
+        
+        // Map permission to agent action
+        const action = mapPermissionToAgentAction(permission);
+        const permissionResult = await agentIdentityService.checkPermission(
+          agentIdentity,
+          action
+        );
+        
+        if (!permissionResult.allowed) {
+          loggingService.warn('Agent permission denied', {
+            agentId: agentIdentity.agentId,
+            permission,
+            action,
+            reason: permissionResult.reason
+          });
+          throw new AppError(`Agent permission denied: ${permissionResult.reason}`, 403);
+        }
+        
+        next();
+        return;
+      }
+      
+      // Standard user permission check
       const userId = (req as any).user?.id;
       const workspaceId = req.workspaceId || (req as any).user?.workspaceId;
 
@@ -53,6 +94,23 @@ export const requirePermission = (permission: keyof Permissions) => {
     }
   };
 };
+
+/**
+ * Map workspace permission to agent action
+ */
+function mapPermissionToAgentAction(permission: keyof Permissions): string {
+  const permissionActionMap: Record<string, string> = {
+    canManageBilling: 'write',
+    canManageTeam: 'admin',
+    canManageProjects: 'write',
+    canViewAnalytics: 'read',
+    canManageApiKeys: 'admin',
+    canManageIntegrations: 'write',
+    canExportData: 'read'
+  };
+  
+  return permissionActionMap[permission] || 'read';
+}
 
 /**
  * Middleware to require specific role(s) - exact match

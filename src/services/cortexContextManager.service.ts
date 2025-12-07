@@ -323,6 +323,34 @@ export class CortexContextManagerService {
             this.updateTopicFlow(context, extraction.topicShift);
         }
 
+        // Apply relevance decay to all entities
+        this.applyRelevanceDecay(context);
+        
+        // Detect context drift if we have previous state
+        if (context.totalInteractions > 0) {
+            const previousContext = { ...context }; // Shallow copy for comparison
+            const driftAnalysis = await this.detectContextDrift(previousContext, context);
+            
+            if (driftAnalysis.driftDetected) {
+                loggingService.info('Context drift detected', {
+                    userId,
+                    sessionId,
+                    driftScore: driftAnalysis.driftScore,
+                    reason: driftAnalysis.reason
+                });
+                
+                // Prune stale entities
+                const pruneResult = this.pruneStaleEntities(context, 0.3);
+                
+                loggingService.info('Stale entities pruned', {
+                    userId,
+                    sessionId,
+                    pruned: pruneResult.pruned,
+                    remaining: pruneResult.remaining
+                });
+            }
+        }
+
         // Update metadata
         context.lastAccessed = new Date();
         context.totalInteractions++;
@@ -705,6 +733,188 @@ export class CortexContextManagerService {
             to: currentTopic,
             confidence
         };
+    }
+
+    /**
+     * Detect context drift between conversation turns
+     */
+    private async detectContextDrift(
+        previousContext: ConversationContext,
+        currentContext: ConversationContext
+    ): Promise<{
+        driftDetected: boolean;
+        driftScore: number;
+        stalentities: string[];
+        reason: string;
+    }> {
+        try {
+            // Get last N entities from previous context
+            const previousEntities = Array.from(previousContext.entities.values())
+                .sort((a, b) => b.lastMentioned.getTime() - a.lastMentioned.getTime())
+                .slice(0, 10); // Last 10 entities
+            
+            const currentEntities = Array.from(currentContext.entities.values())
+                .sort((a, b) => b.lastMentioned.getTime() - a.lastMentioned.getTime())
+                .slice(0, 10);
+            
+            if (previousEntities.length === 0 || currentEntities.length === 0) {
+                return {
+                    driftDetected: false,
+                    driftScore: 0,
+                    stalentities: [],
+                    reason: 'Insufficient entity data'
+                };
+            }
+            
+            // Calculate semantic similarity between entity sets
+            const driftScore = await this.calculateDriftScore(previousEntities, currentEntities);
+            
+            // Identify stale entities (not mentioned in last N turns)
+            const now = Date.now();
+            const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+            const staleEntities = Array.from(currentContext.entities.values())
+                .filter(entity => (now - entity.lastMentioned.getTime()) > STALE_THRESHOLD_MS)
+                .map(entity => entity.id);
+            
+            const driftDetected = driftScore < 0.7; // Low similarity indicates drift
+            
+            loggingService.debug('Context drift detection', {
+                driftScore,
+                driftDetected,
+                staleEntitiesCount: staleEntities.length,
+                previousEntityCount: previousEntities.length,
+                currentEntityCount: currentEntities.length
+            });
+            
+            return {
+                driftDetected,
+                driftScore,
+                stalentities: staleEntities, // Note: keeping typo for backward compatibility
+                reason: driftDetected ? 
+                    `Low semantic similarity (${driftScore.toFixed(2)}) between conversation turns` :
+                    'Context is coherent'
+            };
+            
+        } catch (error) {
+            loggingService.error('Error detecting context drift', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            return {
+                driftDetected: false,
+                driftScore: 0,
+                stalentities: [],
+                reason: 'Error during drift detection'
+            };
+        }
+    }
+
+    /**
+     * Calculate drift score using semantic similarity of entities
+     */
+    private async calculateDriftScore(
+        previousEntities: ContextEntity[],
+        currentEntities: ContextEntity[]
+    ): Promise<number> {
+        try {
+            // Create entity name sets for comparison
+            const previousNames = previousEntities.map(e => e.name.toLowerCase());
+            const currentNames = currentEntities.map(e => e.name.toLowerCase());
+            
+            // Calculate Jaccard similarity (overlap coefficient)
+            const previousSet = new Set(previousNames);
+            const currentSet = new Set(currentNames);
+            
+            const intersection = new Set([...previousSet].filter(x => currentSet.has(x)));
+            const union = new Set([...previousSet, ...currentSet]);
+            
+            if (union.size === 0) {
+                return 0;
+            }
+            
+            const jaccardSimilarity = intersection.size / union.size;
+            
+            // Weight by entity relevance
+            let weightedScore = 0;
+            let totalWeight = 0;
+            
+            for (const entity of currentEntities) {
+                if (previousSet.has(entity.name.toLowerCase())) {
+                    weightedScore += entity.relevance;
+                    totalWeight += 1;
+                }
+            }
+            
+            const relevanceWeightedScore = totalWeight > 0 ? weightedScore / totalWeight : 0;
+            
+            // Combine Jaccard similarity with relevance-weighted score
+            const finalScore = (jaccardSimilarity * 0.6) + (relevanceWeightedScore * 0.4);
+            
+            return finalScore;
+            
+        } catch (error) {
+            loggingService.error('Error calculating drift score', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return 0.5; // Neutral score on error
+        }
+    }
+
+    /**
+     * Prune stale entities from context
+     */
+    private pruneStaleEntities(
+        context: ConversationContext,
+        relevanceThreshold: number = 0.3
+    ): {
+        pruned: number;
+        remaining: number;
+    } {
+        const initialSize = context.entities.size;
+        const entitiesToRemove: string[] = [];
+        
+        for (const [id, entity] of context.entities) {
+            if (entity.relevance < relevanceThreshold) {
+                entitiesToRemove.push(id);
+            }
+        }
+        
+        // Remove low-relevance entities
+        for (const id of entitiesToRemove) {
+            context.entities.delete(id);
+        }
+        
+        const prunedCount = initialSize - context.entities.size;
+        
+        loggingService.debug('Pruned stale entities', {
+            pruned: prunedCount,
+            remaining: context.entities.size,
+            threshold: relevanceThreshold
+        });
+        
+        return {
+            pruned: prunedCount,
+            remaining: context.entities.size
+        };
+    }
+
+    /**
+     * Apply relevance decay to entities (call every turn)
+     */
+    private applyRelevanceDecay(context: ConversationContext): void {
+        const DECAY_FACTOR = 0.9; // 10% decay per turn
+        
+        for (const [id, entity] of context.entities) {
+            // Optionally, you could use 'id' for logging.
+            // For illustration, we'll log the decay for each entity:
+            loggingService.debug('Applying relevance decay', {
+                entityId: id,
+                oldRelevance: entity.relevance,
+                newRelevance: entity.relevance * DECAY_FACTOR
+            });
+            // Decay relevance for entities not mentioned in current turn
+            entity.relevance *= DECAY_FACTOR;
+        }
     }
 
     private createWorkingMemory(frame: CortexFrame): ContextMemoryFrame[] {

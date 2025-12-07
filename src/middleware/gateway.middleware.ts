@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import { loggingService } from '../services/logging.service';
 import { User } from '../models/User';
 import { AuthService } from '../services/auth.service';
@@ -7,6 +8,7 @@ import { KeyVaultService } from '../services/keyVault.service';
 import { v4 as uuidv4 } from 'uuid';
 import { GuardrailsService } from '../services/guardrails.service';
 import { cacheService } from '../services/cache.service';
+import { agentIdentityService } from '../services/agentIdentity.service';
 
 // Extend Request interface to include gateway-specific properties
 declare global {
@@ -17,7 +19,7 @@ declare global {
                 requestId?: string; // CostKatana-Request-Id for feedback tracking
                 targetUrl?: string;
                 projectId?: string; // CostKatana-Project-Id for project tracking
-                authMethodOverride?: 'gateway' | 'standard'; // CostKatana-Auth-Method override
+                authMethodOverride?: 'gateway' | 'standard' | 'agent'; // CostKatana-Auth-Method override
                 cacheEnabled?: boolean;
                 retryEnabled?: boolean;
                 budgetId?: string;
@@ -59,6 +61,9 @@ declare global {
                 inputTokens?: number;
                 outputTokens?: number;
                 cost?: number;
+                workspaceId?: string;
+                simulationId?: string;
+                estimatedCost?: number;
 
                 // 🚀 CORTEX PROCESSING PROPERTIES
                 cortexEnabled?: boolean;
@@ -79,8 +84,14 @@ declare global {
                 cortexHybridExecution?: boolean;
                 cortexFragmentCache?: boolean;
                 cortexMetadata?: any;
-                // Auto-track configuration
                 autoTrack?: boolean;
+                budgetReservationId?: string;
+                isAgentRequest?: boolean;
+                agentId?: string;
+                agentIdentityId?: string;
+                agentToken?: string;
+                agentType?: string;
+                agentGovernanceEnabled?: boolean;
             };
         }
     }
@@ -598,6 +609,77 @@ export const gatewayAuth = async (req: any, res: Response, next: NextFunction): 
                 // Process gateway headers and continue
                 processGatewayHeaders(req, res, next);
                 return;
+            } else if (authValue.startsWith('ck-agent-')) {
+                loggingService.info('Agent token detected, processing agent authentication', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'agent_token_detected',
+                    authType: 'agent_token'
+                });
+                
+                // Handle agent authentication
+                const agentIdentity = await agentIdentityService.authenticateAgent(authValue);
+                if (!agentIdentity) {
+                    loggingService.warn('Agent authentication failed', {
+                        component: 'GatewayMiddleware',
+                        operation: 'gatewayAuth',
+                        type: 'gateway_authentication',
+                        step: 'agent_auth_failed'
+                    });
+                    res.status(401).json({
+                        error: 'Invalid agent token',
+                        message: 'Agent authentication failed'
+                    });
+                    return;
+                }
+                
+                // Get user associated with agent
+                user = await User.findById(agentIdentity.userId);
+                if (!user) {
+                    loggingService.warn('User not found for agent', {
+                        component: 'GatewayMiddleware',
+                        operation: 'gatewayAuth',
+                        agentId: agentIdentity.agentId,
+                        userId: agentIdentity.userId.toString()
+                    });
+                    res.status(401).json({
+                        error: 'Invalid agent token',
+                        message: 'User not found for agent'
+                    });
+                    return;
+                }
+                
+                userId = user._id.toString();
+                
+                // Add agent context to request
+                req.gatewayContext = {
+                    startTime,
+                    userId,
+                    authMethodOverride: 'agent',
+                    isAgentRequest: true,
+                    agentId: agentIdentity.agentId,
+                    agentIdentityId: (agentIdentity._id as mongoose.Types.ObjectId).toString(),
+                    agentToken: authValue,
+                    agentType: agentIdentity.agentType,
+                    agentGovernanceEnabled: true,
+                    workspaceId: agentIdentity.workspaceId?.toString(),
+                    organizationId: agentIdentity.organizationId?.toString()
+                };
+                
+                loggingService.info('Agent authenticated successfully', {
+                    component: 'GatewayMiddleware',
+                    operation: 'gatewayAuth',
+                    type: 'gateway_authentication',
+                    step: 'agent_auth_success',
+                    agentId: agentIdentity.agentId,
+                    agentType: agentIdentity.agentType,
+                    userId
+                });
+                
+                // Process gateway headers and continue
+                processGatewayHeaders(req, res, next);
+                return;
             } else {
                 token = authValue;
                 loggingService.info('JWT token found in CostKatana-Auth header', {
@@ -986,7 +1068,8 @@ export const processGatewayHeaders = (req: Request, res: Response, next: NextFun
     // 🧩 FRAGMENT CACHE HEADERS
     context.cortexFragmentCache = req.headers['costkatana-cortex-fragment-cache'] !== 'false';
     
-    // Process cache-specific headers
+    // Process cache-specific headers (ENABLED BY DEFAULT for cost optimization)
+    // Opt-out pattern: users must explicitly disable with header = 'false'
     context.semanticCacheEnabled = req.headers['costkatana-semantic-cache-enabled'] !== 'false';
     context.deduplicationEnabled = req.headers['costkatana-deduplication-enabled'] !== 'false';
     const similarityThreshold = parseFloat(req.headers['costkatana-similarity-threshold'] as string);

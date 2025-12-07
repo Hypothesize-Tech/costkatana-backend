@@ -6,27 +6,27 @@ export const OTHERS_PRICING: ModelPricing[] = [
         modelId: 'deepseek-chat',
         modelName: 'DeepSeek Chat',
         provider: 'DeepSeek',
-        inputPrice: 0.14,
-        outputPrice: 0.28,
+        inputPrice: 0.28,
+        outputPrice: 0.42,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 32768,
-        capabilities: ['text', 'instruct'],
+        capabilities: ['text', 'instruct', 'coding', 'json', 'functions'],
         category: 'text',
         isLatest: true,
-        notes: 'DeepSeek Chat model'
+        notes: 'DeepSeek Chat model. Cached: $0.028'
     },
     {
-        modelId: 'deepseek-coder',
-        modelName: 'DeepSeek Coder',
+        modelId: 'deepseek-reasoner',
+        modelName: 'DeepSeek Reasoner',
         provider: 'DeepSeek',
-        inputPrice: 0.14,
-        outputPrice: 0.28,
+        inputPrice: 0.28,
+        outputPrice: 0.42,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 32768,
-        capabilities: ['text', 'code'],
-        category: 'code',
+        capabilities: ['text', 'reasoning', 'thinking'],
+        category: 'reasoning',
         isLatest: true,
-        notes: 'DeepSeek Coder model for code generation'
+        notes: 'DeepSeek Reasoner model. Cached: $0.028'
     },
 
     // Grok Models

@@ -170,9 +170,33 @@ export class UsageService {
             }
             if (filters.startDate || filters.endDate) {
                 query.createdAt = {};
-                if (filters.startDate) query.createdAt.$gte = filters.startDate;
-                if (filters.endDate) query.createdAt.$lte = filters.endDate;
+                if (filters.startDate) {
+                    query.createdAt.$gte = filters.startDate;
+                }
+                if (filters.endDate) {
+                    query.createdAt.$lte = filters.endDate;
+                }
             }
+
+            // Log the constructed query for debugging
+            loggingService.info('Usage query constructed', {
+                component: 'UsageService',
+                operation: 'getUsage',
+                query: JSON.stringify(query, null, 2),
+                filters: {
+                    userId: filters.userId,
+                    startDate: filters.startDate?.toISOString(),
+                    endDate: filters.endDate?.toISOString(),
+                    service: filters.service,
+                    model: filters.model,
+                },
+                options: {
+                    page: options.page,
+                    limit: options.limit,
+                    sort: options.sort,
+                    order: options.order,
+                }
+            });
 
             // Add custom property filtering
             if (filters.customProperties) {
@@ -268,6 +292,15 @@ export class UsageService {
                     .lean(),
                 Usage.countDocuments(query),
             ]);
+
+            // Log query results for debugging
+            loggingService.info('Usage query executed', {
+                component: 'UsageService',
+                operation: 'getUsage',
+                totalDocuments: total,
+                documentsReturned: data.length,
+                query: JSON.stringify(query, null, 2),
+            });
 
             const result = paginate(data, total, options);
 

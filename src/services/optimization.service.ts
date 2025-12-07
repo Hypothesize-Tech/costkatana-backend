@@ -30,6 +30,14 @@ import { calculateUnifiedSavings, convertToCortexMetrics } from '../utils/calcul
 // 🚀 ADVANCED STREAMING ORCHESTRATOR
 import { CortexStreamingOrchestratorService, CortexStreamingConfig, DEFAULT_STREAMING_CONFIG } from './cortexStreamingOrchestrator.service';
 
+// 🎯 STRATEGIC POLICIES - Make implicit tradeoffs explicit
+import { 
+    getStrategicPolicies, 
+    getFallbackPricing, 
+    getRoutingStrategy,
+    CortexOperationType
+} from '../config/strategicPolicies.config';
+
 /**
  * Convert AIProvider enum to string for pricing functions
  */
@@ -93,6 +101,7 @@ interface OptimizationRequest {
     }>;
     cortexEnabled?: boolean;
     cortexConfig?: any;
+    cortexOperation?: CortexOperationType;  // 🆕 Explicit operation type (defaults to policy)
     options?: {
         targetReduction?: number;
         preserveIntent?: boolean;
@@ -438,7 +447,7 @@ export class OptimizationService {
             });
 
             // Fallback to basic Cortex processing
-            return await this.processCortexOptimization(prompt, cortexConfig, userId, model);
+            return await this.processCortexOptimization(prompt, cortexConfig, userId, model, undefined);
         }
     }
 
@@ -549,7 +558,8 @@ function optimizedFunction() {
         originalPrompt: string, 
         cortexConfig: any, 
         userId: string,
-        model?: string
+        model?: string,
+        cortexOperation?: CortexOperationType
     ): Promise<{
         optimizedPrompt: string;
         cortexMetadata: any;
@@ -646,9 +656,42 @@ function optimizedFunction() {
             });
             
             const coreService = CortexCoreService.getInstance();
+            
+            /**
+             * STRATEGIC DECISION: Cortex Operation Type
+             * 
+             * ✅ FIXED: Now uses explicit policy configuration
+             * TRADEOFF: Made explicit via strategicPolicies.config.ts
+             *   ✅ Flexible: Supports 6 operation types
+             *   ✅ Explicit: Request can override default
+             *   ✅ Documented: Each operation has documented tradeoffs
+             * 
+             * OPERATION TYPES:
+             *   - optimize: General optimization (recommended default)
+             *   - compress: Maximum token reduction (cost-critical)
+             *   - analyze: Analysis without transformation
+             *   - transform: Format conversion
+             *   - sast: Semantic AST generation
+             *   - answer: Legacy answer generation (backward compat)
+             * 
+             * See: /docs/COST_PERFORMANCE_TRADEOFFS.md#1-cortex-operation-type
+             *      /config/strategicPolicies.config.ts
+             */
+            const strategicPolicies = getStrategicPolicies();
+            const operationType = cortexOperation || 
+                                 (cortexConfig?.processingOperation as CortexOperationType) ||
+                                 (cortexConfig?.cortexOperation as CortexOperationType) ||
+                                 strategicPolicies.cortexOperation.defaultOperation;
+            
+            loggingService.info(`Using Cortex operation: ${operationType}`, {
+                requested: cortexOperation,
+                default: strategicPolicies.cortexOperation.defaultOperation,
+                tradeoff: strategicPolicies.cortexOperation.operationConfig[operationType as CortexOperationType]?.tradeoff
+            });
+            
             const processingResult = await coreService.process({
                 input: encodingResult.cortexFrame,
-                operation: 'answer', // Hardcoded to answer generation
+                operation: operationType, // ✅ Now configurable via policy
                 options: { preserveSemantics: true },
                 prompt: lispInstructions.coreProcessorPrompt
             });
@@ -1454,7 +1497,7 @@ REPLY FORMAT (JSON only):
         // Validate subscription before optimization
         const { SubscriptionService } = await import('./subscription.service');
         const subscription = await SubscriptionService.getSubscriptionByUserId(request.userId);
-        
+
         if (!subscription) {
             throw new Error('Subscription not found');
         }
@@ -1477,27 +1520,26 @@ REPLY FORMAT (JSON only):
 
             // 🚀 CORTEX PROCESSING: Check if Cortex is enabled and process accordingly
             let cortexResult: any = null;
-            
+
             // Conditional debug logging only in development
-                loggingService.debug('Cortex options check', {
-                    userId: request.userId,
-                    enableCortex: request.options?.enableCortex,
-                    hasCortexConfig: !!request.options?.cortexConfig
-                });
-                
-                loggingService.info('🔍 DEBUG: Cortex options check', {
-                    userId: request.userId,
-                    hasOptions: !!request.options,
-                    enableCortex: request.options?.enableCortex,
-                    hasCortexConfig: !!request.options?.cortexConfig,
-                    cortexConfig: request.options?.cortexConfig
-                });
+            loggingService.debug('Cortex options check', {
+                userId: request.userId,
+                enableCortex: request.options?.enableCortex,
+                hasCortexConfig: !!request.options?.cortexConfig
+            });
             
-                            if (request.options?.enableCortex) {
+            loggingService.info('🔍 DEBUG: Cortex options check', {
+                userId: request.userId,
+                hasOptions: !!request.options,
+                enableCortex: request.options?.enableCortex,
+                hasCortexConfig: !!request.options?.cortexConfig,
+                cortexConfig: request.options?.cortexConfig
+            });
+
+            if (request.options?.enableCortex) {
                 loggingService.debug('Cortex processing triggered', { userId: request.userId });
 
                 try {
-                    // Check circuit breaker before attempting Cortex processing
                     if (this.isCortexCircuitBreakerOpen()) {
                         loggingService.warn('⚠️ Cortex circuit breaker is open, using fallback', {
                             userId: request.userId,
@@ -1506,18 +1548,16 @@ REPLY FORMAT (JSON only):
                         throw new Error('Cortex circuit breaker is open');
                     }
 
-                    // Initialize Cortex services if not already done
                     await this.initializeCortexServices();
 
-                        loggingService.debug('Cortex initialization status', {
-                            userId: request.userId,
-                            cortexInitialized: this.cortexInitialized
-                        });
+                    loggingService.debug('Cortex initialization status', {
+                        userId: request.userId,
+                        cortexInitialized: this.cortexInitialized
+                    });
 
                     if (this.cortexInitialized) {
                         loggingService.info('⚡ Starting Advanced Cortex Streaming Pipeline', { userId: request.userId });
 
-                        // Use streaming orchestrator for advanced processing
                         cortexResult = await this.processAdvancedCortexStreaming(
                             request.prompt,
                             request.options.cortexConfig || {},
@@ -1526,7 +1566,6 @@ REPLY FORMAT (JSON only):
                             request.service
                         );
 
-                        // Reset failure count on success
                         this.cortexFailureCount = 0;
 
                         loggingService.info('✅ Advanced Cortex Streaming completed', {
@@ -1539,17 +1578,17 @@ REPLY FORMAT (JSON only):
                             userId: request.userId
                         });
 
-                        // Fallback to basic Cortex processing
                         const cortexPromise = this.processCortexOptimization(
                             request.prompt,
                             request.options.cortexConfig || {},
                             request.userId,
-                            request.model
+                            request.model,
+                            request.cortexOperation
                         );
 
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Cortex processing timeout')), 25000);
-            });
+                        const timeoutPromise = new Promise((_, reject) => {
+                            setTimeout(() => reject(new Error('Cortex processing timeout')), 25000);
+                        });
 
                         cortexResult = await Promise.race([cortexPromise, timeoutPromise]);
                     }
@@ -1561,7 +1600,6 @@ REPLY FORMAT (JSON only):
                         failureCount: this.cortexFailureCount
                     });
 
-                    // Return a detailed error result instead of null
                     cortexResult = {
                         optimizedPrompt: request.prompt,
                         cortexMetadata: {
@@ -1579,8 +1617,6 @@ REPLY FORMAT (JSON only):
                 }
             } else {
                 loggingService.info('🚀 Lightweight Cortex optimization (Cortex not enabled)', { userId: request.userId });
-                
-                // Use lightweight Cortex-like optimization with 50% cheaper models
                 try {
                     cortexResult = await this.processLightweightCortexOptimization(
                         request.prompt,
@@ -1599,7 +1635,6 @@ REPLY FORMAT (JSON only):
                         error: error instanceof Error ? error.message : String(error)
                     });
                     
-                    // Return a detailed error result instead of null
                     cortexResult = {
                         optimizedPrompt: request.prompt,
                         cortexMetadata: {
@@ -1616,10 +1651,9 @@ REPLY FORMAT (JSON only):
                 }
             }
 
-
             // Get token count and cost for ORIGINAL prompt with memoization
             const originalTokens = await this.getTokensWithMemoization(request.prompt, provider, request.model);
-            
+
             let originalSimpleEstimate;
             try {
                 originalSimpleEstimate = estimateCost(
@@ -1629,15 +1663,31 @@ REPLY FORMAT (JSON only):
                     request.model
                 );
             } catch (error) {
-                loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing`);
-                // Use fallback pricing (GPT-4o-mini rates as default)
+                const fallbackPolicy = getFallbackPricing();
+
+                if (fallbackPolicy.strategy === 'strict') {
+                    throw new Error(
+                        `No pricing data found for ${providerEnumToString(provider)}/${request.model}. ` +
+                        `Configure explicit pricing or change FALLBACK_PRICING_STRATEGY from 'strict'.`
+                    );
+                }
+
+                loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}`, {
+                    fallbackStrategy: fallbackPolicy.strategy,
+                    expectedAccuracy: fallbackPolicy.accuracy,
+                    risk: fallbackPolicy.risk,
+                    rationale: fallbackPolicy.rationale
+                });
+
                 originalSimpleEstimate = {
-                    inputCost: (originalTokens / 1_000_000) * 0.15,
-                    outputCost: (150 / 1_000_000) * 0.60,
-                    totalCost: (originalTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
+                    inputCost: (originalTokens / 1_000_000) * fallbackPolicy.pricingRates.inputCostPer1M,
+                    outputCost: (150 / 1_000_000) * fallbackPolicy.pricingRates.outputCostPer1M,
+                    totalCost:
+                        (originalTokens / 1_000_000) * fallbackPolicy.pricingRates.inputCostPer1M +
+                        (150 / 1_000_000) * fallbackPolicy.pricingRates.outputCostPer1M
                 };
             }
-            
+
             const originalEstimate: CostEstimate = convertToCostEstimate(
                 originalSimpleEstimate,
                 originalTokens,
@@ -1649,7 +1699,6 @@ REPLY FORMAT (JSON only):
             // Skip traditional optimization if we have Cortex result (full or lightweight)
             let optimizationResult: OptimizationResult | null = null;
             if (!cortexResult || cortexResult.cortexMetadata.error) {
-                // Only run traditional optimization as final fallback
                 try {
                     optimizationResult = generateOptimizationSuggestions(
                         request.prompt,
@@ -1659,7 +1708,6 @@ REPLY FORMAT (JSON only):
                     );
                 } catch (error) {
                     loggingService.error('Failed to generate optimization suggestions:', { error: error instanceof Error ? error.message : String(error) });
-                    // Create a fallback optimization result
                     optimizationResult = {
                         id: 'fallback-optimization',
                         totalSavings: 10,
@@ -1692,27 +1740,24 @@ REPLY FORMAT (JSON only):
             // Apply the optimizations to get the actual optimized prompt
             let optimizedPrompt = request.prompt;
             let appliedOptimizations: string[] = [];
-            
+
             // 🚀 USE CORTEX RESULT if available and successful
             if (cortexResult && !cortexResult.cortexMetadata.error) {
                 optimizedPrompt = cortexResult.optimizedPrompt;
-                
-                // 🚨 FINAL QUALITY CHECK - Be more lenient for Cortex responses
-                // Only flag as terrible if it's obviously broken or too short
+
                 const isActuallyTerrible = await this.isTerribleResponse(optimizedPrompt, request.prompt);
 
-                // For Cortex responses, be extremely lenient - only fallback for obvious failures
                 const shouldUseFallback = isActuallyTerrible && (
-                    optimizedPrompt.length < 20 || // Very short
-                    optimizedPrompt.includes('error') || // Contains errors
-                    optimizedPrompt.includes('failed') || // Contains failures
-                    optimizedPrompt.length > request.prompt.length * 3 // Much too long
+                    optimizedPrompt.length < 20 ||
+                    optimizedPrompt.includes('error') ||
+                    optimizedPrompt.includes('failed') ||
+                    optimizedPrompt.length > request.prompt.length * 3
                 );
 
                 if (shouldUseFallback) {
                     loggingService.warn('🚨 FINAL QUALITY CHECK: Cortex returned terrible response, using intelligent fallback', {
                         userId: request.userId,
-                        originalPrompt: request.prompt, // Full prompt for training data
+                        originalPrompt: request.prompt,
                         terribleCortexResponse: optimizedPrompt,
                         reason: 'Final quality check detected unusable response'
                     });
@@ -1722,23 +1767,21 @@ REPLY FORMAT (JSON only):
                 } else {
                     appliedOptimizations.push(cortexResult.cortexMetadata.lightweightCortex ? 'lightweight_cortex_optimization' : 'cortex_optimization');
                 }
-                
+
                 loggingService.info('✅ Using final optimized prompt', {
                     userId: request.userId,
                     originalLength: request.prompt.length,
                     optimizedLength: optimizedPrompt.length,
-                    reduction: `${cortexResult.cortexMetadata.reductionPercentage.toFixed(1)}%`,
+                    reduction: `${cortexResult.cortexMetadata.reductionPercentage?.toFixed?.(1) ?? 'N/A'}%`,
                     wasIntelligentFallback: appliedOptimizations.includes('intelligent_fallback'),
                     isLightweightCortex: cortexResult.cortexMetadata.lightweightCortex
                 });
             } else if (optimizationResult && optimizationResult.suggestions.length > 0) {
-                // Fall back to traditional optimization
                 const bestSuggestion = optimizationResult.suggestions[0];
                 if (bestSuggestion.optimizedPrompt) {
                     optimizedPrompt = bestSuggestion.optimizedPrompt;
                     appliedOptimizations.push(bestSuggestion.id);
                 } else if (bestSuggestion.type === 'compression') {
-                    // Apply basic compression if no optimized prompt is provided
                     optimizedPrompt = request.prompt.replace(/\s+/g, ' ').trim();
                     appliedOptimizations.push('compression');
                 }
@@ -1746,7 +1789,7 @@ REPLY FORMAT (JSON only):
 
             // Get token count and cost for optimized prompt with memoization
             const optimizedTokens = await this.getTokensWithMemoization(optimizedPrompt, provider, request.model);
-            
+
             let optimizedSimpleEstimate;
             try {
                 optimizedSimpleEstimate = estimateCost(
@@ -1757,14 +1800,13 @@ REPLY FORMAT (JSON only):
                 );
             } catch (error) {
                 loggingService.warn(`No pricing data found for ${providerEnumToString(provider)}/${request.model}, using fallback pricing for optimized prompt`);
-                // Use fallback pricing (GPT-4o-mini rates as default)
                 optimizedSimpleEstimate = {
                     inputCost: (optimizedTokens / 1_000_000) * 0.15,
                     outputCost: (150 / 1_000_000) * 0.60,
                     totalCost: (optimizedTokens / 1_000_000) * 0.15 + (150 / 1_000_000) * 0.60
                 };
             }
-            
+
             const optimizedEstimate: CostEstimate = convertToCostEstimate(
                 optimizedSimpleEstimate,
                 optimizedTokens,
@@ -1781,14 +1823,13 @@ REPLY FORMAT (JSON only):
                 request.model,
                 150 // Expected completion tokens
             );
-            
-            // Use the unified calculation results (use display values for database to avoid negative validation errors)
+
             const totalOriginalTokens = unifiedCalc.originalTokens;
             const totalOptimizedTokens = unifiedCalc.optimizedTokens;
-            const tokensSaved = unifiedCalc.displayTokensSaved; // Use display value to avoid negative validation errors
-            const costSaved = unifiedCalc.displayCostSaved; // Use display value to avoid negative validation errors
-            const improvementPercentage = Math.min(100, unifiedCalc.displayPercentage); // Cap at 100% to avoid validation errors
-            
+            const tokensSaved = unifiedCalc.displayTokensSaved;
+            const costSaved = unifiedCalc.displayCostSaved;
+            const improvementPercentage = Math.min(100, unifiedCalc.displayPercentage);
+
             loggingService.info('🔍 Unified calculation results:', {
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
@@ -1802,26 +1843,26 @@ REPLY FORMAT (JSON only):
             const optimizationType = (optimizationResult?.suggestions && optimizationResult.suggestions.length > 0) ? optimizationResult.suggestions[0].type : 'compression';
             const category = this.determineCategoryFromType(optimizationType);
 
-            // Build metadata based on optimization type
+            // Build metadata based on optimization type and include optimizedEstimate
             const metadata: any = {
                 analysisTime: optimizationResult?.metadata?.processingTime || 0,
                 confidence: (optimizationResult?.suggestions && optimizationResult.suggestions.length > 0) ? optimizationResult.suggestions[0].confidence : 0.5,
                 optimizationType: optimizationType,
                 appliedTechniques: appliedOptimizations,
+                // Also include raw cost estimates (original and optimized)
+                originalEstimate: originalEstimate,
+                optimizedEstimate: optimizedEstimate
             };
 
             // 🚀 ADD CORTEX METADATA if Cortex was used
             if (cortexResult) {
                 metadata.cortex = cortexResult.cortexMetadata;
                 metadata.cortexEnabled = true;
-                
-                // Override traditional optimization values if Cortex was successful
+
                 if (!cortexResult.cortexMetadata.error) {
                     metadata.cortexProcessingTime = cortexResult.cortexMetadata.processingTime;
                     metadata.cortexSemanticIntegrity = cortexResult.cortexMetadata.semanticIntegrity;
                     metadata.cortexTokenReduction = cortexResult.tokenReduction;
-                    
-                    // Add Cortex-specific optimization techniques
                     if (!appliedOptimizations.includes('cortex_optimization')) {
                         appliedOptimizations.push('cortex_optimization');
                     }
@@ -1830,7 +1871,6 @@ REPLY FORMAT (JSON only):
                 metadata.cortexEnabled = false;
             }
 
-            // Add type-specific metadata
             if (optimizationResult?.suggestions && optimizationResult.suggestions.length > 0) {
                 const bestSuggestion = optimizationResult.suggestions[0];
                 if (bestSuggestion.compressionDetails) {
@@ -1844,11 +1884,11 @@ REPLY FORMAT (JSON only):
                 }
             }
 
-            // Create optimization record
+            // Create optimization record, add optimizedEstimate to suggestions[]. Extend suggestion object with .optimizedEstimate
             const optimization = await Optimization.create({
                 userId: request.userId,
-                userQuery: request.prompt, // Changed from originalPrompt
-                generatedAnswer: optimizedPrompt, // Changed from optimizedPrompt
+                userQuery: request.prompt,
+                generatedAnswer: optimizedPrompt,
                 optimizationTechniques: appliedOptimizations,
                 originalTokens: totalOriginalTokens,
                 optimizedTokens: totalOptimizedTokens,
@@ -1865,9 +1905,10 @@ REPLY FORMAT (JSON only):
                     description: suggestion.explanation,
                     impact: suggestion.estimatedSavings > 30 ? 'high' : suggestion.estimatedSavings > 15 ? 'medium' : 'low',
                     implemented: index === 0,
+                    // Attach optimizedEstimate to suggestion object
+                    optimizedEstimate: optimizedEstimate
                 })) || [],
                 metadata,
-                // Use unified calculations to generate consistent cortex metrics
                 cortexImpactMetrics: cortexResult ? convertToCortexMetrics(
                     unifiedCalc,
                     cortexResult.impactMetrics?.qualityMetrics,
@@ -1876,17 +1917,14 @@ REPLY FORMAT (JSON only):
                 ) : undefined,
             });
 
-            // Queue background operations for better performance
             this.queueBackgroundOperation(async () => {
                 try {
-                    // Update user's optimization count
                     await User.findByIdAndUpdate(request.userId, {
                         $inc: {
                             'usage.currentMonth.optimizationsSaved': costSaved,
                         },
                     });
 
-                    // Track activity
                     await ActivityService.trackActivity(request.userId, {
                         type: 'optimization_created',
                         title: 'Created Optimization',
@@ -1897,11 +1935,13 @@ REPLY FORMAT (JSON only):
                             model: request.model,
                             cost: unifiedCalc.originalCost,
                             saved: costSaved,
-                            techniques: optimizationResult?.appliedOptimizations || appliedOptimizations
+                            techniques: optimizationResult?.appliedOptimizations || appliedOptimizations,
+                            // Use both originalEstimate and optimizedEstimate in activity audit
+                            originalEstimate: originalEstimate,
+                            optimizedEstimate: optimizedEstimate
                         }
                     });
 
-                    // Create alert if significant savings
                     if (improvementPercentage > 30) {
                         const newAlert = await Alert.create({
                             userId: request.userId,
@@ -1915,11 +1955,12 @@ REPLY FORMAT (JSON only):
                                 potentialSavings: costSaved,
                                 percentage: improvementPercentage,
                                 optimizationType: optimizationType,
-                                recommendations: [`Apply ${optimizationType} optimization to reduce tokens by ${improvementPercentage.toFixed(1)}%`]
+                                recommendations: [`Apply ${optimizationType} optimization to reduce tokens by ${improvementPercentage.toFixed(1)}%`],
+                                originalEstimate: originalEstimate,
+                                optimizedEstimate: optimizedEstimate
                             },
                         });
 
-                        // Send to integrations
                         try {
                             const { NotificationService } = await import('./notification.service');
                             await NotificationService.sendAlert(newAlert);
@@ -1937,22 +1978,18 @@ REPLY FORMAT (JSON only):
                 }
             });
 
-            // Track consumption after optimization
             try {
                 const { SubscriptionService } = await import('./subscription.service');
-                const totalTokens = totalOriginalTokens + totalOptimizedTokens; // Total tokens used for optimization
+                const totalTokens = totalOriginalTokens + totalOptimizedTokens;
                 const totalCost = unifiedCalc.originalCost + unifiedCalc.optimizedCost;
-                
-                // Consume tokens and requests
+
                 await SubscriptionService.consumeTokens(request.userId, totalTokens, totalCost);
                 await SubscriptionService.consumeRequest(request.userId);
-                
-                // Consume Cortex usage if Cortex was used
+
                 if (cortexResult && !cortexResult.cortexMetadata.error) {
                     await SubscriptionService.consumeCortexUsage(request.userId);
                 }
-                
-                // Increment optimization count
+
                 const subscription = await SubscriptionService.getSubscriptionByUserId(request.userId);
                 if (subscription) {
                     subscription.usage.optimizationsUsed += 1;
@@ -1963,16 +2000,19 @@ REPLY FORMAT (JSON only):
                     userId: request.userId,
                     error: error.message,
                 });
-                // Don't throw - consumption tracking failure shouldn't break optimization
             }
 
-            loggingService.info('Optimization created', { value:  { 
-                userId: request.userId,
-                originalTokens: totalOriginalTokens,
-                optimizedTokens: totalOptimizedTokens,
-                savings: improvementPercentage,
-                type: optimizationType,
-             } });
+            loggingService.info('Optimization created', {
+                value: {
+                    userId: request.userId,
+                    originalTokens: totalOriginalTokens,
+                    optimizedTokens: totalOptimizedTokens,
+                    savings: improvementPercentage,
+                    type: optimizationType,
+                    originalEstimate: originalEstimate,
+                    optimizedEstimate: optimizedEstimate
+                }
+            });
 
             return optimization;
         } catch (error) {

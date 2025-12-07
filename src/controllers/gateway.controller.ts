@@ -2,11 +2,24 @@ import { Request, Response } from 'express';
 import axios, { AxiosResponse, AxiosError } from 'axios';
 import { loggingService } from '../services/logging.service';
 import { AICostTrackerService } from '../services/aiCostTracker.service';
-import { ProjectService } from '../services/project.service';
 import { FailoverService } from '../services/failover.service';
 import { redisService } from '../services/redis.service';
 import { GatewayCortexService } from '../services/gatewayCortex.service';
+import { latencyRouterService } from '../services/latencyRouter.service';
+import { costSimulatorService } from '../services/costSimulator.service';
+import { costStreamingService } from '../services/costStreaming.service';
+import { BudgetService } from '../services/budget.service';
+import { ProactiveSuggestionsService } from '../services/proactiveSuggestions.service';
+import { LazySummarizationService } from '../services/lazySummarization.service';
+import { PromptCompilerService } from '../compiler/promptCompiler.service';
+import { ParallelExecutionOptimizerService } from '../compiler/parallelExecutionOptimizer.service';
 import https from 'https';
+
+interface ConversationMessage {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    timestamp?: Date;
+}
 
 // Create a connection pool for better performance
 const httpsAgent = new https.Agent({
@@ -107,14 +120,52 @@ export class GatewayController {
                 return;
             }
 
-            // Handle budget constraint violation
+            // Handle budget constraint violation with hard blocking
             if (!budgetCheck.allowed) {
-                res.status(429).json({
-                    error: 'Budget limit exceeded',
-                    message: budgetCheck.allowed ? 'Budget limit exceeded' : 'Budget limit exceeded',
-                    budgetId: context.budgetId
+                const blockData = budgetCheck as { 
+                    allowed: boolean; 
+                    message?: string; 
+                    simulation?: any;
+                    cheaperAlternatives?: any[];
+                };
+
+                loggingService.error('❌ HARD BLOCK: Budget violation prevented', {
+                    userId: context.userId,
+                    budgetId: context.budgetId,
+                    estimatedCost: blockData.simulation?.originalRequest?.estimatedCost,
+                    reason: blockData.message,
+                    requestId: req.headers['x-request-id'] as string
+                });
+
+                // Return detailed error with alternatives
+                res.status(402).json({
+                    error: 'BUDGET_EXCEEDED',
+                    message: blockData.message || 'Budget limit exceeded - request blocked',
+                    budgetId: context.budgetId,
+                    estimatedCost: blockData.simulation?.originalRequest?.estimatedCost,
+                    cheaperAlternatives: blockData.cheaperAlternatives || [],
+                    suggestedActions: [
+                        'Upgrade your plan to increase budget limits',
+                        'Use a cheaper model from the alternatives list',
+                        'Reduce prompt length to lower costs',
+                        'Wait until next billing cycle'
+                    ],
+                    timestamp: new Date().toISOString()
                 });
                 return;
+            }
+            
+            // Store reservation ID and simulation data in context for later confirmation/release
+            const reservationId = (budgetCheck as { allowed: boolean; reservationId?: string; simulation?: any }).reservationId;
+            const simulation = (budgetCheck as { allowed: boolean; simulation?: any }).simulation;
+            
+            if (reservationId) {
+                context.budgetReservationId = reservationId;
+            }
+            
+            if (simulation) {
+                context.simulationId = simulation.requestId;
+                context.estimatedCost = simulation.originalRequest.estimatedCost;
             }
 
             // Handle firewall blocking
@@ -216,6 +267,136 @@ export class GatewayController {
                 // Handle single provider request (existing logic)
                 const proxyRequest = await GatewayController.prepareProxyRequest(req);
                 
+                // 🚀 P1: LAZY SUMMARIZATION - Auto-compress large contexts
+                if (req.body && req.body.messages && Array.isArray(req.body.messages)) {
+                    const messages: ConversationMessage[] = req.body.messages.map((m: any) => ({
+                        role: m.role || 'user',
+                        content: m.content || '',
+                        timestamp: m.timestamp ? new Date(m.timestamp) : undefined
+                    }));
+                    
+                    const shouldSummarize = LazySummarizationService.shouldApplySummarization(
+                        messages.reduce((sum, m) => sum + (m.content.length / 4), 0)
+                    );
+                    
+                    if (shouldSummarize.shouldApply) {
+                        try {
+                            const summarizationResult = await LazySummarizationService.compressConversationHistory(
+                                messages,
+                                shouldSummarize.recommendedTarget!
+                            );
+                            
+                            if (summarizationResult.reductionPercentage > 20) {
+                                loggingService.info('🗜️ Lazy summarization applied', {
+                                    userId: context.userId,
+                                    originalMessages: summarizationResult.original.length,
+                                    compressedMessages: summarizationResult.compressed.length,
+                                    reduction: `${summarizationResult.reductionPercentage.toFixed(1)}%`
+                                });
+                                
+                                // Update request body with compressed messages
+                                proxyRequest.data = {
+                                    ...proxyRequest.data,
+                                    messages: summarizationResult.compressed
+                                };
+                                req.body.messages = summarizationResult.compressed;
+                                
+                                // Push proactive suggestion notification
+                                ProactiveSuggestionsService.pushContextCompressionSuggestion(
+                                    context.userId!,
+                                    summarizationResult.original.length,
+                                    summarizationResult.compressed.length,
+                                    summarizationResult.reductionPercentage
+                                ).catch(err => {
+                                    loggingService.warn('Failed to push suggestion', { error: err.message });
+                                });
+                            }
+                        } catch (error) {
+                            loggingService.warn('Lazy summarization failed, continuing with original', {
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                        }
+                    }
+                }
+                
+                // 🚀 P2: PROMPT COMPILER - Production-ready intelligent optimization
+                const enableCompiler = req.headers['x-costkatana-enable-compiler'] === 'true';
+                const optimizationLevel = parseInt(req.headers['x-costkatana-optimization-level'] as string) || 2;
+                
+                if (enableCompiler) {
+                    try {
+                        const prompt = req.body.prompt || req.body.messages?.map((m: any) => m.content).join('\n') || '';
+                        
+                        if (prompt && prompt.length > 200) { // Only optimize prompts > 200 chars
+                            const compilationResult = await PromptCompilerService.compile(prompt, {
+                                optimizationLevel: optimizationLevel as 0 | 1 | 2 | 3,
+                                preserveQuality: true,
+                                enableParallelization: true
+                            });
+                            
+                            if (compilationResult.success && compilationResult.metrics.tokenReduction > 10) {
+                                loggingService.info('🔧 Prompt compiler applied optimizations', {
+                                    userId: context.userId,
+                                    originalTokens: compilationResult.metrics.originalTokens,
+                                    optimizedTokens: compilationResult.metrics.optimizedTokens,
+                                    reduction: `${compilationResult.metrics.tokenReduction.toFixed(1)}%`,
+                                    passes: compilationResult.metrics.optimizationPasses.length
+                                });
+                                
+                                // Update request with optimized prompt
+                                if (req.body.prompt) {
+                                    proxyRequest.data = {
+                                        ...proxyRequest.data,
+                                        prompt: compilationResult.optimizedPrompt
+                                    };
+                                    req.body.prompt = compilationResult.optimizedPrompt;
+                                } else if (req.body.messages) {
+                                    // Update last message with optimized content
+                                    const messages = [...req.body.messages];
+                                    messages[messages.length - 1] = {
+                                        ...messages[messages.length - 1],
+                                        content: compilationResult.optimizedPrompt
+                                    };
+                                    proxyRequest.data = {
+                                        ...proxyRequest.data,
+                                        messages
+                                    };
+                                    req.body.messages = messages;
+                                }
+                                
+                                // Analyze parallelization opportunities
+                                if (compilationResult.ast) {
+                                    const parallelAnalysis = ParallelExecutionOptimizerService.analyzeParallelizationOpportunities(
+                                        compilationResult.ast
+                                    );
+                                    
+                                    if (parallelAnalysis.parallelizationPercentage > 30) {
+                                        loggingService.info('📊 Parallel execution opportunities detected', {
+                                            userId: context.userId,
+                                            parallelizableNodes: parallelAnalysis.parallelizableNodes,
+                                            percentage: `${parallelAnalysis.parallelizationPercentage.toFixed(1)}%`,
+                                            estimatedSpeedup: `${parallelAnalysis.estimatedSpeedup.toFixed(2)}x`,
+                                            recommendedParallelism: parallelAnalysis.recommendedMaxParallelism
+                                        });
+                                        
+                                        // Push proactive suggestion about parallelization
+                                        ProactiveSuggestionsService.generateSuggestionsForUser(
+                                            context.userId!
+                                        ).catch((err: any) => {
+                                            loggingService.debug('Suggestion generation failed', { error: err.message });
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        loggingService.warn('Prompt compilation failed, continuing with original', {
+                            error: error instanceof Error ? error.message : String(error),
+                            userId: context.userId
+                        });
+                    }
+                }
+                
                 // 🚀 OPTIMIZED CORTEX PROCESSING - Memory-efficient processing
                 if (context.cortexEnabled && GatewayCortexService.isEligibleForCortex(req.body, context)) {
                     loggingService.info('🔄 Processing request through Gateway Cortex', {
@@ -306,6 +487,14 @@ export class GatewayController {
             if (requestSuccess && !context.failoverEnabled) {
                 const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
                 GatewayController.updateCircuitBreaker(provider, true);
+                
+                // Track latency for routing decisions
+                const latency = Date.now() - context.startTime;
+                const model = req.body?.model || context.modelOverride || 'unknown';
+                
+                this.queueBackgroundOperation(async () => {
+                    await latencyRouterService.trackModelLatency(provider, model, latency, true);
+                });
             }
 
             // Parallel response processing and moderation
@@ -317,13 +506,33 @@ export class GatewayController {
                 return [processed, moderated];
             });
 
+            // Confirm budget reservation with actual cost
+            if (context.budgetReservationId) {
+                const actualCost = context.cost || 0;
+                this.queueBackgroundOperation(async () => {
+                    const { BudgetService } = await import('../services/budget.service');
+                    await BudgetService.confirmBudget(context.budgetReservationId!, actualCost);
+                    
+                    // Record simulation accuracy (Layer 6)
+                    if (context.simulationId && context.estimatedCost) {
+                        costSimulatorService.recordActualCost(
+                            context.simulationId,
+                            actualCost,
+                            context.estimatedCost
+                        );
+                    }
+                });
+            }
+            
             // Non-blocking background operations
             const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
             this.queueBackgroundOperation(async () => {
                 await Promise.allSettled([
                     context.cacheEnabled ? GatewayController.cacheResponse(req, moderatedResponse.response) : Promise.resolve(),
                     GatewayController.trackUsage(req, moderatedResponse.response, retryAttempts),
-                    Promise.resolve(this.updateCircuitBreakerBatched(provider, true))
+                    Promise.resolve(this.updateCircuitBreakerBatched(provider, true)),
+                    // 🎯 P2: Record model performance for dynamic routing
+                    this.recordModelPerformance(req, moderatedResponse.response, context)
                 ]);
             });
 
@@ -370,6 +579,25 @@ export class GatewayController {
             res.send(moderatedResponse.response);
 
         } catch (error: any) {
+            // Release budget reservation on error
+            if (context.budgetReservationId) {
+                this.queueBackgroundOperation(async () => {
+                    const { BudgetService } = await import('../services/budget.service');
+                    await BudgetService.releaseBudget(context.budgetReservationId!);
+                });
+            }
+            
+            // Track latency for failed requests
+            if (!context.failoverEnabled) {
+                const provider = GatewayController.inferServiceFromUrl(context.targetUrl!);
+                const latency = Date.now() - context.startTime;
+                const model = req.body?.model || context.modelOverride || 'unknown';
+                
+                this.queueBackgroundOperation(async () => {
+                    await latencyRouterService.trackModelLatency(provider, model, latency, false);
+                });
+            }
+            
             loggingService.error('Gateway proxy error', {
                 error: error.message || 'Unknown error',
                 stack: error.stack,
@@ -423,11 +651,14 @@ export class GatewayController {
             }
             
             // Check Redis cache with semantic matching
+            // Check for opt-out header
+            const disableSemanticCache = req.headers['costkatana-disable-semantic-cache'] === 'true';
+            
             const cacheResult = await redisService.checkCache(prompt, {
                 userId: context.cacheUserScope ? context.userId : undefined,
                 model: req.body?.model,
                 provider: context.provider,
-                enableSemantic: context.semanticCacheEnabled !== false,
+                enableSemantic: !disableSemanticCache && context.semanticCacheEnabled !== false,
                 enableDeduplication: context.deduplicationEnabled !== false,
                 similarityThreshold: context.similarityThreshold || 0.85
             });
@@ -485,6 +716,9 @@ export class GatewayController {
                 const cost = req.gatewayContext?.cost || 0;
                 
                 // Store in Redis with semantic embedding
+                // Check for opt-out header
+                const disableSemanticCache = req.headers['costkatana-disable-semantic-cache'] === 'true';
+                
                 await redisService.storeCache(prompt, response, {
                     userId: context.cacheUserScope ? context.userId : undefined,
                     model: req.body?.model,
@@ -492,7 +726,7 @@ export class GatewayController {
                     ttl: context.cacheTTL || DEFAULT_CACHE_TTL,
                     tokens: inputTokens + outputTokens,
                     cost,
-                    enableSemantic: context.semanticCacheEnabled !== false,
+                    enableSemantic: !disableSemanticCache && context.semanticCacheEnabled !== false,
                     enableDeduplication: context.deduplicationEnabled !== false
                 });
                 
@@ -516,43 +750,124 @@ export class GatewayController {
 
 
     /**
-     * Check budget constraints before making request
+     * Check budget constraints before making request with pre-flight estimation
      */
-    private static async checkBudgetConstraints(req: Request): Promise<{ allowed: boolean; message?: string }> {
+    private static async checkBudgetConstraints(req: Request): Promise<{ 
+        allowed: boolean; 
+        message?: string; 
+        reservationId?: string;
+        simulation?: any;
+    }> {
         const context = req.gatewayContext!;
         
         try {
-            if (!context.budgetId || !context.userId) {
+            if (!context.userId) {
                 return { allowed: true };
             }
 
-            // Get project for budget check
-            const projects = await ProjectService.getUserProjects(context.userId);
-            const project = projects.find(p => p._id.toString() === context.budgetId);
+            // Step 1: Cost Simulation (Layer 6)
+            const prompt = GatewayController.extractPromptFromRequest(req.body);
+            const model = req.body?.model || context.modelOverride || 'gpt-3.5-turbo';
+            const provider = context.provider || 'openai';
             
-            if (!project) {
-                return { allowed: false, message: 'Budget ID not found' };
-            }
+            let simulation;
+            try {
+                simulation = await costSimulatorService.simulateRequestCost(
+                    prompt || '',
+                    model,
+                    provider,
+                    context.userId,
+                    context.workspaceId,
+                    {
+                        includeAlternatives: true,
+                        maxOutputTokens: req.body?.max_tokens || 1000
+                    }
+                );
 
-            // Simple budget check - in production, this would estimate the cost first
-            const currentSpending = project.spending.current;
-            const budgetAmount = project.budget.amount;
-            
-            if (currentSpending >= budgetAmount) {
-                return { 
-                    allowed: false, 
-                    message: `Budget limit of ${budgetAmount} ${project.budget.currency} exceeded. Current: ${currentSpending}` 
+                // Log simulation for tracking
+                loggingService.debug('Cost simulation completed', {
+                    requestId: simulation.requestId,
+                    estimatedCost: simulation.originalRequest.estimatedCost,
+                    alternatives: simulation.alternatives.length
+                });
+            } catch (simError) {
+                loggingService.warn('Cost simulation failed, using fallback estimation', {
+                    error: simError instanceof Error ? simError.message : String(simError)
+                });
+                
+                // Fallback to basic estimation
+                const estimatedTokens = prompt ? Math.ceil(prompt.length / 4) : 100;
+                simulation = {
+                    originalRequest: {
+                        estimatedCost: estimatedTokens * 0.00001, // Rough estimate
+                        estimatedTokens: { total: estimatedTokens * 1.5 }
+                    }
                 };
             }
 
-            return { allowed: true };
+            // Step 2: Pre-flight Budget Enforcement (Layer 4)
+            if (context.budgetId) {
+                const estimatedCost = simulation.originalRequest.estimatedCost;
+                
+                // Use enhanced pre-flight check
+                const budgetCheck = await BudgetService.preFlightBudgetCheck(
+                    context.userId,
+                    estimatedCost,
+                    context.budgetId,
+                    context.workspaceId,
+                    {
+                        enforceHardLimits: true,
+                        allowDowngrade: true,
+                        planTier: (req as any).user?.planTier || 'plus'
+                    }
+                );
+
+                if (!budgetCheck.allowed) {
+                    // Emit budget warning via streaming
+                    costStreamingService.emitCostEvent({
+                        eventType: 'budget_warning',
+                        timestamp: new Date(),
+                        userId: context.userId,
+                        workspaceId: context.workspaceId,
+                        data: {
+                            estimatedCost,
+                            budgetRemaining: budgetCheck.remainingBudget,
+                            metadata: {
+                                reason: budgetCheck.reason,
+                                recommendedAction: budgetCheck.recommendedAction
+                            }
+                        }
+                    });
+
+                    return {
+                        allowed: false,
+                        message: budgetCheck.reason || 'Budget limit exceeded',
+                        simulation
+                    };
+                }
+
+                loggingService.info('Pre-flight budget check passed', {
+                    userId: context.userId,
+                    estimatedCost,
+                    remainingBudget: budgetCheck.remainingBudget,
+                    reservationId: budgetCheck.reservationId
+                });
+
+                return { 
+                    allowed: true, 
+                    reservationId: budgetCheck.reservationId,
+                    simulation
+                };
+            }
+
+            return { allowed: true, simulation };
         } catch (error: any) {
             loggingService.error('Budget check error', {
                 error: error.message || 'Unknown error',
                 stack: error.stack,
                 requestId: req.headers['x-request-id'] as string
             });
-            return { allowed: true }; // Allow on error to prevent blocking
+            return { allowed: true }; // Fail-open to prevent blocking
         }
     }
 
@@ -1913,5 +2228,38 @@ export class GatewayController {
 
         this.circuitBreakerBatch.clear();
         this.batchTimer = undefined;
+    }
+
+    /**
+     * 🎯 P2: Record model performance for dynamic routing thresholds
+     */
+    private static async recordModelPerformance(
+        req: Request,
+        response: any,
+        context: any
+    ): Promise<void> {
+        try {
+            const { IntelligentRouterService } = await import('../services/intelligentRouter.service');
+            const router = IntelligentRouterService.getInstance();
+
+            const modelId = req.body?.model || context.modelOverride || 'unknown';
+            const latency = Date.now() - (context.startTime || Date.now());
+            const cost = context.cost || 0;
+            const success = response.status >= 200 && response.status < 300;
+
+            router.recordModelPerformance(modelId, latency, cost, success);
+
+            loggingService.debug('Recorded model performance for dynamic routing', {
+                modelId,
+                latency,
+                cost,
+                success
+            });
+        } catch (error) {
+            // Fail silently - this is non-critical telemetry
+            loggingService.debug('Failed to record model performance', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
     }
 }

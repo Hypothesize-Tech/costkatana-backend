@@ -744,3 +744,6 @@ export function compareModelCosts(
   
   return comparison;
 }
+
+// Export the pricing data for use in other modules
+export { modelPricingData };

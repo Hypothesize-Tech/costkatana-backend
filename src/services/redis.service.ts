@@ -5,6 +5,7 @@ import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from '@langchain/aws';
 import { resolveRedisUrl, getRedisOptions, getRedisErrorDiagnostic } from '../config/redis';
 import { LRUCache } from 'lru-cache';
+import { costStreamingService } from './costStreaming.service';
 
 dotenv.config();
 
@@ -575,6 +576,24 @@ export class RedisService {
                 const data = JSON.parse(exactMatch);
                 await this.updateCacheMetadata(exactKey, { hits: 1, lastAccessed: Date.now() });
                 loggingService.info('Cache hit (exact match)', { key: exactKey.substring(0, 20) });
+                
+                // Emit cache hit event
+                setImmediate(() => {
+                    costStreamingService.emitCostEvent({
+                        eventType: 'cache_hit',
+                        timestamp: new Date(),
+                        userId,
+                        data: {
+                            cacheHit: true,
+                            metadata: {
+                                strategy: 'exact',
+                                model,
+                                provider
+                            }
+                        }
+                    });
+                });
+                
                 return { hit: true, data, strategy: 'exact' };
             }
 
@@ -592,7 +611,9 @@ export class RedisService {
             }
 
             // Strategy 3: Semantic similarity cache
-            if (enableSemantic && process.env.ENABLE_SEMANTIC_CACHE === 'true') {
+            // Enabled by default, can be disabled via enableSemantic parameter or env var
+            const semanticEnabled = enableSemantic && process.env.ENABLE_SEMANTIC_CACHE !== 'false';
+            if (semanticEnabled) {
                 const embedding = await this.generateEmbedding(prompt);
                 const semanticResults = await this.findSemanticMatches(
                     embedding,
@@ -620,6 +641,25 @@ export class RedisService {
             // Cache miss
             await this.incrementStat('misses');
             loggingService.info('Cache miss', { prompt: prompt.substring(0, 50) });
+            
+            // Emit cache miss event
+            setImmediate(() => {
+                costStreamingService.emitCostEvent({
+                    eventType: 'cache_miss',
+                    timestamp: new Date(),
+                    userId,
+                    data: {
+                        cacheHit: false,
+                        metadata: {
+                            model,
+                            provider,
+                            semanticEnabled,
+                            deduplicationEnabled: enableDeduplication
+                        }
+                    }
+                });
+            });
+            
             return { hit: false };
 
         } catch (error) {
@@ -737,7 +777,9 @@ export class RedisService {
             }
 
             // Store semantic cache
-            if (enableSemantic && process.env.ENABLE_SEMANTIC_CACHE === 'true') {
+            // Enabled by default, can be disabled via enableSemantic parameter or env var
+            const semanticEnabled = enableSemantic && process.env.ENABLE_SEMANTIC_CACHE !== 'false';
+            if (semanticEnabled) {
                 const embedding = await this.generateEmbedding(prompt);
                 const semanticKey = `${this.SEMANTIC_PREFIX}${exactKey}`;
                 const semanticEntry: SemanticCacheEntry = {

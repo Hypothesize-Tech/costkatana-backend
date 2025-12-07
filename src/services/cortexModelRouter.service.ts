@@ -2,9 +2,14 @@
  * Cortex Model Router Service
  * 
  * Intelligently routes Cortex processing requests to the most appropriate models
- * based on complexity analysis, cost constraints, and user preferences.
+ * based on complexity analysis, cost constraints, user preferences, and real-time latency.
  * Implements adaptive routing for optimal performance and cost efficiency.
  */
+
+import { latencyRouterService, ModelOption as LatencyModelOption } from './latencyRouter.service';
+import { loggingService } from './logging.service';
+import { TelemetryService } from './telemetry.service';
+
 // ============================================================================
 // TYPES AND INTERFACES
 // ============================================================================
@@ -299,6 +304,98 @@ export class CortexModelRouterService {
     }
 
     /**
+     * Make routing decision with real-time latency consideration
+     */
+    public async makeRoutingDecisionWithLatency(
+        complexity: PromptComplexityAnalysis,
+        preferences: Partial<RoutingPreferences> = {}
+    ): Promise<RoutingDecision> {
+        const defaultPreferences: RoutingPreferences = {
+            priority: 'balanced',
+            ...preferences
+        };
+
+        try {
+            // Get base decision without latency
+            const baseDecision = this.makeRoutingDecision(complexity, defaultPreferences);
+            
+            // If maxProcessingTime is specified, use latency-based routing
+            if (defaultPreferences.maxProcessingTime) {
+                loggingService.info('🔄 Using latency-based routing', {
+                    maxLatency: defaultPreferences.maxProcessingTime,
+                    baseTier: baseDecision.selectedTier.name
+                });
+                
+                // Prepare model options for latency routing
+                const modelOptions: LatencyModelOption[] = [
+                    {
+                        provider: 'anthropic',
+                        model: baseDecision.selectedTier.models.core,
+                        estimatedCost: baseDecision.costEstimate.estimatedCost,
+                        capabilities: baseDecision.selectedTier.characteristics.capabilities
+                    }
+                ];
+                
+                // Add alternative models from other tiers
+                for (const [tierName, tier] of Object.entries(MODEL_TIERS)) {
+                    if (tierName !== complexity.recommendedTier && this.tierCanHandle(tier, complexity)) {
+                        const altCostEstimate = this.estimateCost(tier, complexity);
+                        modelOptions.push({
+                            provider: 'anthropic',
+                            model: tier.models.core,
+                            estimatedCost: altCostEstimate.estimatedCost,
+                            capabilities: tier.characteristics.capabilities
+                        });
+                    }
+                }
+                
+                // Select by latency
+                const latencyDecision = await latencyRouterService.selectModelByLatency(
+                    defaultPreferences.maxProcessingTime,
+                    modelOptions
+                );
+                
+                if (latencyDecision) {
+                    // Find the tier for the selected model
+                    const selectedTierEntry = Object.entries(MODEL_TIERS).find(([_, tier]) => 
+                        tier.models.core === latencyDecision.selectedModel
+                    );
+                    
+                    if (selectedTierEntry) {
+                        const [tierName, selectedTier] = selectedTierEntry;
+                        const costEstimate = this.estimateCost(selectedTier, complexity);
+                        
+                        loggingService.info('✅ Latency-based routing selected model', {
+                            model: latencyDecision.selectedModel,
+                            tier: tierName,
+                            latencyP95: latencyDecision.latencyP95,
+                            confidence: latencyDecision.confidence
+                        });
+                        
+                        return {
+                            selectedTier,
+                            reasoning: `${latencyDecision.reasoning}. ${this.generateReasoning(selectedTier, complexity, defaultPreferences)}`,
+                            confidence: Math.min(0.95, latencyDecision.confidence * complexity.confidence),
+                            costEstimate
+                        };
+                    }
+                }
+            }
+            
+            // Fallback to base decision
+            return baseDecision;
+            
+        } catch (error) {
+            loggingService.warn('Latency-based routing failed, using base decision', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to original decision
+            return this.makeRoutingDecision(complexity, defaultPreferences);
+        }
+    }
+
+    /**
      * Get model configuration for gateway context
      */
     public getModelConfiguration(routingDecision: RoutingDecision): {
@@ -311,6 +408,175 @@ export class CortexModelRouterService {
             cortexEncodingModel: routingDecision.selectedTier.models.encoder,
             cortexDecodingModel: routingDecision.selectedTier.models.decoder
         };
+    }
+
+    /**
+     * Enhanced routing decision with actual telemetry data
+     * Uses historical cost and latency data to make informed decisions
+     */
+    public async makeRoutingDecisionWithTelemetry(
+        complexity: PromptComplexityAnalysis,
+        preferences: Partial<RoutingPreferences> = {},
+        userId?: string,
+        workspaceId?: string
+    ): Promise<RoutingDecision> {
+        try {
+            // Get historical performance data from telemetry, include workspace/user context
+            const recentMetrics = await TelemetryService.getPerformanceMetrics({
+                workspace_id: workspaceId,
+                timeframe: '1h'
+            });
+
+            // Build model options with actual cost data
+            const modelOptions: LatencyModelOption[] = [];
+            for (const [tierName, tier] of Object.entries(MODEL_TIERS)) {
+                // Get actual cost from telemetry for this model (per workspace/user if provided)
+                const modelCostData = recentMetrics.cost_by_model?.find(
+                    (m: any) => m.model === tier.models.core
+                );
+                
+                const actualAvgCost = modelCostData && modelCostData.request_count > 0
+                    ? modelCostData.total_cost / modelCostData.request_count
+                    : this.estimateCost(tier, complexity).estimatedCost;
+
+                modelOptions.push({
+                    provider: 'aws-bedrock',
+                    model: tier.models.core,
+                    estimatedCost: actualAvgCost,
+                    capabilities: tier.characteristics.capabilities
+                });
+            }
+
+            // Use latency router if maxProcessingTime is specified
+            if (preferences.maxProcessingTime) {
+                const latencyDecision = await latencyRouterService.selectModelByLatency(
+                    preferences.maxProcessingTime,
+                    modelOptions
+                );
+
+                if (latencyDecision) {
+                    // Find matching tier by model name
+                    const selectedTierEntry = Object.entries(MODEL_TIERS).find(
+                        ([, tier]) => tier.models.core === latencyDecision.selectedModel
+                    );
+
+                    if (selectedTierEntry) {
+                        const [selectedTierName, selectedTier] = selectedTierEntry;
+                        return {
+                            selectedTier,
+                            reasoning: `${latencyDecision.reasoning}. Selected based on actual P95 latency data, workspaceId: ${workspaceId || 'n/a'}, userId: ${userId || 'n/a'}.`,
+                            confidence: latencyDecision.confidence,
+                            costEstimate: {
+                                tokens: complexity.factors.length * 1.5,
+                                estimatedCost:
+                                    latencyDecision.latencyP95 > 0
+                                        ? (modelOptions.find(m => m.model === latencyDecision.selectedModel)?.estimatedCost ?? 0)
+                                        : this.estimateCost(selectedTier, complexity).estimatedCost,
+                                tier: selectedTierName
+                            }
+                        };
+                    }
+                }
+            }
+
+            // Fallback to standard routing with telemetry-informed costs
+            const decision = this.makeRoutingDecision(complexity, preferences);
+
+            // Enhance decision with actual cost data (workspaceId/userId are not filterable here, unless metrics are split)
+            const actualModelCost = recentMetrics.cost_by_model?.find(
+                (m: any) => m.model === decision.selectedTier.models.core
+            );
+
+            if (actualModelCost && actualModelCost.request_count > 0) {
+                decision.costEstimate.estimatedCost = actualModelCost.total_cost / actualModelCost.request_count;
+                decision.reasoning += ` (using actual cost data from telemetry, workspaceId: ${workspaceId || 'n/a'}, userId: ${userId || 'n/a'})`;
+                decision.confidence = Math.min(0.95, decision.confidence + 0.1);
+            }
+
+            return decision;
+        } catch (error) {
+            loggingService.warn('Telemetry-based routing failed, falling back to standard routing', {
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                workspaceId
+            });
+            return this.makeRoutingDecision(complexity, preferences);
+        }
+    }
+
+    /**
+     * Get model performance metrics from telemetry
+     */
+    public async getModelPerformanceMetrics(
+        modelId: string,
+        timeframe: string = '1h'
+    ): Promise<{
+        avgCost: number;
+        avgLatency: number;
+        p95Latency: number;
+        requestCount: number;
+        errorRate: number;
+    }> {
+        try {
+            const metrics = await TelemetryService.getPerformanceMetrics({
+                timeframe
+            });
+
+            const modelSpecific = metrics.cost_by_model?.find(
+                (m: any) => m.model === modelId
+            );
+
+            return {
+                avgCost: modelSpecific 
+                    ? modelSpecific.total_cost / modelSpecific.request_count 
+                    : 0,
+                avgLatency: metrics.avg_duration_ms,
+                p95Latency: metrics.p95_duration_ms,
+                requestCount: modelSpecific?.request_count || 0,
+                errorRate: metrics.error_rate
+            };
+        } catch (error) {
+            loggingService.error('Failed to get model performance metrics', {
+                error: error instanceof Error ? error.message : String(error),
+                modelId
+            });
+            return {
+                avgCost: 0,
+                avgLatency: 0,
+                p95Latency: 0,
+                requestCount: 0,
+                errorRate: 0
+            };
+        }
+    }
+
+    /**
+     * Get tier recommendation based on user/workspace plan
+     */
+    public getTierRecommendationForPlan(
+        planTier: 'free' | 'plus' | 'pro' | 'enterprise',
+        complexity: PromptComplexityAnalysis
+    ): string {
+        // Free tier: prioritize cost
+        if (planTier === 'free') {
+            return complexity.overallComplexity === 'expert' ? 'balanced' : 'fast';
+        }
+
+        // Plus tier: balanced approach
+        if (planTier === 'plus') {
+            if (complexity.overallComplexity === 'simple') return 'fast';
+            if (complexity.overallComplexity === 'expert') return 'premium';
+            return 'balanced';
+        }
+
+        // Pro tier: prioritize quality
+        if (planTier === 'pro') {
+            if (complexity.overallComplexity === 'simple') return 'balanced';
+            return complexity.overallComplexity === 'expert' ? 'expert' : 'premium';
+        }
+
+        // Enterprise: best tier for complexity
+        return complexity.recommendedTier;
     }
 
     // ========================================================================
@@ -549,6 +815,19 @@ export class CortexModelRouterService {
         }
         
         return reasons.join('. ');
+    }
+
+    /**
+     * Get circuit breaker state for a provider
+     * Delegates to latency router service
+     */
+    public getCircuitBreakerState(provider: string, model?: string): 'closed' | 'open' | 'half-open' {
+        // Use a default model if not provided
+        const modelToCheck = model || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+        const state = latencyRouterService.getCircuitBreakerState(provider, modelToCheck);
+        
+        // Convert uppercase to lowercase to match expected format
+        return state.toLowerCase() as 'closed' | 'open' | 'half-open';
     }
 
 }
