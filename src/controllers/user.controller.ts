@@ -102,6 +102,35 @@ export class UserController {
                 return;
             }
 
+            // Populate subscription if subscriptionId exists
+            let subscription = null;
+            if (user.subscriptionId) {
+                const { SubscriptionService } = await import('../services/subscription.service');
+                subscription = await SubscriptionService.getSubscriptionByUserId(userId);
+            }
+
+            // Convert user to plain object
+            const userObject: any = user.toObject();
+            
+            // Transform _id to id for frontend compatibility
+            if (userObject._id) {
+                userObject.id = userObject._id.toString();
+            }
+
+            // Add subscription to user object
+            if (subscription) {
+                userObject.subscription = subscription.toObject();
+            } else {
+                // If no subscription found, log warning (shouldn't happen, but safety check)
+                if (user.subscriptionId) {
+                    loggingService.warn('User has subscriptionId but subscription not found', { 
+                        userId, 
+                        subscriptionId: user.subscriptionId 
+                    });
+                }
+                // Don't fail, just return user without subscription
+            }
+
             const duration = Date.now() - startTime;
 
             // Queue business event logging to background
@@ -123,7 +152,7 @@ export class UserController {
 
             res.json({
                 success: true,
-                data: user,
+                data: userObject,
             });
         } catch (error: any) {
             UserController.recordDbFailure();
@@ -1394,9 +1423,16 @@ export class UserController {
         const { Optimization } = await import('../models/Optimization');
 
         // Get user data
-        const user: any = await User.findById(userId).select('createdAt usage subscription');
+        const user: any = await User.findById(userId).select('createdAt usage subscriptionId');
         if (!user) {
             throw new Error('User not found');
+        }
+
+        // Fetch subscription if subscriptionId exists
+        let subscription = null;
+        if (user.subscriptionId) {
+            const { SubscriptionService } = await import('../services/subscription.service');
+            subscription = await SubscriptionService.getSubscriptionByUserId(userId);
         }
 
         // Calculate account age in days
@@ -1545,9 +1581,19 @@ export class UserController {
             accountAge,
             savingsRate: Math.round(savingsRate * 100) / 100,
             appliedOptimizations: optimizationStats?.appliedOptimizations || 0,
-            subscription: {
-                plan: user.subscription.plan,
-                limits: user.subscription.limits
+            subscription: subscription ? {
+                plan: subscription.plan,
+                limits: subscription.limits
+            } : {
+                plan: 'free',
+                limits: {
+                    tokensPerMonth: 1000000,
+                    requestsPerMonth: 10000,
+                    logsPerMonth: 15000,
+                    projects: 1,
+                    workflows: 10,
+                    seats: 1,
+                }
             }
         };
     }

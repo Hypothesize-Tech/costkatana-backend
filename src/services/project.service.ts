@@ -74,10 +74,58 @@ export class ProjectService {
          } });
 
         try {
-            // Get user's workspace
-            const user = await User.findById(ownerId).select('workspaceId');
-            if (!user || !user.workspaceId) {
-                throw new Error('User must belong to a workspace to create projects');
+            // Get user's workspace and subscription
+            const user = await User.findById(ownerId).select('workspaceId subscriptionId name email');
+            if (!user) {
+                throw new Error('User not found');
+            }
+
+            // If user doesn't have a workspace, create one (for existing OAuth users created before workspace fix)
+            if (!user.workspaceId) {
+                loggingService.info('User missing workspace, creating default workspace', { userId: ownerId });
+                
+                // Create default subscription if missing
+                if (!user.subscriptionId) {
+                    const { SubscriptionService } = await import('./subscription.service');
+                    const subscription = await SubscriptionService.createDefaultSubscription(ownerId);
+                    user.subscriptionId = subscription._id as any;
+                    await user.save();
+                    loggingService.info('Created default subscription for user', { userId: ownerId, subscriptionId: subscription._id });
+                }
+
+                // Create default workspace
+                const { WorkspaceService } = await import('./workspace.service');
+                const workspace = await WorkspaceService.createDefaultWorkspace(
+                    ownerId,
+                    user.name || 'User'
+                );
+
+                // Update user with workspace
+                user.workspaceId = workspace._id;
+                user.workspaceMemberships = [{
+                    workspaceId: workspace._id,
+                    role: 'owner',
+                    joinedAt: new Date(),
+                }];
+                await user.save();
+
+                // Create owner team member record
+                const { TeamMember } = await import('../models/TeamMember');
+                await TeamMember.create({
+                    userId: new mongoose.Types.ObjectId(ownerId),
+                    workspaceId: workspace._id,
+                    email: user.email,
+                    role: 'owner',
+                    status: 'active',
+                    joinedAt: new Date(),
+                });
+
+                loggingService.info('Created default workspace for user', { userId: ownerId, workspaceId: workspace._id });
+            }
+
+            // Ensure workspaceId is set (should be after the check above)
+            if (!user.workspaceId) {
+                throw new Error('User workspace is required but not found');
             }
 
             loggingService.info('Step 1: Creating project object');

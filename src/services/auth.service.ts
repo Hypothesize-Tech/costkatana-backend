@@ -167,8 +167,9 @@ export class AuthService {
 
     static async register(data: {
         email: string;
-        password: string;
+        password?: string;
         name: string;
+        emailVerified?: boolean;
     }): Promise<{ user: IUser; tokens: AuthTokens }> {
         const startTime = Date.now();
         
@@ -186,8 +187,8 @@ export class AuthService {
             // Create new user (System role is 'user' by default)
             const user = await User.create({
                 ...data,
-                verificationToken,
-                emailVerified: false,
+                verificationToken: data.emailVerified ? undefined : verificationToken,
+                emailVerified: data.emailVerified || false,
             });
 
             // Create default free subscription for new user
@@ -351,6 +352,25 @@ export class AuthService {
         const startTime = Date.now();
         
         try {
+            // Ensure user has a subscription (for existing users created before subscription requirement)
+            if (!user.subscriptionId) {
+                loggingService.info('User missing subscription, creating default subscription', { 
+                    userId: user._id.toString(),
+                    email: user.email 
+                });
+                
+                const { SubscriptionService } = await import('./subscription.service');
+                const subscription = await SubscriptionService.createDefaultSubscription(user._id);
+                
+                user.subscriptionId = subscription._id as any;
+                await user.save();
+                
+                loggingService.info('Created default subscription for existing user', { 
+                    userId: user._id.toString(),
+                    subscriptionId: subscription._id 
+                });
+            }
+
             // Update last login and track activity in parallel
             const [, tokens] = await Promise.all([
                 // Update last login
@@ -677,6 +697,49 @@ export class AuthService {
     private static recordDbFailure(): void {
         this.dbFailureCount++;
         this.lastDbFailureTime = Date.now();
+    }
+
+    /**
+     * Login with OAuth provider
+     */
+    static async loginWithOAuth(
+        provider: 'google' | 'github',
+        providerId: string,
+        email: string
+    ): Promise<{ user: IUser; tokens: AuthTokens }> {
+        try {
+            // Find user with OAuth provider
+            const user = await User.findOne({
+                'oauthProviders.provider': provider,
+                'oauthProviders.providerId': providerId,
+            });
+
+            if (!user) {
+                throw new Error('OAuth account not found. Please sign up first.');
+            }
+
+            // Update last login
+            user.lastLogin = new Date();
+            await user.save();
+
+            // Generate tokens
+            const tokens = this.generateTokens(user);
+
+            loggingService.info('OAuth login successful', {
+                provider,
+                email,
+                userId: (user as any)._id,
+            });
+
+            return { user, tokens };
+        } catch (error: any) {
+            loggingService.error('OAuth login failed', {
+                error: error.message,
+                provider,
+                email,
+            });
+            throw error;
+        }
     }
 
     /**
