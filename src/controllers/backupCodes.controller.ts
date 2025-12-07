@@ -45,6 +45,15 @@ export class BackupCodesController {
                 return;
             }
 
+            // Check if user has a password (OAuth users might not have one)
+            if (!user.password) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Password not set for this account. Please set a password first.'
+                });
+                return;
+            }
+
             // Verify password
             const isPasswordValid = await bcrypt.compare(password, user.password);
             if (!isPasswordValid) {
@@ -150,6 +159,15 @@ export class BackupCodesController {
                 res.status(404).json({
                     success: false,
                     error: 'User not found'
+                });
+                return;
+            }
+
+            // Check if user has a password (OAuth users might not have one)
+            if (!user.password) {
+                res.status(400).json({
+                    success: false,
+                    error: 'Password not set for this account. Please set a password first.'
                 });
                 return;
             }

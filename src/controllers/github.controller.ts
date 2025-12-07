@@ -137,6 +137,7 @@ export class GitHubController {
     /**
      * OAuth callback handler
      * GET /api/github/callback
+     * Handles both user authentication OAuth (login) and integration OAuth
      */
     static async handleOAuthCallback(req: any, res: Response): Promise<void> {
         try {
@@ -156,10 +157,186 @@ export class GitHubController {
                 return;
             }
 
+            // Check if this is a user authentication OAuth (login) by checking Redis
+            // Login OAuth uses Redis state, integration OAuth uses session state
+            const { redisService } = await import('../services/redis.service');
+            const stateKey = `oauth:state:${state}`;
+            let loginOAuthState: any = null;
+            
+            try {
+                loginOAuthState = await redisService.get(stateKey);
+                if (loginOAuthState) {
+                    // This is a login OAuth flow - handle it here
+                    loggingService.info('Detected login OAuth flow in GitHub callback', { stateKey });
+                    
+                    // Delete state after reading (one-time use)
+                    await redisService.del(stateKey);
+                    
+                    // Validate state
+                    if (loginOAuthState.state !== state || loginOAuthState.provider !== 'github') {
+                        loggingService.warn('OAuth state mismatch in GitHub callback', { 
+                            expectedState: state,
+                            receivedState: loginOAuthState?.state,
+                            expectedProvider: 'github',
+                            receivedProvider: loginOAuthState?.provider,
+                        });
+                        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                        res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Invalid OAuth state. Please try again.')}`);
+                        return;
+                    }
+                    
+                    // Validate timestamp (10 minute expiration)
+                    const stateAge = Date.now() - (loginOAuthState.timestamp || 0);
+                    if (stateAge > 10 * 60 * 1000) {
+                        loggingService.warn('OAuth state expired in GitHub callback', { 
+                            stateAge: `${Math.floor(stateAge / 1000)}s`,
+                        });
+                        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                        res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('OAuth state expired. Please try again.')}`);
+                        return;
+                    }
+                    
+                    // Handle OAuth callback using OAuth service
+                    const { OAuthService } = await import('../services/oauth.service');
+                    const { user, isNewUser, accessToken: oauthAccessToken, githubTokenResponse } = await OAuthService.handleOAuthCallback(
+                        'github',
+                        code as string,
+                        state as string
+                    );
+                    
+                    // Get the actual User document to update
+                    const { User } = await import('../models/User');
+                    const userDoc = await User.findById((user as any)._id);
+                    if (!userDoc) {
+                        throw new Error('User not found after OAuth callback');
+                    }
+                    
+                    userDoc.lastLoginMethod = 'github';
+                    await userDoc.save();
+                    
+                    // Handle GitHub connection and integration (same as in OAuth controller)
+                    if (oauthAccessToken && githubTokenResponse) {
+                        try {
+                            await GitHubService.initialize();
+                            const githubUser = await GitHubService.getAuthenticatedUser(oauthAccessToken);
+                            
+                            let connection = await GitHubConnection.findOne({
+                                userId: userDoc._id.toString(),
+                                githubUserId: githubUser.id,
+                            }).select('+accessToken +refreshToken');
+                            
+                            const expiresAt = githubTokenResponse?.expires_in
+                                ? new Date(Date.now() + githubTokenResponse.expires_in * 1000)
+                                : undefined;
+                            
+                            if (connection) {
+                                connection.accessToken = oauthAccessToken;
+                                if (githubTokenResponse?.refresh_token) {
+                                    connection.refreshToken = githubTokenResponse.refresh_token;
+                                }
+                                connection.tokenType = 'oauth';
+                                connection.scope = githubTokenResponse.scope;
+                                connection.expiresAt = expiresAt;
+                                connection.isActive = true;
+                                connection.lastSyncedAt = new Date();
+                                await connection.save();
+                                loggingService.info('GitHub OAuth connection updated during login', { userId: userDoc._id.toString(), githubUsername: githubUser.login });
+                            } else {
+                                connection = await GitHubConnection.create({
+                                    userId: userDoc._id.toString(),
+                                    accessToken: oauthAccessToken,
+                                    refreshToken: githubTokenResponse?.refresh_token,
+                                    tokenType: 'oauth',
+                                    scope: githubTokenResponse?.scope || 'read:user user:email repo',
+                                    expiresAt,
+                                    githubUserId: githubUser.id,
+                                    githubUsername: githubUser.login,
+                                    avatarUrl: githubUser.avatar_url,
+                                    isActive: true,
+                                    repositories: [],
+                                    lastSyncedAt: new Date(),
+                                });
+                                loggingService.info('GitHub OAuth connection created during login', { userId: userDoc._id.toString(), githubUsername: githubUser.login });
+                            }
+                            
+                            try {
+                                const repositories = await GitHubService.listUserRepositories(connection);
+                                connection.repositories = repositories;
+                                connection.lastSyncedAt = new Date();
+                                await connection.save();
+                                loggingService.info('GitHub repositories synced during login', { userId: userDoc._id.toString(), repositoriesCount: repositories.length });
+                            } catch (repoError: any) {
+                                loggingService.warn('Failed to sync GitHub repositories during login', { userId: userDoc._id.toString(), error: repoError.message });
+                            }
+                            
+                            try {
+                                const { Integration } = await import('../models/Integration');
+                                const existingIntegration = await Integration.findOne({
+                                    userId: userDoc._id,
+                                    type: 'github_oauth',
+                                });
+                                
+                                if (existingIntegration) {
+                                    existingIntegration.status = 'active';
+                                    existingIntegration.metadata = {
+                                        ...existingIntegration.metadata,
+                                        connectionId: connection._id.toString(),
+                                        githubUsername: githubUser.login,
+                                        repositoriesCount: connection.repositories.length,
+                                        lastSynced: new Date(),
+                                    };
+                                    await existingIntegration.save();
+                                    loggingService.info('GitHub integration updated during login', { userId: userDoc._id.toString(), integrationId: existingIntegration._id });
+                                } else {
+                                    const integration = new Integration({
+                                        userId: userDoc._id,
+                                        type: 'github_oauth',
+                                        name: `GitHub (${githubUser.login})`,
+                                        description: `GitHub OAuth integration connected via login`,
+                                        status: 'active',
+                                        encryptedCredentials: '',
+                                        metadata: {
+                                            connectionId: connection._id.toString(),
+                                            githubUsername: githubUser.login,
+                                            githubUserId: githubUser.id,
+                                            repositoriesCount: connection.repositories.length,
+                                            connectedVia: 'oauth_login',
+                                            lastSynced: new Date(),
+                                        },
+                                        stats: { totalDeliveries: 0, successfulDeliveries: 0, failedDeliveries: 0, averageResponseTime: 0 },
+                                    });
+                                    await integration.save();
+                                    loggingService.info('GitHub integration created during login', { userId: userDoc._id.toString(), integrationId: integration._id });
+                                }
+                            } catch (integrationError: any) {
+                                loggingService.warn('Failed to create GitHub integration during login', { userId: userDoc._id.toString(), error: integrationError.message });
+                            }
+                        } catch (githubError: any) {
+                            loggingService.warn('Failed to setup GitHub connection during login', { userId: userDoc._id.toString(), error: githubError.message });
+                        }
+                    }
+                    
+                    // Generate JWT tokens
+                    const { AuthService } = await import('../services/auth.service');
+                    const tokens = await AuthService.generateTokens(userDoc);
+                    
+                    // Redirect to frontend with tokens
+                    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                    const redirectUrl = `${frontendUrl}/oauth/callback?accessToken=${encodeURIComponent(tokens.accessToken)}&refreshToken=${encodeURIComponent(tokens.refreshToken)}&isNewUser=${isNewUser}&lastLoginMethod=github`;
+                    res.redirect(redirectUrl);
+                    return;
+                }
+            } catch (error: any) {
+                loggingService.debug('No login OAuth state found in Redis, checking for integration OAuth', { 
+                    error: error.message 
+                });
+            }
+
+            // This is an integration OAuth flow - use existing logic
             // Initialize GitHub service first
             await GitHubService.initialize();
 
-            // Validate state parameter (CSRF protection)
+            // Validate state parameter (CSRF protection) - check session
             const storedState = req.session?.githubOAuthState;
             if (!storedState || storedState.state !== state) {
                 const error = GitHubErrors.OAUTH_STATE_INVALID;

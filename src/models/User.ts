@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 
 export interface IUser {
     email: string;
-    password: string;
+    password?: string; // Optional for OAuth users
     name: string;
     avatar?: string;
     role: 'user' | 'admin';
@@ -12,6 +12,12 @@ export interface IUser {
         workspaceId: ObjectId;
         role: 'owner' | 'admin' | 'developer' | 'viewer';
         joinedAt: Date;
+    }>;
+    oauthProviders: Array<{
+        provider: 'google' | 'github';
+        providerId: string;
+        email: string;
+        linkedAt: Date;
     }>;
     otherEmails: Array<{
         email: string;
@@ -75,6 +81,7 @@ export interface IUser {
     resetPasswordToken?: string;
     resetPasswordExpires?: Date;
     lastLogin?: Date;
+    lastLoginMethod?: 'email' | 'google' | 'github'; // Track last login method
     country?: string; // ISO 3166-1 alpha-2 country code (e.g., 'IN', 'US', 'GB')
     mfa: {
         enabled: boolean;
@@ -138,7 +145,7 @@ const userSchema = new Schema<IUser>({
     },
     password: {
         type: String,
-        required: true,
+        required: false, // Optional for OAuth users
         minlength: 8,
     },
     name: {
@@ -158,6 +165,27 @@ const userSchema = new Schema<IUser>({
         type: Schema.Types.ObjectId,
         ref: 'Workspace',
     },
+    oauthProviders: [{
+        provider: {
+            type: String,
+            enum: ['google', 'github'],
+            required: true,
+        },
+        providerId: {
+            type: String,
+            required: true,
+        },
+        email: {
+            type: String,
+            required: true,
+            lowercase: true,
+            trim: true,
+        },
+        linkedAt: {
+            type: Date,
+            default: Date.now,
+        },
+    }],
     workspaceMemberships: [{
         workspaceId: {
             type: Schema.Types.ObjectId,
@@ -349,6 +377,10 @@ const userSchema = new Schema<IUser>({
     resetPasswordToken: String,
     resetPasswordExpires: Date,
     lastLogin: Date,
+    lastLoginMethod: {
+        type: String,
+        enum: ['email', 'google', 'github'],
+    },
     country: {
         type: String,
         uppercase: true,
@@ -478,7 +510,7 @@ const userSchema = new Schema<IUser>({
 
 // Hash password before saving
 userSchema.pre('save', async function (next) {
-    if (!this.isModified('password')) return next();
+    if (!this.isModified('password') || !this.password) return next();
 
     try {
         const salt = await bcrypt.genSalt(10);
@@ -491,6 +523,9 @@ userSchema.pre('save', async function (next) {
 
 // Compare password method
 userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
+    if (!this.password) {
+        throw new Error('No password set for this user. Please use OAuth login.');
+    }
     return bcrypt.compare(candidatePassword, this.password);
 };
 
@@ -537,5 +572,7 @@ userSchema.index({ 'dashboardApiKeys.keyId': 1, '_id': 1 });
 userSchema.index({ 'otherEmails.email': 1 });
 userSchema.index({ workspaceId: 1 });
 userSchema.index({ 'workspaceMemberships.workspaceId': 1 });
+userSchema.index({ 'oauthProviders.providerId': 1 });
+userSchema.index({ 'oauthProviders.provider': 1, 'oauthProviders.providerId': 1 });
 
 export const User = mongoose.model<IUser>('User', userSchema);

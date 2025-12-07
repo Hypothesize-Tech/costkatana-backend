@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import metricsRouter from './metrics.route';
 import authRouter from './auth.routes';
+import oauthRouter from './oauth.routes';
 import userRouter from './user.routes';
 import usageRouter from './usage.routes';
 import optimizationRouter from './optimization.routes';
@@ -88,6 +89,7 @@ router.get('/version', (_, res) => {
 
 // Mount routes
 router.use('/auth', authRouter);
+router.use('/auth/oauth', oauthRouter);
 router.use('/user', userRouter);
 router.use('/usage', usageRouter);
 router.use('/optimizations', optimizationRouter);

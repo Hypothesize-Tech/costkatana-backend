@@ -308,24 +308,59 @@ export class OnboardingController {
                     }]
                 });
 
-                // Parallel operations: save user and create project
-                const [savedUser, defaultProject] = await Promise.all([
-                    newUser.save(),
-                    ProjectService.createProject(userId, {
-                        name: `My ${source.charAt(0).toUpperCase() + source.slice(1)} Project`,
-                        description: `Default project for ${source} cost tracking`,
-                        budget: {
-                            amount: 100,
-                            period: 'monthly' as const,
-                            currency: 'USD'
-                        },
-                        settings: {
-                            requireApprovalAbove: 100,
-                            enablePromptLibrary: true,
-                            enableCostAllocation: true
-                        }
-                    })
-                ]);
+                // Save user first
+                const savedUser = await newUser.save();
+
+                // Create default free subscription for new user
+                const { SubscriptionService } = await import('../services/subscription.service');
+                const subscription = await SubscriptionService.createDefaultSubscription(userId);
+                
+                // Update user with subscriptionId
+                savedUser.subscriptionId = subscription._id as any;
+                await savedUser.save();
+
+                // Create default workspace for the user
+                const { WorkspaceService } = await import('../services/workspace.service');
+                const workspace = await WorkspaceService.createDefaultWorkspace(
+                    userId,
+                    savedUser.name || email.split('@')[0]
+                );
+
+                // Update user with workspace
+                savedUser.workspaceId = workspace._id;
+                savedUser.workspaceMemberships = [{
+                    workspaceId: workspace._id,
+                    role: 'owner',
+                    joinedAt: new Date(),
+                }];
+                await savedUser.save();
+
+                // Create owner team member record
+                const { TeamMember } = await import('../models/TeamMember');
+                await TeamMember.create({
+                    userId: new mongoose.Types.ObjectId(userId),
+                    workspaceId: workspace._id,
+                    email: savedUser.email,
+                    role: 'owner',
+                    status: 'active',
+                    joinedAt: new Date(),
+                });
+
+                // Create project (now that workspace exists)
+                const defaultProject = await ProjectService.createProject(userId, {
+                    name: `My ${source.charAt(0).toUpperCase() + source.slice(1)} Project`,
+                    description: `Default project for ${source} cost tracking`,
+                    budget: {
+                        amount: 100,
+                        period: 'monthly' as const,
+                        currency: 'USD'
+                    },
+                    settings: {
+                        requireApprovalAbove: 100,
+                        enablePromptLibrary: true,
+                        enableCostAllocation: true
+                    }
+                });
 
                 cleanedUser = savedUser.toObject();
                 isNewUser = true;
