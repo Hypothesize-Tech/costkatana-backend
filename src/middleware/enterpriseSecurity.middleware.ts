@@ -456,7 +456,7 @@ export function enterpriseSecurityMiddleware(
                         timestamp: new Date().toISOString()
                     },
                     remediation: {
-                        contact: 'security@costkatana.com',
+                        contact: 'support@costkatana.com',
                         documentation: 'https://docs.costkatana.com/security',
                         appeal_process: 'Submit security appeal through support'
                     }
@@ -534,7 +534,7 @@ export function enterpriseSecurityMiddleware(
                 res.status(500).json({
                     error: 'Security System Error',
                     message: 'Request blocked due to security system error',
-                    contact: 'security@costkatana.com'
+                    contact: 'support@costkatana.com'
                 });
                 return;
             }
