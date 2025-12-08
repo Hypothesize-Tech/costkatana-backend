@@ -26,6 +26,8 @@ export { Integration, IIntegration } from './Integration';
 export type { IntegrationType, IntegrationStatus, AlertType, AlertSeverity, AlertRoutingRule, IntegrationCredentials, DeliveryConfig, IntegrationStats } from './Integration';
 export { GitHubConnection, IGitHubConnection, IGitHubRepository } from './GitHubConnection';
 export { GitHubIntegration, IGitHubIntegration, IGitHubCommit, IAISuggestion, IFeatureConfig } from './GitHubIntegration';
+export { GoogleConnection, IGoogleConnection, IGoogleDriveFile } from './GoogleConnection';
+export { GoogleExportAudit, IGoogleExportAudit } from './GoogleExportAudit';
 export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserMapping';
 export { AILog, IAILog } from './AILog';
 export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversation';

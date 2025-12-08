@@ -525,6 +525,8 @@ export class IntegrationChatService {
           return await this.executeDiscordCommand(command, integration, credentials);
         case 'github':
           return await this.executeGitHubCommand(command, integration, credentials);
+        case 'google':
+          return await this.executeGoogleCommand(command, integration, credentials);
         default:
           return {
             success: false,
@@ -2123,6 +2125,182 @@ export class IntegrationChatService {
         success: false,
         message: `❌ GitHub command failed: ${error.message}`,
         error: error.message
+      };
+    }
+  }
+
+  /**
+   * Execute Google command
+   */
+  private static async executeGoogleCommand(
+    command: IntegrationCommand,
+    integration: IIntegration,
+    credentials: IntegrationCredentials
+  ): Promise<IntegrationCommandResult> {
+    try {
+      const { GoogleService } = await import('./google.service');
+      const { GoogleIntegrationService } = await import('./googleIntegration.service');
+      const { GoogleConnection } = await import('../models/GoogleConnection');
+
+      // Get Google connection from metadata or credentials
+      let connectionId = integration.metadata?.connectionId;
+      
+      // Fallback: try to get connectionId from credentials if not in metadata
+      if (!connectionId && (credentials as any).connectionId) {
+        connectionId = (credentials as any).connectionId;
+      }
+
+      // If we have connectionId, fetch the connection
+      let connection = null;
+      if (connectionId) {
+        connection = await GoogleConnection.findOne({
+          _id: connectionId,
+          userId: integration.userId.toString(),
+          isActive: true
+        }).select('+accessToken +refreshToken');
+      }
+
+      // Fallback: If no connection found but we have accessToken in credentials, 
+      // try to find connection by userId and validate token
+      if (!connection && credentials.accessToken) {
+        // Try to find any active Google connection for this user
+        const connections = await GoogleConnection.find({
+          userId: integration.userId.toString(),
+          isActive: true
+        }).select('+accessToken +refreshToken').limit(1);
+
+        if (connections.length > 0) {
+          connection = connections[0];
+          // Validate that the token matches (optional check)
+          try {
+            const decryptedToken = connection.decryptToken();
+            if (decryptedToken !== credentials.accessToken) {
+              // Token mismatch, but still use the connection from DB
+              loggingService.warn('Google access token mismatch between credentials and connection', {
+                userId: integration.userId.toString(),
+                connectionId: connection._id
+              });
+            }
+          } catch (error) {
+            // Token decryption failed, continue with connection anyway
+            loggingService.warn('Failed to decrypt Google token for validation', {
+              userId: integration.userId.toString(),
+              connectionId: connection._id
+            });
+          }
+        }
+      }
+
+      if (!connection) {
+        return {
+          success: false,
+          message: '❌ Google connection not found. Please connect your Google account from Settings → Integrations.',
+          error: 'No active Google connection found'
+        };
+      }
+
+      // Use connectionId from the found connection
+      const finalConnectionId = connection._id.toString();
+
+      const mention = command.mention;
+      const action = mention.entityType; // sheets, docs, drive, etc.
+      const subAction = mention.subEntityType; // export, create, list, etc.
+
+      // Handle different Google product actions
+      if (action === 'sheets') {
+        if (subAction === 'export' || command.params?.export) {
+          // Export cost data to Google Sheets
+          const result = await GoogleIntegrationService.exportCostDataToSheets(connection, {
+            userId: integration.userId.toString(),
+            connectionId: finalConnectionId,
+            startDate: command.params?.startDate ? new Date(command.params.startDate) : undefined,
+            endDate: command.params?.endDate ? new Date(command.params.endDate) : undefined,
+            projectId: command.params?.projectId,
+            redactionOptions: command.params?.redactionOptions
+          });
+
+          return {
+            success: true,
+            message: `✅ Exported cost data to Google Sheets`,
+            data: {
+              spreadsheetUrl: result.spreadsheetUrl,
+              spreadsheetId: result.spreadsheetId
+            }
+          };
+        } else if (subAction === 'list') {
+          // List sheets
+          const { files } = await GoogleService.listDriveFiles(connection, {
+            query: "mimeType='application/vnd.google-apps.spreadsheet'"
+          });
+
+          return {
+            success: true,
+            message: `📊 Found ${files.length} Google Sheets`,
+            data: files
+          };
+        }
+      } else if (action === 'docs') {
+        if (subAction === 'report' || command.params?.report) {
+          // Create cost report in Google Docs
+          const result = await GoogleIntegrationService.createCostReportInDocs(connection, {
+            userId: integration.userId.toString(),
+            connectionId: finalConnectionId,
+            startDate: command.params?.startDate ? new Date(command.params.startDate) : undefined,
+            endDate: command.params?.endDate ? new Date(command.params.endDate) : undefined,
+            projectId: command.params?.projectId,
+            includeTopModels: true,
+            includeRecommendations: true
+          });
+
+          return {
+            success: true,
+            message: `✅ Created cost report in Google Docs`,
+            data: {
+              documentUrl: result.documentUrl,
+              documentId: result.documentId
+            }
+          };
+        } else if (subAction === 'list') {
+          // List docs
+          const { files } = await GoogleService.listDriveFiles(connection, {
+            query: "mimeType='application/vnd.google-apps.document'"
+          });
+
+          return {
+            success: true,
+            message: `📄 Found ${files.length} Google Docs`,
+            data: files
+          };
+        }
+      } else if (action === 'drive') {
+        if (subAction === 'list' || command.type === 'list') {
+          // List all Drive files
+          const { files } = await GoogleService.listDriveFiles(connection, {
+            pageSize: command.params?.limit ?? 20
+          });
+
+          return {
+            success: true,
+            message: `📁 Found ${files.length} files in Google Drive`,
+            data: files
+          };
+        }
+      }
+
+      return {
+        success: false,
+        message: `❌ Unknown Google command: ${action}:${subAction}`,
+        error: 'Command not recognized'
+      };
+    } catch (error: any) {
+      loggingService.error('Failed to execute Google command', {
+        error: error?.message,
+        command
+      });
+      return {
+        success: false,
+        message: `❌ Google command failed: ${error?.message}`,
+        error: error?.message
       };
     }
   }

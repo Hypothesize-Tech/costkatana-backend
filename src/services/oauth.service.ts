@@ -71,8 +71,14 @@ export class OAuthService {
 
         if (provider === 'google') {
             const clientId = process.env.GOOGLE_CLIENT_ID;
+            if (!clientId) {
+                loggingService.error('GOOGLE_CLIENT_ID is not set in environment variables');
+                throw new Error('Google OAuth is not configured. GOOGLE_CLIENT_ID is missing.');
+            }
+            
             const callbackUrl = process.env.GOOGLE_CALLBACK_URL || `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/oauth/google/callback`;
-            const scopes = 'openid email profile';
+            // Include Google Workspace scopes for all products (Phase 1-3)
+            const scopes = 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/forms.body https://www.googleapis.com/auth/forms.responses.readonly';
             
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;
         } else {
@@ -115,9 +121,9 @@ export class OAuthService {
     }
 
     /**
-     * Exchange Google authorization code for access token
+     * Exchange Google authorization code for access token and refresh token
      */
-    static async exchangeGoogleCodeForToken(code: string): Promise<string> {
+    static async exchangeGoogleCodeForToken(code: string): Promise<GoogleTokenResponse> {
         try {
             const clientId = process.env.GOOGLE_CLIENT_ID;
             const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -149,8 +155,11 @@ export class OAuthService {
                 throw new Error('No access token received from Google');
             }
 
-            loggingService.info('Google OAuth token exchanged successfully');
-            return data.access_token;
+            loggingService.info('Google OAuth token exchanged successfully', { 
+                hasRefreshToken: !!data.refresh_token,
+                expiresIn: data.expires_in 
+            });
+            return data;
         } catch (error: any) {
             loggingService.error('Failed to exchange Google code', { error: error.message });
             throw error;
@@ -550,16 +559,18 @@ export class OAuthService {
         provider: 'google' | 'github',
         code: string,
         state: string
-    ): Promise<{ user: IUser; isNewUser: boolean; accessToken?: string; githubTokenResponse?: any }> {
+    ): Promise<{ user: IUser; isNewUser: boolean; accessToken?: string; googleTokenResponse?: GoogleTokenResponse; githubTokenResponse?: any }> {
         try {
             // Validate state
             const stateData = this.validateState(state, provider);
 
             // Exchange code for token
             let accessToken: string;
+            let googleTokenResponse: GoogleTokenResponse | undefined = undefined;
             let githubTokenResponse: any = undefined;
             if (provider === 'google') {
-                accessToken = await this.exchangeGoogleCodeForToken(code);
+                googleTokenResponse = await this.exchangeGoogleCodeForToken(code);
+                accessToken = googleTokenResponse.access_token;
             } else {
                 // For GitHub, get the full token response
                 const callbackUrl = process.env.GITHUB_OAUTH_CALLBACK_URL ?? `${process.env.BACKEND_URL ?? 'http://localhost:8000'}/api/github/callback`;
@@ -607,7 +618,13 @@ export class OAuthService {
             // Check if this is a linking flow (userId in state)
             if (stateData.userId) {
                 const user = await this.linkOAuthProvider(stateData.userId, provider, userInfo);
-                return { user, isNewUser: false, accessToken: provider === 'github' ? accessToken : undefined, githubTokenResponse };
+                return { 
+                    user, 
+                    isNewUser: false, 
+                    accessToken, // Always return access token for linking flows
+                    googleTokenResponse: provider === 'google' ? googleTokenResponse : undefined,
+                    githubTokenResponse 
+                };
             }
 
             // Find or create user
@@ -619,7 +636,13 @@ export class OAuthService {
             const isNewUser = !existingUser;
             const user = await this.findOrCreateOAuthUser(provider, userInfo);
 
-            return { user, isNewUser, accessToken: provider === 'github' ? accessToken : undefined, githubTokenResponse };
+            return { 
+                user, 
+                isNewUser, 
+                accessToken: provider === 'github' ? accessToken : undefined, 
+                googleTokenResponse: provider === 'google' ? googleTokenResponse : undefined,
+                githubTokenResponse 
+            };
         } catch (error: any) {
             loggingService.error('Failed to handle OAuth callback', { error: error?.message, provider });
             throw error;

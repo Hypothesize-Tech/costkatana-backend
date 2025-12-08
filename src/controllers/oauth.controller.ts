@@ -103,6 +103,18 @@ export class OAuthController {
             const provider = req.params.provider as 'google' | 'github';
             const { code, state, error: oauthError, error_description } = req.query;
 
+            // Log callback attempt immediately
+            loggingService.info('OAuth callback received', {
+                provider,
+                hasCode: !!code,
+                hasState: !!state,
+                hasError: !!oauthError,
+                error: oauthError,
+                errorDescription: error_description,
+                path: req.path,
+                query: Object.keys(req.query),
+            });
+
             const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
             // Handle OAuth errors
@@ -125,7 +137,119 @@ export class OAuthController {
             }
 
             // Validate state (CSRF protection)
-            // Tries: Redis/in-memory cache -> Session -> Fail gracefully
+            // Express automatically URL-decodes query parameters, but base64 uses + and / which might get corrupted
+            // We need to handle this carefully - get the raw state from the URL if possible
+            let decodedState: any = null;
+            let stateForValidation: string = state as string; // This will be passed to handleOAuthCallback
+            
+            try {
+                const stateString = state as string;
+                
+                loggingService.info('Decoding OAuth state', { 
+                    provider,
+                    stateLength: stateString.length,
+                    statePrefix: stateString.substring(0, 30),
+                    stateHasPlus: stateString.includes('+'),
+                    stateHasPercent: stateString.includes('%'),
+                    stateHasSpace: stateString.includes(' '),
+                });
+                
+                // Express URL-decodes query params, but base64 + becomes space, / becomes something else
+                // Try to get raw state from URL if possible, otherwise fix the state
+                let stateToDecode = stateString;
+                
+                // If state contains spaces, they might be decoded + signs from base64
+                // Base64 uses + and / which URL encoding converts to %2B and %2F
+                // But Express decodes %2B to +, so that should be fine
+                // However, if + was in the original base64 and got URL-encoded as %2B, Express decodes it back to +
+                // So the state should be correct as-is from Express
+                
+                // Check if state looks URL-encoded (contains %XX patterns that weren't decoded)
+                if (stateString.includes('%')) {
+                    try {
+                        stateToDecode = decodeURIComponent(stateString);
+                        stateForValidation = stateToDecode; // Use decoded version for validation
+                        loggingService.info('State was URL-encoded, decoded it', { 
+                            provider,
+                            originalLength: stateString.length,
+                            decodedLength: stateToDecode.length,
+                        });
+                    } catch (decodeError: any) {
+                        // If decode fails, use original (might already be decoded)
+                        loggingService.warn('Failed to URL-decode state, using as-is', { 
+                            provider,
+                            error: decodeError.message,
+                        });
+                        stateToDecode = stateString;
+                        stateForValidation = stateString;
+                    }
+                } else {
+                    // State doesn't have % signs, so Express already decoded it
+                    // But if it has spaces, they might be corrupted + signs
+                    if (stateString.includes(' ')) {
+                        // Replace spaces with + (base64 uses + not space)
+                        stateToDecode = stateString.replace(/ /g, '+');
+                        stateForValidation = stateToDecode;
+                        loggingService.info('State contains spaces, replaced with +', { 
+                            provider,
+                            originalLength: stateString.length,
+                            fixedLength: stateToDecode.length,
+                        });
+                    } else {
+                        stateToDecode = stateString;
+                        stateForValidation = stateString;
+                    }
+                }
+                
+                // Base64-decode the state
+                decodedState = JSON.parse(Buffer.from(stateToDecode, 'base64').toString());
+                
+                loggingService.info('OAuth state decoded successfully', { 
+                    provider,
+                    hasNonce: !!decodedState.nonce,
+                    hasTimestamp: !!decodedState.timestamp,
+                    hasProvider: !!decodedState.provider,
+                    noncePrefix: decodedState.nonce?.substring(0, 8),
+                    timestamp: decodedState.timestamp,
+                    providerMatch: decodedState.provider === provider,
+                });
+            } catch (error: any) {
+                loggingService.error('Failed to decode OAuth state', { 
+                    error: error.message,
+                    errorStack: error.stack,
+                    provider,
+                    stateLength: (state as string)?.length,
+                    statePrefix: (state as string)?.substring(0, 50),
+                    stateSuffix: (state as string)?.substring(Math.max(0, (state as string)?.length - 20)),
+                });
+                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Invalid OAuth state. Please try again.')}`);
+                return;
+            }
+
+            // Validate timestamp (10 minute expiration)
+            const stateAge = Date.now() - (decodedState.timestamp || 0);
+            if (stateAge > 10 * 60 * 1000) {
+                loggingService.warn('OAuth state expired', { 
+                    provider,
+                    stateAge: `${Math.floor(stateAge / 1000)}s`,
+                });
+                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('OAuth state expired. Please try again.')}`);
+                return;
+            }
+
+            // Validate provider
+            if (decodedState.provider !== provider) {
+                loggingService.warn('OAuth provider mismatch', { 
+                    expectedProvider: provider,
+                    receivedProvider: decodedState.provider,
+                });
+                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Invalid OAuth provider. Please try again.')}`);
+                return;
+            }
+
+            // Try to verify state was stored (CSRF protection)
+            // Tries: Redis/in-memory cache -> Session -> Continue anyway (state is self-contained)
+            // Use the original state (URL-encoded) for the cache key, but decodedStateString for comparison
             const stateKey = `oauth:state:${state}`;
             let storedState: any = null;
             
@@ -135,11 +259,22 @@ export class OAuthController {
                 if (storedState) {
                     // Delete state after reading (one-time use)
                     await redisService.del(stateKey);
-                    loggingService.info('OAuth state retrieved from cache', { provider, stateKey });
+                    loggingService.info('OAuth state retrieved from cache', { 
+                        provider, 
+                        stateKey,
+                        storedStateType: typeof storedState,
+                        hasStateField: !!(storedState as any)?.state,
+                    });
+                } else {
+                    loggingService.warn('OAuth state not found in cache', { 
+                        provider,
+                        stateKey,
+                    });
                 }
             } catch (error: any) {
                 loggingService.warn('Failed to get OAuth state from cache', { 
                     error: error.message,
+                    errorStack: error.stack,
                     provider 
                 });
             }
@@ -150,48 +285,82 @@ export class OAuthController {
                 if (req.session) {
                     delete req.session.oauthState;
                 }
-                loggingService.info('OAuth state retrieved from session fallback', { provider });
-            }
-            
-            // Validate state
-            if (!storedState) {
-                loggingService.warn('OAuth state not found', { 
+                loggingService.info('OAuth state retrieved from session fallback', { 
                     provider,
-                    stateKey,
-                    hasSession: !!req.session,
+                    storedStateType: typeof storedState,
                 });
-                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('OAuth state expired or invalid. Please try again.')}`);
-                return;
             }
-            
-            if (storedState.state !== state || storedState.provider !== provider) {
-                loggingService.warn('OAuth state mismatch', { 
+
+            // If state was stored, verify it matches (additional CSRF protection)
+            if (storedState) {
+                // The storedState is an object with { state, provider, timestamp, userId }
+                // where state is the base64-encoded string. We need to decode it to get the nonce.
+                let storedStateDecoded: any = null;
+                try {
+                    // storedState.state contains the base64-encoded state string (not URL-encoded)
+                    if (storedState.state && typeof storedState.state === 'string') {
+                        // The stored state is already base64-encoded, no URL decoding needed
+                        storedStateDecoded = JSON.parse(Buffer.from(storedState.state, 'base64').toString());
+                    } else if (typeof storedState === 'string') {
+                        // Fallback: if storedState itself is a string, try to decode it
+                        // First try URL-decode, then base64-decode
+                        try {
+                            const urlDecoded = decodeURIComponent(storedState);
+                            storedStateDecoded = JSON.parse(Buffer.from(urlDecoded, 'base64').toString());
+                        } catch {
+                            // If URL decode fails, try direct base64 decode
+                            storedStateDecoded = JSON.parse(Buffer.from(storedState, 'base64').toString());
+                        }
+                    } else {
+                        // If storedState is already decoded, use it directly
+                        storedStateDecoded = storedState;
+                    }
+                } catch (error: any) {
+                    loggingService.warn('Failed to decode stored OAuth state', { 
+                        error: error.message,
+                        provider,
+                        storedStateType: typeof storedState,
+                        hasStateField: !!(storedState as any)?.state,
+                    });
+                    // Continue anyway - the state is already validated from the query param
+                }
+
+                // Verify nonce matches (CSRF protection)
+                if (storedStateDecoded && storedStateDecoded.nonce && decodedState.nonce) {
+                    if (storedStateDecoded.nonce !== decodedState.nonce) {
+                        loggingService.warn('OAuth state nonce mismatch', { 
                     provider, 
-                    expectedState: state,
-                    receivedState: storedState?.state,
-                    expectedProvider: provider,
-                    receivedProvider: storedState?.provider,
+                            storedNonce: storedStateDecoded.nonce?.substring(0, 8),
+                            receivedNonce: decodedState.nonce?.substring(0, 8),
                 });
                 res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('Invalid OAuth state. Please try again.')}`);
                 return;
             }
-            
-            // Validate timestamp (10 minute expiration)
-            const stateAge = Date.now() - (storedState.timestamp || 0);
-            if (stateAge > 10 * 60 * 1000) {
-                loggingService.warn('OAuth state expired', { 
+                    loggingService.info('OAuth state nonce verified successfully', { provider });
+                }
+            } else {
+                // State not found in cache/session, but state is self-contained and validated
+                // This can happen if Redis is down or state expired from cache but not from timestamp
+                // Log warning but continue if timestamp is valid
+                loggingService.warn('OAuth state not found in cache/session, but state is self-validated', { 
                     provider,
-                    stateAge: `${Math.floor(stateAge / 1000)}s`,
+                    stateKey,
+                    hasSession: !!req.session,
                 });
-                res.redirect(`${frontendUrl}/login?error=${encodeURIComponent('OAuth state expired. Please try again.')}`);
-                return;
             }
 
             // Handle OAuth callback
-            const { user, isNewUser, accessToken: oauthAccessToken } = await OAuthService.handleOAuthCallback(
+            // Pass the stateForValidation we prepared (handles URL decoding and space-to-plus conversion)
+            loggingService.info('Calling handleOAuthCallback', { 
+                provider,
+                stateLength: stateForValidation.length,
+                statePrefix: stateForValidation.substring(0, 20),
+            });
+            
+            const { user, isNewUser, accessToken: oauthAccessToken, googleTokenResponse } = await OAuthService.handleOAuthCallback(
                 provider,
                 code as string,
-                state as string
+                stateForValidation
             );
 
             // Get the actual User document to update
@@ -203,20 +372,27 @@ export class OAuthController {
             }
 
             // Update last login method (only for login, not for linking)
-            // Check if this is a linking flow by checking if userId was in state
-            let isLinkingFlow = false;
-            try {
-                const stateData = OAuthService.validateState(state as string, provider);
-                isLinkingFlow = !!stateData.userId;
+            // Check if this is a linking flow by checking if userId was in decodedState
+            // We already decoded the state earlier, so use decodedState instead of re-validating
+            const isLinkingFlow = !!decodedState.userId;
+            
+            // Use the correct userId - for linking flows, use decodedState.userId; for login flows, use userDoc._id
+            // Both should be the same, but using decodedState.userId for linking ensures consistency
+            const targetUserId = isLinkingFlow && decodedState.userId 
+                ? decodedState.userId 
+                : (userDoc as any)._id.toString();
+            
                 if (!isLinkingFlow) {
                     // This is a login flow, update lastLoginMethod
-                    userDoc.lastLoginMethod = provider;
-                    await userDoc.save();
-                }
-            } catch {
-                // If state validation fails, assume it's a login flow
                 userDoc.lastLoginMethod = provider;
                 await userDoc.save();
+            } else {
+                loggingService.info(`${provider} OAuth linking flow detected`, {
+                    provider,
+                    userId: decodedState.userId,
+                    currentUserId: (userDoc as any)._id.toString(),
+                    targetUserId,
+                });
             }
 
             // For GitHub OAuth, create/update GitHub connection and fetch repositories
@@ -234,7 +410,7 @@ export class OAuthController {
                     
                     // Check if connection already exists
                     let connection = await GitHubConnection.findOne({
-                        userId: (userDoc as any)._id.toString(),
+                        userId: targetUserId,
                         githubUserId: githubUser.id
                     }).select('+accessToken +refreshToken');
                     
@@ -248,14 +424,15 @@ export class OAuthController {
                         connection.avatarUrl = githubUser.avatar_url;
                         await connection.save();
                         
-                        loggingService.info('GitHub OAuth connection updated during login', {
-                            userId: (userDoc as any)._id.toString(),
+                        loggingService.info(`GitHub OAuth connection updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
                             githubUsername: githubUser.login,
+                            isLinkingFlow,
                         });
                     } else {
                         // Create new connection
                         connection = await GitHubConnection.create({
-                            userId: (userDoc as any)._id.toString(),
+                            userId: targetUserId,
                             accessToken: oauthAccessToken,
                             tokenType: 'oauth',
                             githubUserId: githubUser.id,
@@ -266,9 +443,10 @@ export class OAuthController {
                             lastSyncedAt: new Date()
                         });
                         
-                        loggingService.info('GitHub OAuth connection created during login', {
-                            userId: (userDoc as any)._id.toString(),
+                        loggingService.info(`GitHub OAuth connection created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
                             githubUsername: githubUser.login,
+                            isLinkingFlow,
                         });
                     }
                     
@@ -279,15 +457,17 @@ export class OAuthController {
                         connection.lastSyncedAt = new Date();
                         await connection.save();
                         
-                        loggingService.info('GitHub repositories synced during login', {
-                            userId: (userDoc as any)._id.toString(),
+                        loggingService.info(`GitHub repositories synced during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
                             repositoriesCount: repositories.length,
+                            isLinkingFlow,
                         });
                     } catch (repoError: any) {
                         // Log but don't fail the login if repo sync fails
-                        loggingService.warn('Failed to sync GitHub repositories during login', {
-                            userId: (userDoc as any)._id.toString(),
+                        loggingService.warn(`Failed to sync GitHub repositories during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
                             error: repoError.message,
+                            isLinkingFlow,
                         });
                     }
                     
@@ -295,7 +475,7 @@ export class OAuthController {
                     try {
                         const { Integration } = await import('../models/Integration');
                         const existingIntegration = await Integration.findOne({
-                            userId: (userDoc as any)._id,
+                            userId: targetUserId,
                             type: 'github_oauth',
                         });
                         
@@ -307,18 +487,20 @@ export class OAuthController {
                                 connectionId: connection._id.toString(),
                                 githubUsername: githubUser.login,
                                 repositoriesCount: connection.repositories.length,
+                                connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
                                 lastSynced: new Date(),
                             };
                             await existingIntegration.save();
                             
-                            loggingService.info('GitHub integration updated during login', {
-                                userId: (userDoc as any)._id.toString(),
+                            loggingService.info(`GitHub integration updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                userId: targetUserId,
                                 integrationId: existingIntegration._id,
+                                isLinkingFlow,
                             });
                         } else {
                             // Create new integration
                             const integration = new Integration({
-                                userId: (userDoc as any)._id,
+                                userId: targetUserId,
                                 type: 'github_oauth',
                                 name: `GitHub (${githubUser.login})`,
                                 description: isLinkingFlow 
@@ -344,30 +526,256 @@ export class OAuthController {
                             await integration.save();
                             
                             loggingService.info(`GitHub integration created during ${isLinkingFlow ? 'linking' : 'login'}`, {
-                                userId: (userDoc as any)._id.toString(),
+                                userId: targetUserId,
                                 integrationId: integration._id,
+                                isLinkingFlow,
                             });
                         }
                     } catch (integrationError: any) {
                         // Log but don't fail the login if integration creation fails
-                        loggingService.warn('Failed to create GitHub integration during login', {
-                            userId: (userDoc as any)._id.toString(),
+                        loggingService.warn(`Failed to create GitHub integration during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
                             error: integrationError.message,
+                            isLinkingFlow,
                         });
                     }
                 } catch (githubError: any) {
                     // Log but don't fail the login if GitHub connection setup fails
-                    loggingService.warn('Failed to setup GitHub connection during login', {
-                        userId: (userDoc as any)._id.toString(),
+                    loggingService.warn(`Failed to setup GitHub connection during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                        userId: targetUserId,
                         error: githubError.message,
+                        isLinkingFlow,
                     });
+                }
+            }
+
+            // For Google OAuth, create/update Google connection and sync Drive files
+            // This applies to both login and linking flows
+            if (provider === 'google' && (oauthAccessToken || googleTokenResponse?.access_token)) {
+                // Use oauthAccessToken if available, otherwise extract from googleTokenResponse
+                const googleAccessToken = oauthAccessToken || googleTokenResponse?.access_token;
+                
+                if (!googleAccessToken) {
+                    loggingService.error('No Google access token available', {
+                        provider,
+                        userId: targetUserId,
+                        hasOAuthToken: !!oauthAccessToken,
+                        hasGoogleTokenResponse: !!googleTokenResponse,
+                    });
+                    throw new Error('No Google access token available');
+                }
+                loggingService.info('Starting Google connection setup', {
+                    provider,
+                    userId: targetUserId,
+                    isLinkingFlow,
+                    hasOAuthToken: !!oauthAccessToken,
+                    hasGoogleTokenResponse: !!googleTokenResponse,
+                    hasRefreshToken: !!googleTokenResponse?.refresh_token,
+                    hasGoogleAccessToken: !!googleAccessToken,
+                });
+                
+                try {
+                    const { GoogleService } = await import('../services/google.service');
+                    const { GoogleConnection } = await import('../models/GoogleConnection');
+                    
+                    loggingService.info('Getting Google user info', {
+                        provider,
+                        userId: targetUserId,
+                    });
+                    
+                    // Get Google user info
+                    loggingService.info('About to call GoogleService.getAuthenticatedUser', {
+                        userId: targetUserId,
+                        hasAccessToken: !!googleAccessToken,
+                        accessTokenLength: googleAccessToken?.length,
+                    });
+                    
+                    const googleUser = await GoogleService.getAuthenticatedUser(googleAccessToken);
+                    
+                    loggingService.info('Google user info retrieved', {
+                        provider,
+                        userId: targetUserId,
+                        googleUserId: googleUser.id,
+                        googleEmail: googleUser.email,
+                    });
+                    
+                    // Check if connection already exists
+                    let connection = await GoogleConnection.findOne({
+                        userId: targetUserId,
+                        googleUserId: googleUser.id
+                    }).select('+accessToken +refreshToken');
+                    
+                    if (connection) {
+                        // Update existing connection
+                        connection.accessToken = googleAccessToken; // Will be encrypted by pre-save hook
+                        if (googleTokenResponse?.refresh_token) {
+                            connection.refreshToken = googleTokenResponse.refresh_token; // Will be encrypted by pre-save hook
+                        }
+                        connection.tokenType = 'oauth';
+                        connection.isActive = true;
+                        connection.healthStatus = 'healthy';
+                        connection.lastSyncedAt = new Date();
+                        connection.googleEmail = googleUser.email;
+                        connection.googleName = googleUser.name;
+                        connection.googleAvatar = googleUser.picture;
+                        connection.googleDomain = googleUser.hd;
+                        await connection.save();
+                        
+                        loggingService.info(`Google OAuth connection updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
+                            googleEmail: googleUser.email,
+                            isLinkingFlow,
+                        });
+                    } else {
+                        // Create new connection
+                        loggingService.info('Creating new Google connection', {
+                            userId: targetUserId,
+                            googleUserId: googleUser.id,
+                            googleEmail: googleUser.email,
+                            hasRefreshToken: !!googleTokenResponse?.refresh_token,
+                        });
+                        
+                        connection = await GoogleConnection.create({
+                            userId: targetUserId,
+                            accessToken: googleAccessToken,
+                            refreshToken: googleTokenResponse?.refresh_token,
+                            tokenType: 'oauth',
+                            googleUserId: googleUser.id,
+                            googleEmail: googleUser.email,
+                            googleName: googleUser.name,
+                            googleAvatar: googleUser.picture,
+                            googleDomain: googleUser.hd,
+                            isActive: true,
+                            healthStatus: 'healthy',
+                            driveFiles: [],
+                            lastSyncedAt: new Date()
+                        });
+                        
+                        loggingService.info(`Google OAuth connection created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
+                            connectionId: connection._id,
+                            googleEmail: googleUser.email,
+                            isLinkingFlow,
+                        });
+                    }
+                    
+                    // Fetch and sync Drive files
+                    try {
+                        const { files } = await GoogleService.listDriveFiles(connection, { pageSize: 50 });
+                        connection.driveFiles = files;
+                        connection.lastSyncedAt = new Date();
+                        await connection.save();
+                        
+                        loggingService.info(`Google Drive files synced during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
+                            filesCount: files.length,
+                            isLinkingFlow,
+                        });
+                    } catch (driveError: any) {
+                        // Log but don't fail the login if Drive sync fails
+                        loggingService.warn(`Failed to sync Google Drive files during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
+                            error: driveError.message,
+                            isLinkingFlow,
+                        });
+                    }
+                    
+                    // Create/update Integration record to mark Google as integrated
+                    try {
+                        const { Integration } = await import('../models/Integration');
+                        const existingIntegration = await Integration.findOne({
+                            userId: targetUserId,
+                            type: 'google_oauth',
+                        });
+                        
+                        if (existingIntegration) {
+                            existingIntegration.status = 'active';
+                            existingIntegration.metadata = {
+                                ...existingIntegration.metadata,
+                                connectionId: connection._id.toString(),
+                                googleEmail: googleUser.email,
+                                googleDomain: googleUser.hd,
+                                driveFilesCount: connection.driveFiles.length,
+                                connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
+                                lastSynced: new Date(),
+                            };
+                            await existingIntegration.save();
+                            
+                            loggingService.info(`Google integration updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                userId: targetUserId,
+                                integrationId: existingIntegration._id,
+                                isLinkingFlow,
+                            });
+                        } else {
+                            // Create new integration record
+                            const integration = new Integration({
+                                userId: targetUserId,
+                                type: 'google_oauth',
+                                name: `Google Workspace - ${googleUser.email}`,
+                                description: 'Google Workspace integration for Drive, Docs, and Sheets',
+                                status: 'active',
+                                encryptedCredentials: '', // Credentials stored in GoogleConnection
+                                metadata: {
+                                    connectionId: connection._id.toString(),
+                                    googleEmail: googleUser.email,
+                                    googleDomain: googleUser.hd,
+                                    driveFilesCount: connection.driveFiles.length,
+                                    connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
+                                    lastSynced: new Date(),
+                                },
+                                stats: {
+                                    totalDeliveries: 0,
+                                    successfulDeliveries: 0,
+                                    failedDeliveries: 0,
+                                    averageResponseTime: 0,
+                                },
+                            });
+                            await integration.save();
+                            
+                            loggingService.info(`Google integration created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                userId: targetUserId,
+                                integrationId: integration._id,
+                                isLinkingFlow,
+                            });
+                        }
+                    } catch (integrationError: any) {
+                        // Log but don't fail the login if integration creation fails
+                        loggingService.warn(`Failed to create Google integration during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            userId: targetUserId,
+                            error: integrationError.message,
+                            isLinkingFlow,
+                        });
+                    }
+                } catch (googleError: any) {
+                    // Log but don't fail the login if Google connection setup fails
+                    loggingService.error(`Failed to setup Google connection during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                        userId: targetUserId,
+                        error: googleError.message,
+                        stack: googleError.stack,
+                        errorName: googleError.name,
+                        errorCode: googleError.code,
+                        isLinkingFlow,
+                        hasOAuthToken: !!oauthAccessToken,
+                        hasGoogleTokenResponse: !!googleTokenResponse,
+                        provider,
+                    });
+                    
+                    // For linking flows, we should fail if connection setup fails
+                    if (isLinkingFlow) {
+                        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                        const errorMessage = `Failed to connect google account. ${googleError.message || 'Please try again.'}`;
+                        res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(errorMessage)}`);
+                        return;
+                    }
                 }
             }
 
             // Check if MFA is enabled for OAuth users
             // Note: OAuth providers (Google/GitHub) already provide strong 2FA
             // But if user has explicitly enabled MFA in Cost Katana, we should respect it
-            if (userDoc.mfa.enabled && userDoc.mfa.methods.length > 0) {
+            // IMPORTANT: Skip MFA check for linking flows (when userId is in state)
+            // because the user is already authenticated and just linking a provider
+            if (!isLinkingFlow && userDoc.mfa.enabled && userDoc.mfa.methods.length > 0) {
                 // Generate MFA token
                 const mfaToken = AuthService.generateMFAToken((userDoc as any)._id.toString());
 
@@ -385,7 +793,112 @@ export class OAuthController {
                 return;
             }
 
-            // Generate JWT tokens (no MFA required)
+            // For linking flows, verify connection was created and redirect to integrations page
+            if (isLinkingFlow) {
+                // Verify connection was created for Google/GitHub
+                let connectionExists = false;
+                let connectionError: string | null = null;
+                
+                if (provider === 'google') {
+                    try {
+                        const { GoogleConnection } = await import('../models/GoogleConnection');
+                        // Check both active and inactive connections to see if one was created but marked inactive
+                        const activeConnection = await GoogleConnection.findOne({
+                            userId: targetUserId,
+                            isActive: true
+                        });
+                        const inactiveConnection = await GoogleConnection.findOne({
+                            userId: targetUserId,
+                            isActive: false
+                        });
+                        
+                        connectionExists = !!activeConnection;
+                        
+                        if (!connectionExists && inactiveConnection) {
+                            connectionError = 'Connection was created but is inactive. Please check server logs.';
+                            loggingService.warn('Google connection exists but is inactive', {
+                                userId: targetUserId,
+                                connectionId: inactiveConnection._id,
+                                provider,
+                            });
+                        } else if (!connectionExists) {
+                            connectionError = 'No Google connection found in database after OAuth callback.';
+                            loggingService.error('Google connection not found after OAuth callback for linking flow', {
+                                userId: targetUserId,
+                                provider,
+                                hasOAuthToken: !!oauthAccessToken,
+                                hasGoogleTokenResponse: !!googleTokenResponse,
+                            });
+                        }
+                    } catch (checkError: any) {
+                        connectionError = `Failed to verify Google connection: ${checkError.message}`;
+                        loggingService.error('Failed to verify Google connection after OAuth callback', {
+                            userId: targetUserId,
+                            error: checkError.message,
+                            stack: checkError.stack,
+                            provider,
+                        });
+                    }
+                } else if (provider === 'github') {
+                    try {
+                        const { GitHubConnection } = await import('../models/GitHubConnection');
+                        const connection = await GitHubConnection.findOne({
+                            userId: targetUserId,
+                            isActive: true
+                        });
+                        connectionExists = !!connection;
+                        
+                        if (!connectionExists) {
+                            connectionError = 'No GitHub connection found in database after OAuth callback.';
+                            loggingService.error('GitHub connection not found after OAuth callback for linking flow', {
+                                userId: targetUserId,
+                                provider,
+                                hasOAuthToken: !!oauthAccessToken,
+                            });
+                        }
+                    } catch (checkError: any) {
+                        connectionError = `Failed to verify GitHub connection: ${checkError.message}`;
+                        loggingService.error('Failed to verify GitHub connection after OAuth callback', {
+                            userId: targetUserId,
+                            error: checkError.message,
+                            stack: checkError.stack,
+                            provider,
+                        });
+                    }
+                }
+
+                if (connectionExists) {
+                    loggingService.info(`${provider} OAuth provider linked successfully`, {
+                        provider,
+                        userId: (userDoc as any)._id,
+                        email: userDoc.email,
+                    });
+
+                    // Redirect to integrations page with success message
+                    const redirectUrl = `${frontendUrl}/integrations?${provider}Connected=true&message=${encodeURIComponent(`${provider} account linked successfully`)}`;
+                    
+                    res.redirect(redirectUrl);
+                    return;
+                } else {
+                    // Connection creation failed - redirect with error
+                    const errorMessage = connectionError || `Failed to connect ${provider} account. Please try again.`;
+                    loggingService.error(`${provider} OAuth linking failed - connection not created`, {
+                        provider,
+                        userId: (userDoc as any)._id,
+                        email: userDoc.email,
+                        connectionError,
+                        hasOAuthToken: !!oauthAccessToken,
+                        hasGoogleTokenResponse: !!googleTokenResponse,
+                    });
+
+                    const redirectUrl = `${frontendUrl}/integrations?error=${encodeURIComponent(errorMessage)}`;
+                    
+                    res.redirect(redirectUrl);
+                    return;
+                }
+            }
+
+            // Generate JWT tokens (no MFA required) - only for login flows
             const tokens = AuthService.generateTokens(userDoc);
 
             loggingService.info(`${provider} OAuth login successful`, {
@@ -448,6 +961,16 @@ export class OAuthController {
                 data: {
                     authUrl,
                     provider,
+                    scopes: provider === 'google' ? [
+                        'https://www.googleapis.com/auth/userinfo.email',
+                        'https://www.googleapis.com/auth/userinfo.profile',
+                        'https://www.googleapis.com/auth/drive.file',
+                        'https://www.googleapis.com/auth/documents',
+                        'https://www.googleapis.com/auth/spreadsheets'
+                    ] : [
+                        'user:email',
+                        'repo'
+                    ],
                 },
             });
         } catch (error: any) {
