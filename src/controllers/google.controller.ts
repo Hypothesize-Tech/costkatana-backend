@@ -1016,5 +1016,885 @@ export class GoogleController {
             });
         }
     }
+
+    /**
+     * Send email via Gmail
+     * POST /api/google/gmail/send
+     */
+    static async sendEmail(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { to, subject, body, isHtml } = req.body;
+            const { connectionId } = req.params;
+
+            if (!to || !subject || !body) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: to, subject, body'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.sendEmail(
+                connection,
+                to,
+                subject,
+                body,
+                isHtml || false
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Sent email via Gmail', {
+                userId,
+                connectionId,
+                to: Array.isArray(to) ? to.join(', ') : to
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to send email', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Search Gmail messages
+     * GET /api/google/gmail/search
+     */
+    static async searchEmails(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { query, maxResults } = req.query;
+            const { connectionId } = req.params;
+
+            if (!query) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required query parameter: query'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const messages = await GoogleService.searchGmailMessages(
+                connection,
+                query as string,
+                maxResults ? parseInt(maxResults as string) : 20
+            );
+
+            res.json({
+                success: true,
+                data: { messages, count: messages.length }
+            });
+
+            loggingService.info('Searched Gmail messages', {
+                userId,
+                connectionId,
+                query,
+                resultsCount: messages.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to search emails', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * List Calendar events
+     * GET /api/google/calendar/events
+     */
+    static async listEvents(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { startDate, endDate, maxResults } = req.query;
+            const { connectionId } = req.params;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const events = await GoogleService.listCalendarEvents(
+                connection,
+                startDate ? new Date(startDate as string) : undefined,
+                endDate ? new Date(endDate as string) : undefined,
+                maxResults ? parseInt(maxResults as string) : 10
+            );
+
+            res.json({
+                success: true,
+                data: { events, count: events.length }
+            });
+
+            loggingService.info('Listed Calendar events', {
+                userId,
+                connectionId,
+                eventsCount: events.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to list calendar events', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Update Calendar event
+     * PATCH /api/google/calendar/events/:eventId
+     */
+    static async updateEvent(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { eventId, connectionId } = req.params;
+            const updates = req.body;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            // Convert date strings to Date objects
+            if (updates.start) updates.start = new Date(updates.start);
+            if (updates.end) updates.end = new Date(updates.end);
+
+            const result = await GoogleService.updateCalendarEvent(
+                connection,
+                eventId,
+                updates
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Updated Calendar event', {
+                userId,
+                connectionId,
+                eventId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to update calendar event', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Delete Calendar event
+     * DELETE /api/google/calendar/events/:eventId
+     */
+    static async deleteEvent(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { eventId, connectionId } = req.params;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.deleteCalendarEvent(connection, eventId);
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Deleted Calendar event', {
+                userId,
+                connectionId,
+                eventId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to delete calendar event', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Upload file to Drive
+     * POST /api/google/drive/upload
+     */
+    static async uploadFile(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { fileName, mimeType, fileContent, folderId } = req.body;
+            const { connectionId } = req.params;
+
+            if (!fileName || !mimeType || !fileContent) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: fileName, mimeType, fileContent'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.uploadFileToDrive(
+                connection,
+                fileName,
+                mimeType,
+                fileContent,
+                folderId
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Uploaded file to Drive', {
+                userId,
+                connectionId,
+                fileName
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to upload file', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Share Drive file
+     * POST /api/google/drive/share/:fileId
+     */
+    static async shareDriveFile(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { fileId, connectionId } = req.params;
+            const { emailAddress, role } = req.body;
+
+            if (!emailAddress) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required field: emailAddress'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.shareFile(
+                connection,
+                fileId,
+                emailAddress,
+                role || 'reader'
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Shared Drive file', {
+                userId,
+                connectionId,
+                fileId,
+                emailAddress
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to share file', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Create Drive folder
+     * POST /api/google/drive/folder
+     */
+    static async createDriveFolder(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { folderName, parentFolderId } = req.body;
+            const { connectionId } = req.params;
+
+            if (!folderName) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required field: folderName'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.createFolder(
+                connection,
+                folderName,
+                parentFolderId
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Created Drive folder', {
+                userId,
+                connectionId,
+                folderName
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to create folder', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Add question to form
+     * POST /api/google/forms/:formId/question
+     */
+    static async addQuestion(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { formId, connectionId } = req.params;
+            const { questionText, questionType, options } = req.body;
+
+            if (!questionText) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required field: questionText'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.addFormQuestion(
+                connection,
+                formId,
+                questionText,
+                questionType || 'TEXT',
+                options
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Added question to form', {
+                userId,
+                connectionId,
+                formId,
+                questionText
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to add question to form', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Export presentation to PDF
+     * POST /api/google/slides/:presentationId/export
+     */
+    static async exportPresentationPDF(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { presentationId, connectionId } = req.params;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const result = await GoogleService.exportPresentationToPDF(connection, presentationId);
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Exported presentation to PDF', {
+                userId,
+                connectionId,
+                presentationId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to export presentation', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    // ===================================
+    // READ APIs - View Google Services
+    // ===================================
+
+    /**
+     * Get Gmail inbox
+     * GET /api/google/gmail/inbox
+     */
+    static async getGmailInbox(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { connectionId } = req.query;
+            const maxResults = parseInt(req.query.maxResults as string) || 20;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const messages = await GoogleService.searchGmailMessages(
+                connection,
+                'in:inbox',
+                maxResults
+            );
+
+            res.json({
+                success: true,
+                data: messages
+            });
+
+            loggingService.info('Retrieved Gmail inbox', {
+                userId,
+                connectionId,
+                messageCount: messages.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get Gmail inbox', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get single Gmail message
+     * GET /api/google/gmail/:messageId
+     */
+    static async getGmailMessage(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { messageId } = req.params;
+            const { connectionId } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const message = await GoogleService.getGmailMessage(connection, messageId);
+
+            res.json({
+                success: true,
+                data: message
+            });
+
+            loggingService.info('Retrieved Gmail message', {
+                userId,
+                connectionId,
+                messageId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get Gmail message', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get sheet data
+     * GET /api/google/sheets/:sheetId/data
+     */
+    static async getSheetData(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { sheetId } = req.params;
+            const { connectionId, range = 'Sheet1!A1:Z100' } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const data = await GoogleService.getSheetValues(
+                connection,
+                sheetId,
+                range as string
+            );
+
+            res.json({
+                success: true,
+                data: {
+                    sheetId,
+                    range,
+                    values: data
+                }
+            });
+
+            loggingService.info('Retrieved sheet data', {
+                userId,
+                connectionId,
+                sheetId,
+                rowCount: data.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get sheet data', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get document content
+     * GET /api/google/docs/:docId/content
+     */
+    static async getDocContent(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { docId } = req.params;
+            const { connectionId } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const content = await GoogleService.readDocument(connection, docId);
+
+            res.json({
+                success: true,
+                data: {
+                    docId,
+                    content
+                }
+            });
+
+            loggingService.info('Retrieved document content', {
+                userId,
+                connectionId,
+                docId,
+                contentLength: content.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get document content', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get file preview/content from Drive
+     * GET /api/google/drive/file/:fileId/preview
+     */
+    static async getDriveFilePreview(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { fileId } = req.params;
+            const { connectionId } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const file = await GoogleService.getDriveFile(connection, fileId);
+
+            res.json({
+                success: true,
+                data: file
+            });
+
+            loggingService.info('Retrieved Drive file preview', {
+                userId,
+                connectionId,
+                fileId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get Drive file preview', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get form responses (alternative endpoint)
+     * GET /api/google/forms/:formId/responses
+     */
+    static async getFormResponsesAlt(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { formId } = req.params;
+            const { connectionId } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const responses = await GoogleService.getFormResponses(connection, formId);
+
+            res.json({
+                success: true,
+                data: responses
+            });
+
+            loggingService.info('Retrieved form responses', {
+                userId,
+                connectionId,
+                formId,
+                responseCount: responses.length
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get form responses', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get slide thumbnails
+     * GET /api/google/slides/:presentationId/thumbnails
+     */
+    static async getSlideThumbnails(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { presentationId } = req.params;
+            const { connectionId } = req.query;
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(connectionId as string),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const presentation = await GoogleService.getPresentation(connection, presentationId);
+
+            res.json({
+                success: true,
+                data: presentation
+            });
+
+            loggingService.info('Retrieved slide thumbnails', {
+                userId,
+                connectionId,
+                presentationId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to get slide thumbnails', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
 }
 

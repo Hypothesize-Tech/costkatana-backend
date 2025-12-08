@@ -36,7 +36,15 @@ export class IntegrationIntentRecognitionService {
     webhook: 'simple',
     linear: 'medium',
     jira: 'medium',
-    github: 'complex'
+    github: 'complex',
+    google: 'complex',
+    gmail: 'complex',
+    calendar: 'medium',
+    drive: 'medium',
+    sheets: 'medium',
+    docs: 'medium',
+    slides: 'medium',
+    forms: 'medium'
   };
 
   /**
@@ -381,6 +389,54 @@ IMPORTANT RULES:
         '@github create issue "Bug in auth" → {title: "Bug in auth"}',
         '@github list pull requests',
         '@github create repository my-app → {name: "my-app"}'
+      ],
+      google: [
+        '@google send email to team@company.com about monthly costs → {action: "gmail", subAction: "send", params: {to: "team@company.com", subject: "Monthly costs"}}',
+        '@google export cost data to sheets → {action: "sheets", subAction: "export"}',
+        '@google create cost report in docs → {action: "docs", subAction: "report"}',
+        '@google schedule budget review meeting next Friday → {action: "calendar", subAction: "create", params: {summary: "Budget review"}}',
+        '@google list my calendar events → {action: "calendar", subAction: "list"}',
+        '@google create feedback form for AI usage → {action: "forms", subAction: "create", params: {title: "AI usage feedback"}}',
+        '@google create QBR slides → {action: "slides", subAction: "create", params: {title: "QBR"}}',
+        '@google upload file to drive → {action: "drive", subAction: "upload"}',
+        '@google share file with finance@company.com → {action: "drive", subAction: "share"}',
+        '@google search emails about AWS billing → {action: "gmail", subAction: "search", params: {query: "AWS billing"}}'
+      ],
+      gmail: [
+        '@gmail send email to team@company.com → {action: "email", subAction: "send", params: {to: "team@company.com"}}',
+        '@gmail search for cost alerts → {action: "email", subAction: "search", params: {query: "cost alerts"}}',
+        '@gmail list unread messages → {action: "email", subAction: "list", params: {query: "is:unread"}}'
+      ],
+      calendar: [
+        '@calendar create meeting tomorrow at 2pm → {action: "calendar", subAction: "create"}',
+        '@calendar list upcoming events → {action: "calendar", subAction: "list"}',
+        '@calendar delete event → {action: "calendar", subAction: "delete"}'
+      ],
+      drive: [
+        '@drive upload cost report → {action: "drive", subAction: "upload"}',
+        '@drive create folder Budget Reports → {action: "drive", subAction: "folder", params: {folderName: "Budget Reports"}}',
+        '@drive share file with team → {action: "drive", subAction: "share"}',
+        '@drive list recent files → {action: "drive", subAction: "list"}'
+      ],
+      sheets: [
+        '@sheets export monthly costs → {action: "sheets", subAction: "export"}',
+        '@sheets create budget tracking sheet → {action: "sheets", subAction: "create"}',
+        '@sheets list my spreadsheets → {action: "sheets", subAction: "list"}'
+      ],
+      docs: [
+        '@docs create cost analysis report → {action: "docs", subAction: "report"}',
+        '@docs create document → {action: "docs", subAction: "create"}',
+        '@docs list documents → {action: "docs", subAction: "list"}'
+      ],
+      slides: [
+        '@slides create QBR presentation → {action: "slides", subAction: "create", params: {title: "QBR"}}',
+        '@slides export to PDF → {action: "slides", subAction: "pdf"}',
+        '@slides add slide with cost chart → {action: "slides", subAction: "add-slide"}'
+      ],
+      forms: [
+        '@forms create feedback form → {action: "forms", subAction: "create"}',
+        '@forms add question to form → {action: "forms", subAction: "question"}',
+        '@forms get responses → {action: "forms", subAction: "responses"}'
       ]
     };
 
@@ -413,6 +469,16 @@ IMPORTANT RULES:
         break;
       case 'github':
         this.validateGitHubParams(normalized, entity, commandType, errors);
+        break;
+      case 'google':
+      case 'gmail':
+      case 'calendar':
+      case 'drive':
+      case 'sheets':
+      case 'docs':
+      case 'slides':
+      case 'forms':
+        this.validateGoogleParams(normalized, entity, commandType, errors);
         break;
     }
 
@@ -588,6 +654,60 @@ IMPORTANT RULES:
     if (commandType === 'create' && entity === 'repository') {
       if (!params.name) {
         errors.push('Repository name is required');
+      }
+    }
+  }
+
+  /**
+   * Validate Google Workspace parameters
+   */
+  private static validateGoogleParams(
+    params: Record<string, any>,
+    entity: string,
+    commandType: string,
+    errors: string[]
+  ): void {
+    const action = params.action || entity;
+    const subAction = params.subAction || commandType;
+
+    // Gmail validation
+    if (action === 'gmail' || action === 'email') {
+      if (subAction === 'send') {
+        if (!params.params?.to && !params.to) {
+          errors.push('Email recipient (to) is required');
+        }
+      }
+    }
+
+    // Calendar validation
+    if (action === 'calendar') {
+      if (subAction === 'create') {
+        if (!params.params?.summary && !params.summary && !params.eventSummary) {
+          errors.push('Event summary/title is required');
+        }
+      }
+    }
+
+    // Drive validation
+    if (action === 'drive') {
+      if (subAction === 'upload') {
+        if (!params.params?.fileName && !params.fileName) {
+          errors.push('File name is required');
+        }
+      }
+      if (subAction === 'share') {
+        if (!params.params?.fileId && !params.fileId) {
+          errors.push('File ID is required for sharing');
+        }
+      }
+    }
+
+    // Forms validation
+    if (action === 'forms' || action === 'form') {
+      if (subAction === 'question' || subAction === 'add-question') {
+        if (!params.params?.formId && !params.formId) {
+          errors.push('Form ID is required');
+        }
       }
     }
   }

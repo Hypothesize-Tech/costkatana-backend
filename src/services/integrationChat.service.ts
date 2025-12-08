@@ -2284,6 +2284,236 @@ export class IntegrationChatService {
             message: `📁 Found ${files.length} files in Google Drive`,
             data: files
           };
+        } else if (subAction === 'upload') {
+          // Upload file to Drive
+          const result = await GoogleService.uploadFileToDrive(
+            connection,
+            command.params?.fileName || 'file.txt',
+            command.params?.mimeType || 'text/plain',
+            command.params?.content || '',
+            command.params?.folderId
+          );
+
+          return {
+            success: true,
+            message: `✅ Uploaded file to Google Drive`,
+            data: result
+          };
+        } else if (subAction === 'folder' || subAction === 'create-folder') {
+          // Create folder in Drive
+          const result = await GoogleService.createFolder(
+            connection,
+            command.params?.folderName || 'New Folder',
+            command.params?.parentFolderId
+          );
+
+          return {
+            success: true,
+            message: `✅ Created folder in Google Drive`,
+            data: result
+          };
+        } else if (subAction === 'share') {
+          // Share Drive file
+          const result = await GoogleService.shareFile(
+            connection,
+            command.params?.fileId || '',
+            command.params?.email || '',
+            command.params?.role || 'reader'
+          );
+
+          return {
+            success: true,
+            message: `✅ Shared file with ${command.params?.email}`,
+            data: result
+          };
+        }
+      } else if (action === 'gmail' || action === 'email') {
+        if (subAction === 'send') {
+          // Send email via Gmail
+          const result = await GoogleService.sendEmail(
+            connection,
+            command.params?.to || [],
+            command.params?.subject || 'Cost Analysis Update',
+            command.params?.body || '',
+            command.params?.isHtml || false
+          );
+
+          return {
+            success: true,
+            message: `✅ Email sent successfully`,
+            data: result
+          };
+        } else if (subAction === 'search' || subAction === 'find') {
+          // Search Gmail messages
+          const messages = await GoogleService.searchGmailMessages(
+            connection,
+            command.params?.query || 'cost',
+            command.params?.maxResults || 10
+          );
+
+          return {
+            success: true,
+            message: `📧 Found ${messages.length} emails`,
+            data: { messages }
+          };
+        } else if (subAction === 'list') {
+          // List Gmail messages (unread or recent)
+          const messages = await GoogleService.listGmailMessages(
+            connection,
+            command.params?.query || 'is:unread',
+            command.params?.maxResults || 10
+          );
+
+          return {
+            success: true,
+            message: `📧 Found ${messages.length} messages`,
+            data: { messages }
+          };
+        }
+      } else if (action === 'calendar') {
+        if (subAction === 'list' || subAction === 'events') {
+          // List calendar events
+          const events = await GoogleService.listCalendarEvents(
+            connection,
+            command.params?.startDate ? new Date(command.params.startDate) : undefined,
+            command.params?.endDate ? new Date(command.params.endDate) : undefined,
+            command.params?.maxResults || 10
+          );
+
+          return {
+            success: true,
+            message: `📅 Found ${events.length} calendar events`,
+            data: { events }
+          };
+        } else if (subAction === 'create' || subAction === 'add') {
+          // Create calendar event
+          const result = await GoogleService.createCalendarEvent(
+            connection,
+            command.params?.summary || 'Budget Review Meeting',
+            command.params?.start ? new Date(command.params.start) : new Date(),
+            command.params?.end ? new Date(command.params.end) : new Date(Date.now() + 3600000),
+            command.params?.description,
+            command.params?.attendees
+          );
+
+          return {
+            success: true,
+            message: `✅ Created calendar event`,
+            data: result
+          };
+        } else if (subAction === 'update') {
+          // Update calendar event
+          const result = await GoogleService.updateCalendarEvent(
+            connection,
+            command.params?.eventId || '',
+            {
+              summary: command.params?.summary,
+              description: command.params?.description,
+              start: command.params?.start ? new Date(command.params.start) : undefined,
+              end: command.params?.end ? new Date(command.params.end) : undefined,
+              attendees: command.params?.attendees
+            }
+          );
+
+          return {
+            success: true,
+            message: `✅ Updated calendar event`,
+            data: result
+          };
+        } else if (subAction === 'delete') {
+          // Delete calendar event
+          const result = await GoogleService.deleteCalendarEvent(
+            connection,
+            command.params?.eventId || ''
+          );
+
+          return {
+            success: true,
+            message: `✅ Deleted calendar event`,
+            data: result
+          };
+        }
+      } else if (action === 'forms' || action === 'form') {
+        if (subAction === 'create') {
+          // Create form
+          const result = await GoogleService.createForm(
+            connection,
+            command.params?.title || 'Cost Feedback Form',
+            command.params?.description
+          );
+
+          return {
+            success: true,
+            message: `✅ Created Google Form`,
+            data: result
+          };
+        } else if (subAction === 'question' || subAction === 'add-question') {
+          // Add question to form
+          const result = await GoogleService.addFormQuestion(
+            connection,
+            command.params?.formId || '',
+            command.params?.questionText || '',
+            command.params?.questionType || 'TEXT',
+            command.params?.options
+          );
+
+          return {
+            success: true,
+            message: `✅ Added question to form`,
+            data: result
+          };
+        } else if (subAction === 'responses' || subAction === 'results') {
+          // Get form responses
+          const responses = await GoogleService.getFormResponses(
+            connection,
+            command.params?.formId || ''
+          );
+
+          return {
+            success: true,
+            message: `📋 Found ${responses.length} form responses`,
+            data: { responses }
+          };
+        }
+      } else if (action === 'slides' || action === 'presentation') {
+        if (subAction === 'create') {
+          // Create presentation
+          const result = await GoogleService.createPresentation(
+            connection,
+            command.params?.title || 'Cost Analysis Presentation'
+          );
+
+          return {
+            success: true,
+            message: `✅ Created Google Slides presentation`,
+            data: result
+          };
+        } else if (subAction === 'add-slide') {
+          // Add slide to presentation
+          const result = await GoogleService.addSlideWithText(
+            connection,
+            command.params?.presentationId || '',
+            command.params?.title || 'New Slide',
+            command.params?.content || ''
+          );
+
+          return {
+            success: true,
+            message: `✅ Added slide to presentation`,
+            data: result
+          };
+        } else if (subAction === 'export' || subAction === 'pdf') {
+          // Export presentation to PDF
+          const result = await GoogleService.exportPresentationToPDF(
+            connection,
+            command.params?.presentationId || ''
+          );
+
+          return {
+            success: true,
+            message: `✅ Exported presentation to PDF`,
+            data: result
+          };
         }
       }
 

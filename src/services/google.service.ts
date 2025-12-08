@@ -452,6 +452,71 @@ export class GoogleService {
     }
 
     /**
+     * Sheets API: Get cell values from a range
+     */
+    static async getSheetValues(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        spreadsheetId: string,
+        range: string
+    ): Promise<any[][]> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const sheets = google.sheets({ version: 'v4', auth });
+
+            const response = await sheets.spreadsheets.values.get({
+                spreadsheetId,
+                range
+            });
+
+            loggingService.info('Retrieved sheet values', {
+                connectionId: connection._id,
+                spreadsheetId,
+                range,
+                rowCount: response.data.values?.length || 0
+            });
+
+            return response.data.values || [];
+        });
+    }
+
+    /**
+     * Sheets API: Update cell values in a range
+     */
+    static async updateSheetValues(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        spreadsheetId: string,
+        range: string,
+        values: any[][]
+    ): Promise<{ updatedCells: number; updatedRows: number }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const sheets = google.sheets({ version: 'v4', auth });
+
+            const response = await sheets.spreadsheets.values.update({
+                spreadsheetId,
+                range,
+                valueInputOption: 'USER_ENTERED',
+                requestBody: {
+                    values
+                }
+            });
+
+            loggingService.info('Updated sheet values', {
+                connectionId: connection._id,
+                spreadsheetId,
+                range,
+                updatedCells: response.data.updatedCells,
+                updatedRows: response.data.updatedRows
+            });
+
+            return {
+                updatedCells: response.data.updatedCells || 0,
+                updatedRows: response.data.updatedRows || 0
+            };
+        });
+    }
+
+    /**
      * Docs API: Read document
      */
     static async readDocument(
@@ -485,6 +550,41 @@ export class GoogleService {
             });
 
             return text;
+        });
+    }
+
+    /**
+     * Docs API: Insert text into document
+     */
+    static async insertTextInDocument(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        documentId: string,
+        text: string,
+        index: number = 1
+    ): Promise<{ success: boolean }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const docs = google.docs({ version: 'v1', auth });
+
+            await docs.documents.batchUpdate({
+                documentId,
+                requestBody: {
+                    requests: [{
+                        insertText: {
+                            location: { index },
+                            text
+                        }
+                    }]
+                }
+            });
+
+            loggingService.info('Inserted text into Google Document', {
+                connectionId: connection._id,
+                documentId,
+                textLength: text.length
+            });
+
+            return { success: true };
         });
     }
 
@@ -756,6 +856,474 @@ export class GoogleService {
             });
 
             return { id: messageId, subject, from, date, body };
+        });
+    }
+
+    /**
+     * Gmail API: Send email
+     */
+    static async sendEmail(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        to: string | string[],
+        subject: string,
+        body: string,
+        isHtml: boolean = false
+    ): Promise<{ messageId: string; success: boolean }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const gmail = google.gmail({ version: 'v1', auth });
+
+            const recipients = Array.isArray(to) ? to.join(', ') : to;
+            const messageParts = [
+                `To: ${recipients}`,
+                `Subject: ${subject}`,
+                `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
+                '',
+                body
+            ];
+
+            const message = messageParts.join('\n');
+            const encodedMessage = Buffer.from(message)
+                .toString('base64')
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '');
+
+            const response = await gmail.users.messages.send({
+                userId: 'me',
+                requestBody: {
+                    raw: encodedMessage
+                }
+            });
+
+            loggingService.info('Sent Gmail message', {
+                connectionId: connection._id,
+                messageId: response.data.id,
+                to: recipients,
+                subject
+            });
+
+            return {
+                messageId: response.data.id!,
+                success: true
+            };
+        });
+    }
+
+    /**
+     * Gmail API: Search emails
+     */
+    static async searchGmailMessages(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        query: string,
+        maxResults: number = 20
+    ): Promise<Array<{ id: string; subject: string; from: string; date: string; snippet: string }>> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const gmail = google.gmail({ version: 'v1', auth });
+
+            const response = await gmail.users.messages.list({
+                userId: 'me',
+                q: query,
+                maxResults
+            });
+
+            const messages = response.data.messages || [];
+            const detailedMessages = [];
+
+            for (const message of messages) {
+                const details = await gmail.users.messages.get({
+                    userId: 'me',
+                    id: message.id!,
+                    format: 'metadata',
+                    metadataHeaders: ['From', 'Subject', 'Date']
+                });
+
+                const headers = details.data.payload?.headers || [];
+                const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
+                const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+                const date = headers.find(h => h.name === 'Date')?.value || '';
+
+                detailedMessages.push({
+                    id: message.id!,
+                    subject,
+                    from,
+                    date,
+                    snippet: details.data.snippet || ''
+                });
+            }
+
+            loggingService.info('Searched Gmail messages', {
+                connectionId: connection._id,
+                query,
+                resultsCount: detailedMessages.length
+            });
+
+            return detailedMessages;
+        });
+    }
+
+    /**
+     * Calendar API: List events
+     */
+    static async listCalendarEvents(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        startDate?: Date,
+        endDate?: Date,
+        maxResults: number = 10
+    ): Promise<Array<{ id: string; summary: string; start: string; end: string; description?: string }>> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const calendar = google.calendar({ version: 'v3', auth });
+
+            const response = await calendar.events.list({
+                calendarId: 'primary',
+                timeMin: startDate?.toISOString(),
+                timeMax: endDate?.toISOString(),
+                maxResults,
+                singleEvents: true,
+                orderBy: 'startTime'
+            });
+
+            const events = (response.data.items || []).map(event => ({
+                id: event.id!,
+                summary: event.summary || '(No Title)',
+                start: event.start?.dateTime || event.start?.date || '',
+                end: event.end?.dateTime || event.end?.date || '',
+                description: event.description || undefined
+            }));
+
+            loggingService.info('Listed Calendar events', {
+                connectionId: connection._id,
+                eventsCount: events.length
+            });
+
+            return events;
+        });
+    }
+
+    /**
+     * Calendar API: Update event
+     */
+    static async updateCalendarEvent(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        eventId: string,
+        updates: {
+            summary?: string;
+            description?: string;
+            start?: Date;
+            end?: Date;
+            attendees?: string[];
+        }
+    ): Promise<{ eventId: string; success: boolean }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const calendar = google.calendar({ version: 'v3', auth });
+
+            const updateBody: any = {};
+            if (updates.summary) updateBody.summary = updates.summary;
+            if (updates.description) updateBody.description = updates.description;
+            if (updates.start) {
+                updateBody.start = {
+                    dateTime: updates.start.toISOString(),
+                    timeZone: 'UTC'
+                };
+            }
+            if (updates.end) {
+                updateBody.end = {
+                    dateTime: updates.end.toISOString(),
+                    timeZone: 'UTC'
+                };
+            }
+            if (updates.attendees) {
+                updateBody.attendees = updates.attendees.map(email => ({ email }));
+            }
+
+            await calendar.events.patch({
+                calendarId: 'primary',
+                eventId,
+                requestBody: updateBody
+            });
+
+            loggingService.info('Updated Calendar event', {
+                connectionId: connection._id,
+                eventId
+            });
+
+            return { eventId, success: true };
+        });
+    }
+
+    /**
+     * Calendar API: Delete event
+     */
+    static async deleteCalendarEvent(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        eventId: string
+    ): Promise<{ success: boolean }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const calendar = google.calendar({ version: 'v3', auth });
+
+            await calendar.events.delete({
+                calendarId: 'primary',
+                eventId
+            });
+
+            loggingService.info('Deleted Calendar event', {
+                connectionId: connection._id,
+                eventId
+            });
+
+            return { success: true };
+        });
+    }
+
+    /**
+     * Drive API: Upload file
+     */
+    static async uploadFileToDrive(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        fileName: string,
+        mimeType: string,
+        fileContent: Buffer | string,
+        folderId?: string
+    ): Promise<{ fileId: string; fileUrl: string }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            const fileMetadata: any = {
+                name: fileName,
+                mimeType
+            };
+
+            if (folderId) {
+                fileMetadata.parents = [folderId];
+            }
+
+            const response = await drive.files.create({
+                requestBody: fileMetadata,
+                media: {
+                    mimeType,
+                    body: typeof fileContent === 'string' ? fileContent : fileContent.toString()
+                },
+                fields: 'id, webViewLink'
+            });
+
+            loggingService.info('Uploaded file to Drive', {
+                connectionId: connection._id,
+                fileId: response.data.id,
+                fileName
+            });
+
+            return {
+                fileId: response.data.id!,
+                fileUrl: response.data.webViewLink!
+            };
+        });
+    }
+
+    /**
+     * Drive API: Share file
+     */
+    static async shareFile(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        fileId: string,
+        emailAddress: string,
+        role: 'reader' | 'writer' | 'commenter' = 'reader'
+    ): Promise<{ success: boolean; permissionId: string }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            const response = await drive.permissions.create({
+                fileId,
+                requestBody: {
+                    type: 'user',
+                    role,
+                    emailAddress
+                },
+                fields: 'id'
+            });
+
+            loggingService.info('Shared Drive file', {
+                connectionId: connection._id,
+                fileId,
+                emailAddress,
+                role
+            });
+
+            return {
+                success: true,
+                permissionId: response.data.id!
+            };
+        });
+    }
+
+    /**
+     * Drive API: Create folder
+     */
+    static async createFolder(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        folderName: string,
+        parentFolderId?: string
+    ): Promise<{ folderId: string; folderUrl: string }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            const fileMetadata: any = {
+                name: folderName,
+                mimeType: 'application/vnd.google-apps.folder'
+            };
+
+            if (parentFolderId) {
+                fileMetadata.parents = [parentFolderId];
+            }
+
+            const response = await drive.files.create({
+                requestBody: fileMetadata,
+                fields: 'id, webViewLink'
+            });
+
+            loggingService.info('Created Drive folder', {
+                connectionId: connection._id,
+                folderId: response.data.id,
+                folderName
+            });
+
+            return {
+                folderId: response.data.id!,
+                folderUrl: response.data.webViewLink!
+            };
+        });
+    }
+
+    /**
+     * Forms API: Add question to form
+     */
+    static async addFormQuestion(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        formId: string,
+        questionText: string,
+        questionType: 'TEXT' | 'PARAGRAPH_TEXT' | 'MULTIPLE_CHOICE' | 'CHECKBOX' | 'DROPDOWN' = 'TEXT',
+        options?: string[]
+    ): Promise<{ success: boolean; questionId: string }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const forms = google.forms({ version: 'v1', auth });
+
+            const questionItem: any = {
+                title: questionText,
+                questionItem: {
+                    question: {
+                        required: false,
+                        [questionType === 'TEXT' || questionType === 'PARAGRAPH_TEXT' ? 'textQuestion' : 'choiceQuestion']: 
+                            questionType === 'MULTIPLE_CHOICE' || questionType === 'CHECKBOX' || questionType === 'DROPDOWN' 
+                                ? { 
+                                    type: questionType,
+                                    options: options?.map(opt => ({ value: opt })) || []
+                                  }
+                                : { paragraph: questionType === 'PARAGRAPH_TEXT' }
+                    }
+                }
+            };
+
+            const response = await forms.forms.batchUpdate({
+                formId,
+                requestBody: {
+                    requests: [{
+                        createItem: {
+                            item: questionItem,
+                            location: { index: 0 }
+                        }
+                    }]
+                }
+            });
+
+            loggingService.info('Added question to Form', {
+                connectionId: connection._id,
+                formId,
+                questionText
+            });
+
+            const questionId = response.data.replies?.[0]?.createItem?.questionId;
+            return {
+                success: true,
+                questionId: Array.isArray(questionId) ? questionId[0] : (questionId || '')
+            };
+        });
+    }
+
+    /**
+     * Slides API: Export presentation to PDF
+     */
+    static async exportPresentationToPDF(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        presentationId: string
+    ): Promise<{ pdfUrl: string; fileId: string }> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            // Export as PDF
+            const response = await drive.files.export({
+                fileId: presentationId,
+                mimeType: 'application/pdf'
+            }, {
+                responseType: 'arraybuffer'
+            });
+
+            // Upload PDF to Drive
+            const pdfFileName = `presentation-${presentationId}.pdf`;
+            const uploadResponse = await drive.files.create({
+                requestBody: {
+                    name: pdfFileName,
+                    mimeType: 'application/pdf'
+                },
+                media: {
+                    mimeType: 'application/pdf',
+                    body: Buffer.from(response.data as ArrayBuffer)
+                },
+                fields: 'id, webViewLink'
+            });
+
+            loggingService.info('Exported presentation to PDF', {
+                connectionId: connection._id,
+                presentationId,
+                pdfFileId: uploadResponse.data.id
+            });
+
+            return {
+                fileId: uploadResponse.data.id!,
+                pdfUrl: uploadResponse.data.webViewLink!
+            };
+        });
+    }
+
+    /**
+     * Slides API: Get presentation details
+     */
+    static async getPresentation(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        presentationId: string
+    ): Promise<any> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const slides = google.slides({ version: 'v1', auth });
+
+            const response = await slides.presentations.get({
+                presentationId
+            });
+
+            loggingService.info('Retrieved presentation', {
+                connectionId: connection._id,
+                presentationId,
+                slideCount: response.data.slides?.length || 0
+            });
+
+            return response.data;
         });
     }
 
