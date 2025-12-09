@@ -357,17 +357,40 @@ export class OAuthController {
                 statePrefix: stateForValidation.substring(0, 20),
             });
             
-            const { user, isNewUser, accessToken: oauthAccessToken, googleTokenResponse } = await OAuthService.handleOAuthCallback(
-                provider,
-                code as string,
-                stateForValidation
-            );
+            let user: any;
+            let isNewUser: boolean;
+            let oauthAccessToken: string | undefined;
+            let googleTokenResponse: any;
+            
+            try {
+                const result = await OAuthService.handleOAuthCallback(
+                    provider,
+                    code as string,
+                    stateForValidation
+                );
+                user = result.user;
+                isNewUser = result.isNewUser;
+                oauthAccessToken = result.accessToken;
+                googleTokenResponse = result.googleTokenResponse;
+            } catch (oauthError: any) {
+                // If OAuth callback fails, this is a critical error - user cannot be authenticated
+                loggingService.error('OAuth callback failed', {
+                    error: oauthError.message,
+                    stack: oauthError.stack,
+                    provider,
+                });
+                throw oauthError; // Re-throw to be caught by outer catch block
+            }
 
             // Get the actual User document to update
             const { User } = await import('../models/User');
             const userDoc = await User.findById((user as any)._id);
             
             if (!userDoc) {
+                loggingService.error('User not found after OAuth callback', {
+                    provider,
+                    userId: (user as any)?._id,
+                });
                 throw new Error('User not found after OAuth callback');
             }
 
@@ -551,294 +574,313 @@ export class OAuthController {
 
             // For Google OAuth, create/update Google connection and sync Drive files
             // This applies to both login and linking flows
+            // IMPORTANT: For login flows, connection setup failures should NOT prevent login/MFA
+            // Only fail for linking flows where connection setup is required
             if (provider === 'google' && (oauthAccessToken || googleTokenResponse?.access_token)) {
                 // Use oauthAccessToken if available, otherwise extract from googleTokenResponse
                 const googleAccessToken = oauthAccessToken || googleTokenResponse?.access_token;
                 
+                // Only proceed with connection setup if we have a token
+                // For login flows, missing token is not fatal - user can still login
                 if (!googleAccessToken) {
-                    loggingService.error('No Google access token available', {
+                    loggingService.warn('No Google access token available for connection setup', {
                         provider,
                         userId: targetUserId,
+                        isLinkingFlow,
                         hasOAuthToken: !!oauthAccessToken,
                         hasGoogleTokenResponse: !!googleTokenResponse,
                     });
-                    throw new Error('No Google access token available');
-                }
-                loggingService.info('Starting Google connection setup', {
-                    provider,
-                    userId: targetUserId,
-                    isLinkingFlow,
-                    hasOAuthToken: !!oauthAccessToken,
-                    hasGoogleTokenResponse: !!googleTokenResponse,
-                    hasRefreshToken: !!googleTokenResponse?.refresh_token,
-                    hasGoogleAccessToken: !!googleAccessToken,
-                });
-                
-                try {
-                    const { GoogleService } = await import('../services/google.service');
-                    const { GoogleConnection } = await import('../models/GoogleConnection');
                     
-                    loggingService.info('Getting Google user info', {
+                    // For linking flows, fail if no token
+                    if (isLinkingFlow) {
+                        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                        res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent('No Google access token available. Please try again.')}`);
+                        return;
+                    }
+                    // For login flows, just skip connection setup and continue to MFA check
+                } else {
+                    loggingService.info('Starting Google connection setup', {
                         provider,
                         userId: targetUserId,
+                        isLinkingFlow,
+                        hasOAuthToken: !!oauthAccessToken,
+                        hasGoogleTokenResponse: !!googleTokenResponse,
+                        hasRefreshToken: !!googleTokenResponse?.refresh_token,
+                        hasGoogleAccessToken: !!googleAccessToken,
                     });
                     
-                    // Get Google user info
-                    loggingService.info('About to call GoogleService.getAuthenticatedUser', {
-                        userId: targetUserId,
-                        hasAccessToken: !!googleAccessToken,
-                        accessTokenLength: googleAccessToken?.length,
-                    });
-                    
-                    const googleUser = await GoogleService.getAuthenticatedUser(googleAccessToken);
-                    
-                    loggingService.info('Google user info retrieved', {
-                        provider,
-                        userId: targetUserId,
-                        googleUserId: googleUser.id,
-                        googleEmail: googleUser.email,
-                    });
-                    
-                    // Check if connection already exists
-                    let connection = await GoogleConnection.findOne({
-                        userId: targetUserId,
-                        googleUserId: googleUser.id
-                    }).select('+accessToken +refreshToken');
-                    
-                    if (connection) {
-                        // Update existing connection
-                        connection.accessToken = googleAccessToken; // Will be encrypted by pre-save hook
-                        if (googleTokenResponse?.refresh_token) {
-                            connection.refreshToken = googleTokenResponse.refresh_token; // Will be encrypted by pre-save hook
-                        }
-                        // Store the granted scopes from OAuth response
-                        if (googleTokenResponse?.scope) {
-                            connection.scope = googleTokenResponse.scope;
-                        }
-                        connection.tokenType = 'oauth';
-                        connection.isActive = true;
-                        connection.healthStatus = 'healthy';
-                        connection.lastSyncedAt = new Date();
-                        connection.googleEmail = googleUser.email;
-                        connection.googleName = googleUser.name;
-                        connection.googleAvatar = googleUser.picture;
-                        connection.googleDomain = googleUser.hd;
-                        await connection.save();
+                    try {
+                        const { GoogleService } = await import('../services/google.service');
+                        const { GoogleConnection } = await import('../models/GoogleConnection');
                         
-                        loggingService.info(`Google OAuth connection updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                        loggingService.info('Getting Google user info', {
+                            provider,
                             userId: targetUserId,
-                            googleEmail: googleUser.email,
-                            isLinkingFlow,
                         });
-                    } else {
-                        // Create new connection
-                        loggingService.info('Creating new Google connection', {
+                        
+                        // Get Google user info
+                        loggingService.info('About to call GoogleService.getAuthenticatedUser', {
+                            userId: targetUserId,
+                            hasAccessToken: !!googleAccessToken,
+                            accessTokenLength: googleAccessToken?.length,
+                        });
+                        
+                        const googleUser = await GoogleService.getAuthenticatedUser(googleAccessToken);
+                        
+                        loggingService.info('Google user info retrieved', {
+                            provider,
                             userId: targetUserId,
                             googleUserId: googleUser.id,
                             googleEmail: googleUser.email,
-                            hasRefreshToken: !!googleTokenResponse?.refresh_token,
                         });
                         
-                        connection = await GoogleConnection.create({
+                        // Check if connection already exists
+                        let connection = await GoogleConnection.findOne({
                             userId: targetUserId,
-                            accessToken: googleAccessToken,
-                            refreshToken: googleTokenResponse?.refresh_token,
-                            scope: googleTokenResponse?.scope || '', // Store granted scopes
-                            tokenType: 'oauth',
-                            googleUserId: googleUser.id,
-                            googleEmail: googleUser.email,
-                            googleName: googleUser.name,
-                            googleAvatar: googleUser.picture,
-                            googleDomain: googleUser.hd,
-                            isActive: true,
-                            healthStatus: 'healthy',
-                            driveFiles: [],
-                            lastSyncedAt: new Date()
-                        });
+                            googleUserId: googleUser.id
+                        }).select('+accessToken +refreshToken');
                         
-                        loggingService.info(`Google OAuth connection created during ${isLinkingFlow ? 'linking' : 'login'}`, {
-                            userId: targetUserId,
-                            connectionId: connection._id,
-                            googleEmail: googleUser.email,
-                            isLinkingFlow,
-                        });
-                        
-                        // Create or update Integration record with connection metadata
-                        try {
-                            const { Integration } = await import('../models/Integration');
-                            const existingIntegration = await Integration.findOne({
+                        if (connection) {
+                            // Update existing connection
+                            connection.accessToken = googleAccessToken; // Will be encrypted by pre-save hook
+                            if (googleTokenResponse?.refresh_token) {
+                                connection.refreshToken = googleTokenResponse.refresh_token; // Will be encrypted by pre-save hook
+                            }
+                            // Store the granted scopes from OAuth response
+                            if (googleTokenResponse?.scope) {
+                                connection.scope = googleTokenResponse.scope;
+                            }
+                            connection.tokenType = 'oauth';
+                            connection.isActive = true;
+                            connection.healthStatus = 'healthy';
+                            connection.lastSyncedAt = new Date();
+                            connection.googleEmail = googleUser.email;
+                            connection.googleName = googleUser.name;
+                            connection.googleAvatar = googleUser.picture;
+                            connection.googleDomain = googleUser.hd;
+                            await connection.save();
+                            
+                            loggingService.info(`Google OAuth connection updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
                                 userId: targetUserId,
-                                type: 'google_oauth'
+                                googleEmail: googleUser.email,
+                                isLinkingFlow,
+                            });
+                        } else {
+                            // Create new connection
+                            loggingService.info('Creating new Google connection', {
+                                userId: targetUserId,
+                                googleUserId: googleUser.id,
+                                googleEmail: googleUser.email,
+                                hasRefreshToken: !!googleTokenResponse?.refresh_token,
                             });
                             
-                            if (existingIntegration) {
-                                // Update metadata with new connectionId
-                                existingIntegration.metadata = {
-                                    ...existingIntegration.metadata,
-                                    connectionId: connection._id.toString(),
-                                    email: googleUser.email,
-                                    scopes: (connection as any).scopes || [],
-                                    googleUserId: googleUser.id
-                                };
-                                existingIntegration.status = 'active';
-                                await existingIntegration.save();
-                                
-                                loggingService.info('Updated existing Google Integration record', {
+                            connection = await GoogleConnection.create({
+                                userId: targetUserId,
+                                accessToken: googleAccessToken,
+                                refreshToken: googleTokenResponse?.refresh_token,
+                                scope: googleTokenResponse?.scope || '', // Store granted scopes
+                                tokenType: 'oauth',
+                                googleUserId: googleUser.id,
+                                googleEmail: googleUser.email,
+                                googleName: googleUser.name,
+                                googleAvatar: googleUser.picture,
+                                googleDomain: googleUser.hd,
+                                isActive: true,
+                                healthStatus: 'healthy',
+                                driveFiles: [],
+                                lastSyncedAt: new Date()
+                            });
+                            
+                            loggingService.info(`Google OAuth connection created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                userId: targetUserId,
+                                connectionId: connection._id,
+                                googleEmail: googleUser.email,
+                                isLinkingFlow,
+                            });
+                            
+                            // Create or update Integration record with connection metadata
+                            try {
+                                const { Integration } = await import('../models/Integration');
+                                const existingIntegration = await Integration.findOne({
                                     userId: targetUserId,
-                                    integrationId: existingIntegration._id,
-                                    connectionId: connection._id
+                                    type: 'google_oauth'
                                 });
-                            } else {
-                                // Create new Integration record
-                                await Integration.create({
-                                    userId: targetUserId,
-                                    type: 'google_oauth',
-                                    name: `Google (${googleUser.email})`,
-                                    description: 'Google Workspace integration via OAuth',
-                                    status: 'active',
-                                    encryptedCredentials: '', // Credentials stored in GoogleConnection
-                                    alertRouting: new Map(),
-                                    deliveryConfig: {
-                                        retryEnabled: true,
-                                        maxRetries: 3,
-                                        timeout: 30000
-                                    },
-                                    stats: {
-                                        totalDeliveries: 0,
-                                        successfulDeliveries: 0,
-                                        failedDeliveries: 0,
-                                        averageResponseTime: 0
-                                    },
-                                    metadata: {
+                                
+                                if (existingIntegration) {
+                                    // Update metadata with new connectionId
+                                    existingIntegration.metadata = {
+                                        ...existingIntegration.metadata,
                                         connectionId: connection._id.toString(),
                                         email: googleUser.email,
                                         scopes: (connection as any).scopes || [],
                                         googleUserId: googleUser.id
-                                    }
-                                });
-                                
-                                loggingService.info('Created new Google Integration record', {
+                                    };
+                                    existingIntegration.status = 'active';
+                                    await existingIntegration.save();
+                                    
+                                    loggingService.info('Updated existing Google Integration record', {
+                                        userId: targetUserId,
+                                        integrationId: existingIntegration._id,
+                                        connectionId: connection._id
+                                    });
+                                } else {
+                                    // Create new Integration record
+                                    await Integration.create({
+                                        userId: targetUserId,
+                                        type: 'google_oauth',
+                                        name: `Google (${googleUser.email})`,
+                                        description: 'Google Workspace integration via OAuth',
+                                        status: 'active',
+                                        encryptedCredentials: '', // Credentials stored in GoogleConnection
+                                        alertRouting: new Map(),
+                                        deliveryConfig: {
+                                            retryEnabled: true,
+                                            maxRetries: 3,
+                                            timeout: 30000
+                                        },
+                                        stats: {
+                                            totalDeliveries: 0,
+                                            successfulDeliveries: 0,
+                                            failedDeliveries: 0,
+                                            averageResponseTime: 0
+                                        },
+                                        metadata: {
+                                            connectionId: connection._id.toString(),
+                                            email: googleUser.email,
+                                            scopes: (connection as any).scopes || [],
+                                            googleUserId: googleUser.id
+                                        }
+                                    });
+                                    
+                                    loggingService.info('Created new Google Integration record', {
+                                        userId: targetUserId,
+                                        connectionId: connection._id
+                                    });
+                                }
+                            } catch (integrationError: any) {
+                                loggingService.error('Failed to create/update Google Integration record', {
                                     userId: targetUserId,
-                                    connectionId: connection._id
+                                    connectionId: connection._id,
+                                    error: integrationError.message
                                 });
+                                // Don't fail the entire flow if Integration creation fails
                             }
-                        } catch (integrationError: any) {
-                            loggingService.error('Failed to create/update Google Integration record', {
-                                userId: targetUserId,
-                                connectionId: connection._id,
-                                error: integrationError.message
-                            });
-                            // Don't fail the entire flow if Integration creation fails
                         }
-                    }
-                    
-                    // Fetch and sync Drive files
-                    try {
-                        const { files } = await GoogleService.listDriveFiles(connection, { pageSize: 50 });
-                        connection.driveFiles = files;
-                        connection.lastSyncedAt = new Date();
-                        await connection.save();
                         
-                        loggingService.info(`Google Drive files synced during ${isLinkingFlow ? 'linking' : 'login'}`, {
-                            userId: targetUserId,
-                            filesCount: files.length,
-                            isLinkingFlow,
-                        });
-                    } catch (driveError: any) {
-                        // Log but don't fail the login if Drive sync fails
-                        loggingService.warn(`Failed to sync Google Drive files during ${isLinkingFlow ? 'linking' : 'login'}`, {
-                            userId: targetUserId,
-                            error: driveError.message,
-                            isLinkingFlow,
-                        });
-                    }
-                    
-                    // Create/update Integration record to mark Google as integrated
-                    try {
-                        const { Integration } = await import('../models/Integration');
-                        const existingIntegration = await Integration.findOne({
-                            userId: targetUserId,
-                            type: 'google_oauth',
-                        });
-                        
-                        if (existingIntegration) {
-                            existingIntegration.status = 'active';
-                            existingIntegration.metadata = {
-                                ...existingIntegration.metadata,
-                                connectionId: connection._id.toString(),
-                                googleEmail: googleUser.email,
-                                googleDomain: googleUser.hd,
-                                driveFilesCount: connection.driveFiles.length,
-                                connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
-                                lastSynced: new Date(),
-                            };
-                            await existingIntegration.save();
+                        // Fetch and sync Drive files
+                        try {
+                            const { files } = await GoogleService.listDriveFiles(connection, { pageSize: 50 });
+                            connection.driveFiles = files;
+                            connection.lastSyncedAt = new Date();
+                            await connection.save();
                             
-                            loggingService.info(`Google integration updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                            loggingService.info(`Google Drive files synced during ${isLinkingFlow ? 'linking' : 'login'}`, {
                                 userId: targetUserId,
-                                integrationId: existingIntegration._id,
+                                filesCount: files.length,
                                 isLinkingFlow,
                             });
-                        } else {
-                            // Create new integration record
-                            const integration = new Integration({
+                        } catch (driveError: any) {
+                            // Log but don't fail the login if Drive sync fails
+                            loggingService.warn(`Failed to sync Google Drive files during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                userId: targetUserId,
+                                error: driveError.message,
+                                isLinkingFlow,
+                            });
+                        }
+                        
+                        // Create/update Integration record to mark Google as integrated
+                        try {
+                            const { Integration } = await import('../models/Integration');
+                            const existingIntegration = await Integration.findOne({
                                 userId: targetUserId,
                                 type: 'google_oauth',
-                                name: `Google Workspace - ${googleUser.email}`,
-                                description: 'Google Workspace integration for Drive, Docs, and Sheets',
-                                status: 'active',
-                                encryptedCredentials: '', // Credentials stored in GoogleConnection
-                                metadata: {
+                            });
+                            
+                            if (existingIntegration) {
+                                existingIntegration.status = 'active';
+                                existingIntegration.metadata = {
+                                    ...existingIntegration.metadata,
                                     connectionId: connection._id.toString(),
                                     googleEmail: googleUser.email,
                                     googleDomain: googleUser.hd,
                                     driveFilesCount: connection.driveFiles.length,
                                     connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
                                     lastSynced: new Date(),
-                                },
-                                stats: {
-                                    totalDeliveries: 0,
-                                    successfulDeliveries: 0,
-                                    failedDeliveries: 0,
-                                    averageResponseTime: 0,
-                                },
-                            });
-                            await integration.save();
-                            
-                            loggingService.info(`Google integration created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                };
+                                await existingIntegration.save();
+                                
+                                loggingService.info(`Google integration updated during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                    userId: targetUserId,
+                                    integrationId: existingIntegration._id,
+                                    isLinkingFlow,
+                                });
+                            } else {
+                                // Create new integration record
+                                const integration = new Integration({
+                                    userId: targetUserId,
+                                    type: 'google_oauth',
+                                    name: `Google Workspace - ${googleUser.email}`,
+                                    description: 'Google Workspace integration for Drive, Docs, and Sheets',
+                                    status: 'active',
+                                    encryptedCredentials: '', // Credentials stored in GoogleConnection
+                                    metadata: {
+                                        connectionId: connection._id.toString(),
+                                        googleEmail: googleUser.email,
+                                        googleDomain: googleUser.hd,
+                                        driveFilesCount: connection.driveFiles.length,
+                                        connectedVia: isLinkingFlow ? 'oauth_linking' : 'oauth_login',
+                                        lastSynced: new Date(),
+                                    },
+                                    stats: {
+                                        totalDeliveries: 0,
+                                        successfulDeliveries: 0,
+                                        failedDeliveries: 0,
+                                        averageResponseTime: 0,
+                                    },
+                                });
+                                await integration.save();
+                                
+                                loggingService.info(`Google integration created during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                                    userId: targetUserId,
+                                    integrationId: integration._id,
+                                    isLinkingFlow,
+                                });
+                            }
+                        } catch (integrationError: any) {
+                            // Log but don't fail the login if integration creation fails
+                            loggingService.warn(`Failed to create Google integration during ${isLinkingFlow ? 'linking' : 'login'}`, {
                                 userId: targetUserId,
-                                integrationId: integration._id,
+                                error: integrationError.message,
                                 isLinkingFlow,
                             });
                         }
-                    } catch (integrationError: any) {
-                        // Log but don't fail the login if integration creation fails
-                        loggingService.warn(`Failed to create Google integration during ${isLinkingFlow ? 'linking' : 'login'}`, {
+                    } catch (googleError: any) {
+                        // For login flows, connection setup failures should NOT prevent login/MFA
+                        // Only fail for linking flows where connection setup is required
+                        loggingService.error(`Failed to setup Google connection during ${isLinkingFlow ? 'linking' : 'login'}`, {
                             userId: targetUserId,
-                            error: integrationError.message,
+                            error: googleError.message,
+                            stack: googleError.stack,
+                            errorName: googleError.name,
+                            errorCode: googleError.code,
                             isLinkingFlow,
+                            hasOAuthToken: !!oauthAccessToken,
+                            hasGoogleTokenResponse: !!googleTokenResponse,
+                            provider,
                         });
-                    }
-                } catch (googleError: any) {
-                    // Log but don't fail the login if Google connection setup fails
-                    loggingService.error(`Failed to setup Google connection during ${isLinkingFlow ? 'linking' : 'login'}`, {
-                        userId: targetUserId,
-                        error: googleError.message,
-                        stack: googleError.stack,
-                        errorName: googleError.name,
-                        errorCode: googleError.code,
-                        isLinkingFlow,
-                        hasOAuthToken: !!oauthAccessToken,
-                        hasGoogleTokenResponse: !!googleTokenResponse,
-                        provider,
-                    });
-                    
-                    // For linking flows, we should fail if connection setup fails
-                    if (isLinkingFlow) {
-                        const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-                        const errorMessage = `Failed to connect google account. ${googleError.message || 'Please try again.'}`;
-                        res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(errorMessage)}`);
-                        return;
+                        
+                        // For linking flows, we should fail if connection setup fails
+                        if (isLinkingFlow) {
+                            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+                            const errorMessage = `Failed to connect google account. ${googleError.message || 'Please try again.'}`;
+                            res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(errorMessage)}`);
+                            return;
+                        }
+                        // For login flows, continue - connection setup failure should not block login/MFA
+                        loggingService.info('Continuing login flow despite Google connection setup failure', {
+                            userId: targetUserId,
+                            provider,
+                        });
                     }
                 }
             }
@@ -848,6 +890,9 @@ export class OAuthController {
             // But if user has explicitly enabled MFA in Cost Katana, we should respect it
             // IMPORTANT: Skip MFA check for linking flows (when userId is in state)
             // because the user is already authenticated and just linking a provider
+            // IMPORTANT: This check MUST happen after user authentication is successful,
+            // regardless of whether Google/GitHub connection setup succeeded or failed.
+            // Connection setup failures should NOT prevent MFA check for login flows.
             if (!isLinkingFlow && userDoc.mfa.enabled && userDoc.mfa.methods.length > 0) {
                 // Generate MFA token
                 const mfaToken = AuthService.generateMFAToken((userDoc as any)._id.toString());
