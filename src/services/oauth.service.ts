@@ -77,8 +77,9 @@ export class OAuthService {
             }
             
             const callbackUrl = process.env.GOOGLE_CALLBACK_URL || `${process.env.BACKEND_URL || 'http://localhost:8000'}/api/auth/oauth/google/callback`;
-            // Include Google Workspace scopes for all products (Phase 1-3)
-            const scopes = 'openid email profile https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/forms.body https://www.googleapis.com/auth/forms.responses.readonly';
+            // Include Google Workspace scopes for all products
+            // Using drive.readonly instead of drive.file to access all user files, not just app-created ones
+            const scopes = 'openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/presentations https://www.googleapis.com/auth/forms.body https://www.googleapis.com/auth/forms.responses.readonly';
             
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;
         } else {

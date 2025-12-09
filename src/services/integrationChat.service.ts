@@ -30,15 +30,185 @@ export interface IntegrationCommandResult {
   message: string;
   data?: any;
   error?: string;
+  viewLinks?: Array<{
+    label: string;
+    url: string;
+    type: 'document' | 'spreadsheet' | 'presentation' | 'file' | 'email' | 'calendar' | 'form';
+  }>;
+  metadata?: {
+    type: string;
+    count?: number;
+    service?: 'gmail' | 'calendar' | 'drive' | 'gdocs' | 'sheets';
+  };
 }
 
 export class IntegrationChatService {
   /**
+   * Parse email recipients from natural language
+   * Handles: "to user@example.com", "to user@example.com and user2@example.com", 
+   * "to user@example.com, user2@example.com", "to user@example.com; user2@example.com"
+   */
+  private static parseEmailRecipients(text: string): string[] {
+    const emails: string[] = [];
+    
+    // First, extract the section after "to" until we hit "subject", "saying", "body", etc.
+    const toSectionMatch = text.match(/\bto\s+(.*?)(?:\s+(?:subject|saying|body|message|with\s+subject|$))/i);
+    
+    if (toSectionMatch) {
+      const toSection = toSectionMatch[1];
+      
+      // Extract all emails from the "to" section
+      const emailPattern = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/gi;
+      let match;
+      while ((match = emailPattern.exec(toSection)) !== null) {
+        emails.push(match[1].toLowerCase());
+      }
+    }
+    
+    // Fallback: Find all emails in entire text if nothing found
+    if (emails.length === 0) {
+      const emailPattern = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+      const matches = text.match(emailPattern);
+      if (matches) {
+        emails.push(...matches.map(e => e.toLowerCase()));
+      }
+    }
+    
+    // Remove duplicates
+    return [...new Set(emails)];
+  }
+
+  /**
+   * Validate email addresses
+   */
+  private static validateEmailAddresses(emails: string[]): { valid: string[]; invalid: string[] } {
+    const valid: string[] = [];
+    const invalid: string[] = [];
+    
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    
+    for (const email of emails) {
+      if (emailRegex.test(email)) {
+        valid.push(email);
+      } else {
+        invalid.push(email);
+      }
+    }
+    
+    return { valid, invalid };
+  }
+
+  /**
+   * Extract subject from natural language
+   * Handles: "subject: Test", "with subject Test", "as Test"
+   */
+  private static extractSubjectFromNaturalLanguage(text: string): string | null {
+    // Pattern 1: "subject: " or "subject "
+    let match = text.match(/subject:?\s+["']?([^"']+?)["']?(?:\s+(?:saying|with|body|message|and)|$)/i);
+    if (match) return match[1].trim();
+    
+    // Pattern 2: "with subject"
+    match = text.match(/with\s+subject\s+["']?([^"']+?)["']?(?:\s+(?:saying|body|message|and)|$)/i);
+    if (match) return match[1].trim();
+    
+    // Pattern 3: "as subject"
+    match = text.match(/as\s+["']?([^"']+?)["']?(?:\s+(?:saying|with|body|message|and)|$)/i);
+    if (match) return match[1].trim();
+    
+    return null;
+  }
+
+  /**
+   * Extract body from natural language
+   * Handles: "saying hello", "message: hello", "body: hello", "with message hello"
+   * Also handles: remaining text after recipients if no "saying"
+   */
+  private static extractBodyFromNaturalLanguage(text: string): string | null {
+    // Pattern 1: "saying" followed by text (with or without quotes)
+    let match = text.match(/saying\s+["']([^"']+)["']/i);
+    if (match) return match[1].trim();
+    
+    match = text.match(/saying\s+(.+?)(?:\s*$)/i);
+    if (match) return match[1].trim();
+    
+    // Pattern 2: "message:" or "body:"
+    match = text.match(/(?:message|body):?\s+["']?([^"']+?)["']?$/i);
+    if (match) return match[1].trim();
+    
+    // Pattern 3: "with message" or "with body"
+    match = text.match(/with\s+(?:message|body)\s+["']?([^"']+?)["']?$/i);
+    if (match) return match[1].trim();
+    
+    // Pattern 4: Everything after subject if subject exists
+    const subjectMatch = text.match(/(?:subject:?|with\s+subject)\s+["']?([^"']+?)["']?\s+saying\s+["']?([^"']+?)["']?$/i);
+    if (subjectMatch) return subjectMatch[2].trim();
+    
+    // Pattern 5: If no "saying" keyword, treat remaining text after recipients as body
+    const afterRecipientsMatch = text.match(/\bto\s+[a-zA-Z0-9._%+\-@,;\s]+(?:and\s+[a-zA-Z0-9._%+\-@]+)?\s+(?!subject)(.+?)$/i);
+    if (afterRecipientsMatch && !text.match(/\bsaying\b/i) && !text.match(/\bsubject\b/i)) {
+      return afterRecipientsMatch[1].trim();
+    }
+    
+    return null;
+  }
+
+  /**
+   * Extract search query from natural language
+   * Handles: "search for X", "find X", "look for X", "X file", "X document"
+   */
+  private static extractSearchQueryFromNaturalLanguage(text: string): string | null {
+    // Remove @service:command prefix
+    const cleaned = text.replace(/@\w+:\w+\s+/, '');
+    
+    // Pattern 1: "search for X", "find X", "look for X"
+    let m = cleaned.match(/(?:search|find|look)\s+(?:for\s+)?(.+)/i);
+    if (m) return m[1].trim();
+    
+    // Pattern 2: "X file", "X document", "X folder"
+    m = cleaned.match(/(.+?)\s+(?:file|document|folder)/i);
+    if (m) return m[1].trim();
+    
+    // Pattern 3: Everything after command
+    return cleaned.trim() || null;
+  }
+
+  /**
    * Parse natural language command with integration mentions
    * Uses AI recognition first, then falls back to manual parsing
+   * Also detects Google intents without @ mentions
    */
   static async parseCommand(message: string, mentions: ParsedMention[]): Promise<IntegrationCommand | null> {
+    // If no mentions, try detecting Google intent from natural language
     if (mentions.length === 0) {
+      const { detectGoogleIntent } = await import('../utils/googleIntentClassifier');
+      const intent = detectGoogleIntent(message);
+      
+      if (intent.service && intent.confidence >= 0.7) {
+        loggingService.info('Detected Google intent from natural language', {
+          component: 'IntegrationChatService',
+          operation: 'parseCommand',
+          service: intent.service,
+          action: intent.action,
+          confidence: intent.confidence
+        });
+
+        // Create a synthetic mention for the detected intent
+        const syntheticMention: ParsedMention = {
+          integration: intent.service,
+          entityType: intent.action,
+          subEntityType: intent.action
+        };
+
+        // Build command from detected intent
+        return {
+          type: intent.action as any,
+          entity: intent.service,
+          mention: syntheticMention,
+          params: intent.params,
+          naturalLanguage: message
+        };
+      }
+      
       return null;
     }
 
@@ -491,7 +661,45 @@ export class IntegrationChatService {
         status: 'active'
       });
 
-      // Find matching integration
+      // Google Workspace services use GoogleConnection, not Integration model
+      const googleServices = ['gmail', 'calendar', 'drive', 'sheets', 'gdocs', 'google'];
+      
+      if (googleServices.includes(command.mention.integration)) {
+        // Handle Google Workspace services directly
+        const { GoogleConnection } = await import('../models/GoogleConnection');
+        const googleConnection = await GoogleConnection.findOne({
+          userId,
+          isActive: true
+        }).select('+accessToken +refreshToken');
+
+        if (!googleConnection) {
+          return {
+            success: false,
+            message: `❌ No active Google account connected. Please connect your Google account from Settings → Integrations → Google Workspace.`,
+            error: 'GOOGLE_CONNECTION_NOT_FOUND'
+          };
+        }
+
+        // Create a mock integration object for Google services
+        const mockGoogleIntegration: any = {
+          _id: googleConnection._id,
+          userId,
+          type: 'google_oauth',
+          status: 'active',
+          metadata: {
+            connectionId: googleConnection._id.toString()
+          },
+          getCredentials: () => ({
+            accessToken: googleConnection.decryptToken(),
+            refreshToken: googleConnection.decryptRefreshToken?.() || undefined,
+            connectionId: googleConnection._id.toString()
+          })
+        };
+
+        return await this.executeGoogleCommand(command, mockGoogleIntegration, mockGoogleIntegration.getCredentials());
+      }
+
+      // Find matching integration for non-Google services
       const integration = integrations.find(i => {
         const integrationType = command.mention.integration;
         if (integrationType === 'jira') return i.type === 'jira_oauth';
@@ -506,7 +714,7 @@ export class IntegrationChatService {
       if (!integration) {
         return {
           success: false,
-          message: `No active ${command.mention.integration} integration found. Please set up an integration first.`,
+          message: `❌ No active ${command.mention.integration} integration found. Please set up an integration first.`,
           error: 'INTEGRATION_NOT_FOUND'
         };
       }
@@ -525,8 +733,6 @@ export class IntegrationChatService {
           return await this.executeDiscordCommand(command, integration, credentials);
         case 'github':
           return await this.executeGitHubCommand(command, integration, credentials);
-        case 'google':
-          return await this.executeGoogleCommand(command, integration, credentials);
         default:
           return {
             success: false,
@@ -2137,6 +2343,10 @@ export class IntegrationChatService {
     integration: IIntegration,
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
+    // Declare these outside try block so they're accessible in catch
+    let rawAction = '';
+    let subAction = '';
+    
     try {
       const { GoogleService } = await import('./google.service');
       const { GoogleIntegrationService } = await import('./googleIntegration.service');
@@ -2203,8 +2413,52 @@ export class IntegrationChatService {
       const finalConnectionId = connection._id.toString();
 
       const mention = command.mention;
-      const action = mention.entityType; // sheets, docs, drive, etc.
-      const subAction = mention.subEntityType; // export, create, list, etc.
+      // Determine the action - could be from mention.integration (e.g., @gmail), mention.entityType, or command.entity
+      // Normalize to lowercase for case-insensitive matching
+      const action = (mention.integration === 'google' 
+        ? (mention.entityType || command.entity)
+        : mention.integration)?.toLowerCase(); // For @gmail, @drive, etc., use the integration name as action
+      subAction = (mention.subEntityType || command.type)?.toLowerCase(); // export, create, list, send, search, etc.
+
+      // Validate service
+      rawAction = action?.toLowerCase().trim();
+
+      if (!rawAction) {
+        return {
+          success: false,
+          message: '❌ Could not determine Google service. Please use format: @gmail:send, @drive:search, etc.',
+          error: 'UNDEFINED_SERVICE'
+        };
+      }
+
+      const SUPPORTED_GOOGLE_SERVICES = ['gmail', 'calendar', 'drive', 'gdocs', 'sheets'];
+
+      if (!SUPPORTED_GOOGLE_SERVICES.includes(rawAction)) {
+        // Check if it's a removed service (slides/forms)
+        if (rawAction === 'slides' || rawAction === 'forms') {
+          return {
+            success: false,
+            message: `❌ ${rawAction.charAt(0).toUpperCase() + rawAction.slice(1)} integration is not available in this workspace.`,
+            error: 'SERVICE_NOT_AVAILABLE'
+          };
+        }
+        
+        return {
+          success: false,
+          message: `❌ The service '@${rawAction}' is not supported. Available: ${SUPPORTED_GOOGLE_SERVICES.join(', ')}`,
+          error: 'UNSUPPORTED_SERVICE'
+        };
+      }
+
+      loggingService.info('Executing Google command', {
+        component: 'IntegrationChatService',
+        userId: integration.userId.toString(),
+        integration: mention.integration,
+        action: rawAction,
+        subAction,
+        commandType: command.type,
+        params: command.params
+      });
 
       // Handle different Google product actions
       if (action === 'sheets') {
@@ -2239,7 +2493,7 @@ export class IntegrationChatService {
             data: files
           };
         }
-      } else if (action === 'docs') {
+      } else if (action === 'gdocs') {
         if (subAction === 'report' || command.params?.report) {
           // Create cost report in Google Docs
           const result = await GoogleIntegrationService.createCostReportInDocs(connection, {
@@ -2252,13 +2506,22 @@ export class IntegrationChatService {
             includeRecommendations: true
           });
 
-          return {
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('gdocs', 'create', {
             success: true,
-            message: `✅ Created cost report in Google Docs`,
+            message: '✅ Created cost report in Google Docs',
             data: {
               documentUrl: result.documentUrl,
               documentId: result.documentId
             }
+          });
+
+          return {
+            success: true,
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         } else if (subAction === 'list') {
           // List docs
@@ -2266,10 +2529,70 @@ export class IntegrationChatService {
             query: "mimeType='application/vnd.google-apps.document'"
           });
 
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('gdocs', 'list', {
+            success: true,
+            data: files
+          });
+
           return {
             success: true,
-            message: `📄 Found ${files.length} Google Docs`,
-            data: files
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
+          };
+        } else if (subAction === 'read' || subAction === 'view' || subAction === 'get' || subAction === 'open') {
+          // Read/view a specific document
+          let documentId = command.params?.documentId || command.params?.docId || command.params?.id;
+          
+          // If no ID is provided, try to find document by name
+          if (!documentId && (command.params?.name || command.params?.title || command.params?.query)) {
+            const searchName = command.params?.name || command.params?.title || command.params?.query;
+            const { files } = await GoogleService.listDriveFiles(connection, {
+              query: `mimeType='application/vnd.google-apps.document' and name='${searchName}'`
+            });
+            
+            if (files.length > 0) {
+              documentId = files[0].id;
+              loggingService.info('Found document by name', {
+                component: 'IntegrationChatService',
+                searchName,
+                documentId,
+                documentName: files[0].name
+              });
+            } else {
+              return {
+                success: false,
+                message: `❌ Could not find a document named "${searchName}". Please provide the exact document name or document ID.`,
+                error: 'DOCUMENT_NOT_FOUND'
+              };
+            }
+          }
+          
+          if (!documentId) {
+            return {
+              success: false,
+              message: `❌ Please provide a document name or ID. Example: @docs:read "Cost Katana Documentation"`,
+              error: 'MISSING_DOCUMENT_ID'
+            };
+          }
+
+          // Read the document content
+          const content = await GoogleService.readDocument(connection, documentId);
+
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('gdocs', 'read', {
+            success: true,
+            data: { documentId, content, characterCount: content.length }
+          });
+
+          return {
+            success: true,
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         }
       } else if (action === 'drive') {
@@ -2279,10 +2602,69 @@ export class IntegrationChatService {
             pageSize: command.params?.limit ?? 20
           });
 
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('drive', 'list', {
+            success: true,
+            data: files
+          });
+
           return {
             success: true,
-            message: `📁 Found ${files.length} files in Google Drive`,
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
+          };
+        } else if (subAction === 'search' || subAction === 'find') {
+          // Search Drive files by name or content
+          let searchQuery = command.params?.query || command.params?.searchQuery || '';
+          
+          // Try to extract from natural language if not provided
+          if (!searchQuery && command.naturalLanguage) {
+            searchQuery = this.extractSearchQueryFromNaturalLanguage(command.naturalLanguage) || '';
+          }
+          
+          if (!searchQuery) {
+            return {
+              success: false,
+              message: '❌ Please specify a search query. Example: @drive:search budget report',
+              error: 'No search query provided'
+            };
+          }
+
+          // Build Google Drive query by splitting words and AND'ing them
+          const words = searchQuery.split(/\s+/).filter((w: string) => w.length > 0);
+          const nameQueries = words.map((w: string) => `name contains '${w}'`).join(' and ');
+          const driveQuery = `(${nameQueries}) and trashed = false`;
+          
+          const { files } = await GoogleService.listDriveFiles(connection, {
+            query: driveQuery,
+            pageSize: command.params?.limit ?? 20
+          });
+
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          
+          // If no results, provide helpful message
+          if (files.length === 0) {
+            return {
+              success: true,
+              message: `❌ No Drive files matched "${searchQuery}".`,
+              data: [],
+              metadata: { type: 'drive_search', count: 0, service: 'drive' }
+            };
+          }
+
+          const formatted = formatGoogleServiceResponse('drive', 'search', {
+            success: true,
             data: files
+          });
+
+          return {
+            success: true,
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         } else if (subAction === 'upload') {
           // Upload file to Drive
@@ -2329,18 +2711,75 @@ export class IntegrationChatService {
         }
       } else if (action === 'gmail' || action === 'email') {
         if (subAction === 'send') {
+          // Parse email parameters from the message or command params
+          let toEmails: string[] = [];
+          let subject = command.params?.subject || null;
+          let body = command.params?.body || command.params?.message || null;
+
+          // Extract 'to' emails - handle both string and array
+          if (command.params?.to) {
+            if (Array.isArray(command.params.to)) {
+              toEmails = command.params.to;
+            } else if (typeof command.params.to === 'string') {
+              // Split by comma, semicolon, or "and"
+              toEmails = command.params.to.split(/[,;]|\s+and\s+/).map((e: string) => e.trim());
+            }
+          }
+
+          // Try to extract from natural language if not found
+          if (toEmails.length === 0 && command.naturalLanguage) {
+            toEmails = this.parseEmailRecipients(command.naturalLanguage);
+          }
+
+          // Validate email addresses
+          const { valid, invalid } = this.validateEmailAddresses(toEmails);
+          
+          if (invalid.length > 0) {
+            return {
+              success: false,
+              message: `❌ Invalid email address(es): ${invalid.join(', ')}. Please check the email format.`,
+              error: 'Invalid email format'
+            };
+          }
+
+          if (valid.length === 0) {
+            return {
+              success: false,
+              message: `❌ I couldn't parse any valid recipient(s). Example:\n@gmail:send send email to user@example.com subject "Hello" saying "Body"`,
+              error: 'Missing recipient'
+            };
+          }
+
+          // Extract subject from natural language if not provided
+          if (!subject && command.naturalLanguage) {
+            subject = this.extractSubjectFromNaturalLanguage(command.naturalLanguage);
+          }
+          
+          // Extract body from natural language if not provided
+          if (!body && command.naturalLanguage) {
+            body = this.extractBodyFromNaturalLanguage(command.naturalLanguage);
+          }
+
+          // Use safe defaults
+          if (!subject) {
+            subject = 'Message from CostKatana';
+          }
+          if (!body) {
+            body = 'This message was sent via CostKatana.';
+          }
+
           // Send email via Gmail
           const result = await GoogleService.sendEmail(
             connection,
-            command.params?.to || [],
-            command.params?.subject || 'Cost Analysis Update',
-            command.params?.body || '',
+            valid,
+            subject,
+            body,
             command.params?.isHtml || false
           );
 
           return {
             success: true,
-            message: `✅ Email sent successfully`,
+            message: `✅ Email sent successfully to ${valid.join(', ')}\n\n**Subject:** ${subject}\n**Message:** ${body.substring(0, 100)}${body.length > 100 ? '...' : ''}`,
             data: result
           };
         } else if (subAction === 'search' || subAction === 'find') {
@@ -2351,10 +2790,18 @@ export class IntegrationChatService {
             command.params?.maxResults || 10
           );
 
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('gmail', 'search', {
+            success: true,
+            data: { messages }
+          });
+
           return {
             success: true,
-            message: `📧 Found ${messages.length} emails`,
-            data: { messages }
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         } else if (subAction === 'list') {
           // List Gmail messages (unread or recent)
@@ -2364,10 +2811,18 @@ export class IntegrationChatService {
             command.params?.maxResults || 10
           );
 
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('gmail', 'list', {
+            success: true,
+            data: { messages }
+          });
+
           return {
             success: true,
-            message: `📧 Found ${messages.length} messages`,
-            data: { messages }
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         }
       } else if (action === 'calendar') {
@@ -2380,10 +2835,18 @@ export class IntegrationChatService {
             command.params?.maxResults || 10
           );
 
+          const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
+          const formatted = formatGoogleServiceResponse('calendar', 'list', {
+            success: true,
+            data: events
+          });
+
           return {
             success: true,
-            message: `📅 Found ${events.length} calendar events`,
-            data: { events }
+            message: formatted.message,
+            data: formatted.data,
+            viewLinks: formatted.viewLinks,
+            metadata: formatted.metadata
           };
         } else if (subAction === 'create' || subAction === 'add') {
           // Create calendar event
@@ -2396,10 +2859,19 @@ export class IntegrationChatService {
             command.params?.attendees
           );
 
+          // Format the response with view link
+          const viewLinks = result.eventLink ? [{
+            label: `View Event in Calendar`,
+            url: result.eventLink,
+            type: 'calendar' as const
+          }] : [];
+
           return {
             success: true,
-            message: `✅ Created calendar event`,
-            data: result
+            message: `✅ Created calendar event\n\n**Event Id:** ${result.eventId}\n**Event Link:** ${result.eventLink || 'N/A'}`,
+            data: result,
+            viewLinks,
+            metadata: { type: 'calendar_create', service: 'calendar' }
           };
         } else if (subAction === 'update') {
           // Update calendar event
@@ -2433,104 +2905,79 @@ export class IntegrationChatService {
             data: result
           };
         }
-      } else if (action === 'forms' || action === 'form') {
-        if (subAction === 'create') {
-          // Create form
-          const result = await GoogleService.createForm(
-            connection,
-            command.params?.title || 'Cost Feedback Form',
-            command.params?.description
-          );
+      }
 
-          return {
-            success: true,
-            message: `✅ Created Google Form`,
-            data: result
-          };
-        } else if (subAction === 'question' || subAction === 'add-question') {
-          // Add question to form
-          const result = await GoogleService.addFormQuestion(
-            connection,
-            command.params?.formId || '',
-            command.params?.questionText || '',
-            command.params?.questionType || 'TEXT',
-            command.params?.options
-          );
-
-          return {
-            success: true,
-            message: `✅ Added question to form`,
-            data: result
-          };
-        } else if (subAction === 'responses' || subAction === 'results') {
-          // Get form responses
-          const responses = await GoogleService.getFormResponses(
-            connection,
-            command.params?.formId || ''
-          );
-
-          return {
-            success: true,
-            message: `📋 Found ${responses.length} form responses`,
-            data: { responses }
-          };
-        }
-      } else if (action === 'slides' || action === 'presentation') {
-        if (subAction === 'create') {
-          // Create presentation
-          const result = await GoogleService.createPresentation(
-            connection,
-            command.params?.title || 'Cost Analysis Presentation'
-          );
-
-          return {
-            success: true,
-            message: `✅ Created Google Slides presentation`,
-            data: result
-          };
-        } else if (subAction === 'add-slide') {
-          // Add slide to presentation
-          const result = await GoogleService.addSlideWithText(
-            connection,
-            command.params?.presentationId || '',
-            command.params?.title || 'New Slide',
-            command.params?.content || ''
-          );
-
-          return {
-            success: true,
-            message: `✅ Added slide to presentation`,
-            data: result
-          };
-        } else if (subAction === 'export' || subAction === 'pdf') {
-          // Export presentation to PDF
-          const result = await GoogleService.exportPresentationToPDF(
-            connection,
-            command.params?.presentationId || ''
-          );
-
-          return {
-            success: true,
-            message: `✅ Exported presentation to PDF`,
-            data: result
-          };
-        }
+      // If no structured command matched, try natural language parsing via GoogleCommandService
+      try {
+        const { GoogleCommandService } = await import('./googleCommand.service');
+        const originalMessage = command.naturalLanguage || `@${command.mention.integration} ${action || ''} ${subAction || ''}`.trim();
+        
+        loggingService.info('Attempting natural language Google command', {
+          userId: integration.userId.toString(),
+          integration: command.mention.integration,
+          message: originalMessage
+        });
+        
+        const result = await GoogleCommandService.executeCommand(
+          integration.userId.toString(),
+          command,
+          originalMessage
+        );
+        
+        return {
+          success: true,
+          message: result,
+          data: null
+        };
+      } catch (nlpError: any) {
+        loggingService.warn('Natural language Google command also failed', {
+          error: nlpError.message,
+          integration: command.mention.integration,
+          action,
+          subAction
+        });
       }
 
       return {
         success: false,
-        message: `❌ Unknown Google command: ${action}:${subAction}`,
-        error: 'Command not recognized'
+        message: `❌ The action '${subAction}' for '@${rawAction}' is not supported yet.`,
+        error: 'UNSUPPORTED_ACTION'
       };
     } catch (error: any) {
-      loggingService.error('Failed to execute Google command', {
+      const { parseGoogleApiError, GoogleErrorType } = await import('../utils/googleErrorHandler');
+      const googleError = parseGoogleApiError(error, rawAction || 'google', subAction || 'command');
+      
+      let userMessage = '';
+      switch (googleError.type) {
+        case GoogleErrorType.AUTH_EXPIRED:
+        case GoogleErrorType.AUTH_REVOKED:
+          userMessage = 'Your Google session expired. Please reconnect in Settings → Integrations.';
+          break;
+        case GoogleErrorType.SCOPE_MISSING:
+        case GoogleErrorType.PERMISSION_DENIED:
+          userMessage = 'Missing permissions for this operation. Please reconnect your Google account with required permissions.';
+          break;
+        case GoogleErrorType.RATE_LIMIT:
+        case GoogleErrorType.QUOTA_EXCEEDED:
+          userMessage = 'Google API rate limit reached. Please try again in a few minutes.';
+          break;
+        case GoogleErrorType.NOT_FOUND:
+          userMessage = 'Resource not found. Please check the ID or name and try again.';
+          break;
+        default:
+          userMessage = googleError.userMessage || googleError.message;
+      }
+      
+      loggingService.error('Google command failed', {
         error: error?.message,
-        command
+        command,
+        googleErrorType: googleError.type
       });
+      
       return {
         success: false,
-        message: `❌ Google command failed: ${error?.message}`,
-        error: error?.message
+        message: `❌ ${userMessage}`,
+        error: googleError.type
       };
     }
   }

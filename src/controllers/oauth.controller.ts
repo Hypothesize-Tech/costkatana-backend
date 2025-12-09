@@ -290,7 +290,7 @@ export class OAuthController {
                     storedStateType: typeof storedState,
                 });
             }
-
+            
             // If state was stored, verify it matches (additional CSRF protection)
             if (storedState) {
                 // The storedState is an object with { state, provider, timestamp, userId }
@@ -318,10 +318,10 @@ export class OAuthController {
                 } catch (error: any) {
                     loggingService.warn('Failed to decode stored OAuth state', { 
                         error: error.message,
-                        provider,
+                    provider,
                         storedStateType: typeof storedState,
                         hasStateField: !!(storedState as any)?.state,
-                    });
+                });
                     // Continue anyway - the state is already validated from the query param
                 }
 
@@ -384,8 +384,8 @@ export class OAuthController {
             
                 if (!isLinkingFlow) {
                     // This is a login flow, update lastLoginMethod
-                userDoc.lastLoginMethod = provider;
-                await userDoc.save();
+                    userDoc.lastLoginMethod = provider;
+                    await userDoc.save();
             } else {
                 loggingService.info(`${provider} OAuth linking flow detected`, {
                     provider,
@@ -611,6 +611,10 @@ export class OAuthController {
                         if (googleTokenResponse?.refresh_token) {
                             connection.refreshToken = googleTokenResponse.refresh_token; // Will be encrypted by pre-save hook
                         }
+                        // Store the granted scopes from OAuth response
+                        if (googleTokenResponse?.scope) {
+                            connection.scope = googleTokenResponse.scope;
+                        }
                         connection.tokenType = 'oauth';
                         connection.isActive = true;
                         connection.healthStatus = 'healthy';
@@ -639,6 +643,7 @@ export class OAuthController {
                             userId: targetUserId,
                             accessToken: googleAccessToken,
                             refreshToken: googleTokenResponse?.refresh_token,
+                            scope: googleTokenResponse?.scope || '', // Store granted scopes
                             tokenType: 'oauth',
                             googleUserId: googleUser.id,
                             googleEmail: googleUser.email,
@@ -657,6 +662,74 @@ export class OAuthController {
                             googleEmail: googleUser.email,
                             isLinkingFlow,
                         });
+                        
+                        // Create or update Integration record with connection metadata
+                        try {
+                            const { Integration } = await import('../models/Integration');
+                            const existingIntegration = await Integration.findOne({
+                                userId: targetUserId,
+                                type: 'google_oauth'
+                            });
+                            
+                            if (existingIntegration) {
+                                // Update metadata with new connectionId
+                                existingIntegration.metadata = {
+                                    ...existingIntegration.metadata,
+                                    connectionId: connection._id.toString(),
+                                    email: googleUser.email,
+                                    scopes: (connection as any).scopes || [],
+                                    googleUserId: googleUser.id
+                                };
+                                existingIntegration.status = 'active';
+                                await existingIntegration.save();
+                                
+                                loggingService.info('Updated existing Google Integration record', {
+                                    userId: targetUserId,
+                                    integrationId: existingIntegration._id,
+                                    connectionId: connection._id
+                                });
+                            } else {
+                                // Create new Integration record
+                                await Integration.create({
+                                    userId: targetUserId,
+                                    type: 'google_oauth',
+                                    name: `Google (${googleUser.email})`,
+                                    description: 'Google Workspace integration via OAuth',
+                                    status: 'active',
+                                    encryptedCredentials: '', // Credentials stored in GoogleConnection
+                                    alertRouting: new Map(),
+                                    deliveryConfig: {
+                                        retryEnabled: true,
+                                        maxRetries: 3,
+                                        timeout: 30000
+                                    },
+                                    stats: {
+                                        totalDeliveries: 0,
+                                        successfulDeliveries: 0,
+                                        failedDeliveries: 0,
+                                        averageResponseTime: 0
+                                    },
+                                    metadata: {
+                                        connectionId: connection._id.toString(),
+                                        email: googleUser.email,
+                                        scopes: (connection as any).scopes || [],
+                                        googleUserId: googleUser.id
+                                    }
+                                });
+                                
+                                loggingService.info('Created new Google Integration record', {
+                                    userId: targetUserId,
+                                    connectionId: connection._id
+                                });
+                            }
+                        } catch (integrationError: any) {
+                            loggingService.error('Failed to create/update Google Integration record', {
+                                userId: targetUserId,
+                                connectionId: connection._id,
+                                error: integrationError.message
+                            });
+                            // Don't fail the entire flow if Integration creation fails
+                        }
                     }
                     
                     // Fetch and sync Drive files

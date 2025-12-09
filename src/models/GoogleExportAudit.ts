@@ -4,7 +4,7 @@ export interface IGoogleExportAudit extends Document {
     _id: Types.ObjectId;
     userId: Types.ObjectId;
     connectionId: Types.ObjectId;
-    exportType: 'sheets' | 'docs' | 'slides' | 'drive';
+    exportType: 'sheets' | 'docs' | 'drive';
     datasetType: 'cost_data' | 'analytics' | 'report' | 'budget' | 'usage' | 'custom';
     fileId: string; // Google Drive file ID
     fileName: string;
@@ -38,7 +38,7 @@ const googleExportAuditSchema = new Schema<IGoogleExportAudit>({
     },
     exportType: {
         type: String,
-        enum: ['sheets', 'docs', 'slides', 'drive'],
+        enum: ['sheets', 'docs', 'drive'],
         required: true,
         index: true
     },

@@ -413,6 +413,8 @@ IMPORTANT RULES:
         '@calendar delete event → {action: "calendar", subAction: "delete"}'
       ],
       drive: [
+        '@drive search monthly ai spend → {action: "drive", subAction: "search", params: {query: "monthly ai spend"}}',
+        '@drive search budget report → {action: "drive", subAction: "search", params: {query: "budget report"}}',
         '@drive upload cost report → {action: "drive", subAction: "upload"}',
         '@drive create folder Budget Reports → {action: "drive", subAction: "folder", params: {folderName: "Budget Reports"}}',
         '@drive share file with team → {action: "drive", subAction: "share"}',

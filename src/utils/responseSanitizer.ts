@@ -164,10 +164,20 @@ function formatValueForDisplay(value: any, indent: number): string {
 /**
  * Format integration command results for display
  * Extracts meaningful information and presents it in a user-friendly format
+ * Returns both the display message and metadata for UI rendering
  */
-export function formatIntegrationResultForDisplay(result: any): string {
+export function formatIntegrationResultForDisplay(result: any): string | { message: string; viewLinks?: any[]; metadata?: any } {
   if (!result || !result.success) {
     return result?.message || 'Command execution failed';
+  }
+
+  // If result has viewLinks and metadata (Google services), return structured response
+  if (result.viewLinks || result.metadata) {
+    return {
+      message: result.message || 'Operation completed successfully',
+      viewLinks: result.viewLinks,
+      metadata: result.metadata
+    };
   }
 
   // If result has a message, use it as base

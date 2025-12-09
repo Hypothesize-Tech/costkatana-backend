@@ -150,12 +150,6 @@ export class GoogleWorkflowExecutorService {
                     config.data || {}
                 );
 
-            case 'create_slides':
-                return await GoogleActionsService.createSlides(
-                    connectionId,
-                    config.title || 'Presentation'
-                );
-
             case 'upload_to_drive':
                 return await GoogleActionsService.uploadToDrive(
                     connectionId,
@@ -171,14 +165,6 @@ export class GoogleWorkflowExecutorService {
                     config.fileId,
                     config.email,
                     config.role || 'reader'
-                );
-
-            case 'create_form':
-                return await GoogleActionsService.createForm(
-                    connectionId,
-                    config.title || 'New Form',
-                    config.description,
-                    config.questions || []
                 );
 
             default:
@@ -253,21 +239,65 @@ export class GoogleWorkflowExecutorService {
                 return false;
             }
 
+            const connectionId = connection._id.toString();
+            const config = workflow.trigger.config;
+
             switch (workflow.trigger.type) {
-                case 'sheet_change':
-                    return await GoogleTriggersService.checkSheetChange(connection, workflow.trigger.config);
+                case 'sheet_change': {
+                    if (!config.resourceId) {
+                        loggingService.warn('Sheet change trigger missing resourceId', { workflowId: workflow.workflowId });
+                        return false;
+                    }
+                    const result = await GoogleTriggersService.checkSheetChange(
+                        connectionId,
+                        config.resourceId,
+                        'A1:Z1000', // Default range
+                        (config as any).lastCheckValue
+                    );
+                    return result.triggered;
+                }
 
-                case 'form_submission':
-                    return await GoogleTriggersService.checkFormSubmission(connection, workflow.trigger.config);
+                case 'calendar_event': {
+                    const eventKeywords = (config as any).eventKeywords 
+                        ? (Array.isArray((config as any).eventKeywords) 
+                            ? (config as any).eventKeywords 
+                            : [(config as any).eventKeywords])
+                        : (config as any).eventNamePattern
+                        ? [(config as any).eventNamePattern]
+                        : [];
+                    const result = await GoogleTriggersService.checkCalendarEvent(
+                        connectionId,
+                        eventKeywords,
+                        (config as any).startDate ? new Date((config as any).startDate) : undefined,
+                        (config as any).endDate ? new Date((config as any).endDate) : undefined
+                    );
+                    return result.triggered;
+                }
 
-                case 'calendar_event':
-                    return await GoogleTriggersService.checkCalendarEvent(connection, workflow.trigger.config);
+                case 'gmail_alert': {
+                    const lastCheckTime = (config as any).lastCheckTime 
+                        ? new Date((config as any).lastCheckTime)
+                        : new Date(Date.now() - 24 * 60 * 60 * 1000); // Default: 24 hours ago
+                    const result = await GoogleTriggersService.checkGmailAlert(
+                        connectionId,
+                        (config as any).query || 'is:unread',
+                        lastCheckTime
+                    );
+                    return result.triggered;
+                }
 
-                case 'gmail_alert':
-                    return await GoogleTriggersService.checkGmailAlert(connection, workflow.trigger.config);
-
-                case 'drive_file_change':
-                    return await GoogleTriggersService.checkDriveFileChange(connection, workflow.trigger.config);
+                case 'drive_file_change': {
+                    if (!config.resourceId) {
+                        loggingService.warn('Drive file change trigger missing resourceId', { workflowId: workflow.workflowId });
+                        return false;
+                    }
+                    const result = await GoogleTriggersService.checkDriveFileChange(
+                        connectionId,
+                        config.resourceId,
+                        (config as any).lastCheckValue
+                    );
+                    return result.triggered;
+                }
 
                 default:
                     loggingService.warn('Unknown trigger type', { triggerType: workflow.trigger.type });

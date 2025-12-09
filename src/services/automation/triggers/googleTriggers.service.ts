@@ -5,14 +5,11 @@ import mongoose from 'mongoose';
 
 export interface GoogleTriggerConfig {
     connectionId: string;
-    triggerType: 'sheet_change' | 'form_submission' | 'calendar_event' | 'gmail_alert' | 'drive_file_change';
+    triggerType: 'sheet_change' | 'calendar_event' | 'gmail_alert' | 'drive_file_change';
     config: {
         // Sheet triggers
         sheetId?: string;
         cellRange?: string;
-        
-        // Form triggers
-        formId?: string;
         
         // Calendar triggers
         eventKeywords?: string[];
@@ -159,53 +156,6 @@ export class GoogleTriggersService {
         }
 
         return changes;
-    }
-
-    /**
-     * Check for new form submissions
-     */
-    static async checkFormSubmission(
-        connectionId: string,
-        formId: string,
-        lastCheckTime: Date
-    ): Promise<TriggerResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { triggered: false, message: 'Connection not found' };
-            }
-
-            const responses = await GoogleService.getFormResponses(connection, formId);
-
-            // Filter responses since last check
-            const newResponses = responses.filter((response: any) => {
-                const responseTime = new Date(response.lastSubmittedTime || response.createTime);
-                return responseTime > lastCheckTime;
-            });
-
-            loggingService.info('Checked Google Form for submissions', {
-                connectionId,
-                formId,
-                newResponses: newResponses.length
-            });
-
-            return {
-                triggered: newResponses.length > 0,
-                data: newResponses,
-                message: `Found ${newResponses.length} new form submissions`
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to check form submissions', {
-                error: error.message,
-                connectionId,
-                formId
-            });
-            return { triggered: false, message: error.message };
-        }
     }
 
     /**
@@ -383,13 +333,6 @@ export class GoogleTriggersService {
                     connectionId,
                     config.sheetId!,
                     config.cellRange!
-                );
-
-            case 'form_submission':
-                return this.checkFormSubmission(
-                    connectionId,
-                    config.formId!,
-                    lastExecutionTime || new Date(Date.now() - 3600000) // Default: 1 hour ago
                 );
 
             case 'calendar_event':

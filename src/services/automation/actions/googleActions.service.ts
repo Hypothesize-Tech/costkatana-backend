@@ -11,10 +11,8 @@ export interface GoogleActionConfig {
         | 'create_calendar_event'
         | 'export_to_sheets'
         | 'create_doc_report'
-        | 'create_slides'
         | 'upload_to_drive'
-        | 'share_file'
-        | 'create_form';
+        | 'share_file';
     config: {
         // Email action
         to?: string | string[];
@@ -372,44 +370,6 @@ export class GoogleActionsService {
     }
 
     /**
-     * Create Google Slides presentation
-     */
-    static async createSlides(
-        connectionId: string,
-        title: string
-    ): Promise<ActionResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { success: false, error: 'Connection not found' };
-            }
-
-            const result = await GoogleService.createPresentation(connection, title);
-
-            loggingService.info('Created Slides presentation via automation', {
-                connectionId,
-                presentationId: result.presentationId
-            });
-
-            return {
-                success: true,
-                data: result,
-                message: 'Google Slides presentation created successfully'
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to create Slides via automation', {
-                error: error.message,
-                connectionId
-            });
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
      * Upload file to Drive
      */
     static async uploadToDrive(
@@ -505,64 +465,6 @@ export class GoogleActionsService {
     }
 
     /**
-     * Create Google Form
-     */
-    static async createForm(
-        connectionId: string,
-        title: string,
-        description?: string,
-        questions?: Array<{
-            text: string;
-            type: 'TEXT' | 'PARAGRAPH_TEXT' | 'MULTIPLE_CHOICE' | 'CHECKBOX' | 'DROPDOWN';
-            options?: string[];
-        }>
-    ): Promise<ActionResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { success: false, error: 'Connection not found' };
-            }
-
-            const result = await GoogleService.createForm(connection, title, description);
-
-            // Add questions if provided
-            if (questions && questions.length > 0) {
-                for (const question of questions) {
-                    await GoogleService.addFormQuestion(
-                        connection,
-                        result.formId,
-                        question.text,
-                        question.type,
-                        question.options
-                    );
-                }
-            }
-
-            loggingService.info('Created Form via automation', {
-                connectionId,
-                formId: result.formId,
-                questionsAdded: questions?.length || 0
-            });
-
-            return {
-                success: true,
-                data: result,
-                message: 'Google Form created successfully'
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to create Form via automation', {
-                error: error.message,
-                connectionId
-            });
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
      * Execute a Google action based on config
      */
     static async executeAction(
@@ -607,12 +509,6 @@ export class GoogleActionsService {
                     config.data
                 );
 
-            case 'create_slides':
-                return this.createSlides(
-                    connectionId,
-                    config.title!
-                );
-
             case 'upload_to_drive':
                 return this.uploadToDrive(
                     connectionId,
@@ -628,14 +524,6 @@ export class GoogleActionsService {
                     config.fileId!,
                     config.shareWith!,
                     config.role
-                );
-
-            case 'create_form':
-                return this.createForm(
-                    connectionId,
-                    config.formTitle!,
-                    config.formDescription,
-                    config.questions
                 );
 
             default:

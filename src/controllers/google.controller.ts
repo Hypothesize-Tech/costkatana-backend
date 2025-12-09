@@ -357,6 +357,54 @@ export class GoogleController {
                 return;
             }
 
+            // Check if connection has the correct scope for accessing all Drive files
+            // Old connections might have 'drive.file' which only allows app-created files
+            // New connections should have 'drive.readonly' or 'drive' for full access
+            // If scope is empty/undefined, verify actual token scopes from Google
+            let connectionScope = connection.scope || '';
+            let hasFullDriveAccess = connectionScope.includes('drive.readonly') || 
+                                    connectionScope.includes('https://www.googleapis.com/auth/drive.readonly') ||
+                                    connectionScope.includes('https://www.googleapis.com/auth/drive');
+            
+            // If scope is empty, verify actual token scopes from Google API
+            if (!connectionScope) {
+                try {
+                    const tokenInfo = await GoogleService.verifyTokenScopes(connection);
+                    connectionScope = tokenInfo.scopes.join(' ');
+                    hasFullDriveAccess = tokenInfo.hasFullDriveAccess;
+                    
+                    // Update stored scope if we got it from Google
+                    if (connectionScope && !connection.scope) {
+                        connection.scope = connectionScope;
+                        await connection.save();
+                        loggingService.info('Updated connection scope from token verification', {
+                            userId,
+                            connectionId: id
+                        });
+                    }
+                } catch (error: any) {
+                    loggingService.warn('Failed to verify token scopes, assuming limited scope', {
+                        userId,
+                        connectionId: id,
+                        error: error.message
+                    });
+                }
+            }
+            
+            // If scope is empty or contains drive.file but not drive.readonly, it's limited
+            const hasLimitedScope = !connectionScope || 
+                                   (!hasFullDriveAccess && (connectionScope.includes('drive.file') || connectionScope === ''));
+
+            if (hasLimitedScope) {
+                loggingService.warn('Google Drive connection has limited scope', {
+                    userId,
+                    connectionId: id,
+                    scope: connectionScope || '(empty - old connection)',
+                    scopeLength: connectionScope.length,
+                    hasFullDriveAccess
+                });
+            }
+
             const result = await GoogleService.listDriveFiles(connection, {
                 pageSize: pageSize ? parseInt(pageSize as string) : undefined,
                 pageToken: pageToken as string,
@@ -374,8 +422,32 @@ export class GoogleController {
             loggingService.info('Listed Google Drive files', {
                 userId,
                 connectionId: id,
-                filesCount: result.files.length
+                filesCount: result.files.length,
+                hasFullAccess: hasFullDriveAccess
             });
+
+            // If connection has limited scope (empty scope or drive.file without drive.readonly), add a warning
+            if (hasLimitedScope) {
+                loggingService.info('Drive files listed with limited scope - user may need to reconnect', {
+                    userId,
+                    connectionId: id,
+                    filesCount: result.files.length,
+                    scope: connectionScope || '(empty)',
+                    hasFullAccess: false
+                });
+                
+                res.json({
+                    success: true,
+                    data: result,
+                    warning: {
+                        code: 'LIMITED_DRIVE_SCOPE',
+                        message: 'Your Google connection has limited Drive access. Only files exported from CostKatana are visible. Please reconnect your Google account to see all your Drive files.',
+                        requiresReconnection: true,
+                        scope: connectionScope || '(not stored - old connection)'
+                    }
+                });
+                return;
+            }
 
             res.json({
                 success: true,
@@ -683,14 +755,14 @@ export class GoogleController {
     }
 
     /**
-     * Create QBR slides
-     * POST /api/google/connections/:id/slides/qbr
+     * Create Spreadsheet
+     * POST /api/google/connections/:id/sheets
      */
-    static async createQBRSlides(req: any, res: Response): Promise<void> {
+    static async createSpreadsheet(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
             const { id } = req.params;
-            const { startDate, endDate, projectId } = req.body;
+            const { title } = req.body;
 
             if (!userId) {
                 const error = GoogleErrors.AUTH_REQUIRED;
@@ -698,9 +770,17 @@ export class GoogleController {
                 return;
             }
 
+            if (!title) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required field: title'
+                });
+                return;
+            }
+
             const connection = await GoogleConnection.findOne({
-                _id: id,
-                userId,
+                _id: new mongoose.Types.ObjectId(id),
+                userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
 
@@ -710,101 +790,38 @@ export class GoogleController {
                 return;
             }
 
-            const result = await GoogleIntegrationService.createQBRSlides(connection, {
-                userId,
-                connectionId: id,
-                startDate: startDate ? new Date(startDate) : undefined,
-                endDate: endDate ? new Date(endDate) : undefined,
-                projectId
-            });
-
-            loggingService.info('Created QBR slides', {
-                userId,
-                connectionId: id,
-                presentationId: result.presentationId
-            });
-
-            res.json({
-                success: true,
-                data: {
-                    presentationId: result.presentationId,
-                    presentationUrl: result.presentationUrl,
-                    auditId: result.audit._id
-                }
-            });
-        } catch (error: any) {
-            loggingService.error('Failed to create QBR slides', {
-                error: error.message
-            });
-
-            const standardError = GoogleErrors.fromGoogleError(error);
-            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
-        }
-    }
-
-    /**
-     * Create feedback form
-     * POST /api/google/connections/:id/forms/create
-     */
-    static async createFeedbackForm(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const { title = 'AI Usage Feedback' } = req.body;
-
-            if (!userId) {
-                const error = GoogleErrors.AUTH_REQUIRED;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
-            const connection = await GoogleConnection.findOne({
-                _id: id,
-                userId,
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                const error = GoogleErrors.CONNECTION_NOT_FOUND;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
-            const result = await GoogleIntegrationService.createFeedbackForm(
-                connection,
-                userId,
-                id,
-                title
-            );
-
-            loggingService.info('Created feedback form', {
-                userId,
-                connectionId: id,
-                formId: result.formId
-            });
+            const result = await GoogleService.createSpreadsheet(connection, title);
 
             res.json({
                 success: true,
                 data: result
             });
-        } catch (error: any) {
-            loggingService.error('Failed to create feedback form', {
-                error: error.message
-            });
 
+            loggingService.info('Created Google Spreadsheet', {
+                userId,
+                connectionId: id,
+                spreadsheetId: result.spreadsheetId
+            });
+        } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to create spreadsheet', {
+                userId: req.userId,
+                error: error.message
+            });
         }
     }
 
     /**
-     * Get form responses
-     * GET /api/google/connections/:id/forms/:formId/responses
+     * Create Document
+     * POST /api/google/connections/:id/docs
      */
-    static async getFormResponses(req: any, res: Response): Promise<void> {
+    static async createDocument(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { id, formId } = req.params;
+            const { id } = req.params;
+            const { title } = req.body;
 
             if (!userId) {
                 const error = GoogleErrors.AUTH_REQUIRED;
@@ -812,9 +829,17 @@ export class GoogleController {
                 return;
             }
 
+            if (!title) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required field: title'
+                });
+                return;
+            }
+
             const connection = await GoogleConnection.findOne({
-                _id: id,
-                userId,
+                _id: new mongoose.Types.ObjectId(id),
+                userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
 
@@ -824,26 +849,26 @@ export class GoogleController {
                 return;
             }
 
-            const responses = await GoogleService.getFormResponses(connection, formId);
-
-            loggingService.info('Retrieved form responses', {
-                userId,
-                connectionId: id,
-                formId,
-                responseCount: responses.length
-            });
+            const result = await GoogleService.createDocument(connection, title);
 
             res.json({
                 success: true,
-                data: responses
-            });
-        } catch (error: any) {
-            loggingService.error('Failed to get form responses', {
-                error: error.message
+                data: result
             });
 
+            loggingService.info('Created Google Document', {
+                userId,
+                connectionId: id,
+                documentId: result.documentId
+            });
+        } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to create document', {
+                userId: req.userId,
+                error: error.message
+            });
         }
     }
 
@@ -854,7 +879,7 @@ export class GoogleController {
     static async getGmailAlerts(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { id } = req.params;
+            const connectionId = req.params.id;
             const { limit = 20 } = req.query;
 
             if (!userId) {
@@ -863,13 +888,25 @@ export class GoogleController {
                 return;
             }
 
+            if (!connectionId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing connection ID'
+                });
+                return;
+            }
+
             const connection = await GoogleConnection.findOne({
-                _id: id,
-                userId,
+                _id: new mongoose.Types.ObjectId(connectionId),
+                userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
 
             if (!connection) {
+                loggingService.warn('Google connection not found for Gmail alerts', {
+                    userId,
+                    connectionId
+                });
                 const error = GoogleErrors.CONNECTION_NOT_FOUND;
                 res.status(error.httpStatus).json(GoogleErrors.formatError(error));
                 return;
@@ -881,7 +918,7 @@ export class GoogleController {
 
             loggingService.info('Retrieved Gmail cost alerts', {
                 userId,
-                connectionId: id,
+                connectionId,
                 alertCount: messages.length
             });
 
@@ -1025,12 +1062,20 @@ export class GoogleController {
         try {
             const userId = req.userId;
             const { to, subject, body, isHtml } = req.body;
-            const { connectionId } = req.params;
+            const connectionId = req.params.id; // Route uses :id, not :connectionId
 
             if (!to || !subject || !body) {
                 res.status(400).json({
                     success: false,
                     message: 'Missing required fields: to, subject, body'
+                });
+                return;
+            }
+
+            if (!connectionId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing connection ID'
                 });
                 return;
             }
@@ -1042,6 +1087,11 @@ export class GoogleController {
             }).select('+accessToken +refreshToken');
 
             if (!connection) {
+                loggingService.warn('Google connection not found for send email', {
+                    userId,
+                    connectionId,
+                    receivedId: req.params.id
+                });
                 const error = GoogleErrors.CONNECTION_NOT_FOUND;
                 res.status(error.httpStatus).json(GoogleErrors.formatError(error));
                 return;
@@ -1084,7 +1134,7 @@ export class GoogleController {
         try {
             const userId = req.userId;
             const { query, maxResults } = req.query;
-            const { connectionId } = req.params;
+            const connectionId = req.params.id; 
 
             if (!query) {
                 res.status(400).json({
@@ -1094,6 +1144,21 @@ export class GoogleController {
                 return;
             }
 
+            if (!connectionId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing connection ID'
+                });
+                return;
+            }
+
+            loggingService.info('Searching Gmail messages', {
+                userId,
+                connectionId,
+                query,
+                maxResults
+            });
+
             const connection = await GoogleConnection.findOne({
                 _id: new mongoose.Types.ObjectId(connectionId),
                 userId: new mongoose.Types.ObjectId(userId),
@@ -1101,6 +1166,12 @@ export class GoogleController {
             }).select('+accessToken +refreshToken');
 
             if (!connection) {
+                loggingService.warn('Google connection not found for Gmail search', {
+                    userId,
+                    connectionId,
+                    receivedId: req.params.id,
+                    allParams: req.params
+                });
                 const error = GoogleErrors.CONNECTION_NOT_FOUND;
                 res.status(error.httpStatus).json(GoogleErrors.formatError(error));
                 return;
@@ -1135,6 +1206,75 @@ export class GoogleController {
     }
 
     /**
+     * Create Calendar event
+     * POST /api/google/connections/:id/calendar/events
+     */
+    static async createEvent(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { id } = req.params;
+            const { summary, start, end, description, attendees } = req.body;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            if (!summary || !start || !end) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: summary, start, end'
+                });
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: new mongoose.Types.ObjectId(id),
+                userId: new mongoose.Types.ObjectId(userId),
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+
+            const result = await GoogleService.createCalendarEvent(
+                connection,
+                summary,
+                startDate,
+                endDate,
+                description,
+                attendees
+            );
+
+            res.json({
+                success: true,
+                data: result
+            });
+
+            loggingService.info('Created Calendar event', {
+                userId,
+                connectionId: id,
+                eventId: result.eventId
+            });
+        } catch (error: any) {
+            const standardError = GoogleErrors.fromGoogleError(error);
+            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
+
+            loggingService.error('Failed to create calendar event', {
+                userId: req.userId,
+                error: error.message
+            });
+        }
+    }
+
+    /**
      * List Calendar events
      * GET /api/google/calendar/events
      */
@@ -1142,10 +1282,10 @@ export class GoogleController {
         try {
             const userId = req.userId;
             const { startDate, endDate, maxResults } = req.query;
-            const { connectionId } = req.params;
+            const { id } = req.params; // Changed from connectionId to id to match route parameter
 
             const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
+                _id: new mongoose.Types.ObjectId(id),
                 userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
@@ -1170,7 +1310,7 @@ export class GoogleController {
 
             loggingService.info('Listed Calendar events', {
                 userId,
-                connectionId,
+                connectionId: id,
                 eventsCount: events.length
             });
         } catch (error: any) {
@@ -1191,11 +1331,11 @@ export class GoogleController {
     static async updateEvent(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { eventId, connectionId } = req.params;
+            const { eventId, id } = req.params; // Changed from connectionId to id to match route parameter
             const updates = req.body;
 
             const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
+                _id: new mongoose.Types.ObjectId(id),
                 userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
@@ -1223,7 +1363,7 @@ export class GoogleController {
 
             loggingService.info('Updated Calendar event', {
                 userId,
-                connectionId,
+                connectionId: id,
                 eventId
             });
         } catch (error: any) {
@@ -1244,10 +1384,10 @@ export class GoogleController {
     static async deleteEvent(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { eventId, connectionId } = req.params;
+            const { eventId, id } = req.params; // Changed from connectionId to id to match route parameter
 
             const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
+                _id: new mongoose.Types.ObjectId(id),
                 userId: new mongoose.Types.ObjectId(userId),
                 isActive: true
             }).select('+accessToken +refreshToken');
@@ -1267,7 +1407,7 @@ export class GoogleController {
 
             loggingService.info('Deleted Calendar event', {
                 userId,
-                connectionId,
+                connectionId: id,
                 eventId
             });
         } catch (error: any) {
@@ -1450,110 +1590,6 @@ export class GoogleController {
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
 
             loggingService.error('Failed to create folder', {
-                userId: req.userId,
-                error: error.message
-            });
-        }
-    }
-
-    /**
-     * Add question to form
-     * POST /api/google/forms/:formId/question
-     */
-    static async addQuestion(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { formId, connectionId } = req.params;
-            const { questionText, questionType, options } = req.body;
-
-            if (!questionText) {
-                res.status(400).json({
-                    success: false,
-                    message: 'Missing required field: questionText'
-                });
-                return;
-            }
-
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                userId: new mongoose.Types.ObjectId(userId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                const error = GoogleErrors.CONNECTION_NOT_FOUND;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
-            const result = await GoogleService.addFormQuestion(
-                connection,
-                formId,
-                questionText,
-                questionType || 'TEXT',
-                options
-            );
-
-            res.json({
-                success: true,
-                data: result
-            });
-
-            loggingService.info('Added question to form', {
-                userId,
-                connectionId,
-                formId,
-                questionText
-            });
-        } catch (error: any) {
-            const standardError = GoogleErrors.fromGoogleError(error);
-            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
-
-            loggingService.error('Failed to add question to form', {
-                userId: req.userId,
-                error: error.message
-            });
-        }
-    }
-
-    /**
-     * Export presentation to PDF
-     * POST /api/google/slides/:presentationId/export
-     */
-    static async exportPresentationPDF(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { presentationId, connectionId } = req.params;
-
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                userId: new mongoose.Types.ObjectId(userId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                const error = GoogleErrors.CONNECTION_NOT_FOUND;
-                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
-                return;
-            }
-
-            const result = await GoogleService.exportPresentationToPDF(connection, presentationId);
-
-            res.json({
-                success: true,
-                data: result
-            });
-
-            loggingService.info('Exported presentation to PDF', {
-                userId,
-                connectionId,
-                presentationId
-            });
-        } catch (error: any) {
-            const standardError = GoogleErrors.fromGoogleError(error);
-            res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
-
-            loggingService.error('Failed to export presentation', {
                 userId: req.userId,
                 error: error.message
             });
@@ -1807,14 +1843,13 @@ export class GoogleController {
     }
 
     /**
-     * Get form responses (alternative endpoint)
-     * GET /api/google/forms/:formId/responses
+     * List Google Docs Documents
+     * GET /api/google/docs/list
      */
-    static async getFormResponsesAlt(req: any, res: Response): Promise<void> {
+    static async listDocuments(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { formId } = req.params;
-            const { connectionId } = req.query;
+            const { connectionId, maxResults = 20 } = req.query;
 
             const connection = await GoogleConnection.findOne({
                 _id: new mongoose.Types.ObjectId(connectionId as string),
@@ -1828,24 +1863,23 @@ export class GoogleController {
                 return;
             }
 
-            const responses = await GoogleService.getFormResponses(connection, formId);
+            const documents = await GoogleService.listDocuments(connection, parseInt(maxResults as string));
 
             res.json({
                 success: true,
-                data: responses
+                data: documents
             });
 
-            loggingService.info('Retrieved form responses', {
+            loggingService.info('Listed Google Documents', {
                 userId,
                 connectionId,
-                formId,
-                responseCount: responses.length
+                count: documents.length
             });
         } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
 
-            loggingService.error('Failed to get form responses', {
+            loggingService.error('Failed to list documents', {
                 userId: req.userId,
                 error: error.message
             });
@@ -1853,14 +1887,13 @@ export class GoogleController {
     }
 
     /**
-     * Get slide thumbnails
-     * GET /api/google/slides/:presentationId/thumbnails
+     * List Google Sheets Spreadsheets
+     * GET /api/google/sheets/list
      */
-    static async getSlideThumbnails(req: any, res: Response): Promise<void> {
+    static async listSpreadsheets(req: any, res: Response): Promise<void> {
         try {
             const userId = req.userId;
-            const { presentationId } = req.params;
-            const { connectionId } = req.query;
+            const { connectionId, maxResults = 20 } = req.query;
 
             const connection = await GoogleConnection.findOne({
                 _id: new mongoose.Types.ObjectId(connectionId as string),
@@ -1874,23 +1907,23 @@ export class GoogleController {
                 return;
             }
 
-            const presentation = await GoogleService.getPresentation(connection, presentationId);
+            const spreadsheets = await GoogleService.listSpreadsheets(connection, parseInt(maxResults as string));
 
             res.json({
                 success: true,
-                data: presentation
+                data: spreadsheets
             });
 
-            loggingService.info('Retrieved slide thumbnails', {
+            loggingService.info('Listed Google Spreadsheets', {
                 userId,
                 connectionId,
-                presentationId
+                count: spreadsheets.length
             });
         } catch (error: any) {
             const standardError = GoogleErrors.fromGoogleError(error);
             res.status(standardError.httpStatus).json(GoogleErrors.formatError(standardError));
 
-            loggingService.error('Failed to get slide thumbnails', {
+            loggingService.error('Failed to list spreadsheets', {
                 userId: req.userId,
                 error: error.message
             });

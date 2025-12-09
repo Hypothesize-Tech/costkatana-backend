@@ -730,8 +730,19 @@ export class AgentService {
 
         if (queryData.context?.previousMessages && queryData.context.previousMessages.length > 0) {
             context += '\nRecent conversation:\n';
-            queryData.context.previousMessages.slice(-3).forEach((msg) => {
-                context += `${msg.role}: ${msg.content}\n`;
+            queryData.context.previousMessages.slice(-3).forEach((msg: any) => {
+                let messageContent = msg.content;
+                
+                // If message has document content in metadata, include it for context
+                if (msg.metadata?.type === 'document_content' && msg.metadata?.content) {
+                    const maxContentLength = 8000; // Limit for agent context
+                    const docContent = msg.metadata.content.length > maxContentLength 
+                        ? msg.metadata.content.substring(0, maxContentLength) + '... [truncated]'
+                        : msg.metadata.content;
+                    messageContent = `${msg.content}\n[Document Content]: ${docContent}`;
+                }
+                
+                context += `${msg.role}: ${messageContent}\n`;
             });
         }
 

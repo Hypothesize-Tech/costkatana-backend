@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import { IGoogleConnection, IGoogleDriveFile } from '../models/GoogleConnection';
 import { loggingService } from './logging.service';
 import { GoogleErrors} from '../utils/googleErrors';
+import { parseGoogleApiError, isRetryableError, getRetryDelay } from '../utils/googleErrorHandler';
 
 export interface GoogleAuthConfig {
     clientId?: string;
@@ -38,6 +39,27 @@ export class GoogleService {
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
+
+    // Required OAuth scopes for each operation
+    private static readonly REQUIRED_SCOPES: Record<string, string> = {
+        'gmail.send': 'https://www.googleapis.com/auth/gmail.send',
+        'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
+        'gmail.modify': 'https://www.googleapis.com/auth/gmail.modify',
+        'gmail.compose': 'https://www.googleapis.com/auth/gmail.compose',
+        'calendar': 'https://www.googleapis.com/auth/calendar',
+        'calendar.readonly': 'https://www.googleapis.com/auth/calendar.readonly',
+        'calendar.events': 'https://www.googleapis.com/auth/calendar.events',
+        'drive': 'https://www.googleapis.com/auth/drive',
+        'drive.file': 'https://www.googleapis.com/auth/drive.file',
+        'drive.readonly': 'https://www.googleapis.com/auth/drive.readonly',
+        'drive.metadata.readonly': 'https://www.googleapis.com/auth/drive.metadata.readonly',
+        'documents': 'https://www.googleapis.com/auth/documents',
+        'documents.readonly': 'https://www.googleapis.com/auth/documents.readonly',
+        'spreadsheets': 'https://www.googleapis.com/auth/spreadsheets',
+        'spreadsheets.readonly': 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'presentations': 'https://www.googleapis.com/auth/presentations',
+        'presentations.readonly': 'https://www.googleapis.com/auth/presentations.readonly'
+    };
 
     /**
      * Create OAuth2 client
@@ -99,11 +121,130 @@ export class GoogleService {
     }
 
     /**
-     * Execute API call with retry logic
+     * Verify token scopes by calling Google's tokeninfo endpoint
+     * This helps detect actual scopes even if not stored in database
+     */
+    static async verifyTokenScopes(connection: IGoogleConnection & { decryptToken: () => string }): Promise<{ scopes: string[]; hasFullDriveAccess: boolean }> {
+        try {
+            const accessToken = connection.decryptToken();
+            const response = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+            
+            if (!response.ok) {
+                loggingService.warn('Failed to verify token scopes', {
+                    connectionId: connection._id,
+                    status: response.status
+                });
+                return { scopes: [], hasFullDriveAccess: false };
+            }
+
+            const tokenInfo = await response.json() as { scope?: string; [key: string]: any };
+            const scopes = (tokenInfo.scope || '').split(' ').filter((s: string) => s.length > 0);
+            
+            const hasFullDriveAccess = scopes.some((scope: string) => 
+                scope.includes('drive.readonly') || 
+                scope.includes('https://www.googleapis.com/auth/drive.readonly') ||
+                scope.includes('https://www.googleapis.com/auth/drive')
+            );
+
+            loggingService.info('Verified token scopes', {
+                connectionId: connection._id,
+                scopesCount: scopes.length,
+                hasFullDriveAccess,
+                scopes: scopes.slice(0, 5) // Log first 5 scopes
+            });
+
+            return { scopes, hasFullDriveAccess };
+        } catch (error: any) {
+            loggingService.error('Error verifying token scopes', {
+                connectionId: connection._id,
+                error: error.message
+            });
+            return { scopes: [], hasFullDriveAccess: false };
+        }
+    }
+
+    /**
+     * Validate if connection has required OAuth scopes
+     */
+    static async validateScopes(
+        connection: IGoogleConnection,
+        requiredScopes: string[]
+    ): Promise<{ valid: boolean; missing: string[] }> {
+        const connectionScopes = connection.scope?.split(' ') || [];
+        const missing: string[] = [];
+
+        for (const scope of requiredScopes) {
+            const scopeUrl = this.REQUIRED_SCOPES[scope] || scope;
+            if (!connectionScopes.includes(scopeUrl)) {
+                missing.push(scope);
+            }
+        }
+
+        if (missing.length > 0) {
+            loggingService.warn('Missing OAuth scopes', {
+                connectionId: connection._id,
+                userId: connection.userId,
+                requiredScopes,
+                missingScopes: missing
+            });
+        }
+
+        return {
+            valid: missing.length === 0,
+            missing
+        };
+    }
+
+    /**
+     * Get required scopes for an operation
+     */
+    static getRequiredScopes(service: string, operation: string): string[] {
+        const scopeMap: Record<string, Record<string, string[]>> = {
+            gmail: {
+                send: ['gmail.send'],
+                read: ['gmail.read'],
+                search: ['gmail.read'],
+                list: ['gmail.read'],
+                modify: ['gmail.modify']
+            },
+            calendar: {
+                create: ['calendar'],
+                update: ['calendar'],
+                delete: ['calendar'],
+                list: ['calendar.readonly'],
+                search: ['calendar.readonly']
+            },
+            drive: {
+                search: ['drive.readonly'],
+                list: ['drive.readonly'],
+                upload: ['drive'],
+                delete: ['drive'],
+                share: ['drive']
+            },
+            gdocs: {
+                read: ['documents.readonly'],
+                create: ['documents'],
+                update: ['documents']
+            },
+            sheets: {
+                read: ['spreadsheets.readonly'],
+                create: ['spreadsheets'],
+                update: ['spreadsheets']
+            }
+        };
+
+        const serviceScopes = scopeMap[service.toLowerCase()] || {};
+        return serviceScopes[operation.toLowerCase()] || ['drive']; // Default to drive scope
+    }
+
+    /**
+     * Execute API call with retry logic and enhanced error handling
      */
     private static async executeWithRetry<T>(
         operation: () => Promise<T>,
-        retryable: boolean = true
+        retryable: boolean = true,
+        service: string = 'google',
+        operationName: string = 'api_call'
     ): Promise<T> {
         let lastError: any;
 
@@ -112,25 +253,48 @@ export class GoogleService {
                 return await operation();
             } catch (error: any) {
                 lastError = error;
-                const standardError = GoogleErrors.fromGoogleError(error);
+                
+                // Use new error handler to parse the error
+                const parsedError = parseGoogleApiError(error, service, operationName);
+                
+                // Check if error is retryable using new error handler
+                const shouldRetry = retryable && isRetryableError(parsedError.type);
 
                 // Don't retry if error is not retryable
-                if (!retryable || !GoogleErrors.isRetryable(standardError)) {
-                    throw standardError;
+                if (!shouldRetry) {
+                    loggingService.error('Google API error (not retryable)', {
+                        service,
+                        operation: operationName,
+                        errorType: parsedError.type,
+                        message: parsedError.userMessage
+                    });
+                    throw error; // Throw original error for compatibility
                 }
 
                 // Don't retry on last attempt
                 if (attempt === this.MAX_RETRIES - 1) {
-                    throw standardError;
+                    loggingService.error('Google API error (max retries exceeded)', {
+                        service,
+                        operation: operationName,
+                        attempts: this.MAX_RETRIES,
+                        errorType: parsedError.type,
+                        message: parsedError.userMessage
+                    });
+                    throw error;
                 }
 
-                // Wait before retry with exponential backoff
-                const delay = this.RETRY_DELAYS[attempt];
+                // Calculate retry delay (respects Retry-After header if present)
+                const delay = getRetryDelay(attempt, parsedError.retryAfter);
+                
                 loggingService.warn(`Google API call failed, retrying in ${delay}ms`, {
+                    service,
+                    operation: operationName,
                     attempt: attempt + 1,
                     maxRetries: this.MAX_RETRIES,
-                    error: error.message
+                    errorType: parsedError.type,
+                    retryAfter: parsedError.retryAfter
                 });
+                
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
@@ -208,10 +372,23 @@ export class GoogleService {
             const auth = await this.createAuthenticatedClient(connection);
             const drive = google.drive({ version: 'v3', auth });
 
+            // Default query excludes trashed files unless explicitly included in user query
+            // IMPORTANT: This lists ALL personal files, not just app-created ones
+            // Requires 'drive.readonly' scope (not 'drive.file' which only allows app-created files)
+            // Users with old 'drive.file' scope need to reconnect to see personal files
+            let query = options?.query;
+            if (!query) {
+                // No app-only filters - lists all user's Drive files
+                query = "trashed=false";
+            } else if (!query.includes('trashed')) {
+                // If user provided a query but didn't specify trashed status, exclude trashed files
+                query = `(${query}) and trashed=false`;
+            }
+
             const response = await drive.files.list({
-                pageSize: options?.pageSize || 100,
+                pageSize: options?.pageSize || 50,
                 pageToken: options?.pageToken,
-                q: options?.query,
+                q: query,
                 orderBy: options?.orderBy || 'modifiedTime desc',
                 fields: 'nextPageToken, files(id, name, mimeType, webViewLink, iconLink, createdTime, modifiedTime, size, parents)'
             });
@@ -230,7 +407,9 @@ export class GoogleService {
 
             loggingService.info('Listed Google Drive files', {
                 connectionId: connection._id,
-                filesCount: files.length
+                filesCount: files.length,
+                query: query.substring(0, 100), // Log first 100 chars of query for debugging
+                hasPersonalFiles: files.length > 0 // Indicates if any files were returned
             });
 
             return {
@@ -636,183 +815,171 @@ export class GoogleService {
     }
 
     /**
-     * Gmail API: List messages
+     * Decode RFC 2047 MIME-encoded headers (e.g., non-ASCII subjects/names)
+     */
+    private static decodeMIMEHeader(header: string): string {
+        if (!header) return header;
+        
+        try {
+            // Handle =?charset?encoding?text?= format
+            const mimePattern = /=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g;
+            
+            return header.replace(mimePattern, (match, charset, encoding, text) => {
+                try {
+                    if (encoding.toUpperCase() === 'B') {
+                        // Base64 encoding
+                        return Buffer.from(text, 'base64').toString('utf-8');
+                    } else if (encoding.toUpperCase() === 'Q') {
+                        // Quoted-printable encoding
+                        const decoded = text
+                            .replace(/_/g, ' ')
+                            .replace(/=([0-9A-F]{2})/g, (_: any, hex: string) => 
+                                String.fromCharCode(parseInt(hex, 16))
+                            );
+                        return decoded;
+                    }
+                    return match;
+                } catch (e) {
+                    return match;
+                }
+            });
+        } catch (error) {
+            loggingService.warn('Failed to decode MIME header', { header, error });
+            return header;
+        }
+    }
+
+    /**
+     * Extract clean email address from "Name <email>" format
+     */
+    private static extractEmail(fromField: string): { name: string; email: string } {
+        if (!fromField) return { name: 'Unknown', email: '' };
+        
+        const match = fromField.match(/(.+?)\s*<(.+?)>/);
+        if (match) {
+            return {
+                name: this.decodeMIMEHeader(match[1].trim().replace(/^["']|["']$/g, '')),
+                email: match[2].trim()
+            };
+        }
+        
+        // If no angle brackets, treat entire string as email
+        return { name: '', email: fromField.trim() };
+    }
+
+    /**
+     * Clean HTML snippet for display
+     */
+    private static cleanSnippet(snippet: string): string {
+        if (!snippet) return '';
+        
+        return snippet
+            .replace(/<[^>]+>/g, '') // Remove HTML tags
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/\s+/g, ' ') // Collapse whitespace
+            .trim()
+            .substring(0, 200); // Limit length
+    }
+
+    /**
+     * Gmail API: List messages with full details
      */
     static async listGmailMessages(
         connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        query?: string,
-        maxResults: number = 10
-    ): Promise<Array<{ id: string; threadId: string; snippet: string }>> {
+        query: string = 'is:inbox',
+        maxResults: number = 20,
+        includeSpam: boolean = false,
+        includeTrashed: boolean = false
+    ): Promise<Array<{ 
+        id: string; 
+        threadId: string; 
+        subject: string; 
+        from: string; 
+        fromName: string;
+        fromEmail: string;
+        to?: string;
+        date: string; 
+        snippet: string; 
+        labels: string[];
+        isUnread: boolean;
+    }>> {
         return this.executeWithRetry(async () => {
             const auth = await this.createAuthenticatedClient(connection);
             const gmail = google.gmail({ version: 'v1', auth });
 
+            // Build query with spam/trash filters
+            let finalQuery = query;
+            if (!includeSpam && !finalQuery.includes('in:spam')) {
+                finalQuery += ' -in:spam';
+            }
+            if (!includeTrashed && !finalQuery.includes('in:trash')) {
+                finalQuery += ' -in:trash';
+            }
+
             const response = await gmail.users.messages.list({
                 userId: 'me',
-                q: query,
+                q: finalQuery,
                 maxResults
             });
 
             const messages = response.data.messages || [];
+            const detailedMessages = [];
 
-            loggingService.info('Listed Gmail messages', {
-                connectionId: connection._id,
-                messageCount: messages.length,
-                query
-            });
+            for (const message of messages) {
+                try {
+                    const details = await gmail.users.messages.get({
+                        userId: 'me',
+                        id: message.id!,
+                        format: 'metadata',
+                        metadataHeaders: ['From', 'Subject', 'Date', 'To']
+                    });
 
-            return messages.map(msg => ({
-                id: msg.id!,
-                threadId: msg.threadId!,
-                snippet: ''
-            }));
-        });
-    }
+                    const headers = details.data.payload?.headers || [];
+                    const rawSubject = headers.find(h => h.name === 'Subject')?.value || '(No subject)';
+                    const rawFrom = headers.find(h => h.name === 'From')?.value || 'Unknown';
+                    const to = headers.find(h => h.name === 'To')?.value;
+                    const date = headers.find(h => h.name === 'Date')?.value || '';
+                    
+                    // Decode MIME-encoded headers
+                    const subject = this.decodeMIMEHeader(rawSubject);
+                    const fromParsed = this.extractEmail(rawFrom);
+                    const labels = details.data.labelIds || [];
+                    const isUnread = labels.includes('UNREAD');
 
-    /**
-     * Slides API: Create presentation
-     */
-    static async createPresentation(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        title: string
-    ): Promise<{ presentationId: string; presentationUrl: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const slides = google.slides({ version: 'v1', auth });
-
-            const response = await slides.presentations.create({
-                requestBody: {
-                    title
+                    detailedMessages.push({
+                        id: message.id!,
+                        threadId: message.threadId || details.data.threadId || message.id!,
+                        subject,
+                        from: `${fromParsed.name || fromParsed.email}`,
+                        fromName: fromParsed.name || fromParsed.email,
+                        fromEmail: fromParsed.email,
+                        to: to || undefined,
+                        date,
+                        snippet: this.cleanSnippet(details.data.snippet || ''),
+                        labels,
+                        isUnread
+                    });
+                } catch (error: any) {
+                    loggingService.warn('Failed to fetch message details', {
+                        messageId: message.id,
+                        error: error.message
+                    });
+                    // Skip messages that fail to load instead of failing entire request
                 }
-            });
+            }
 
-            const presentationId = response.data.presentationId!;
-            const presentationUrl = `https://docs.google.com/presentation/d/${presentationId}/edit`;
-
-            loggingService.info('Created Google Slides presentation', {
+            loggingService.info('Listed Gmail messages with details', {
                 connectionId: connection._id,
-                presentationId,
-                title
+                messageCount: detailedMessages.length,
+                query: finalQuery
             });
 
-            return { presentationId, presentationUrl };
-        });
-    }
-
-    /**
-     * Slides API: Add slide with text
-     */
-    static async addSlideWithText(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        presentationId: string,
-        title: string,
-        body: string
-    ): Promise<void> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const slides = google.slides({ version: 'v1', auth });
-
-            // Create a new slide
-            const slideId = `slide_${Date.now()}`;
-            const titleId = `title_${Date.now()}`;
-            const bodyId = `body_${Date.now()}`;
-
-            await slides.presentations.batchUpdate({
-                presentationId,
-                requestBody: {
-                    requests: [
-                        {
-                            createSlide: {
-                                objectId: slideId,
-                                slideLayoutReference: {
-                                    predefinedLayout: 'TITLE_AND_BODY'
-                                }
-                            }
-                        },
-                        {
-                            insertText: {
-                                objectId: titleId,
-                                text: title
-                            }
-                        },
-                        {
-                            insertText: {
-                                objectId: bodyId,
-                                text: body
-                            }
-                        }
-                    ]
-                }
-            });
-
-            loggingService.info('Added slide to presentation', {
-                connectionId: connection._id,
-                presentationId,
-                title
-            });
-        });
-    }
-
-    /**
-     * Forms API: Create form
-     */
-    static async createForm(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        title: string,
-        description?: string
-    ): Promise<{ formId: string; formUrl: string; responderUri: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const forms = google.forms({ version: 'v1', auth });
-
-            const response = await forms.forms.create({
-                requestBody: {
-                    info: {
-                        title,
-                        documentTitle: title
-                    }
-                }
-            });
-
-            const formId = response.data.formId!;
-            const formUrl = `https://docs.google.com/forms/d/${formId}/edit`;
-            const responderUri = response.data.responderUri || `https://docs.google.com/forms/d/${formId}/viewform`;
-
-            loggingService.info('Created Google Form', {
-                connectionId: connection._id,
-                formId,
-                title
-            });
-
-            return { formId, formUrl, responderUri };
-        });
-    }
-
-    /**
-     * Forms API: Get form responses
-     */
-    static async getFormResponses(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        formId: string
-    ): Promise<any[]> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const forms = google.forms({ version: 'v1', auth });
-
-            const response = await forms.forms.responses.list({
-                formId
-            });
-
-            const responses = response.data.responses || [];
-
-            loggingService.info('Retrieved Google Form responses', {
-                connectionId: connection._id,
-                formId,
-                responseCount: responses.length
-            });
-
-            return responses;
-        });
+            return detailedMessages;
+        }, true, 'gmail', 'list');
     }
 
     /**
@@ -869,6 +1036,12 @@ export class GoogleService {
         body: string,
         isHtml: boolean = false
     ): Promise<{ messageId: string; success: boolean }> {
+        // Verify Gmail send scope before attempting to send
+        const scopeValidation = await this.validateScopes(connection, ['gmail.send']);
+        if (!scopeValidation.valid) {
+            throw new Error('Gmail send permission is missing. Please reconnect your Google account with send permissions.');
+        }
+
         return this.executeWithRetry(async () => {
             const auth = await this.createAuthenticatedClient(connection);
             const gmail = google.gmail({ version: 'v1', auth });
@@ -917,7 +1090,7 @@ export class GoogleService {
         connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
         query: string,
         maxResults: number = 20
-    ): Promise<Array<{ id: string; subject: string; from: string; date: string; snippet: string }>> {
+    ): Promise<Array<{ id: string; threadId?: string; subject: string; from: string; date: string; snippet: string }>> {
         return this.executeWithRetry(async () => {
             const auth = await this.createAuthenticatedClient(connection);
             const gmail = google.gmail({ version: 'v1', auth });
@@ -940,16 +1113,25 @@ export class GoogleService {
                 });
 
                 const headers = details.data.payload?.headers || [];
-                const subject = headers.find(h => h.name === 'Subject')?.value || '(No Subject)';
-                const from = headers.find(h => h.name === 'From')?.value || 'Unknown';
+                const rawSubject = headers.find(h => h.name === 'Subject')?.value || '(No subject)';
+                const rawFrom = headers.find(h => h.name === 'From')?.value || 'Unknown';
                 const date = headers.find(h => h.name === 'Date')?.value || '';
 
+                // Decode MIME-encoded headers
+                const subject = this.decodeMIMEHeader(rawSubject);
+                const fromParsed = this.extractEmail(rawFrom);
+
+                // Convert null to undefined for threadId to match return type (string | undefined, not string | null | undefined)
+                const rawThreadId = message.threadId ?? details.data.threadId;
+                const threadId: string | undefined = rawThreadId === null ? undefined : rawThreadId;
+                
                 detailedMessages.push({
                     id: message.id!,
+                    threadId,
                     subject,
-                    from,
+                    from: `${fromParsed.name || fromParsed.email}`,
                     date,
-                    snippet: details.data.snippet || ''
+                    snippet: this.cleanSnippet(details.data.snippet || '')
                 });
             }
 
@@ -971,7 +1153,16 @@ export class GoogleService {
         startDate?: Date,
         endDate?: Date,
         maxResults: number = 10
-    ): Promise<Array<{ id: string; summary: string; start: string; end: string; description?: string }>> {
+    ): Promise<Array<{ 
+        id: string; 
+        summary: string; 
+        start: { dateTime?: string; date?: string }; 
+        end: { dateTime?: string; date?: string }; 
+        description?: string;
+        location?: string;
+        htmlLink?: string;
+        attendees?: Array<{ email: string; displayName?: string }>;
+    }>> {
         return this.executeWithRetry(async () => {
             const auth = await this.createAuthenticatedClient(connection);
             const calendar = google.calendar({ version: 'v3', auth });
@@ -988,9 +1179,21 @@ export class GoogleService {
             const events = (response.data.items || []).map(event => ({
                 id: event.id!,
                 summary: event.summary || '(No Title)',
-                start: event.start?.dateTime || event.start?.date || '',
-                end: event.end?.dateTime || event.end?.date || '',
-                description: event.description || undefined
+                start: {
+                    dateTime: event.start?.dateTime || undefined,
+                    date: event.start?.date || undefined
+                },
+                end: {
+                    dateTime: event.end?.dateTime || undefined,
+                    date: event.end?.date || undefined
+                },
+                description: event.description || undefined,
+                location: event.location || undefined,
+                htmlLink: event.htmlLink || undefined,
+                attendees: event.attendees?.map((a: any) => ({
+                    email: a.email,
+                    displayName: a.displayName || a.email
+                })) || undefined
             }));
 
             loggingService.info('Listed Calendar events', {
@@ -1201,133 +1404,6 @@ export class GoogleService {
     }
 
     /**
-     * Forms API: Add question to form
-     */
-    static async addFormQuestion(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        formId: string,
-        questionText: string,
-        questionType: 'TEXT' | 'PARAGRAPH_TEXT' | 'MULTIPLE_CHOICE' | 'CHECKBOX' | 'DROPDOWN' = 'TEXT',
-        options?: string[]
-    ): Promise<{ success: boolean; questionId: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const forms = google.forms({ version: 'v1', auth });
-
-            const questionItem: any = {
-                title: questionText,
-                questionItem: {
-                    question: {
-                        required: false,
-                        [questionType === 'TEXT' || questionType === 'PARAGRAPH_TEXT' ? 'textQuestion' : 'choiceQuestion']: 
-                            questionType === 'MULTIPLE_CHOICE' || questionType === 'CHECKBOX' || questionType === 'DROPDOWN' 
-                                ? { 
-                                    type: questionType,
-                                    options: options?.map(opt => ({ value: opt })) || []
-                                  }
-                                : { paragraph: questionType === 'PARAGRAPH_TEXT' }
-                    }
-                }
-            };
-
-            const response = await forms.forms.batchUpdate({
-                formId,
-                requestBody: {
-                    requests: [{
-                        createItem: {
-                            item: questionItem,
-                            location: { index: 0 }
-                        }
-                    }]
-                }
-            });
-
-            loggingService.info('Added question to Form', {
-                connectionId: connection._id,
-                formId,
-                questionText
-            });
-
-            const questionId = response.data.replies?.[0]?.createItem?.questionId;
-            return {
-                success: true,
-                questionId: Array.isArray(questionId) ? questionId[0] : (questionId || '')
-            };
-        });
-    }
-
-    /**
-     * Slides API: Export presentation to PDF
-     */
-    static async exportPresentationToPDF(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        presentationId: string
-    ): Promise<{ pdfUrl: string; fileId: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const drive = google.drive({ version: 'v3', auth });
-
-            // Export as PDF
-            const response = await drive.files.export({
-                fileId: presentationId,
-                mimeType: 'application/pdf'
-            }, {
-                responseType: 'arraybuffer'
-            });
-
-            // Upload PDF to Drive
-            const pdfFileName = `presentation-${presentationId}.pdf`;
-            const uploadResponse = await drive.files.create({
-                requestBody: {
-                    name: pdfFileName,
-                    mimeType: 'application/pdf'
-                },
-                media: {
-                    mimeType: 'application/pdf',
-                    body: Buffer.from(response.data as ArrayBuffer)
-                },
-                fields: 'id, webViewLink'
-            });
-
-            loggingService.info('Exported presentation to PDF', {
-                connectionId: connection._id,
-                presentationId,
-                pdfFileId: uploadResponse.data.id
-            });
-
-            return {
-                fileId: uploadResponse.data.id!,
-                pdfUrl: uploadResponse.data.webViewLink!
-            };
-        });
-    }
-
-    /**
-     * Slides API: Get presentation details
-     */
-    static async getPresentation(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        presentationId: string
-    ): Promise<any> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const slides = google.slides({ version: 'v1', auth });
-
-            const response = await slides.presentations.get({
-                presentationId
-            });
-
-            loggingService.info('Retrieved presentation', {
-                connectionId: connection._id,
-                presentationId,
-                slideCount: response.data.slides?.length || 0
-            });
-
-            return response.data;
-        });
-    }
-
-    /**
      * Check connection health
      */
     static async checkConnectionHealth(
@@ -1361,5 +1437,73 @@ export class GoogleService {
             };
         }
     }
+
+    /**
+     * List Google Docs Documents
+     */
+    static async listDocuments(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        maxResults: number = 20
+    ): Promise<Array<{ id: string; name: string; createdTime: string; modifiedTime: string; webViewLink: string }>> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            const response = await drive.files.list({
+                q: "mimeType='application/vnd.google-apps.document' and trashed=false",
+                pageSize: maxResults,
+                fields: 'files(id,name,createdTime,modifiedTime,webViewLink)',
+                orderBy: 'modifiedTime desc'
+            });
+
+            loggingService.info('Listed Google Documents', {
+                connectionId: connection._id,
+                count: response.data.files?.length || 0
+            });
+
+            return response.data.files?.map(file => ({
+                id: file.id!,
+                name: file.name!,
+                createdTime: file.createdTime!,
+                modifiedTime: file.modifiedTime!,
+                webViewLink: file.webViewLink!
+            })) || [];
+        });
+    }
+
+    /**
+     * List Google Sheets Spreadsheets
+     */
+    static async listSpreadsheets(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        maxResults: number = 20
+    ): Promise<Array<{ id: string; name: string; createdTime: string; modifiedTime: string; webViewLink: string }>> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const drive = google.drive({ version: 'v3', auth });
+
+            const response = await drive.files.list({
+                q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+                pageSize: maxResults,
+                fields: 'files(id,name,createdTime,modifiedTime,webViewLink)',
+                orderBy: 'modifiedTime desc'
+            });
+
+            loggingService.info('Listed Google Spreadsheets', {
+                connectionId: connection._id,
+                count: response.data.files?.length || 0
+            });
+
+            return response.data.files?.map(file => ({
+                id: file.id!,
+                name: file.name!,
+                createdTime: file.createdTime!,
+                modifiedTime: file.modifiedTime!,
+                webViewLink: file.webViewLink!
+            })) || [];
+        });
+    }
+
 }
+
 
