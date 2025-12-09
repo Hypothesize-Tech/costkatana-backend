@@ -56,9 +56,7 @@ export class GoogleService {
         'documents': 'https://www.googleapis.com/auth/documents',
         'documents.readonly': 'https://www.googleapis.com/auth/documents.readonly',
         'spreadsheets': 'https://www.googleapis.com/auth/spreadsheets',
-        'spreadsheets.readonly': 'https://www.googleapis.com/auth/spreadsheets.readonly',
-        'presentations': 'https://www.googleapis.com/auth/presentations',
-        'presentations.readonly': 'https://www.googleapis.com/auth/presentations.readonly'
+        'spreadsheets.readonly': 'https://www.googleapis.com/auth/spreadsheets.readonly'
     };
 
     /**
