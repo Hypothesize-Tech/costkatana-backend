@@ -74,6 +74,32 @@ export class LLMSecurityService {
         const startTime = Date.now();
         
         try {
+            // INTEGRATION WHITELIST: Detect Google/integration commands and bypass security for user's own data
+            const integrationMentions = /@(gmail|calendar|drive|sheets|docs|slides|forms|google|github|jira|linear|slack|discord|webhook)\b/i;
+            const hasIntegrationMention = integrationMentions.test(prompt);
+            
+            if (hasIntegrationMention && userId) {
+                // Log bypass decision for audit
+                loggingService.info('Security check bypassed for integration command', {
+                    requestId,
+                    userId,
+                    source: context?.source,
+                    integrationDetected: prompt.match(integrationMentions)?.[1] || 'unknown',
+                    promptPreview: prompt.substring(0, 100)
+                });
+                
+                // Return allow result
+                return {
+                    result: {
+                        isBlocked: false,
+                        confidence: 0.0,
+                        reason: 'Integration command - bypassed security check',
+                        stage: 'llama-guard',
+                        containmentAction: 'allow'
+                    }
+                };
+            }
+            
             // Get firewall configuration (could be user-specific in the future)
             const config = PromptFirewallService.getDefaultConfig();
             

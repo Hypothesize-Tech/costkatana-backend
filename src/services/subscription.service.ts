@@ -93,6 +93,15 @@ export class SubscriptionService {
      */
     static async createDefaultSubscription(userId: string | ObjectId): Promise<ISubscription> {
         try {
+            const userIdStr = typeof userId === 'string' ? userId : userId.toString();
+            
+            // Check if subscription already exists
+            const existingSubscription = await Subscription.findOne({ userId: userIdStr });
+            if (existingSubscription) {
+                loggingService.info('Subscription already exists for user', { userId: userIdStr });
+                return existingSubscription;
+            }
+
             const limits = SUBSCRIPTION_PLAN_LIMITS.free;
             const now = new Date();
             const periodEnd = new Date(now);
@@ -141,7 +150,6 @@ export class SubscriptionService {
 
             // Create subscription history entry
             const subscriptionIdStr = (subscription._id as any).toString();
-            const userIdStr = typeof userId === 'string' ? userId : userId.toString();
             await SubscriptionHistory.create({
                 subscriptionId: subscriptionIdStr,
                 userId: userIdStr,

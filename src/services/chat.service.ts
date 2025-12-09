@@ -140,6 +140,13 @@ export interface ChatSendMessageResponse {
             reasoning?: string;
         }>;
     };
+    // Google services view links
+    viewLinks?: Array<{
+        label: string;
+        url: string;
+        type: 'document' | 'spreadsheet' | 'presentation' | 'file' | 'email' | 'calendar' | 'form';
+    }>;
+    metadata?: any;
 }
 
 export class ChatService {
@@ -734,7 +741,8 @@ export class ChatService {
                     conversationId: context.conversationId,
                     previousMessages: recentMessages.map(msg => ({
                         role: msg.role,
-                        content: msg.content
+                        content: msg.content,
+                        metadata: (msg as any).metadata // Include metadata for document content
                     })),
                     useWebScraper: true,
                     searchTerms: this.extractSearchTerms(request.message || '')
@@ -1123,7 +1131,7 @@ export class ChatService {
             
             while (actualMessage && (match = mentionPattern.exec(actualMessage)) !== null) {
                 const [, integration, part1, part2, subEntityType, subEntityId] = match;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google'].includes(integration)) {
                     // If part2 exists, it's entityId (Pattern 1: @integration:entityType:entityId)
                     // If part2 doesn't exist but part1 exists, it might be a command (Pattern 2: @integration:command)
                     // Commands with dashes (like list-issues) will be in part1
@@ -1143,7 +1151,7 @@ export class ChatService {
             let simpleMatch;
             while (actualMessage && (simpleMatch = simpleMentionPattern.exec(actualMessage)) !== null) {
                 const [, integration] = simpleMatch;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google'].includes(integration)) {
                     // Check if this integration is already in mentions
                     if (!mentions.some(m => m.integration === integration)) {
                         mentions.push({
@@ -1176,7 +1184,41 @@ export class ChatService {
                         if (result.success && result.result.success) {
                             // Sanitize response for display (remove MongoDB IDs, etc.)
                             const { formatIntegrationResultForDisplay } = await import('../utils/responseSanitizer');
-                            const sanitizedMessage = formatIntegrationResultForDisplay(result.result);
+                            const formattedResult = formatIntegrationResultForDisplay(result.result);
+
+                            // Extract message and metadata from formatted result
+                            const sanitizedMessage = typeof formattedResult === 'string' 
+                                ? formattedResult 
+                                : formattedResult.message;
+                            const viewLinks = typeof formattedResult === 'object' ? formattedResult.viewLinks : result.result.viewLinks;
+                            const resultMetadata = typeof formattedResult === 'object' ? formattedResult.metadata : result.result.metadata;
+
+                            // If result contains document content (from @docs:read), store it in metadata for AI context
+                            let integrationMetadata: any = undefined;
+                            if (result.result.data?.content && result.result.data?.documentId) {
+                                integrationMetadata = {
+                                    type: 'document_content',
+                                    documentId: result.result.data.documentId,
+                                    content: result.result.data.content,
+                                    characterCount: result.result.data.characterCount
+                                };
+                            } else if (result.result.data?.files && Array.isArray(result.result.data.files)) {
+                                // Store file list for reference
+                                integrationMetadata = {
+                                    type: 'file_list',
+                                    files: result.result.data.files.map((f: any) => ({
+                                        id: f.id,
+                                        name: f.name,
+                                        mimeType: f.mimeType
+                                    }))
+                                };
+                            } else if (result.result.data && typeof result.result.data === 'object') {
+                                // Store other integration data
+                                integrationMetadata = {
+                                    type: 'integration_data',
+                                    data: result.result.data
+                                };
+                            }
 
                             // Save assistant response with integration result
                             const session2 = await mongoose.startSession();
@@ -1187,7 +1229,8 @@ export class ChatService {
                                         userId: request.userId,
                                         role: 'assistant',
                                         content: sanitizedMessage,
-                                        modelId: request.modelId
+                                        modelId: request.modelId,
+                                        metadata: integrationMetadata
                                     }], { session: session2 });
 
                                     conversation!.messageCount = (conversation!.messageCount || 0) + 2;
@@ -1211,7 +1254,9 @@ export class ChatService {
                                 agentPath: ['integration_handler'],
                                 optimizationsApplied: [],
                                 cacheHit: false,
-                                riskLevel: 'low' as const
+                                riskLevel: 'low' as const,
+                                viewLinks: viewLinks, // Pass through view links for Google services
+                                metadata: resultMetadata // Pass through metadata
                             };
                         } else {
                             // Integration command failed - return error message directly

@@ -363,6 +363,7 @@ export class IntegrationChatController {
         if (type === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
         if (type === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
         if (type === 'github') return i.type === 'github_oauth';
+        if (type === 'google') return i.type === 'google_oauth';
         if (type === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
@@ -462,6 +463,47 @@ export class IntegrationChatController {
               id: branch.name,
               name: branch.name
             })));
+          }
+        } else if (type === 'google') {
+          // Google Drive/Docs/Sheets sub-entities
+          const { GoogleService } = await import('../services/google.service');
+          const { GoogleConnection } = await import('../models/GoogleConnection');
+          
+          const connectionId = integration.metadata?.connectionId;
+          if (connectionId) {
+            const connection = await GoogleConnection.findById(connectionId).select('+accessToken +refreshToken');
+            
+            if (connection) {
+              if (subEntityType === 'spreadsheets') {
+                const { files } = await GoogleService.listDriveFiles(connection, {
+                  query: "mimeType='application/vnd.google-apps.spreadsheet'",
+                  pageSize: 50
+                });
+                subEntities.push(...files.map(file => ({
+                  id: file.id,
+                  name: file.name
+                })));
+              } else if (subEntityType === 'documents') {
+                const { files } = await GoogleService.listDriveFiles(connection, {
+                  query: "mimeType='application/vnd.google-apps.document'",
+                  pageSize: 50
+                });
+                subEntities.push(...files.map(file => ({
+                  id: file.id,
+                  name: file.name
+                })));
+              } else if (subEntityType === 'files' || subEntityType === 'folders') {
+                const mimeType = subEntityType === 'folders' ? 'application/vnd.google-apps.folder' : '';
+                const { files } = await GoogleService.listDriveFiles(connection, {
+                  query: mimeType ? `mimeType='${mimeType}'` : undefined,
+                  pageSize: 50
+                });
+                subEntities.push(...files.map(file => ({
+                  id: file.id,
+                  name: file.name
+                })));
+              }
+            }
           }
         }
       } catch (error: any) {

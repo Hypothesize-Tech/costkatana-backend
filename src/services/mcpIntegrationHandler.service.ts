@@ -157,6 +157,33 @@ export class MCPIntegrationHandler {
     integrationType: string
   ): Promise<boolean> {
     try {
+      // Google Workspace services (gmail, calendar, drive, sheets, docs, google)
+      // use GoogleConnection model, not the standard Integration model
+      const googleServices = ['gmail', 'calendar', 'drive', 'sheets', 'docs', 'google'];
+      
+      if (googleServices.includes(integrationType)) {
+        const { GoogleConnection } = await import('../models/GoogleConnection');
+        const googleConnections = await GoogleConnection.find({
+          userId,
+          isActive: true
+        });
+        
+        const hasGoogleAccess = googleConnections.length > 0;
+        
+        if (hasGoogleAccess) {
+          loggingService.info('Google Workspace access validated', {
+            component: 'MCPIntegrationHandler',
+            operation: 'validateUserAccess',
+            userId,
+            integrationType,
+            connectionCount: googleConnections.length
+          });
+        }
+        
+        return hasGoogleAccess;
+      }
+
+      // For other integrations, check the standard Integration model
       const integrations = await IntegrationService.getUserIntegrations(userId, {
         status: 'active'
       });

@@ -54,7 +54,7 @@ export class BedrockService {
      * Build messages array from recent conversation history (ChatGPT-style)
      */
     private static buildMessagesArray(
-        recentMessages: Array<{ role: string; content: string }>,
+        recentMessages: Array<{ role: string; content: string; metadata?: any }>,
         newMessage: string
     ): Array<{ role: 'user' | 'assistant'; content: string }> {
         const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
@@ -65,9 +65,22 @@ export class BedrockService {
         // Add each message
         chronological.forEach(msg => {
             if ((msg.role === 'user' || msg.role === 'assistant') && msg.content) {
+                let messageContent = msg.content;
+                
+                // If this is an assistant message with document content in metadata, append it to provide context
+                if (msg.role === 'assistant' && msg.metadata?.type === 'document_content' && msg.metadata?.content) {
+                    // Add document content as context (truncate if too long to avoid token limits)
+                    const maxContentLength = 10000; // Limit to ~2500 tokens
+                    const docContent = msg.metadata.content.length > maxContentLength 
+                        ? msg.metadata.content.substring(0, maxContentLength) + '... [content truncated]'
+                        : msg.metadata.content;
+                    
+                    messageContent = `${msg.content}\n\n[Document Content Retrieved]:\n${docContent}`;
+                }
+                
                 messages.push({
                     role: msg.role as 'user' | 'assistant',
-                    content: msg.content
+                    content: messageContent
                 });
             }
         });
