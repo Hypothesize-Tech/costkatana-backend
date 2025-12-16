@@ -41,11 +41,10 @@ export class GoogleService {
     private static readonly RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
 
     // Required OAuth scopes for each operation
+    // Note: gmail.modify and gmail.compose removed (not used in codebase)
     private static readonly REQUIRED_SCOPES: Record<string, string> = {
         'gmail.send': 'https://www.googleapis.com/auth/gmail.send',
         'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
-        'gmail.modify': 'https://www.googleapis.com/auth/gmail.modify',
-        'gmail.compose': 'https://www.googleapis.com/auth/gmail.compose',
         'calendar': 'https://www.googleapis.com/auth/calendar',
         'calendar.readonly': 'https://www.googleapis.com/auth/calendar.readonly',
         'calendar.events': 'https://www.googleapis.com/auth/calendar.events',
@@ -202,8 +201,7 @@ export class GoogleService {
                 send: ['gmail.send'],
                 read: ['gmail.read'],
                 search: ['gmail.read'],
-                list: ['gmail.read'],
-                modify: ['gmail.modify']
+                list: ['gmail.read']
             },
             calendar: {
                 create: ['calendar'],
