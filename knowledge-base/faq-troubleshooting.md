@@ -22,11 +22,11 @@ cost-katana test
 **For Core Package (JavaScript/TypeScript):**
 ```javascript
 // Check if API key is properly loaded
-console.log('API Key length:', process.env.API_KEY?.length);
-console.log('API Key prefix:', process.env.API_KEY?.substring(0, 4));
+console.log('API Key length:', process.env.COST_KATANA_API_KEY?.length);
+console.log('API Key prefix:', process.env.COST_KATANA_API_KEY?.substring(0, 4));
 
 // Verify key format
-if (!process.env.API_KEY?.startsWith('dak_')) {
+if (!process.env.COST_KATANA_API_KEY?.startsWith('dak_')) {
   throw new Error('Invalid API key format. Must start with "dak_"');
 }
 ```
