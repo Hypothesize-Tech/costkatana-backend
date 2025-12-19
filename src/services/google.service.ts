@@ -496,6 +496,18 @@ export class GoogleService {
                 rowCount: data?.length || 0
             });
 
+            // Auto-cache the created spreadsheet
+            await this.cacheFileAccess(
+                connection.userId.toString(),
+                connection._id.toString(),
+                spreadsheetId,
+                title,
+                'sheets',
+                'application/vnd.google-apps.spreadsheet',
+                'app_created',
+                { webViewLink: spreadsheetUrl }
+            );
+
             return { spreadsheetId, spreadsheetUrl };
         });
     }
@@ -586,6 +598,18 @@ export class GoogleService {
                 documentId,
                 title
             });
+
+            // Auto-cache the created document
+            await this.cacheFileAccess(
+                connection.userId.toString(),
+                connection._id.toString(),
+                documentId,
+                title,
+                'docs',
+                'application/vnd.google-apps.document',
+                'app_created',
+                { webViewLink: documentUrl }
+            );
 
             return { documentId, documentUrl };
         });
@@ -1498,6 +1522,167 @@ export class GoogleService {
                 webViewLink: file.webViewLink!
             })) || [];
         });
+    }
+
+    /**
+     * Cache file access from picker selection or app creation
+     */
+    static async cacheFileAccess(
+        userId: string,
+        connectionId: string,
+        fileId: string,
+        fileName: string,
+        fileType: 'docs' | 'sheets' | 'drive',
+        mimeType: string,
+        accessMethod: 'app_created' | 'picker_selected',
+        metadata?: {
+            webViewLink?: string;
+            size?: number;
+            createdTime?: string;
+            modifiedTime?: string;
+            iconLink?: string;
+        }
+    ): Promise<void> {
+        const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
+        
+        // Upsert file access record
+        await GoogleFileAccess.findOneAndUpdate(
+            { userId, fileId },
+            {
+                userId,
+                connectionId,
+                fileId,
+                fileName,
+                fileType,
+                mimeType,
+                accessMethod,
+                lastAccessedAt: new Date(),
+                webViewLink: metadata?.webViewLink,
+                metadata: {
+                    size: metadata?.size,
+                    createdTime: metadata?.createdTime,
+                    modifiedTime: metadata?.modifiedTime,
+                    iconLink: metadata?.iconLink
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        loggingService.info('Cached file access', {
+            userId,
+            fileId,
+            fileName,
+            accessMethod
+        });
+    }
+
+    /**
+     * Check if user has access to a file
+     */
+    static async checkFileAccess(
+        userId: string,
+        fileId: string
+    ): Promise<boolean> {
+        const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
+        
+        const access = await GoogleFileAccess.findOne({ userId, fileId });
+        
+        if (access) {
+            // Update last accessed time
+            access.lastAccessedAt = new Date();
+            await access.save();
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Get accessible files for user
+     */
+    static async getAccessibleFiles(
+        userId: string,
+        connectionId: string,
+        fileType?: 'docs' | 'sheets' | 'drive'
+    ): Promise<any[]> {
+        const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
+        
+        const query: any = { userId, connectionId };
+        if (fileType) {
+            query.fileType = fileType;
+        }
+        
+        const files = await GoogleFileAccess.find(query)
+            .sort({ lastAccessedAt: -1 })
+            .limit(50);
+        
+        return files.map(file => ({
+            id: file.fileId,
+            name: file.fileName,
+            mimeType: file.mimeType,
+            webViewLink: file.webViewLink,
+            iconLink: file.metadata?.iconLink,
+            createdTime: file.metadata?.createdTime,
+            modifiedTime: file.metadata?.modifiedTime,
+            size: file.metadata?.size,
+            accessMethod: file.accessMethod,
+            lastAccessedAt: file.lastAccessedAt
+        }));
+    }
+
+    /**
+     * Search accessible files by name
+     */
+    static async searchAccessibleFiles(
+        userId: string,
+        connectionId: string,
+        searchQuery: string,
+        fileType?: 'docs' | 'sheets' | 'drive'
+    ): Promise<any[]> {
+        const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
+        
+        const query: any = {
+            userId,
+            connectionId,
+            fileName: { $regex: searchQuery, $options: 'i' }
+        };
+        
+        if (fileType) {
+            query.fileType = fileType;
+        }
+        
+        const files = await GoogleFileAccess.find(query)
+            .sort({ lastAccessedAt: -1 })
+            .limit(20);
+        
+        return files.map(file => ({
+            id: file.fileId,
+            name: file.fileName,
+            mimeType: file.mimeType,
+            webViewLink: file.webViewLink,
+            accessMethod: file.accessMethod,
+            lastAccessedAt: file.lastAccessedAt
+        }));
+    }
+
+    /**
+     * Cleanup old file access records (older than 90 days)
+     */
+    static async cleanupOldFileAccess(): Promise<number> {
+        const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
+        
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        
+        const result = await GoogleFileAccess.deleteMany({
+            lastAccessedAt: { $lt: ninetyDaysAgo }
+        });
+        
+        loggingService.info('Cleaned up old file access records', {
+            deletedCount: result.deletedCount
+        });
+        
+        return result.deletedCount || 0;
     }
 
 }

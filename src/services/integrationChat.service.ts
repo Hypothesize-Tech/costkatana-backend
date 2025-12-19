@@ -39,6 +39,8 @@ export interface IntegrationCommandResult {
     type: string;
     count?: number;
     service?: 'gmail' | 'calendar' | 'drive' | 'gdocs' | 'sheets';
+    requiresPicker?: boolean;
+    fileType?: 'docs' | 'sheets' | 'drive';
   };
 }
 
@@ -2596,11 +2598,31 @@ export class IntegrationChatService {
           };
         }
       } else if (action === 'drive') {
-        if (subAction === 'list' || command.type === 'list') {
-          // List all Drive files
-          const { files } = await GoogleService.listDriveFiles(connection, {
-            pageSize: command.params?.limit ?? 20
-          });
+        if (subAction === 'select') {
+          return {
+            success: true,
+            message: '📁 **Select Files**\n\nPlease use the file picker that will open to select files from your Google Drive. Once selected, you can use commands to work with them directly!',
+            metadata: {
+              type: 'picker_required',
+              requiresPicker: true,
+              fileType: 'drive'
+            }
+          };
+        } else if (subAction === 'list' || command.type === 'list') {
+          // List accessible Drive files from cache
+          const files = await GoogleService.getAccessibleFiles(
+            integration.userId.toString(),
+            connection._id.toString(),
+            'drive'
+          );
+
+          if (files.length === 0) {
+            return {
+              success: true,
+              message: '📁 **No Files Found**\n\nNo files available yet. You can:\n\n🆕 Create files through Cost Katana (they\'ll appear here automatically)\n📂 Use `@drive select` to access your existing Google Drive files\n\nOnce selected, you can use commands to work with them directly!',
+              data: []
+            };
+          }
 
           const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
           const formatted = formatGoogleServiceResponse('drive', 'list', {
@@ -2610,7 +2632,7 @@ export class IntegrationChatService {
 
           return {
             success: true,
-            message: formatted.message,
+            message: formatted.message + `\n\n💡 Use \`@drive select\` to add more files from your Google Drive`,
             data: formatted.data,
             viewLinks: formatted.viewLinks,
             metadata: formatted.metadata
@@ -2632,15 +2654,13 @@ export class IntegrationChatService {
             };
           }
 
-          // Build Google Drive query by splitting words and AND'ing them
-          const words = searchQuery.split(/\s+/).filter((w: string) => w.length > 0);
-          const nameQueries = words.map((w: string) => `name contains '${w}'`).join(' and ');
-          const driveQuery = `(${nameQueries}) and trashed = false`;
-          
-          const { files } = await GoogleService.listDriveFiles(connection, {
-            query: driveQuery,
-            pageSize: command.params?.limit ?? 20
-          });
+          // Search in accessible files cache
+          const files = await GoogleService.searchAccessibleFiles(
+            integration.userId.toString(),
+            connection._id.toString(),
+            searchQuery,
+            'drive'
+          );
 
           const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
           
@@ -2648,7 +2668,7 @@ export class IntegrationChatService {
           if (files.length === 0) {
             return {
               success: true,
-              message: `❌ No Drive files matched "${searchQuery}".`,
+              message: `📁 **No files found matching "${searchQuery}"**\n\nThe file might not be accessible yet. Use \`@drive select\` to add files from your Google Drive, then search again!`,
               data: [],
               metadata: { type: 'drive_search', count: 0, service: 'drive' }
             };

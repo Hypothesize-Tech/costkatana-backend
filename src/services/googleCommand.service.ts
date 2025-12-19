@@ -123,7 +123,7 @@ export class GoogleCommandService {
      * Handle Drive commands
      */
     private static async handleDriveCommand(connection: any, command: any, message: string): Promise<string> {
-        const action = this.extractAction(command, message, ['list', 'search', 'upload', 'folder', 'files']);
+        const action = this.extractAction(command, message, ['list', 'search', 'upload', 'folder', 'files', 'select']);
         
         loggingService.info('Executing Drive command', {
             action,
@@ -136,6 +136,8 @@ export class GoogleCommandService {
                 return await this.listDriveFiles(connection, message);
             case 'search':
                 return await this.searchDriveFiles(connection, message);
+            case 'select':
+                return '📁 **Select Files**\n\nOpening file picker to select files from your Google Drive. Once selected, you can use commands to work with them directly!';
             case 'folder':
                 return 'To create a folder, use: @drive folder [name]';
             case 'upload':
@@ -149,7 +151,7 @@ export class GoogleCommandService {
      * Handle Sheets commands
      */
     private static async handleSheetsCommand(connection: any, command: any, message: string): Promise<string> {
-        const action = this.extractAction(command, message, ['list', 'create', 'append', 'export']);
+        const action = this.extractAction(command, message, ['list', 'create', 'append', 'export', 'select']);
         
         loggingService.info('Executing Sheets command', {
             action,
@@ -159,6 +161,8 @@ export class GoogleCommandService {
         switch (action) {
             case 'list':
                 return await this.listSpreadsheets(connection);
+            case 'select':
+                return '📊 **Select Spreadsheet**\n\nOpening file picker to select a spreadsheet from your Google Sheets. Once selected, you can use commands to work with it directly!';
             case 'create':
                 return 'To create a sheet, use: @sheets create [title]';
             case 'append':
@@ -174,7 +178,7 @@ export class GoogleCommandService {
      * Handle Docs commands
      */
     private static async handleDocsCommand(connection: any, command: any, message: string): Promise<string> {
-        const action = this.extractAction(command, message, ['list', 'create', 'update']);
+        const action = this.extractAction(command, message, ['list', 'create', 'update', 'select']);
         
         loggingService.info('Executing Docs command', {
             action,
@@ -184,6 +188,8 @@ export class GoogleCommandService {
         switch (action) {
             case 'list':
                 return await this.listDocuments(connection);
+            case 'select':
+                return '📝 **Select Document**\n\nOpening file picker to select a document from your Google Docs. Once selected, you can use commands to work with it directly!';
             case 'create':
                 return 'To create a document, use: @docs create [title]';
             case 'update':
@@ -503,33 +509,24 @@ export class GoogleCommandService {
     // ==================== Drive Actions ====================
     
     private static async listDriveFiles(connection: any, message: string): Promise<string> {
-        // Optionally support query via "@drive list [query]"
-        // If message contains a query after "@drive list", use it to filter files
-        const match = message.match(/@drive\s+list\s+(.+)/i);
-        const userQuery = match && match[1] ? match[1].trim() : '';
-        let queryOptions: { pageSize: number, query?: string } = { pageSize: 10 };
-
-        if (userQuery) {
-            // Search files based on user query
-            queryOptions.query = `name contains '${userQuery}' or fullText contains '${userQuery}'`;
-        }
-
         try {
-            const { files } = await GoogleService.listDriveFiles(connection, queryOptions);
+            // First, get accessible files from cache (app-created + picker-selected)
+            const accessibleFiles = await GoogleService.getAccessibleFiles(
+                connection.userId.toString(),
+                connection._id.toString(),
+                'drive'
+            );
 
-            if (!files || files.length === 0) {
-                return userQuery
-                    ? `No files found in your Drive matching "${userQuery}".`
-                    : 'No files found in your Drive.';
+            if (accessibleFiles.length === 0) {
+                return `📁 **No Files Found**\n\nNo files available yet. You can:\n\n🆕 Create files through Cost Katana (they'll appear here automatically)\n📂 Use \`@drive select\` to access your existing Google Drive files\n\nOnce selected, you can use commands to work with them directly!`;
             }
 
-            const fileList = files.map((file: any, idx: number) =>
-                `${idx + 1}. **${file.name}** (${file.mimeType})`
-            ).join('\n');
+            const fileList = accessibleFiles.map((file: any, idx: number) => {
+                const accessBadge = file.accessMethod === 'app_created' ? '🆕' : '📁';
+                return `${idx + 1}. ${accessBadge} **${file.name}** (${file.mimeType})`;
+            }).join('\n');
 
-            return userQuery
-                ? `**Drive Files matching "${userQuery}"**\n\n${fileList}\n\n${files.length === 10 ? 'Open Drive viewer to see more files.' : ''}`
-                : `**Recent Drive Files**\n\n${fileList}\n\n${files.length === 10 ? 'Open Drive viewer to see more files.' : ''}`;
+            return `**Accessible Drive Files** (${accessibleFiles.length})\n\n${fileList}\n\n💡 Use \`@drive select\` to add more files from your Google Drive`;
         } catch (error: any) {
             return `❌ Failed to list files: ${error.message}`;
         }
@@ -543,20 +540,24 @@ export class GoogleCommandService {
         }
         
         try {
-            const { files } = await GoogleService.listDriveFiles(connection, { 
-                pageSize: 10,
-                query: `name contains '${query}' or fullText contains '${query}'`
-            });
+            // Search in accessible files cache
+            const files = await GoogleService.searchAccessibleFiles(
+                connection.userId.toString(),
+                connection._id.toString(),
+                query,
+                'drive'
+            );
             
             if (!files || files.length === 0) {
-                return `No files found matching "${query}"`;
+                return `📁 **No files found matching "${query}"**\n\nThe file might not be accessible yet. Use \`@drive select\` to add files from your Google Drive, then search again!`;
             }
             
-            const fileList = files.map((file: any, idx: number) => 
-                `${idx + 1}. **${file.name}** (${file.mimeType})`
-            ).join('\n');
+            const fileList = files.map((file: any, idx: number) => {
+                const accessBadge = file.accessMethod === 'app_created' ? '🆕' : '📁';
+                return `${idx + 1}. ${accessBadge} **${file.name}**`;
+            }).join('\n');
             
-            return `**Search Results for "${query}"**\n\n${fileList}`;
+            return `**Search Results for "${query}"** (${files.length} found)\n\n${fileList}`;
         } catch (error: any) {
             return `❌ Failed to search files: ${error.message}`;
         }
@@ -576,17 +577,23 @@ export class GoogleCommandService {
     
     private static async listSpreadsheets(connection: any): Promise<string> {
         try {
-            const sheets = await GoogleService.listSpreadsheets(connection);
+            // Get accessible spreadsheets from cache
+            const sheets = await GoogleService.getAccessibleFiles(
+                connection.userId.toString(),
+                connection._id.toString(),
+                'sheets'
+            );
             
             if (!sheets || sheets.length === 0) {
-                return 'No spreadsheets found.';
+                return `📊 **No Spreadsheets Found**\n\nNo spreadsheets available yet. You can:\n\n🆕 Use \`@sheets create [title]\` to create a new spreadsheet\n📂 Use \`@sheets select\` to access your existing Google Sheets\n\nOnce selected, you can use commands to work with them directly!`;
             }
             
-            const sheetList = sheets.slice(0, 10).map((sheet: any, idx: number) => 
-                `${idx + 1}. **${sheet.name}**`
-            ).join('\n');
+            const sheetList = sheets.slice(0, 10).map((sheet: any, idx: number) => {
+                const accessBadge = sheet.accessMethod === 'app_created' ? '🆕' : '📁';
+                return `${idx + 1}. ${accessBadge} **${sheet.name}**`;
+            }).join('\n');
             
-            return `**Your Spreadsheets**\n\n${sheetList}`;
+            return `**Accessible Spreadsheets** (${sheets.length})\n\n${sheetList}\n\n💡 Use \`@sheets select\` to add more from your Google Sheets`;
         } catch (error: any) {
             return `❌ Failed to list spreadsheets: ${error.message}`;
         }
@@ -606,17 +613,23 @@ export class GoogleCommandService {
     
     private static async listDocuments(connection: any): Promise<string> {
         try {
-            const docs = await GoogleService.listDocuments(connection);
+            // Get accessible documents from cache
+            const docs = await GoogleService.getAccessibleFiles(
+                connection.userId.toString(),
+                connection._id.toString(),
+                'docs'
+            );
             
             if (!docs || docs.length === 0) {
-                return 'No documents found.';
+                return `📝 **No Documents Found**\n\nNo documents available yet. You can:\n\n🆕 Use \`@docs create [title]\` to create a new document\n📂 Use \`@docs select\` to access your existing Google Docs\n\nOnce selected, you can use commands to work with them directly!`;
             }
             
-            const docList = docs.slice(0, 10).map((doc: any, idx: number) => 
-                `${idx + 1}. **${doc.name}**`
-            ).join('\n');
+            const docList = docs.slice(0, 10).map((doc: any, idx: number) => {
+                const accessBadge = doc.accessMethod === 'app_created' ? '🆕' : '📁';
+                return `${idx + 1}. ${accessBadge} **${doc.name}**`;
+            }).join('\n');
             
-            return `**Your Documents**\n\n${docList}`;
+            return `**Accessible Documents** (${docs.length})\n\n${docList}\n\n💡 Use \`@docs select\` to add more from your Google Docs`;
         } catch (error: any) {
             return `❌ Failed to list documents: ${error.message}`;
         }
