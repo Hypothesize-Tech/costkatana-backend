@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 
 export interface GoogleTriggerConfig {
     connectionId: string;
-    triggerType: 'sheet_change' | 'calendar_event' | 'gmail_alert' | 'drive_file_change';
+    triggerType: 'sheet_change' | 'calendar_event' | 'gmail_alert';
     config: {
         // Sheet triggers
         sheetId?: string;
@@ -17,9 +17,6 @@ export interface GoogleTriggerConfig {
         // Gmail triggers
         searchQuery?: string;
         
-        // Drive triggers
-        folderId?: string;
-        fileNamePattern?: string;
     };
 }
 
@@ -261,62 +258,6 @@ export class GoogleTriggersService {
         }
     }
 
-    /**
-     * Check Drive for file changes
-     */
-    static async checkDriveFileChange(
-        connectionId: string,
-        folderId?: string,
-        fileNamePattern?: string,
-        lastCheckTime?: Date
-    ): Promise<TriggerResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { triggered: false, message: 'Connection not found' };
-            }
-
-            let query = '';
-            if (folderId) {
-                query += `'${folderId}' in parents`;
-            }
-            if (fileNamePattern) {
-                query += (query ? ' and ' : '') + `name contains '${fileNamePattern}'`;
-            }
-            if (lastCheckTime) {
-                const modifiedAfter = lastCheckTime.toISOString();
-                query += (query ? ' and ' : '') + `modifiedTime > '${modifiedAfter}'`;
-            }
-
-            const { files } = await GoogleService.listDriveFiles(connection, {
-                query: query || undefined,
-                pageSize: 50
-            });
-
-            loggingService.info('Checked Drive for file changes', {
-                connectionId,
-                folderId,
-                fileNamePattern,
-                changedFiles: files.length
-            });
-
-            return {
-                triggered: files.length > 0,
-                data: files,
-                message: `Found ${files.length} changed files`
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to check Drive file changes', {
-                error: error.message,
-                connectionId
-            });
-            return { triggered: false, message: error.message };
-        }
-    }
 
     /**
      * Execute a Google trigger based on config
@@ -350,13 +291,6 @@ export class GoogleTriggersService {
                     lastExecutionTime || new Date(Date.now() - 3600000)
                 );
 
-            case 'drive_file_change':
-                return this.checkDriveFileChange(
-                    connectionId,
-                    config.folderId,
-                    config.fileNamePattern,
-                    lastExecutionTime
-                );
 
             default:
                 return {

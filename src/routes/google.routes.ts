@@ -61,5 +61,13 @@ router.post('/gemini/analyze', GoogleController.analyzeCostTrends);
 router.post('/gemini/explain-anomaly', GoogleController.explainCostAnomaly);
 router.post('/gemini/suggest-strategy', GoogleController.generateOptimizationStrategy);
 
+// File Access Cache (for Picker API integration)
+router.post('/file-access/cache', GoogleController.cachePickerSelection);
+router.get('/file-access', GoogleController.getAccessibleFiles);
+router.get('/file-access/check/:fileId', GoogleController.checkFileAccess);
+
+// Picker API token endpoint
+router.get('/connections/:id/picker-token', GoogleController.getPickerToken);
+
 export default router;
 

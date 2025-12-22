@@ -1929,5 +1929,236 @@ export class GoogleController {
             });
         }
     }
+
+    /**
+     * Cache file access from picker selection
+     * POST /api/google/file-access/cache
+     */
+    static async cachePickerSelection(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { connectionId, files } = req.body;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            if (!connectionId || !files || !Array.isArray(files)) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: connectionId, files array'
+                });
+                return;
+            }
+
+            // Cache each selected file
+            for (const file of files) {
+                const { fileId, fileName, mimeType, fileType, webViewLink, metadata } = file;
+                
+                await GoogleService.cacheFileAccess(
+                    userId,
+                    connectionId,
+                    fileId,
+                    fileName,
+                    fileType,
+                    mimeType,
+                    'picker_selected',
+                    {
+                        webViewLink,
+                        ...metadata
+                    }
+                );
+            }
+
+            loggingService.info('Cached picker selections', {
+                userId,
+                connectionId,
+                fileCount: files.length
+            });
+
+            res.json({
+                success: true,
+                message: `Successfully cached ${files.length} file(s)`,
+                data: { cachedCount: files.length }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to cache picker selection', {
+                userId: req.userId,
+                error: error.message
+            });
+
+            res.status(500).json({
+                success: false,
+                message: 'Failed to cache file selection',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get accessible files from cache
+     * GET /api/google/file-access
+     */
+    static async getAccessibleFiles(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { connectionId, fileType } = req.query;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            if (!connectionId) {
+                res.status(400).json({
+                    success: false,
+                    message: 'Missing required parameter: connectionId'
+                });
+                return;
+            }
+
+            const files = await GoogleService.getAccessibleFiles(
+                userId,
+                connectionId as string,
+                fileType as any
+            );
+
+            loggingService.info('Retrieved accessible files', {
+                userId,
+                connectionId,
+                fileType,
+                count: files.length
+            });
+
+            res.json({
+                success: true,
+                data: files
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get accessible files', {
+                userId: req.userId,
+                error: error.message
+            });
+
+            res.status(500).json({
+                success: false,
+                message: 'Failed to retrieve accessible files',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Check if user has access to a specific file
+     * GET /api/google/file-access/check/:fileId
+     */
+    static async checkFileAccess(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { fileId } = req.params;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const hasAccess = await GoogleService.checkFileAccess(userId, fileId);
+
+            res.json({
+                success: true,
+                data: { hasAccess, fileId }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to check file access', {
+                userId: req.userId,
+                error: error.message
+            });
+
+            res.status(500).json({
+                success: false,
+                message: 'Failed to check file access',
+                error: error.message
+            });
+        }
+    }
+
+    /**
+     * Get OAuth token for Google Picker API
+     * GET /api/google/connections/:id/picker-token
+     */
+    static async getPickerToken(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { id } = req.params;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: id,
+                userId,
+                isActive: true
+            }).select('+accessToken +refreshToken');
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            // Check if token needs refresh and refresh if needed
+            if (connection.expiresAt && new Date() >= connection.expiresAt) {
+                try {
+                    const { GoogleService } = await import('../services/google.service');
+                    // Check connection health which will refresh token if needed
+                    await GoogleService.checkConnectionHealth(connection);
+                    // Reload connection to get refreshed token
+                    await connection.save();
+                } catch (error: any) {
+                    loggingService.warn('Token refresh failed, using existing token', {
+                        userId,
+                        connectionId: id,
+                        error: error.message
+                    });
+                }
+            }
+
+            // Get the access token (decrypted)
+            const accessToken = connection.decryptToken();
+
+            loggingService.info('Retrieved picker token', {
+                userId,
+                connectionId: id,
+                hasToken: !!accessToken
+            });
+
+            res.json({
+                success: true,
+                data: {
+                    accessToken,
+                    clientId: process.env.GOOGLE_CLIENT_ID,
+                    developerKey: process.env.GOOGLE_API_KEY
+                }
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get picker token', {
+                userId: req.userId,
+                error: error.message
+            });
+
+            res.status(500).json({
+                success: false,
+                message: 'Failed to get picker token',
+                error: error.message
+            });
+        }
+    }
 }
 

@@ -131,7 +131,7 @@ export COST_KATANA_COST_LIMIT=50.0
 const { CostTracker } = require('cost-katana');
 
 const tracker = new CostTracker({
-  apiKey: process.env.API_KEY,
+  apiKey: COST_KATANA_API_KEY,
   baseUrl: process.env.COST_KATANA_BASE_URL,
   defaultModel: process.env.COST_KATANA_DEFAULT_MODEL || 'nova-lite',
   defaultTemperature: 0.7,

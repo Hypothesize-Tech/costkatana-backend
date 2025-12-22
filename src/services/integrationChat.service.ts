@@ -18,7 +18,7 @@ export interface ParsedMention {
 }
 
 export interface IntegrationCommand {
-  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add' | 'assign' | 'remove' | 'ban' | 'unban' | 'kick';
+  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add' | 'assign' | 'remove' | 'ban' | 'unban' | 'kick' | 'export';
   entity: string;
   mention: ParsedMention;
   params: Record<string, any>;
@@ -39,6 +39,8 @@ export interface IntegrationCommandResult {
     type: string;
     count?: number;
     service?: 'gmail' | 'calendar' | 'drive' | 'gdocs' | 'sheets';
+    requiresPicker?: boolean;
+    fileType?: 'docs' | 'sheets' | 'drive';
   };
 }
 
@@ -361,6 +363,94 @@ export class IntegrationChatService {
         /(?:description|desc|body|details?)[: ]+(\S+(?:\s+\S+)*)/i,
         /(?:with\s+)?description\s+['"]([^'"]+)['"]/i
       ];
+
+    // Special handling for Google integrations (drive, sheets, docs, gmail, calendar)
+    const googleIntegrations = ['drive', 'sheets', 'docs', 'gmail', 'calendar', 'gdocs', 'google'];
+    if (googleIntegrations.includes(mention.integration.toLowerCase())) {
+      // For Google integrations, the command is simple: @drive:list, @sheets:create, etc.
+      // Check for export command (e.g., @google export to sheets, @sheets export)
+      if (lowerMessage.includes('export') || extractedCommand === 'export') {
+        commandType = 'export';
+        // Determine target entity from message
+        if (lowerMessage.includes('sheet')) {
+          entity = 'sheets';
+        } else if (lowerMessage.includes('doc')) {
+          entity = 'docs';
+        } else {
+          entity = 'sheets'; // default to sheets
+        }
+        params.export = true;
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+      // Check for list command
+      if (lowerMessage.includes('list') || extractedCommand === 'list') {
+        commandType = 'list';
+        entity = mention.integration.toLowerCase(); // drive, sheets, docs, etc.
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+      // Check for create command
+      if (lowerMessage.includes('create') || extractedCommand === 'create') {
+        commandType = 'create';
+        entity = mention.integration.toLowerCase();
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+      // Check for search command
+      if (lowerMessage.includes('search') || lowerMessage.includes('find') || extractedCommand === 'search') {
+        commandType = 'list'; // search is a type of list
+        entity = mention.integration.toLowerCase();
+        params.query = lowerMessage.replace(/@\w+:?\w*/g, '').replace(/search|find/g, '').trim();
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+      // Check for send command (for gmail)
+      if (lowerMessage.includes('send') || extractedCommand === 'send') {
+        commandType = 'send';
+        entity = 'message';
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+      // Check for select command (for picker)
+      if (lowerMessage.includes('select') || extractedCommand === 'select') {
+        commandType = 'list'; // select triggers picker, but it's a list-like operation
+        entity = mention.integration.toLowerCase();
+        params.usePicker = true;
+        return {
+          type: commandType,
+          entity,
+          mention,
+          params,
+          naturalLanguage: message
+        };
+      }
+    }
 
     // Detect command patterns - check for dashed commands first
     if (lowerMessage.includes('create-issue') || lowerMessage.match(/create\s+issue/)) {
@@ -2415,10 +2505,16 @@ export class IntegrationChatService {
       const mention = command.mention;
       // Determine the action - could be from mention.integration (e.g., @gmail), mention.entityType, or command.entity
       // Normalize to lowercase for case-insensitive matching
-      const action = (mention.integration === 'google' 
+      let action = (mention.integration === 'google' 
         ? (mention.entityType || command.entity)
         : mention.integration)?.toLowerCase(); // For @gmail, @drive, etc., use the integration name as action
-      subAction = (mention.subEntityType || command.type)?.toLowerCase(); // export, create, list, send, search, etc.
+      
+      // If action is still 'google' and we have a command entity, use that
+      if (action === 'google' && command.entity) {
+        action = command.entity.toLowerCase();
+      }
+      
+      subAction = (mention.subEntityType || command.type)?.toLowerCase(); 
 
       // Validate service
       rawAction = action?.toLowerCase().trim();
@@ -2596,11 +2692,31 @@ export class IntegrationChatService {
           };
         }
       } else if (action === 'drive') {
-        if (subAction === 'list' || command.type === 'list') {
-          // List all Drive files
-          const { files } = await GoogleService.listDriveFiles(connection, {
-            pageSize: command.params?.limit ?? 20
-          });
+        if (subAction === 'select') {
+          return {
+            success: true,
+            message: '📁 **Select Files**\n\nPlease use the file picker that will open to select files from your Google Drive. Once selected, you can use commands to work with them directly!',
+            metadata: {
+              type: 'picker_required',
+              requiresPicker: true,
+              fileType: 'drive'
+            }
+          };
+        } else if (subAction === 'list' || command.type === 'list') {
+          // List accessible Drive files from cache
+          const files = await GoogleService.getAccessibleFiles(
+            integration.userId.toString(),
+            connection._id.toString(),
+            'drive'
+          );
+
+          if (files.length === 0) {
+            return {
+              success: true,
+              message: '📁 **No Files Found**\n\nNo files available yet. You can:\n\n🆕 Create files through Cost Katana (they\'ll appear here automatically)\n📂 Use `@drive select` to access your existing Google Drive files\n\nOnce selected, you can use commands to work with them directly!',
+              data: []
+            };
+          }
 
           const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
           const formatted = formatGoogleServiceResponse('drive', 'list', {
@@ -2610,7 +2726,7 @@ export class IntegrationChatService {
 
           return {
             success: true,
-            message: formatted.message,
+            message: formatted.message + `\n\n💡 Use \`@drive select\` to add more files from your Google Drive`,
             data: formatted.data,
             viewLinks: formatted.viewLinks,
             metadata: formatted.metadata
@@ -2632,15 +2748,13 @@ export class IntegrationChatService {
             };
           }
 
-          // Build Google Drive query by splitting words and AND'ing them
-          const words = searchQuery.split(/\s+/).filter((w: string) => w.length > 0);
-          const nameQueries = words.map((w: string) => `name contains '${w}'`).join(' and ');
-          const driveQuery = `(${nameQueries}) and trashed = false`;
-          
-          const { files } = await GoogleService.listDriveFiles(connection, {
-            query: driveQuery,
-            pageSize: command.params?.limit ?? 20
-          });
+          // Search in accessible files cache
+          const files = await GoogleService.searchAccessibleFiles(
+            integration.userId.toString(),
+            connection._id.toString(),
+            searchQuery,
+            'drive'
+          );
 
           const { formatGoogleServiceResponse } = await import('../utils/googleResponseFormatter');
           
@@ -2648,7 +2762,7 @@ export class IntegrationChatService {
           if (files.length === 0) {
             return {
               success: true,
-              message: `❌ No Drive files matched "${searchQuery}".`,
+              message: `📁 **No files found matching "${searchQuery}"**\n\nThe file might not be accessible yet. Use \`@drive select\` to add files from your Google Drive, then search again!`,
               data: [],
               metadata: { type: 'drive_search', count: 0, service: 'drive' }
             };

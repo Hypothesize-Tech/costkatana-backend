@@ -1,7 +1,7 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IGoogleWorkflowTrigger {
-    type: 'sheet_change' | 'form_submission' | 'calendar_event' | 'gmail_alert' | 'drive_file_change';
+    type: 'sheet_change' | 'form_submission' | 'calendar_event' | 'gmail_alert';
     service: 'sheets' | 'forms' | 'calendar' | 'gmail' | 'drive';
     config: {
         resourceId?: string;
@@ -76,7 +76,7 @@ const GoogleWorkflowSchema = new Schema<IGoogleWorkflow>(
         trigger: {
             type: {
                 type: String,
-                enum: ['sheet_change', 'form_submission', 'calendar_event', 'gmail_alert', 'drive_file_change'],
+                enum: ['sheet_change', 'form_submission', 'calendar_event', 'gmail_alert'],
                 required: true
             },
             service: {

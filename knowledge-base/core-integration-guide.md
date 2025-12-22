@@ -82,7 +82,7 @@ class AICostManager {
 
 // Usage
 const aiManager = new AICostManager({
-  apiKey: process.env.API_KEY!,
+  apiKey: process.env.COST_KATANA_API_KEY!,
   defaultModel: 'claude-3-sonnet',
   costLimit: 100.0
 });
@@ -438,7 +438,7 @@ try {
 ```javascript
 // Environment-based configuration (recommended)
 const config = {
-  apiKey: process.env.API_KEY,
+  apiKey:process.env.COST_KATANA_API_KEY,
   baseUrl: process.env.COST_KATANA_BASE_URL || 'https://api.costkatana.com',
   defaultModel: process.env.COST_KATANA_DEFAULT_MODEL || 'nova-lite',
   costLimitPerDay: parseFloat(process.env.COST_KATANA_COST_LIMIT || '50.0'),

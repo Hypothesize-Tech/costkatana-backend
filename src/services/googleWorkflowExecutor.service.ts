@@ -286,18 +286,6 @@ export class GoogleWorkflowExecutorService {
                     return result.triggered;
                 }
 
-                case 'drive_file_change': {
-                    if (!config.resourceId) {
-                        loggingService.warn('Drive file change trigger missing resourceId', { workflowId: workflow.workflowId });
-                        return false;
-                    }
-                    const result = await GoogleTriggersService.checkDriveFileChange(
-                        connectionId,
-                        config.resourceId,
-                        (config as any).lastCheckValue
-                    );
-                    return result.triggered;
-                }
 
                 default:
                     loggingService.warn('Unknown trigger type', { triggerType: workflow.trigger.type });

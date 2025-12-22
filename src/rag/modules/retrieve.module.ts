@@ -94,7 +94,12 @@ export class RetrieveModule extends BaseRAGModule {
           break;
 
         default:
-          result = await retrievalService.retrieve(query, retrievalOptions);
+          // Use enhanced retrieval that includes Google Drive files
+          if (context?.userId) {
+            result = await retrievalService.retrieveWithGoogleDriveFiles(query, retrievalOptions);
+          } else {
+            result = await retrievalService.retrieve(query, retrievalOptions);
+          }
       }
 
       // Filter by similarity threshold if specified
