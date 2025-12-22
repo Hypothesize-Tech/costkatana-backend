@@ -1,4 +1,5 @@
 import { google } from 'googleapis';
+import mongoose from 'mongoose';
 import { IGoogleConnection, IGoogleDriveFile } from '../models/GoogleConnection';
 import { loggingService } from './logging.service';
 import { GoogleErrors} from '../utils/googleErrors';
@@ -496,6 +497,17 @@ export class GoogleService {
                 rowCount: data?.length || 0
             });
 
+            // Share the spreadsheet with the authenticated user
+            try {
+                await this.shareFileWithUser(connection, spreadsheetId);
+            } catch (shareError: any) {
+                loggingService.warn('Failed to auto-share spreadsheet with user', {
+                    spreadsheetId,
+                    error: shareError.message
+                });
+                // Don't fail the entire operation if sharing fails
+            }
+
             // Auto-cache the created spreadsheet
             await this.cacheFileAccess(
                 connection.userId.toString(),
@@ -598,6 +610,17 @@ export class GoogleService {
                 documentId,
                 title
             });
+
+            // Share the document with the authenticated user
+            try {
+                await this.shareFileWithUser(connection, documentId);
+            } catch (shareError: any) {
+                loggingService.warn('Failed to auto-share document with user', {
+                    documentId,
+                    error: shareError.message
+                });
+                // Don't fail the entire operation if sharing fails
+            }
 
             // Auto-cache the created document
             await this.cacheFileAccess(
@@ -1385,6 +1408,53 @@ export class GoogleService {
     }
 
     /**
+     * Drive API: Share file with the authenticated user
+     */
+    static async shareFileWithUser(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        fileId: string,
+        role: 'reader' | 'writer' | 'commenter' = 'writer'
+    ): Promise<{ success: boolean; permissionId: string }> {
+        return this.executeWithRetry(async () => {
+            // Get user's email from their Google account
+            const auth = await this.createAuthenticatedClient(connection);
+            const oauth2 = google.oauth2({ version: 'v2', auth });
+            
+            const userInfo = await oauth2.userinfo.get();
+            const userEmail = userInfo.data.email;
+            
+            if (!userEmail) {
+                throw new Error('Could not retrieve user email from Google account');
+            }
+
+            // Share the file with the user
+            const drive = google.drive({ version: 'v3', auth });
+
+            const response = await drive.permissions.create({
+                fileId,
+                requestBody: {
+                    type: 'user',
+                    role,
+                    emailAddress: userEmail
+                },
+                fields: 'id'
+            });
+
+            loggingService.info('Shared file with authenticated user', {
+                connectionId: connection._id,
+                fileId,
+                userEmail,
+                role
+            });
+
+            return {
+                success: true,
+                permissionId: response.data.id!
+            };
+        });
+    }
+
+    /**
      * Drive API: Create folder
      */
     static async createFolder(
@@ -1545,12 +1615,16 @@ export class GoogleService {
     ): Promise<void> {
         const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
         
+        // Convert to ObjectId
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+        const connectionObjectId = new mongoose.Types.ObjectId(connectionId);
+        
         // Upsert file access record
         await GoogleFileAccess.findOneAndUpdate(
-            { userId, fileId },
+            { userId: userObjectId, fileId },
             {
-                userId,
-                connectionId,
+                userId: userObjectId,
+                connectionId: connectionObjectId,
                 fileId,
                 fileName,
                 fileType,
@@ -1585,7 +1659,8 @@ export class GoogleService {
     ): Promise<boolean> {
         const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
         
-        const access = await GoogleFileAccess.findOne({ userId, fileId });
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+        const access = await GoogleFileAccess.findOne({ userId: userObjectId, fileId });
         
         if (access) {
             // Update last accessed time
@@ -1607,14 +1682,32 @@ export class GoogleService {
     ): Promise<any[]> {
         const { GoogleFileAccess } = await import('../models/GoogleFileAccess');
         
-        const query: any = { userId, connectionId };
+        // Convert to ObjectId
+        const userObjectId = new mongoose.Types.ObjectId(userId);
+        const connectionObjectId = new mongoose.Types.ObjectId(connectionId);
+        
+        const query: any = { userId: userObjectId, connectionId: connectionObjectId };
         if (fileType) {
             query.fileType = fileType;
         }
         
+        loggingService.info('Querying GoogleFileAccess collection', {
+            userId,
+            connectionId,
+            fileType,
+            query: JSON.stringify(query)
+        });
+        
         const files = await GoogleFileAccess.find(query)
             .sort({ lastAccessedAt: -1 })
             .limit(50);
+        
+        loggingService.info('GoogleFileAccess query result', {
+            userId,
+            connectionId,
+            fileType,
+            filesFound: files.length
+        });
         
         return files.map(file => ({
             id: file.fileId,

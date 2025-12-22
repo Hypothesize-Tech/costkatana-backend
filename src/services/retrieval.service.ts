@@ -525,6 +525,194 @@ export class RetrievalService {
             });
         }
     }
+
+    /**
+     * Retrieve Google Drive files and include them in search results
+     */
+    async retrieveWithGoogleDriveFiles(query: string, options: RetrievalOptions = {}): Promise<RetrievalResult> {
+        const startTime = Date.now();
+        
+        try {
+            // Get regular retrieval results first
+            const regularResults = await this.retrieve(query, { ...options, useCache: false });
+            
+            // If we have good results from regular retrieval, return them
+            if (regularResults.documents.length >= (options.limit ?? 5)) {
+                return regularResults;
+            }
+            
+            // Try to get Google Drive files if regular results are sparse
+            const googleDriveResults = await this.getGoogleDriveFileResults(query, options);
+            
+            // Combine results
+            const combinedDocuments = [...regularResults.documents, ...googleDriveResults];
+            const limit = options.limit ?? 5;
+            const finalDocuments = combinedDocuments.slice(0, limit);
+            
+            const combinedSources = [...new Set([...regularResults.sources, ...this.extractSources(googleDriveResults)])];
+            
+            loggingService.info('Combined retrieval with Google Drive files completed', {
+                component: 'RetrievalService',
+                regularResults: regularResults.documents.length,
+                googleDriveResults: googleDriveResults.length,
+                combinedResults: finalDocuments.length
+            });
+            
+            return {
+                documents: finalDocuments,
+                sources: combinedSources,
+                totalResults: combinedDocuments.length,
+                cacheHit: false,
+                retrievalTime: Date.now() - startTime,
+                stats: {
+                    sources: combinedSources,
+                    cacheHit: false,
+                    retrievalTime: Date.now() - startTime
+                }
+            };
+            
+        } catch (error) {
+            loggingService.error('Retrieval with Google Drive files failed', {
+                component: 'RetrievalService',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to regular retrieval
+            return await this.retrieve(query, options);
+        }
+    }
+
+    /**
+     * Get Google Drive file results
+     */
+    private async getGoogleDriveFileResults(query: string, options: RetrievalOptions): Promise<Document[]> {
+        if (!options.userId) {
+            return [];
+        }
+        
+        try {
+            const { GoogleService } = await import('./google.service');
+            const { GoogleConnection } = await import('../models/GoogleConnection');
+            
+            // Get user's Google connections
+            const connections = await GoogleConnection.find({
+                userId: options.userId,
+                isActive: true,
+                healthStatus: 'healthy' // Only use healthy connections
+            }).select('+accessToken +refreshToken');
+            
+            if (connections.length === 0) {
+                return [];
+            }
+            
+            const connection = connections[0];
+            
+            // Validate that connection has required token
+            if (!connection.accessToken) {
+                loggingService.warn('Google connection missing access token', {
+                    connectionId: connection._id.toString(),
+                    userId: options.userId
+                });
+                return [];
+            }
+            
+            // Don't filter by fileType - get all accessible files (docs, sheets, drive)
+            const accessibleFiles = await GoogleService.getAccessibleFiles(
+                options.userId,
+                connection._id.toString()
+            );
+            
+            if (accessibleFiles.length === 0) {
+                return [];
+            }
+            
+            const documents: Document[] = [];
+            const queryLower = query.toLowerCase();
+            
+            // Filter files by relevance to query
+            // If query is generic (e.g., "what does this contain?", "what's in this file?"), include all recent files
+            const genericQueries = ['this', 'that', 'file', 'document', 'contain', 'what', 'show', 'explain'];
+            const isGenericQuery = genericQueries.every(word => queryLower.split(/\s+/).includes(word)) || 
+                                    queryLower.includes('what does this') ||
+                                    queryLower.includes('what is this') ||
+                                    queryLower.includes('what\'s in') ||
+                                    queryLower.includes('show me this');
+            
+            let relevantFiles: any[];
+            if (isGenericQuery || accessibleFiles.length <= 3) {
+                // For generic queries or when there are few files, include all files
+                relevantFiles = accessibleFiles;
+            } else {
+                // Filter by filename relevance
+                relevantFiles = accessibleFiles.filter(file => {
+                    const nameLower = file.name.toLowerCase();
+                    const queryWords = queryLower.split(/\s+/);
+                    return queryWords.some(word => 
+                        word.length > 2 && nameLower.includes(word)
+                    );
+                });
+                
+                // If no relevant files found, fallback to all files
+                if (relevantFiles.length === 0) {
+                    relevantFiles = accessibleFiles;
+                }
+            }
+            
+            // Limit to top 3 most relevant files
+            const filesToProcess = relevantFiles.slice(0, 3);
+            
+            for (const file of filesToProcess) {
+                try {
+                    let content = '';
+                    
+                    if (file.mimeType === 'application/vnd.google-apps.document') {
+                        content = await GoogleService.readDocument(connection, file.id);
+                    } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                        const sheetData = await GoogleService.readSpreadsheet(connection, file.id, 'Sheet1!A1:Z100');
+                        if (Array.isArray(sheetData)) {
+                            content = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
+                        }
+                    }
+                    
+                    if (content && content.length > 50) {
+                        documents.push(new Document({
+                            pageContent: content,
+                            metadata: {
+                                source: 'google-drive',
+                                fileName: file.name,
+                                fileId: file.id,
+                                mimeType: file.mimeType,
+                                userId: options.userId,
+                                accessMethod: file.accessMethod,
+                                lastAccessedAt: file.lastAccessedAt || new Date(),
+                                score: 0.8 // High relevance score for selected files
+                            }
+                        }));
+                        
+                        loggingService.info('Added Google Drive file to results', {
+                            fileName: file.name,
+                            fileId: file.id,
+                            contentLength: content.length
+                        });
+                    }
+                } catch (error) {
+                    loggingService.warn('Failed to read Google Drive file for retrieval', {
+                        fileName: file.name,
+                        fileId: file.id,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
+            }
+            
+            return documents;
+            
+        } catch (error) {
+            loggingService.error('Failed to get Google Drive file results', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        }
+    }
 }
 
 // Singleton instance

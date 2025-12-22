@@ -650,10 +650,89 @@ export class ChatService {
         });
         
         try {
+            // Check for accessible Google Drive files
+            let googleDriveContext = '';
+            let accessibleFiles: any[] = [];
+            try {
+                const { GoogleService } = await import('./google.service');
+                const { GoogleConnection } = await import('../models/GoogleConnection');
+                
+                // Get user's Google connections
+                const connections = await GoogleConnection.find({ 
+                    userId: request.userId, 
+                    isActive: true,
+                    healthStatus: 'healthy' // Only use healthy connections
+                }).select('+accessToken +refreshToken');
+                
+                if (connections.length > 0) {
+                    // Get accessible files from the first active connection
+                    const connection = connections[0];
+                    
+                    // Validate that connection has required token
+                    if (!connection.accessToken) {
+                        loggingService.warn('Google connection missing access token', {
+                            connectionId: connection._id.toString(),
+                            userId: request.userId
+                        });
+                    } else {
+                        // Don't filter by fileType - get all accessible files (docs, sheets, drive)
+                        accessibleFiles = await GoogleService.getAccessibleFiles(
+                            request.userId,
+                            connection._id.toString()
+                        );
+                        
+                        if (accessibleFiles.length > 0) {
+                            // Try to read content from the most recently accessed Google Drive file
+                            const recentFiles = accessibleFiles.slice(0, 1); // Only the most recent file
+                            const fileContents: string[] = [];
+                            
+                            for (const file of recentFiles) {
+                                try {
+                                    let content = '';
+                                    if (file.mimeType === 'application/vnd.google-apps.document') {
+                                        // Read Google Docs content
+                                        content = await GoogleService.readDocument(connection, file.id);
+                                    } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                                        // Read Google Sheets content (first sheet)
+                                        const sheetData = await GoogleService.readSpreadsheet(connection, file.id, 'Sheet1!A1:Z100');
+                                        if (Array.isArray(sheetData)) {
+                                            content = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
+                                        }
+                                    }
+                                    
+                                    if (content && content.length > 50) {
+                                        fileContents.push(`File: ${file.name}\nContent: ${content.substring(0, 2000)}...`);
+                                        loggingService.info('Added Google Drive file content to context', {
+                                            fileName: file.name,
+                                            fileId: file.id,
+                                            contentLength: content.length
+                                        });
+                                    }
+                                } catch (error) {
+                                    loggingService.warn('Failed to read Google Drive file content', {
+                                        fileName: file.name,
+                                        fileId: file.id,
+                                        error: error instanceof Error ? error.message : String(error)
+                                    });
+                                }
+                            }
+                            
+                            if (fileContents.length > 0) {
+                                googleDriveContext = `\n\nSelected Google Drive file:\n${fileContents.join('\n\n')}`;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                loggingService.warn('Failed to load Google Drive context', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+            }
+
             // Use new Modular RAG Orchestrator
             const { modularRAGOrchestrator } = await import('../rag');
             
-            // Build RAG context
+            // Build RAG context with Google Drive context
             const ragContext: any = {
                 userId: request.userId,
                 conversationId: context.conversationId,
@@ -662,6 +741,8 @@ export class ChatService {
                     content: msg.content
                 })),
                 currentTopic: context.currentSubject,
+                googleDriveFiles: accessibleFiles,
+                additionalContext: googleDriveContext,
             };
 
             // Configure RAG based on query characteristics
@@ -690,18 +771,58 @@ export class ChatService {
                 documentsFound: ragResult.documents.length,
                 sources: ragResult.sources,
                 userId: request.userId,
+                hasGoogleDriveFiles: accessibleFiles.length > 0,
             });
 
             if (ragResult.success && ragResult.answer) {
+                // Enhance response with Google Drive context if available but no knowledge base results
+                let enhancedResponse = ragResult.answer;
+                if (ragResult.documents.length === 0 && googleDriveContext) {
+                    // If RAG found no documents but we have Google Drive files, create a response using that context
+                    const { BedrockService } = await import('./bedrock.service');
+                    
+                    const contextualPrompt = `Based on the following Google Drive files and the user's question, provide a helpful response:
+
+${googleDriveContext}
+
+User question: ${request.message}
+
+Please analyze the content from the Google Drive files above and provide a relevant answer to the user's question. If the files contain relevant information, use that in your response. If not, let the user know what the files contain instead.`;
+
+                    try {
+                        const contextualResponse = await BedrockService.invokeModel(
+                            contextualPrompt,
+                            request.modelId || 'anthropic.claude-3-5-sonnet-20240620-v1:0',
+                            {
+                                useSystemPrompt: false
+                            }
+                        );
+                        
+                        if (contextualResponse && typeof contextualResponse === 'string') {
+                            enhancedResponse = contextualResponse;
+                        }
+                    } catch (error) {
+                        loggingService.warn('Failed to generate contextual response with Google Drive files', {
+                            error: error instanceof Error ? error.message : String(error)
+                        });
+                    }
+                }
+
+                const optimizations = [
+                    'modular_rag',
+                    `pattern_${ragResult.metadata.pattern}`,
+                    ...ragResult.metadata.modulesUsed.map((m: string) => `module_${m}`),
+                    `retrieved_${ragResult.documents.length}_docs`,
+                ];
+
+                if (accessibleFiles.length > 0) {
+                    optimizations.push(`google_drive_files_${accessibleFiles.length}`);
+                }
+
                 return {
-                    response: ragResult.answer,
+                    response: enhancedResponse,
                     agentPath: ['knowledge_base', 'modular_rag', ragResult.metadata.pattern],
-                    optimizationsApplied: [
-                        'modular_rag',
-                        `pattern_${ragResult.metadata.pattern}`,
-                        ...ragResult.metadata.modulesUsed.map((m: string) => `module_${m}`),
-                        `retrieved_${ragResult.documents.length}_docs`,
-                    ],
+                    optimizationsApplied: optimizations,
                     cacheHit: ragResult.metadata.cacheHit || false,
                     riskLevel: 'low',
                 };
