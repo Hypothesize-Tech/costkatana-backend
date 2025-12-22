@@ -42,7 +42,51 @@ export interface HumanReviewRequest {
 }
 
 export class LLMSecurityService {
-    private static humanReviewQueue = new Map<string, HumanReviewRequest>();
+    private static humanReviewQueue = new Map<string, HumanReviewRequest>()
+    
+    // Trusted domains whitelist - bypass security for legitimate websites
+    private static readonly TRUSTED_DOMAINS = [
+        // Video platforms
+        'youtube.com', 'www.youtube.com', 'youtu.be',
+        'vimeo.com', 'www.vimeo.com',
+        'dailymotion.com', 'www.dailymotion.com',
+        
+        // Social media
+        'twitter.com', 'www.twitter.com', 'x.com', 'www.x.com',
+        'facebook.com', 'www.facebook.com',
+        'linkedin.com', 'www.linkedin.com',
+        'instagram.com', 'www.instagram.com',
+        
+        // Development platforms
+        'github.com', 'www.github.com',
+        'gitlab.com', 'www.gitlab.com',
+        'bitbucket.org', 'www.bitbucket.org',
+        'stackoverflow.com', 'www.stackoverflow.com',
+        
+        // Documentation sites
+        'docs.google.com',
+        'medium.com', 'www.medium.com',
+        'dev.to', 'www.dev.to',
+        'reddit.com', 'www.reddit.com',
+        
+        // Cloud services
+        'drive.google.com',
+        'dropbox.com', 'www.dropbox.com',
+        'onedrive.com', 'www.onedrive.com',
+        
+        // News and information
+        'wikipedia.org', 'www.wikipedia.org', 'en.wikipedia.org',
+        'google.com', 'www.google.com',
+        
+        // Development tools
+        'npmjs.com', 'www.npmjs.com',
+        'pypi.org', 'www.pypi.org',
+        
+        // AI platforms
+        'claude.ai', 'www.claude.ai',
+        'openai.com', 'www.openai.com', 'chat.openai.com',
+        'anthropic.com', 'www.anthropic.com',
+    ];
     
     // Circuit breaker for database operations
     private static dbFailureCount: number = 0;
@@ -53,6 +97,71 @@ export class LLMSecurityService {
     /**
      * Comprehensive security check for LLM requests
      */
+    
+    /**
+     * Validate that all URLs use HTTPS (reject HTTP links)
+     */
+    private static validateHttpsOnly(content: string): { isValid: boolean; httpUrls?: string[] } {
+        const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/gi;
+        const urls = content.match(urlPattern);
+        
+        if (!urls || urls.length === 0) {
+            return { isValid: true }; // No URLs found, validation passes
+        }
+        
+        const httpUrls: string[] = [];
+        
+        for (const url of urls) {
+            // Check if URL starts with http:// (insecure)
+            if (url.toLowerCase().startsWith('http://')) {
+                httpUrls.push(url);
+            }
+        }
+        
+        if (httpUrls.length > 0) {
+            return { isValid: false, httpUrls };
+        }
+        
+        return { isValid: true }; // All URLs use HTTPS
+    }
+    
+    /**
+     * Check if content contains only trusted domain links
+     */
+    private static containsOnlyTrustedLinks(content: string): boolean {
+        // Extract all URLs from content
+        const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+|www\.[^\s<>"{}|\\^`[\]]+)/gi;
+        const urls = content.match(urlPattern);
+        
+        if (!urls || urls.length === 0) {
+            return false; // No URLs found, proceed with normal security check
+        }
+        
+        // Check if all URLs are from trusted domains
+        for (const url of urls) {
+            try {
+                // Add protocol if missing
+                const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+                const urlObj = new URL(fullUrl);
+                const hostname = urlObj.hostname.toLowerCase();
+                
+                // Check if domain is trusted
+                const isTrusted = this.TRUSTED_DOMAINS.some(domain => 
+                    hostname === domain || hostname.endsWith(`.${domain}`)
+                );
+                
+                if (!isTrusted) {
+                    return false; // Found untrusted domain
+                }
+            } catch (error) {
+                // Invalid URL, let security check handle it
+                return false;
+            }
+        }
+        
+        return true; // All URLs are from trusted domains
+    }
+
     static async performSecurityCheck(
         prompt: string,
         requestId: string,
@@ -74,6 +183,48 @@ export class LLMSecurityService {
         const startTime = Date.now();
         
         try {
+            // HTTPS VALIDATION: Reject HTTP links, only allow HTTPS
+            const httpsValidation = this.validateHttpsOnly(prompt);
+            if (!httpsValidation.isValid && httpsValidation.httpUrls) {
+                loggingService.warn('Security check blocked - HTTP links detected', {
+                    requestId,
+                    userId,
+                    source: context?.source,
+                    httpUrls: httpsValidation.httpUrls
+                });
+                
+                return {
+                    result: {
+                        isBlocked: true,
+                        confidence: 1.0,
+                        reason: `Only HTTPS links are allowed. HTTP links detected: ${httpsValidation.httpUrls.join(', ')}`,
+                        stage: 'prompt-guard',
+                        threatCategory: 'insecure_protocol',
+                        containmentAction: 'block'
+                    }
+                };
+            }
+            
+            // TRUSTED DOMAINS WHITELIST: Bypass security for content with only trusted links
+            if (this.containsOnlyTrustedLinks(prompt)) {
+                loggingService.info('Security check bypassed for trusted domain links', {
+                    requestId,
+                    userId,
+                    source: context?.source,
+                    promptPreview: prompt.substring(0, 150)
+                });
+                
+                return {
+                    result: {
+                        isBlocked: false,
+                        confidence: 0.0,
+                        reason: 'Content contains only trusted domain links - bypassed security check',
+                        stage: 'llama-guard',
+                        containmentAction: 'allow'
+                    }
+                };
+            }
+            
             // INTEGRATION WHITELIST: Detect Google/integration commands and bypass security for user's own data
             const integrationMentions = /@(gmail|calendar|drive|sheets|docs|slides|forms|google|github|jira|linear|slack|discord|webhook)\b/i;
             const hasIntegrationMention = integrationMentions.test(prompt);

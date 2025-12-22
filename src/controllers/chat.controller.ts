@@ -3,6 +3,7 @@ import { loggingService } from '../services/logging.service';
 import { ChatService } from '../services/chat.service';
 import { LLMSecurityService } from '../services/llmSecurity.service';
 import { v4 as uuidv4 } from 'uuid';
+import { extractLinkMetadata } from '../utils/linkMetadata';
 
 export interface AuthenticatedRequest extends Request {
     userId?: string;
@@ -154,9 +155,165 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             }
         }
 
+        // AUTO-DETECT AND EXTRACT METADATA FOR LINKS IN MESSAGE (non-blocking)
+        let enrichedMessage = message;
+        if (message) {
+            try {
+                const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+                const detectedUrls = message.match(urlPattern);
+
+                if (detectedUrls && detectedUrls.length > 0) {
+                    loggingService.debug('Detected URLs in message, extracting metadata', {
+                        userId,
+                        urlCount: detectedUrls.length,
+                        urls: detectedUrls
+                    });
+
+                    // Extract metadata for all detected URLs with timeout (don't block message sending)
+                    const metadataPromises = detectedUrls.map(async (url: string) => {
+                        try {
+                            // Use Promise.race with timeout to prevent blocking
+                            const timeoutPromise = new Promise<{ url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null }>((resolve) => 
+                                setTimeout(() => resolve({ url, metadata: null }), 2000)
+                            );
+                            const fetchPromise = extractLinkMetadata(url).then(metadata => ({ url, metadata }));
+                            return await Promise.race([fetchPromise, timeoutPromise]);
+                        } catch (error) {
+                            // Fallback to just URL if metadata extraction fails
+                            loggingService.debug('Link metadata extraction failed', {
+                                url,
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                            return { url, metadata: null };
+                        }
+                    });
+
+                    // Wait for metadata extraction (with timeout) but don't block if it takes too long
+                    type UrlWithMetadata = { url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null };
+                    const urlsWithMetadata = await Promise.race([
+                        Promise.all(metadataPromises),
+                        new Promise<UrlWithMetadata[]>((resolve) => 
+                            setTimeout(() => resolve(detectedUrls.map((url: string) => ({ url, metadata: null }))), 2500)
+                        )
+                    ]);
+
+                    // Build link context to prepend at the beginning of the message
+                    // This ensures the AI sees the instructions FIRST before any other content
+                    let linkContextPrefix = '';
+                    const linkDescriptions: string[] = [];
+                    
+                    urlsWithMetadata.forEach(({ url, metadata }) => {
+                        if (metadata?.title) {
+                            // Consistent format for all public links with explicit instructions
+                            const linkType = metadata.type === 'repository' ? 'Repository' : 
+                                          metadata.type === 'video' ? 'Video' : 
+                                          metadata.siteName ?? 'Link';
+                            
+                            // Build comprehensive link info with scraped content
+                            let linkInfo = `📎 **ATTACHED PUBLIC LINK - ${linkType}:**\n**Title:** ${metadata.title}\n**URL:** ${url}`;
+                            
+                            if (metadata.description) {
+                                linkInfo += `\n**Description:** ${metadata.description.substring(0, 300)}${metadata.description.length > 300 ? '...' : ''}`;
+                            }
+                            
+                            // Add AI-generated summary if available (from Puppeteer + AI scraping)
+                            if (metadata.summary) {
+                                linkInfo += `\n\n**📊 AI SUMMARY:**\n${metadata.summary}`;
+                            }
+                            
+                            // Add structured data if extracted by AI
+                            if (metadata.structuredData) {
+                                linkInfo += `\n\n**📋 STRUCTURED DATA EXTRACTED:**\n${JSON.stringify(metadata.structuredData, null, 2).substring(0, 1000)}`;
+                            }
+                            
+                            // Add full content if available
+                            if (metadata.fullContent && metadata.fullContent.length > 100) {
+                                const contentPreview = metadata.fullContent.substring(0, 5000);
+                                linkInfo += `\n\n**📄 FULL PAGE CONTENT:**\n${contentPreview}${metadata.fullContent.length > 5000 ? '...\n[Content truncated for length]' : ''}`;
+                            }
+                            
+                            // Add code blocks if available
+                            if (metadata.codeBlocks && metadata.codeBlocks.length > 0) {
+                                linkInfo += `\n\n**CODE BLOCKS FOUND (${metadata.codeBlocks.length}):**`;
+                                metadata.codeBlocks.slice(0, 3).forEach((block: { language?: string; code: string }, idx: number) => {
+                                    const lang = block.language ? ` (${block.language})` : '';
+                                    linkInfo += `\n\n**Code Block ${idx + 1}${lang}:**\n\`\`\`${block.language ?? ''}\n${block.code.substring(0, 1000)}\n\`\`\``;
+                                });
+                                if (metadata.codeBlocks.length > 3) {
+                                    linkInfo += `\n... and ${metadata.codeBlocks.length - 3} more code blocks`;
+                                }
+                            }
+                            
+                            // Add images info if available
+                            if (metadata.images && metadata.images.length > 0) {
+                                linkInfo += `\n\n**🖼️ IMAGES FOUND:** ${metadata.images.length} images on this page`;
+                            }
+                            
+                            // Add scraping method info for transparency
+                            if (metadata.scrapingMethod) {
+                                const methodLabel = metadata.scrapingMethod === 'puppeteer-ai' 
+                                    ? '🤖 Advanced AI Scraping (Puppeteer + AI Analysis + Vector Storage)'
+                                    : '⚡ Fast Scraping (Axios + Cheerio)';
+                                linkInfo += `\n\n**Method:** ${methodLabel}`;
+                            }
+                            
+                            linkDescriptions.push(linkInfo);
+                            
+                            // Remove URL from message (will be replaced with just the link info)
+                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
+                            
+                            loggingService.debug('Link metadata extracted and added to message', {
+                                url,
+                                title: metadata.title,
+                                siteName: metadata.siteName,
+                                type: metadata.type,
+                                hasFullContent: !!metadata.fullContent,
+                                codeBlocksCount: metadata.codeBlocks?.length || 0,
+                                imagesCount: metadata.images?.length || 0,
+                                scrapingMethod: metadata.scrapingMethod,
+                                hasSummary: !!metadata.summary,
+                                hasStructuredData: !!metadata.structuredData,
+                                relevanceScore: metadata.relevanceScore
+                            });
+                        } else {
+                            // For links without metadata - still provide explicit context
+                            const linkInfo = `📎 **ATTACHED PUBLIC LINK:**\n**URL:** ${url}`;
+                            linkDescriptions.push(linkInfo);
+                            
+                            // Remove URL from message
+                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
+                        }
+                    });
+                    
+                    // Prepend all link information at the VERY BEGINNING with strong instructions
+                    if (linkDescriptions.length > 0) {
+                        linkContextPrefix = `\n\n⚠️ **IMPORTANT: USER IS ASKING ABOUT THE LINK(S) BELOW** ⚠️\n\n${linkDescriptions.join('\n\n')}\n\n**🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY:**\n1. The user's question is SPECIFICALLY about the link(s) shown above\n2. You MUST provide a comprehensive summary based on:\n   - The full page content provided above\n   - Any code blocks extracted from the page\n   - Images and other media found on the page\n   - The overall structure and purpose of the content\n3. COMPLETELY IGNORE and DO NOT mention:\n   - Any Google Drive files\n   - Any other documents or files\n   - Any previous conversation context about other topics\n   - Anything not directly related to the link(s) above\n4. Your summary should cover:\n   - What the page/repository/content is about\n   - Key sections or components\n   - Any code, technical details, or implementations mentioned\n   - The purpose and functionality\n5. Be thorough and detailed in your analysis of the scraped content\n\n**User's question:**\n`;
+                        
+                        // Replace link placeholders back with just the URL
+                        linkDescriptions.forEach((_, index) => {
+                            const url = urlsWithMetadata[index]?.url || '';
+                            enrichedMessage = enrichedMessage.replace(`[LINK_${index + 1}]`, url);
+                        });
+                        
+                        // Prepend the link context at the beginning
+                        enrichedMessage = linkContextPrefix + enrichedMessage;
+                    }
+                }
+            } catch (error) {
+                // Log error but continue with original message if metadata extraction fails
+                loggingService.error('Failed to extract link metadata in chat controller', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    messageLength: message?.length || 0
+                });
+                // Continue with original message
+            }
+        }
+
         const result = await ChatService.sendMessage({
             userId,
-            message,
+            message: enrichedMessage, // Enriched message with instructions for AI
+            originalMessage: message, // Original user message for storage/display
             modelId,
             conversationId,
             temperature,

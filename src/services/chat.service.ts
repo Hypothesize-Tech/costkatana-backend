@@ -76,7 +76,8 @@ export interface ConversationResponse {
 
 export interface ChatSendMessageRequest {
     userId: string;
-    message?: string; // Now optional when templateId is provided
+    message?: string; // Enriched message for AI processing (may include instructions)
+    originalMessage?: string; // Original user message for storage/display (if different from message)
     modelId: string;
     conversationId?: string;
     temperature?: number;
@@ -650,82 +651,94 @@ export class ChatService {
         });
         
         try {
-            // Check for accessible Google Drive files
+            // Check if message contains a link - if so, skip Google Drive files to avoid confusion
+            const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+            const messageContainsLink = request.message && urlPattern.test(request.message);
+            
+            // Check for accessible Google Drive files (only if no link is present)
             let googleDriveContext = '';
             let accessibleFiles: any[] = [];
-            try {
-                const { GoogleService } = await import('./google.service');
-                const { GoogleConnection } = await import('../models/GoogleConnection');
-                
-                // Get user's Google connections
-                const connections = await GoogleConnection.find({ 
-                    userId: request.userId, 
-                    isActive: true,
-                    healthStatus: 'healthy' // Only use healthy connections
-                }).select('+accessToken +refreshToken');
-                
-                if (connections.length > 0) {
-                    // Get accessible files from the first active connection
-                    const connection = connections[0];
+            
+            if (!messageContainsLink) {
+                try {
+                    const { GoogleService } = await import('./google.service');
+                    const { GoogleConnection } = await import('../models/GoogleConnection');
                     
-                    // Validate that connection has required token
-                    if (!connection.accessToken) {
-                        loggingService.warn('Google connection missing access token', {
-                            connectionId: connection._id.toString(),
-                            userId: request.userId
-                        });
-                    } else {
-                        // Don't filter by fileType - get all accessible files (docs, sheets, drive)
-                        accessibleFiles = await GoogleService.getAccessibleFiles(
-                            request.userId,
-                            connection._id.toString()
-                        );
+                    // Get user's Google connections
+                    const connections = await GoogleConnection.find({ 
+                        userId: request.userId, 
+                        isActive: true,
+                        healthStatus: 'healthy' // Only use healthy connections
+                    }).select('+accessToken +refreshToken');
+                    
+                    if (connections.length > 0) {
+                        // Get accessible files from the first active connection
+                        const connection = connections[0];
                         
-                        if (accessibleFiles.length > 0) {
-                            // Try to read content from the most recently accessed Google Drive file
-                            const recentFiles = accessibleFiles.slice(0, 1); // Only the most recent file
-                            const fileContents: string[] = [];
+                        // Validate that connection has required token
+                        if (!connection.accessToken) {
+                            loggingService.warn('Google connection missing access token', {
+                                connectionId: connection._id.toString(),
+                                userId: request.userId
+                            });
+                        } else {
+                            // Don't filter by fileType - get all accessible files (docs, sheets, drive)
+                            accessibleFiles = await GoogleService.getAccessibleFiles(
+                                request.userId,
+                                connection._id.toString()
+                            );
                             
-                            for (const file of recentFiles) {
-                                try {
-                                    let content = '';
-                                    if (file.mimeType === 'application/vnd.google-apps.document') {
-                                        // Read Google Docs content
-                                        content = await GoogleService.readDocument(connection, file.id);
-                                    } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-                                        // Read Google Sheets content (first sheet)
-                                        const sheetData = await GoogleService.readSpreadsheet(connection, file.id, 'Sheet1!A1:Z100');
-                                        if (Array.isArray(sheetData)) {
-                                            content = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
+                            if (accessibleFiles.length > 0) {
+                                // Try to read content from the most recently accessed Google Drive file
+                                const recentFiles = accessibleFiles.slice(0, 1); // Only the most recent file
+                                const fileContents: string[] = [];
+                                
+                                for (const file of recentFiles) {
+                                    try {
+                                        let content = '';
+                                        if (file.mimeType === 'application/vnd.google-apps.document') {
+                                            // Read Google Docs content
+                                            content = await GoogleService.readDocument(connection, file.id);
+                                        } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                                            // Read Google Sheets content (first sheet)
+                                            const sheetData = await GoogleService.readSpreadsheet(connection, file.id, 'Sheet1!A1:Z100');
+                                            if (Array.isArray(sheetData)) {
+                                                content = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
+                                            }
                                         }
-                                    }
-                                    
-                                    if (content && content.length > 50) {
-                                        fileContents.push(`File: ${file.name}\nContent: ${content.substring(0, 2000)}...`);
-                                        loggingService.info('Added Google Drive file content to context', {
+                                        
+                                        if (content && content.length > 50) {
+                                            fileContents.push(`File: ${file.name}\nContent: ${content.substring(0, 2000)}...`);
+                                            loggingService.info('Added Google Drive file content to context', {
+                                                fileName: file.name,
+                                                fileId: file.id,
+                                                contentLength: content.length
+                                            });
+                                        }
+                                    } catch (error) {
+                                        loggingService.warn('Failed to read Google Drive file content', {
                                             fileName: file.name,
                                             fileId: file.id,
-                                            contentLength: content.length
+                                            error: error instanceof Error ? error.message : String(error)
                                         });
                                     }
-                                } catch (error) {
-                                    loggingService.warn('Failed to read Google Drive file content', {
-                                        fileName: file.name,
-                                        fileId: file.id,
-                                        error: error instanceof Error ? error.message : String(error)
-                                    });
                                 }
-                            }
-                            
-                            if (fileContents.length > 0) {
-                                googleDriveContext = `\n\nSelected Google Drive file:\n${fileContents.join('\n\n')}`;
+                                
+                                if (fileContents.length > 0) {
+                                    googleDriveContext = `\n\nSelected Google Drive file:\n${fileContents.join('\n\n')}`;
+                                }
                             }
                         }
                     }
+                } catch (error) {
+                    loggingService.warn('Failed to load Google Drive context', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
                 }
-            } catch (error) {
-                loggingService.warn('Failed to load Google Drive context', {
-                    error: error instanceof Error ? error.message : String(error)
+            } else {
+                loggingService.debug('Skipping Google Drive files - message contains link', {
+                    userId: request.userId,
+                    messagePreview: request.message?.substring(0, 100)
                 });
             }
 
@@ -1153,11 +1166,14 @@ Please analyze the content from the Google Drive files above and provide a relev
                     // Save user message with attached documents (only if not using template initially)
                     // Template messages will be saved after resolution
                     if (!request.templateId) {
+                        // Use originalMessage for storage (what user actually typed), 
+                        // message is enriched version for AI only
+                        const messageToStore = request.originalMessage ?? request.message ?? '';
                         await ChatMessage.create([{
                             conversationId: conversation!._id,
                             userId: request.userId,
                             role: 'user',
-                            content: request.message || '',
+                            content: messageToStore,
                             attachedDocuments: attachedDocuments
                         }], { session });
                     }
