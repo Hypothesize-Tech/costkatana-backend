@@ -3,6 +3,7 @@ import { loggingService } from '../services/logging.service';
 import { ChatService } from '../services/chat.service';
 import { LLMSecurityService } from '../services/llmSecurity.service';
 import { v4 as uuidv4 } from 'uuid';
+import { extractLinkMetadata } from '../utils/linkMetadata';
 
 export interface AuthenticatedRequest extends Request {
     userId?: string;
@@ -154,9 +155,110 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             }
         }
 
+        // AUTO-DETECT AND EXTRACT METADATA FOR LINKS IN MESSAGE (non-blocking)
+        let enrichedMessage = message;
+        if (message) {
+            try {
+                const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+                const detectedUrls = message.match(urlPattern);
+
+                if (detectedUrls && detectedUrls.length > 0) {
+                    loggingService.debug('Detected URLs in message, extracting metadata', {
+                        userId,
+                        urlCount: detectedUrls.length,
+                        urls: detectedUrls
+                    });
+
+                    // Extract metadata for all detected URLs with timeout (don't block message sending)
+                    const metadataPromises = detectedUrls.map(async (url: string) => {
+                        try {
+                            // Use Promise.race with timeout to prevent blocking
+                            const timeoutPromise = new Promise<{ url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null }>((resolve) => 
+                                setTimeout(() => resolve({ url, metadata: null }), 2000)
+                            );
+                            const fetchPromise = extractLinkMetadata(url).then(metadata => ({ url, metadata }));
+                            return await Promise.race([fetchPromise, timeoutPromise]);
+                        } catch (error) {
+                            // Fallback to just URL if metadata extraction fails
+                            loggingService.debug('Link metadata extraction failed', {
+                                url,
+                                error: error instanceof Error ? error.message : String(error)
+                            });
+                            return { url, metadata: null };
+                        }
+                    });
+
+                    // Wait for metadata extraction (with timeout) but don't block if it takes too long
+                    type UrlWithMetadata = { url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null };
+                    const urlsWithMetadata = await Promise.race([
+                        Promise.all(metadataPromises),
+                        new Promise<UrlWithMetadata[]>((resolve) => 
+                            setTimeout(() => resolve(detectedUrls.map((url: string) => ({ url, metadata: null }))), 2500)
+                        )
+                    ]);
+
+                    // Build link context to prepend at the beginning of the message
+                    // This ensures the AI sees the instructions FIRST before any other content
+                    let linkContextPrefix = '';
+                    const linkDescriptions: string[] = [];
+                    
+                    urlsWithMetadata.forEach(({ url, metadata }) => {
+                        if (metadata?.title) {
+                            // Consistent format for all public links with explicit instructions
+                            const linkType = metadata.type === 'repository' ? 'Repository' : 
+                                          metadata.type === 'video' ? 'Video' : 
+                                          metadata.siteName ?? 'Link';
+                            
+                            const linkInfo = `📎 **ATTACHED PUBLIC LINK - ${linkType}:**\n**Title:** ${metadata.title}\n**URL:** ${url}${metadata.description ? `\n**Description:** ${metadata.description.substring(0, 300)}${metadata.description.length > 300 ? '...' : ''}` : ''}`;
+                            linkDescriptions.push(linkInfo);
+                            
+                            // Remove URL from message (will be replaced with just the link info)
+                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
+                            
+                            loggingService.debug('Link metadata extracted and added to message', {
+                                url,
+                                title: metadata.title,
+                                siteName: metadata.siteName,
+                                type: metadata.type
+                            });
+                        } else {
+                            // For links without metadata - still provide explicit context
+                            const linkInfo = `📎 **ATTACHED PUBLIC LINK:**\n**URL:** ${url}`;
+                            linkDescriptions.push(linkInfo);
+                            
+                            // Remove URL from message
+                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
+                        }
+                    });
+                    
+                    // Prepend all link information at the VERY BEGINNING with strong instructions
+                    if (linkDescriptions.length > 0) {
+                        linkContextPrefix = `\n\n⚠️ **IMPORTANT: USER IS ASKING ABOUT THE LINK(S) BELOW** ⚠️\n\n${linkDescriptions.join('\n\n')}\n\n**🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY:**\n1. The user's question is SPECIFICALLY about the link(s) shown above\n2. You MUST answer ONLY about the link(s) - describe what they contain\n3. COMPLETELY IGNORE and DO NOT mention:\n   - Any Google Drive files\n   - Any other documents or files\n   - Any previous conversation context about other topics\n   - Anything not directly related to the link(s) above\n4. If the user's question mentions other content, IGNORE those references and focus ONLY on the link(s)\n5. Provide a detailed description of what the link(s) contain based on the URL and metadata\n\n**User's question:**\n`;
+                        
+                        // Replace link placeholders back with just the URL
+                        linkDescriptions.forEach((_, index) => {
+                            const url = urlsWithMetadata[index]?.url || '';
+                            enrichedMessage = enrichedMessage.replace(`[LINK_${index + 1}]`, url);
+                        });
+                        
+                        // Prepend the link context at the beginning
+                        enrichedMessage = linkContextPrefix + enrichedMessage;
+                    }
+                }
+            } catch (error) {
+                // Log error but continue with original message if metadata extraction fails
+                loggingService.error('Failed to extract link metadata in chat controller', {
+                    error: error instanceof Error ? error.message : String(error),
+                    userId,
+                    messageLength: message?.length || 0
+                });
+                // Continue with original message
+            }
+        }
+
         const result = await ChatService.sendMessage({
             userId,
-            message,
+            message: enrichedMessage,
             modelId,
             conversationId,
             temperature,

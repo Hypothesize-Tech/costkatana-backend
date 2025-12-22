@@ -75,6 +75,7 @@ import costIntelligenceConfigRoutes from './costIntelligenceConfig.routes';
 import agentGovernanceRoutes from './agentGovernance.routes';
 import dataNetworkEffectsRoutes from './dataNetworkEffects.routes';
 import proactiveSuggestionsRoutes from './proactiveSuggestions.routes';
+import utilsRoutes from './utils.routes';
 
 const router = Router();
 
@@ -166,5 +167,6 @@ router.use('/cost-intelligence-config', costIntelligenceConfigRoutes);
 router.use('/agent-governance', agentGovernanceRoutes);
 router.use('/data-network-effects', dataNetworkEffectsRoutes);
 router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
+router.use('/utils', utilsRoutes);
 
 export const apiRouter = router;
