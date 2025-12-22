@@ -76,7 +76,8 @@ export interface ConversationResponse {
 
 export interface ChatSendMessageRequest {
     userId: string;
-    message?: string; // Now optional when templateId is provided
+    message?: string; // Enriched message for AI processing (may include instructions)
+    originalMessage?: string; // Original user message for storage/display (if different from message)
     modelId: string;
     conversationId?: string;
     temperature?: number;
@@ -1165,11 +1166,14 @@ Please analyze the content from the Google Drive files above and provide a relev
                     // Save user message with attached documents (only if not using template initially)
                     // Template messages will be saved after resolution
                     if (!request.templateId) {
+                        // Use originalMessage for storage (what user actually typed), 
+                        // message is enriched version for AI only
+                        const messageToStore = request.originalMessage ?? request.message ?? '';
                         await ChatMessage.create([{
                             conversationId: conversation!._id,
                             userId: request.userId,
                             role: 'user',
-                            content: request.message || '',
+                            content: messageToStore,
                             attachedDocuments: attachedDocuments
                         }], { session });
                     }

@@ -209,7 +209,54 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                                           metadata.type === 'video' ? 'Video' : 
                                           metadata.siteName ?? 'Link';
                             
-                            const linkInfo = `📎 **ATTACHED PUBLIC LINK - ${linkType}:**\n**Title:** ${metadata.title}\n**URL:** ${url}${metadata.description ? `\n**Description:** ${metadata.description.substring(0, 300)}${metadata.description.length > 300 ? '...' : ''}` : ''}`;
+                            // Build comprehensive link info with scraped content
+                            let linkInfo = `📎 **ATTACHED PUBLIC LINK - ${linkType}:**\n**Title:** ${metadata.title}\n**URL:** ${url}`;
+                            
+                            if (metadata.description) {
+                                linkInfo += `\n**Description:** ${metadata.description.substring(0, 300)}${metadata.description.length > 300 ? '...' : ''}`;
+                            }
+                            
+                            // Add AI-generated summary if available (from Puppeteer + AI scraping)
+                            if (metadata.summary) {
+                                linkInfo += `\n\n**📊 AI SUMMARY:**\n${metadata.summary}`;
+                            }
+                            
+                            // Add structured data if extracted by AI
+                            if (metadata.structuredData) {
+                                linkInfo += `\n\n**📋 STRUCTURED DATA EXTRACTED:**\n${JSON.stringify(metadata.structuredData, null, 2).substring(0, 1000)}`;
+                            }
+                            
+                            // Add full content if available
+                            if (metadata.fullContent && metadata.fullContent.length > 100) {
+                                const contentPreview = metadata.fullContent.substring(0, 5000);
+                                linkInfo += `\n\n**📄 FULL PAGE CONTENT:**\n${contentPreview}${metadata.fullContent.length > 5000 ? '...\n[Content truncated for length]' : ''}`;
+                            }
+                            
+                            // Add code blocks if available
+                            if (metadata.codeBlocks && metadata.codeBlocks.length > 0) {
+                                linkInfo += `\n\n**CODE BLOCKS FOUND (${metadata.codeBlocks.length}):**`;
+                                metadata.codeBlocks.slice(0, 3).forEach((block: { language?: string; code: string }, idx: number) => {
+                                    const lang = block.language ? ` (${block.language})` : '';
+                                    linkInfo += `\n\n**Code Block ${idx + 1}${lang}:**\n\`\`\`${block.language ?? ''}\n${block.code.substring(0, 1000)}\n\`\`\``;
+                                });
+                                if (metadata.codeBlocks.length > 3) {
+                                    linkInfo += `\n... and ${metadata.codeBlocks.length - 3} more code blocks`;
+                                }
+                            }
+                            
+                            // Add images info if available
+                            if (metadata.images && metadata.images.length > 0) {
+                                linkInfo += `\n\n**🖼️ IMAGES FOUND:** ${metadata.images.length} images on this page`;
+                            }
+                            
+                            // Add scraping method info for transparency
+                            if (metadata.scrapingMethod) {
+                                const methodLabel = metadata.scrapingMethod === 'puppeteer-ai' 
+                                    ? '🤖 Advanced AI Scraping (Puppeteer + AI Analysis + Vector Storage)'
+                                    : '⚡ Fast Scraping (Axios + Cheerio)';
+                                linkInfo += `\n\n**Method:** ${methodLabel}`;
+                            }
+                            
                             linkDescriptions.push(linkInfo);
                             
                             // Remove URL from message (will be replaced with just the link info)
@@ -219,7 +266,14 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                                 url,
                                 title: metadata.title,
                                 siteName: metadata.siteName,
-                                type: metadata.type
+                                type: metadata.type,
+                                hasFullContent: !!metadata.fullContent,
+                                codeBlocksCount: metadata.codeBlocks?.length || 0,
+                                imagesCount: metadata.images?.length || 0,
+                                scrapingMethod: metadata.scrapingMethod,
+                                hasSummary: !!metadata.summary,
+                                hasStructuredData: !!metadata.structuredData,
+                                relevanceScore: metadata.relevanceScore
                             });
                         } else {
                             // For links without metadata - still provide explicit context
@@ -233,7 +287,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                     
                     // Prepend all link information at the VERY BEGINNING with strong instructions
                     if (linkDescriptions.length > 0) {
-                        linkContextPrefix = `\n\n⚠️ **IMPORTANT: USER IS ASKING ABOUT THE LINK(S) BELOW** ⚠️\n\n${linkDescriptions.join('\n\n')}\n\n**🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY:**\n1. The user's question is SPECIFICALLY about the link(s) shown above\n2. You MUST answer ONLY about the link(s) - describe what they contain\n3. COMPLETELY IGNORE and DO NOT mention:\n   - Any Google Drive files\n   - Any other documents or files\n   - Any previous conversation context about other topics\n   - Anything not directly related to the link(s) above\n4. If the user's question mentions other content, IGNORE those references and focus ONLY on the link(s)\n5. Provide a detailed description of what the link(s) contain based on the URL and metadata\n\n**User's question:**\n`;
+                        linkContextPrefix = `\n\n⚠️ **IMPORTANT: USER IS ASKING ABOUT THE LINK(S) BELOW** ⚠️\n\n${linkDescriptions.join('\n\n')}\n\n**🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY:**\n1. The user's question is SPECIFICALLY about the link(s) shown above\n2. You MUST provide a comprehensive summary based on:\n   - The full page content provided above\n   - Any code blocks extracted from the page\n   - Images and other media found on the page\n   - The overall structure and purpose of the content\n3. COMPLETELY IGNORE and DO NOT mention:\n   - Any Google Drive files\n   - Any other documents or files\n   - Any previous conversation context about other topics\n   - Anything not directly related to the link(s) above\n4. Your summary should cover:\n   - What the page/repository/content is about\n   - Key sections or components\n   - Any code, technical details, or implementations mentioned\n   - The purpose and functionality\n5. Be thorough and detailed in your analysis of the scraped content\n\n**User's question:**\n`;
                         
                         // Replace link placeholders back with just the URL
                         linkDescriptions.forEach((_, index) => {
@@ -258,7 +312,8 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
 
         const result = await ChatService.sendMessage({
             userId,
-            message: enrichedMessage,
+            message: enrichedMessage, // Enriched message with instructions for AI
+            originalMessage: message, // Original user message for storage/display
             modelId,
             conversationId,
             temperature,

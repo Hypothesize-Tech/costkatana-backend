@@ -1,5 +1,17 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { WebScraperTool, type ScrapingRequest, type ScrapingResult } from '../tools/webScraper.tool';
+import { loggingService } from '../services/logging.service';
+
+// Singleton instance for web scraper
+let webScraperInstance: WebScraperTool | null = null;
+
+function getWebScraperInstance(): WebScraperTool {
+  if (!webScraperInstance) {
+    webScraperInstance = new WebScraperTool();
+  }
+  return webScraperInstance;
+}
 
 export interface LinkMetadata {
   url: string;
@@ -8,20 +20,157 @@ export interface LinkMetadata {
   image?: string;
   siteName?: string;
   type?: string;
+  fullContent?: string; // Scraped full page content
+  codeBlocks?: Array<{ language?: string; code: string }>; // Extracted code blocks
+  images?: string[]; // All images on the page
+  summary?: string; // AI-generated summary from WebScraperTool
+  structuredData?: Record<string, unknown>; // Structured data extracted by AI
+  relevanceScore?: number; // Relevance score from AI
+  scrapingMethod?: 'axios-cheerio' | 'puppeteer-ai'; // Which method was used
+}
+
+/**
+ * Use advanced Puppeteer-based scraping with AI summarization
+ * This method handles JavaScript-heavy sites and provides AI-powered content analysis
+ */
+async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
+  try {
+    const scraper = getWebScraperInstance();
+    
+    // Prepare scraping request with comprehensive selectors
+    const scrapingRequest: ScrapingRequest = {
+      operation: 'extract', // Use 'extract' for AI-powered structured data extraction
+      url,
+      selectors: {
+        title: 'h1, .title, .headline, title',
+        content: 'main, article, .content, .main-content, .post-content, .article-content, body',
+        links: 'a[href]',
+        images: 'img[src]',
+      },
+      options: {
+        timeout: 30000,
+        javascript: true, // Enable JavaScript execution for dynamic content
+        extractText: true,
+        mobile: false,
+      },
+      cache: {
+        enabled: true,
+        ttl: 3600, // Cache for 1 hour
+        key: `link_metadata_${Buffer.from(url).toString('base64').substring(0, 50)}`
+      }
+    };
+
+    loggingService.info('Using advanced WebScraperTool for link extraction', {
+      url,
+      method: 'puppeteer-ai',
+      hasCache: scrapingRequest.cache?.enabled
+    });
+
+    // Call the web scraper tool
+    const resultString = await scraper._call(JSON.stringify(scrapingRequest));
+    const result: ScrapingResult = JSON.parse(resultString);
+
+    if (!result.success) {
+      throw new Error(result.error || 'Web scraping failed');
+    }
+
+    // Extract code blocks from the content
+    const codeBlocks: Array<{ language?: string; code: string }> = [];
+    if (result.data.extractedText) {
+      // Look for code patterns in the extracted text
+      const codePatterns = [
+        /```(\w+)?\n([\s\S]*?)```/g, // Markdown code blocks
+        /<pre><code(?:\s+class="language-(\w+)")?>([\s\S]*?)<\/code><\/pre>/g, // HTML code blocks
+        /<code(?:\s+class="language-(\w+)")?>([\s\S]*?)<\/code>/g, // Inline code
+      ];
+
+      for (const pattern of codePatterns) {
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(result.data.extractedText)) !== null) {
+          const language = match[1];
+          const code = match[2];
+          if (code && code.trim().length > 10) {
+            codeBlocks.push({ 
+              language, 
+              code: code.trim().substring(0, 2000) 
+            });
+          }
+        }
+      }
+    }
+
+    const urlObj = new URL(url);
+    
+    return {
+      url,
+      title: result.data.title ?? urlObj.hostname.replace('www.', ''),
+      description: result.data.summary ?? result.data.extractedText?.substring(0, 300),
+      fullContent: result.data.extractedText?.substring(0, 15000),
+      images: result.data.images,
+      codeBlocks: codeBlocks.length > 0 ? codeBlocks : undefined,
+      siteName: urlObj.hostname.replace('www.', ''),
+      type: 'website',
+      summary: result.data.summary, // AI-generated summary
+      structuredData: 'structuredData' in result.data ? (result.data.structuredData as Record<string, unknown>) : undefined,
+      relevanceScore: result.data.relevanceScore,
+      scrapingMethod: 'puppeteer-ai',
+    };
+  } catch (error) {
+    loggingService.error('Advanced web scraping failed', {
+      url,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    throw error; // Re-throw to fallback to cheerio method
+  }
 }
 
 /**
  * Extract metadata from a URL using Open Graph tags and HTML meta tags
  * Works for any public link that can be accessed
+ * Also scrapes full content including text, code blocks, and images
+ * 
+ * Strategy:
+ * 1. For complex sites (LinkedIn, Twitter, etc.) or when AI summary is needed: Use Puppeteer + AI
+ * 2. For simple sites: Use fast axios + cheerio approach
+ * 3. Fallback gracefully if advanced method fails
  */
-export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
+export async function extractLinkMetadata(url: string, useAdvancedScraping: boolean = false): Promise<LinkMetadata> {
+  const urlObj = new URL(url);
+  
+  // Determine if we should use advanced scraping
+  const needsAdvancedScraping = useAdvancedScraping || 
+    urlObj.hostname.includes('linkedin.com') ||
+    urlObj.hostname.includes('twitter.com') ||
+    urlObj.hostname.includes('x.com') ||
+    urlObj.hostname.includes('facebook.com') ||
+    urlObj.hostname.includes('instagram.com') ||
+    urlObj.hostname.includes('medium.com');
+
+  // Try advanced scraping first if needed
+  if (needsAdvancedScraping) {
+    try {
+      loggingService.debug('Attempting advanced scraping with Puppeteer + AI', {
+        url,
+        reason: useAdvancedScraping ? 'explicitly requested' : 'site requires JavaScript'
+      });
+      return await extractWithWebScraperTool(url);
+    } catch (error) {
+      loggingService.warn('Advanced scraping failed, falling back to cheerio', {
+        url,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Continue to fallback method
+    }
+  }
+
+  // Fallback to fast axios + cheerio method
   try {
     // Validate URL
     const urlObj = new URL(url);
     
     // Fetch the page with a timeout for any public link
     const response = await axios.get(url, {
-      timeout: 5000,
+      timeout: 10000, // Increased timeout for content-heavy pages
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; CostKatanaBot/1.0; +https://costkatana.com)',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -53,6 +202,67 @@ export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
     // Try to get h1 as additional fallback
     const h1Text = $('h1').first().text()?.trim();
 
+    // EXTRACT FULL CONTENT
+    // Remove unwanted elements
+    $('script, style, nav, header, footer, .nav, .navbar, .header, .footer, .sidebar, .cookie-banner, .ad, .advertisement, .social-share, .comments').remove();
+    
+    // Extract main content - try multiple selectors
+    let fullContent = '';
+    const contentSelectors = ['main', 'article', '.content', '.main-content', '.post-content', '.article-content', 'body'];
+    
+    for (const selector of contentSelectors) {
+      const element = $(selector).first();
+      if (element.length > 0) {
+        fullContent = element.text();
+        break;
+      }
+    }
+    
+    // Fallback to body if no specific content area found
+    if (!fullContent || fullContent.length < 100) {
+      fullContent = $('body').text();
+    }
+    
+    // Clean up the content
+    fullContent = fullContent
+      .replace(/\s+/g, ' ')  // Normalize whitespace
+      .replace(/\n\s*\n/g, '\n')  // Remove empty lines
+      .trim()
+      .substring(0, 15000); // Limit to 15000 chars to avoid token limits
+
+    // EXTRACT CODE BLOCKS
+    const codeBlocks: Array<{ language?: string; code: string }> = [];
+    
+    // Look for code in pre/code tags
+    $('pre code, pre, code.block, .code-block').each((_i, elem) => {
+      const $elem = $(elem);
+      const code = $elem.text().trim();
+      
+      if (code && code.length > 10) { // Only include meaningful code blocks
+        // Try to detect language from class names
+        const classes = $elem.attr('class') ?? '';
+        const langMatch = classes.match(/language-(\w+)|lang-(\w+)|(\w+)-code/);
+        const language = langMatch ? (langMatch[1] || langMatch[2] || langMatch[3]) : undefined;
+        
+        codeBlocks.push({ language, code: code.substring(0, 2000) }); // Limit each code block
+      }
+    });
+
+    // EXTRACT ALL IMAGES
+    const images: string[] = [];
+    $('img').each((_i, elem) => {
+      const src = $(elem).attr('src');
+      if (src) {
+        // Make relative URLs absolute
+        try {
+          const absoluteUrl = new URL(src, url).href;
+          images.push(absoluteUrl);
+        } catch {
+          // Skip invalid URLs
+        }
+      }
+    });
+
     // For GitHub repositories, extract repository info
     if (urlObj.hostname.includes('github.com')) {
       const pathParts = urlObj.pathname.split('/').filter(p => p);
@@ -72,6 +282,9 @@ export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
           image: ogImage ?? twitterImage,
           siteName: 'GitHub',
           type: 'repository',
+          fullContent, // Include scraped content
+          codeBlocks: codeBlocks.length > 0 ? codeBlocks : undefined,
+          images: images.length > 0 ? images.slice(0, 10) : undefined, // Limit to 10 images
         };
       }
     }
@@ -87,6 +300,8 @@ export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
           image: ogImage ?? twitterImage ?? `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
           siteName: 'YouTube',
           type: 'video',
+          fullContent: fullContent.length > 100 ? fullContent : undefined,
+          images: images.length > 0 ? images.slice(0, 5) : undefined,
         };
       }
     }
@@ -101,11 +316,20 @@ export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
       image: ogImage ?? twitterImage,
       siteName: ogSiteName ?? urlObj.hostname.replace('www.', ''),
       type: ogType ?? 'website',
+      fullContent: fullContent.length > 100 ? fullContent : undefined, // Only include if we got meaningful content
+      codeBlocks: codeBlocks.length > 0 ? codeBlocks : undefined,
+      images: images.length > 0 ? images.slice(0, 10) : undefined, // Limit to 10 images
+      scrapingMethod: 'axios-cheerio',
     };
 
     return metadata;
   } catch (error) {
     // Fallback to basic URL info if fetch fails (network error, timeout, etc.)
+    loggingService.warn('Cheerio-based scraping failed, returning basic metadata', {
+      url,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    
     const urlObj = new URL(url);
     
     // Try to extract meaningful info from URL path
@@ -118,10 +342,11 @@ export async function extractLinkMetadata(url: string): Promise<LinkMetadata> {
       description: `Public link to ${urlObj.hostname.replace('www.', '')}. Metadata extraction failed, but this is a public link.`,
       siteName: urlObj.hostname.replace('www.', ''),
       type: 'website',
+      scrapingMethod: 'axios-cheerio',
     };
   }
 }
-
+ 
 /**
  * Extract YouTube video ID from various YouTube URL formats
  */
