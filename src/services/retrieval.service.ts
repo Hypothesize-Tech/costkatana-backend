@@ -533,8 +533,21 @@ export class RetrievalService {
         const startTime = Date.now();
         
         try {
+            // Check if query contains a link - if so, skip Google Drive files to avoid confusion
+            const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+            const queryContainsLink = urlPattern.test(query);
+            
             // Get regular retrieval results first
             const regularResults = await this.retrieve(query, { ...options, useCache: false });
+            
+            // If query contains a link, skip Google Drive files and return regular results
+            if (queryContainsLink) {
+                loggingService.debug('Skipping Google Drive files - query contains link', {
+                    component: 'RetrievalService',
+                    queryPreview: query.substring(0, 100)
+                });
+                return regularResults;
+            }
             
             // If we have good results from regular retrieval, return them
             if (regularResults.documents.length >= (options.limit ?? 5)) {
