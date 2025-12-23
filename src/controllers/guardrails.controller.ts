@@ -335,8 +335,8 @@ export class GuardrailsController {
             const limits = {
                 free: {
                     tokensPerMonth: 1_000_000,
-                    requestsPerMonth: 10_000,
-                    logsPerMonth: 15_000,
+                    requestsPerMonth: 5_000,
+                    logsPerMonth: 5_000,
                     projects: 5,
                     workflows: 10,
                     seats: 1,
@@ -344,8 +344,8 @@ export class GuardrailsController {
                     price: 0
                 },
                 plus: {
-                    tokensPerMonth: 10_000_000,
-                    requestsPerMonth: 50_000,
+                    tokensPerMonth: 2_000_000,
+                    requestsPerMonth: 10_000,
                     logsPerMonth: 'unlimited',
                     projects: 'unlimited',
                     workflows: 100,
@@ -354,14 +354,14 @@ export class GuardrailsController {
                     price: 25
                 },
                 pro: {
-                    tokensPerMonth: 15_000_000,
-                    requestsPerMonth: 100_000,
+                    tokensPerMonth: 5_000_000,
+                    requestsPerMonth: 50_000,
                     logsPerMonth: 'unlimited',
                     projects: 'unlimited',
                     workflows: 100,
                     seats: 20,
                     models: 'all',
-                    price: 399
+                    price: 499
                 },
                 enterprise: {
                     tokensPerMonth: 'unlimited',
