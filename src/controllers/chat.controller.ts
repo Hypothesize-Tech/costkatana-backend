@@ -493,12 +493,14 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
     const userId = req.userId;
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
+    const includeArchived = req.query.includeArchived === 'true';
 
     try {
         loggingService.info('User conversations request initiated', {
             userId,
             limit,
             offset,
+            includeArchived,
             requestId: req.headers['x-request-id'] as string
         });
 
@@ -517,7 +519,8 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
         const conversations = await ChatService.getUserConversations(
             userId, 
             limit, 
-            offset
+            offset,
+            includeArchived
         );
 
         const duration = Date.now() - startTime;
@@ -527,6 +530,7 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
             duration,
             limit,
             offset,
+            includeArchived,
             conversationsCount: conversations.conversations?.length || 0,
             totalConversations: conversations.total || 0,
             requestId: req.headers['x-request-id'] as string
@@ -541,6 +545,7 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
                 userId,
                 limit,
                 offset,
+                includeArchived,
                 conversationsCount: conversations.conversations?.length || 0,
                 totalConversations: conversations.total || 0
             }
@@ -558,6 +563,7 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
             userId,
             limit,
             offset,
+            includeArchived,
             error: error.message || 'Unknown error',
             stack: error.stack,
             duration,
@@ -854,6 +860,280 @@ export const deleteConversation = async (req: AuthenticatedRequest, res: Respons
         res.status(500).json({
             success: false,
             message: 'Failed to delete conversation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Rename a conversation
+ */
+export const renameConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { id } = req.params;
+    const { title } = req.body;
+
+    try {
+        loggingService.info('Conversation rename request initiated', {
+            userId,
+            conversationId: id,
+            newTitle: title,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        if (!userId) {
+            loggingService.warn('Conversation rename request failed - no user authentication', {
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            return;
+        }
+
+        if (!title || title.trim().length === 0) {
+            loggingService.warn('Conversation rename request failed - invalid title', {
+                userId,
+                conversationId: id,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(400).json({
+                success: false,
+                message: 'Title is required and cannot be empty'
+            });
+            return;
+        }
+
+        const updatedConversation = await ChatService.renameConversation(userId, id, title);
+
+        const duration = Date.now() - startTime;
+
+        loggingService.info('Conversation renamed successfully', {
+            userId,
+            conversationId: id,
+            newTitle: title,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        loggingService.logBusiness({
+            event: 'conversation_renamed',
+            category: 'chat_management',
+            value: duration,
+            metadata: {
+                userId,
+                conversationId: id
+            }
+        });
+
+        res.json({
+            success: true,
+            data: updatedConversation
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Conversation rename failed', {
+            userId,
+            conversationId: id,
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to rename conversation',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Archive or unarchive a conversation
+ */
+export const archiveConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { id } = req.params;
+    const { archived } = req.body;
+
+    try {
+        loggingService.info('Conversation archive request initiated', {
+            userId,
+            conversationId: id,
+            archived,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        if (!userId) {
+            loggingService.warn('Conversation archive request failed - no user authentication', {
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            return;
+        }
+
+        if (typeof archived !== 'boolean') {
+            loggingService.warn('Conversation archive request failed - invalid archived value', {
+                userId,
+                conversationId: id,
+                archived,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(400).json({
+                success: false,
+                message: 'archived must be a boolean value'
+            });
+            return;
+        }
+
+        const updatedConversation = await ChatService.archiveConversation(userId, id, archived);
+
+        const duration = Date.now() - startTime;
+
+        loggingService.info('Conversation archive status updated successfully', {
+            userId,
+            conversationId: id,
+            archived,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        loggingService.logBusiness({
+            event: archived ? 'conversation_archived' : 'conversation_unarchived',
+            category: 'chat_management',
+            value: duration,
+            metadata: {
+                userId,
+                conversationId: id
+            }
+        });
+
+        res.json({
+            success: true,
+            data: updatedConversation
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Conversation archive failed', {
+            userId,
+            conversationId: id,
+            archived,
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update conversation archive status',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Pin or unpin a conversation
+ */
+export const pinConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { id } = req.params;
+    const { pinned } = req.body;
+
+    try {
+        loggingService.info('Conversation pin request initiated', {
+            userId,
+            conversationId: id,
+            pinned,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        if (!userId) {
+            loggingService.warn('Conversation pin request failed - no user authentication', {
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            return;
+        }
+
+        if (typeof pinned !== 'boolean') {
+            loggingService.warn('Conversation pin request failed - invalid pinned value', {
+                userId,
+                conversationId: id,
+                pinned,
+                requestId: req.headers['x-request-id'] as string
+            });
+
+            res.status(400).json({
+                success: false,
+                message: 'pinned must be a boolean value'
+            });
+            return;
+        }
+
+        const updatedConversation = await ChatService.pinConversation(userId, id, pinned);
+
+        const duration = Date.now() - startTime;
+
+        loggingService.info('Conversation pin status updated successfully', {
+            userId,
+            conversationId: id,
+            pinned,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        loggingService.logBusiness({
+            event: pinned ? 'conversation_pinned' : 'conversation_unpinned',
+            category: 'chat_management',
+            value: duration,
+            metadata: {
+                userId,
+                conversationId: id
+            }
+        });
+
+        res.json({
+            success: true,
+            data: updatedConversation
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Conversation pin failed', {
+            userId,
+            conversationId: id,
+            pinned,
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update conversation pin status',
             error: error instanceof Error ? error.message : 'Unknown error'
         });
     }

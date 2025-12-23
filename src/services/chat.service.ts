@@ -64,6 +64,8 @@ export interface ConversationResponse {
     messageCount: number;
     lastMessage?: string;
     totalCost?: number;
+    isPinned?: boolean;
+    isArchived?: boolean;
     githubContext?: {
         connectionId?: string;
         repositoryId?: number;
@@ -1820,22 +1822,26 @@ Please analyze the content from the Google Drive files above and provide a relev
     static async getUserConversations(
         userId: string, 
         limit: number = 20, 
-        offset: number = 0
+        offset: number = 0,
+        includeArchived: boolean = false
     ): Promise<{ conversations: ConversationResponse[]; total: number }> {
         try {
-            const conversations = await Conversation.find({
+            const query: any = {
                 userId: userId,
                 isActive: true
-            })
-            .sort({ updatedAt: -1 })
+            };
+
+            if (!includeArchived) {
+                query.isArchived = { $ne: true };
+            }
+
+            const conversations = await Conversation.find(query)
+            .sort({ isPinned: -1, updatedAt: -1 })
             .skip(offset)
             .limit(limit)
             .lean();
 
-            const total = await Conversation.countDocuments({
-                userId: userId,
-                isActive: true
-            });
+            const total = await Conversation.countDocuments(query);
 
             return {
                 conversations: conversations.map(this.convertConversationToResponse),
@@ -1890,7 +1896,7 @@ Please analyze the content from the Google Drive files above and provide a relev
                 },
                 { 
                     isActive: false,
-                    updatedAt: new Date()
+                    deletedAt: new Date()
                 }
             );
 
@@ -1903,6 +1909,99 @@ Please analyze the content from the Google Drive files above and provide a relev
         } catch (error) {
             loggingService.error('Error deleting conversation:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to delete conversation');
+        }
+    }
+
+    /**
+     * Rename a conversation
+     */
+    static async renameConversation(userId: string, conversationId: string, title: string): Promise<ConversationResponse> {
+        try {
+            const conversation = await Conversation.findOneAndUpdate(
+                { 
+                    _id: conversationId,
+                    userId: userId,
+                    isActive: true
+                },
+                { 
+                    title: title
+                },
+                { new: true }
+            );
+
+            if (!conversation) {
+                throw new Error('Conversation not found or access denied');
+            }
+
+            loggingService.info(`Conversation renamed: ${conversationId} to "${title}" for user ${userId}`);
+
+            return this.convertConversationToResponse(conversation);
+
+        } catch (error) {
+            loggingService.error('Error renaming conversation:', { error: error instanceof Error ? error.message : String(error) });
+            throw new Error('Failed to rename conversation');
+        }
+    }
+
+    /**
+     * Archive or unarchive a conversation
+     */
+    static async archiveConversation(userId: string, conversationId: string, archived: boolean): Promise<ConversationResponse> {
+        try {
+            const conversation = await Conversation.findOneAndUpdate(
+                { 
+                    _id: conversationId,
+                    userId: userId,
+                    isActive: true
+                },
+                { 
+                    isArchived: archived
+                },
+                { new: true }
+            );
+
+            if (!conversation) {
+                throw new Error('Conversation not found or access denied');
+            }
+
+            loggingService.info(`Conversation ${archived ? 'archived' : 'unarchived'}: ${conversationId} for user ${userId}`);
+
+            return this.convertConversationToResponse(conversation);
+
+        } catch (error) {
+            loggingService.error('Error archiving conversation:', { error: error instanceof Error ? error.message : String(error) });
+            throw new Error('Failed to archive conversation');
+        }
+    }
+
+    /**
+     * Pin or unpin a conversation
+     */
+    static async pinConversation(userId: string, conversationId: string, pinned: boolean): Promise<ConversationResponse> {
+        try {
+            const conversation = await Conversation.findOneAndUpdate(
+                { 
+                    _id: conversationId,
+                    userId: userId,
+                    isActive: true
+                },
+                { 
+                    isPinned: pinned
+                },
+                { new: true }
+            );
+
+            if (!conversation) {
+                throw new Error('Conversation not found or access denied');
+            }
+
+            loggingService.info(`Conversation ${pinned ? 'pinned' : 'unpinned'}: ${conversationId} for user ${userId}`);
+
+            return this.convertConversationToResponse(conversation);
+
+        } catch (error) {
+            loggingService.error('Error pinning conversation:', { error: error instanceof Error ? error.message : String(error) });
+            throw new Error('Failed to pin conversation');
         }
     }
 
@@ -2010,6 +2109,8 @@ Please analyze the content from the Google Drive files above and provide a relev
             messageCount: conversation.messageCount || 0,
             lastMessage: conversation.lastMessage,
             totalCost: conversation.totalCost || 0,
+            isPinned: conversation.isPinned || false,
+            isArchived: conversation.isArchived || false,
             githubContext: conversation.githubContext ? {
                 connectionId: conversation.githubContext.connectionId?.toString(),
                 repositoryId: conversation.githubContext.repositoryId,

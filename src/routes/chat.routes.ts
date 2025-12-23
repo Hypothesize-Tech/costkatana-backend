@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.middleware';
 import { validateRequest } from '../middleware/validation.middleware';
-import { body } from 'express-validator';
+import { body, param } from 'express-validator';
 import {
     sendMessage,
     getConversationHistory,
@@ -9,7 +9,10 @@ import {
     createConversation,
     deleteConversation,
     getAvailableModels,
-    updateConversationGitHubContext
+    updateConversationGitHubContext,
+    renameConversation,
+    archiveConversation,
+    pinConversation
 } from '../controllers/chat.controller';
 import { IntegrationChatController } from '../controllers/integrationChat.controller';
 
@@ -55,6 +58,42 @@ router.patch('/conversations/:conversationId/github-context', authenticate, upda
 
 // Delete a conversation
 router.delete('/conversations/:conversationId', authenticate, deleteConversation);
+
+// Rename a conversation
+router.put(
+    '/conversations/:id/rename',
+    [
+        param('id').isMongoId().withMessage('Invalid conversation ID'),
+        body('title').notEmpty().trim().isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters')
+    ],
+    validateRequest,
+    authenticate,
+    renameConversation
+);
+
+// Archive/unarchive a conversation
+router.put(
+    '/conversations/:id/archive',
+    [
+        param('id').isMongoId().withMessage('Invalid conversation ID'),
+        body('archived').isBoolean().withMessage('archived must be a boolean')
+    ],
+    validateRequest,
+    authenticate,
+    archiveConversation
+);
+
+// Pin/unpin a conversation
+router.put(
+    '/conversations/:id/pin',
+    [
+        param('id').isMongoId().withMessage('Invalid conversation ID'),
+        body('pinned').isBoolean().withMessage('pinned must be a boolean')
+    ],
+    validateRequest,
+    authenticate,
+    pinConversation
+);
 
 /**
  * Integration Chat Routes

@@ -19,6 +19,9 @@ export interface IConversation extends Document {
     lastMessage?: string;
     lastMessageAt?: Date;
     isActive: boolean;
+    isPinned: boolean;
+    isArchived: boolean;
+    deletedAt?: Date;
     githubContext?: IGitHubContext;
     createdAt: Date;
     updatedAt: Date;
@@ -59,6 +62,18 @@ const conversationSchema = new Schema<IConversation>({
         type: Boolean,
         default: true
     },
+    isPinned: {
+        type: Boolean,
+        default: false
+    },
+    isArchived: {
+        type: Boolean,
+        default: false
+    },
+    deletedAt: {
+        type: Date,
+        required: false
+    },
     githubContext: {
         type: {
             connectionId: Schema.Types.ObjectId,
@@ -78,5 +93,8 @@ const conversationSchema = new Schema<IConversation>({
 // Indexes for performance
 conversationSchema.index({ userId: 1, updatedAt: -1 });
 conversationSchema.index({ userId: 1, isActive: 1, updatedAt: -1 });
+conversationSchema.index({ userId: 1, isPinned: 1, updatedAt: -1 });
+conversationSchema.index({ userId: 1, isArchived: 1, updatedAt: -1 });
+conversationSchema.index({ userId: 1, isActive: 1, isArchived: 1, isPinned: 1, updatedAt: -1 });
 
 export const Conversation = model<IConversation>('Conversation', conversationSchema); 
