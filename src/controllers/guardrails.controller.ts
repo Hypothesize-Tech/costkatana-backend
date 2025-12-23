@@ -337,9 +337,10 @@ export class GuardrailsController {
                     tokensPerMonth: 1_000_000,
                     requestsPerMonth: 5_000,
                     logsPerMonth: 5_000,
-                    projects: 5,
+                    projects: 1,
                     workflows: 10,
                     seats: 1,
+                    cortexDailyUsage: 0,
                     models: ['claude-3-haiku', 'gpt-3.5-turbo', 'gemini-1.5-flash'],
                     price: 0
                 },
@@ -349,7 +350,8 @@ export class GuardrailsController {
                     logsPerMonth: 'unlimited',
                     projects: 'unlimited',
                     workflows: 100,
-                    seats: 'per-seat pricing',
+                    seats: 1,
+                    cortexDailyUsage: 0,
                     models: 'all',
                     price: 25
                 },
@@ -360,6 +362,7 @@ export class GuardrailsController {
                     projects: 'unlimited',
                     workflows: 100,
                     seats: 20,
+                    cortexDailyUsage: 0,
                     models: 'all',
                     price: 499
                 },
@@ -370,6 +373,7 @@ export class GuardrailsController {
                     projects: 'unlimited',
                     workflows: 'unlimited',
                     seats: 'custom',
+                    cortexDailyUsage: 'unlimited',
                     models: 'all + custom',
                     price: 'custom'
                 }
