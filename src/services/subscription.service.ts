@@ -13,8 +13,8 @@ import { ObjectId } from 'mongoose';
 export const SUBSCRIPTION_PLAN_LIMITS = {
     free: {
         tokensPerMonth: 1_000_000, // 1M tokens
-        requestsPerMonth: 10_000, // 10K requests
-        logsPerMonth: 15_000, // 15K logs
+        requestsPerMonth: 5_000, // 5K requests
+        logsPerMonth: 5_000, // 5K logs
         projects: 1,
         workflows: 10,
         seats: 1,
@@ -25,33 +25,33 @@ export const SUBSCRIPTION_PLAN_LIMITS = {
         features: ['basic_analytics', 'usage_tracking', 'unified_endpoint'],
     },
     plus: {
-        tokensPerMonth: 5_000_000, // 5M tokens included
-        requestsPerMonth: 50_000, // 50K requests
+        tokensPerMonth: 2_000_000, // 2M tokens included
+        requestsPerMonth: 10_000, // 10K requests
         logsPerMonth: -1, // Unlimited
         projects: -1, // Unlimited
         workflows: 100,
         seats: 1,
         cortexDailyUsage: {
-            limit: 3, // 3 per day
+            limit: 0, // Not available
         },
         allowedModels: ['*'], // All models
-        features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 'failover', 'security_moderation', 'cortex_meta_language', 'usage_tracking', 'unified_endpoint', 'advanced_metrics'],
+        features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 'failover', 'security_moderation', 'usage_tracking', 'unified_endpoint', 'advanced_metrics'],
         overagePricing: {
             tokensPer1M: 5, // $5 per 1M tokens over included
         },
     },
     pro: {
         tokensPerMonth: 5_000_000, // 5M tokens included per user
-        requestsPerMonth: 100_000, // 100K requests
+        requestsPerMonth: 50_000, // 50K requests
         logsPerMonth: -1, // Unlimited
         projects: -1, // Unlimited
         workflows: 100, // Per user
         seats: 1, // Base seat included, additional at $20/user/month
         cortexDailyUsage: {
-            limit: 30, // 30 per day
+            limit: 0, // Not available
         },
         allowedModels: ['*'], // All models
-        features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 'failover', 'security_moderation', 'cortex_meta_language', 'usage_tracking', 'unified_endpoint', 'advanced_metrics', 'priority_support'],
+        features: ['advanced_analytics', 'predictive_analytics', 'batch_processing', 'failover', 'security_moderation', 'usage_tracking', 'unified_endpoint', 'advanced_metrics', 'priority_support'],
         overagePricing: {
             tokensPer1M: 5, // $5 per 1M tokens over included
             seatPerMonth: 20, // $20 per additional seat per month

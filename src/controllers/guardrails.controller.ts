@@ -335,33 +335,36 @@ export class GuardrailsController {
             const limits = {
                 free: {
                     tokensPerMonth: 1_000_000,
-                    requestsPerMonth: 10_000,
-                    logsPerMonth: 15_000,
-                    projects: 5,
+                    requestsPerMonth: 5_000,
+                    logsPerMonth: 5_000,
+                    projects: 1,
                     workflows: 10,
                     seats: 1,
+                    cortexDailyUsage: 0,
                     models: ['claude-3-haiku', 'gpt-3.5-turbo', 'gemini-1.5-flash'],
                     price: 0
                 },
                 plus: {
-                    tokensPerMonth: 10_000_000,
-                    requestsPerMonth: 50_000,
+                    tokensPerMonth: 2_000_000,
+                    requestsPerMonth: 10_000,
                     logsPerMonth: 'unlimited',
                     projects: 'unlimited',
                     workflows: 100,
-                    seats: 'per-seat pricing',
+                    seats: 1,
+                    cortexDailyUsage: 0,
                     models: 'all',
                     price: 25
                 },
                 pro: {
-                    tokensPerMonth: 15_000_000,
-                    requestsPerMonth: 100_000,
+                    tokensPerMonth: 5_000_000,
+                    requestsPerMonth: 50_000,
                     logsPerMonth: 'unlimited',
                     projects: 'unlimited',
                     workflows: 100,
                     seats: 20,
+                    cortexDailyUsage: 0,
                     models: 'all',
-                    price: 399
+                    price: 499
                 },
                 enterprise: {
                     tokensPerMonth: 'unlimited',
@@ -370,6 +373,7 @@ export class GuardrailsController {
                     projects: 'unlimited',
                     workflows: 'unlimited',
                     seats: 'custom',
+                    cortexDailyUsage: 'unlimited',
                     models: 'all + custom',
                     price: 'custom'
                 }
