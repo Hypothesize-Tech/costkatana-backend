@@ -4,7 +4,7 @@ import { StateGraph, Annotation } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
 import { langSmithService } from './langsmith.service';
 import { RetryWithBackoff, RetryConfigs } from '../utils/retryWithBackoff';
-import { WebScraperTool } from '../tools/webScraper.tool';
+import { WebSearchTool } from '../tools/webSearch.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { memoryService, MemoryContext, MemoryService } from './memory.service';
 import { userPreferenceService } from './userPreference.service';
@@ -106,7 +106,7 @@ export class MultiAgentFlowService {
     private webScrapingAgent!: ChatBedrockConverse;
     private graph: any;
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
-    private webScraperTool: WebScraperTool;
+    private webSearchTool: WebSearchTool;
     private trendingDetector: TrendingDetectorService;
     private retryService: RetryWithBackoff;
     private trendingDetectorService: TrendingDetectorService;
@@ -127,15 +127,15 @@ export class MultiAgentFlowService {
         });
         
         this.retryService = new RetryWithBackoff();
-        this.webScraperTool = new WebScraperTool();
+        this.webSearchTool = new WebSearchTool();
         this.trendingDetectorService = new TrendingDetectorService();
         this.trendingDetector = this.trendingDetectorService;
         
         this.initializeAgents();
         this.initializeGraph();
         
-        // Initialize web scraping components
-        this.webScraperTool = new WebScraperTool();
+        // Initialize web search components
+        this.webSearchTool = new WebSearchTool();
         this.trendingDetector = new TrendingDetectorService();
         
         // Initialize retry mechanism for multi-agent operations
@@ -664,7 +664,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 return { agentPath: ['web_scraping_no_sources'] };
             }
 
-            loggingService.info(`🕷️ Starting intelligent web scraping from ${sources.length} sources...`);
+            loggingService.info(`🔍 Starting web search from ${sources.length} sources...`);
             if (trendingAnalysis?.suggestedSources) {
                 loggingService.info(`🎯 Using trending analysis for ${sources.length} sources`);
             }
@@ -676,52 +676,37 @@ Would you like me to help you with anything else, or would you prefer to check t
                 const source = sources[i];
                 
                 try {
-                    loggingService.info(`📄 Scraping: ${source}`);
+                    loggingService.info(`📄 Fetching: ${source}`);
                     
-                    // Get scraping template for known sites
-                    const template = this.trendingDetector.getScrapingTemplate(source);
-                    
+                    // Use simplified scraping request (no Puppeteer, just axios + cheerio)
                     const scrapingRequest = {
                         operation: 'scrape' as const,
                         url: source,
-                        selectors: template?.selectors || trendingAnalysis?.extractionStrategy?.selectors || {
-                            title: 'h1, .title, .headline',
-                            content: '.content, article, .post',
-                            links: 'a[href]'
-                        },
-                        options: {
-                            timeout: 20000, // Increased timeout for complex platforms
-                            javascript: template?.options?.javascript ?? trendingAnalysis?.extractionStrategy?.javascript ?? true, // Default to true for better compatibility
-                            waitFor: template?.options?.waitFor || trendingAnalysis?.extractionStrategy?.waitFor,
-                            extractText: true
-                        },
                         cache: {
                             enabled: true,
-                            ttl: trendingAnalysis?.cacheStrategy?.ttl || 1800, // 30 minutes default
                             key: `scrape_${Buffer.from(source).toString('base64')}`
                         }
                     };
 
-                    const result = await this.webScraperTool._call(JSON.stringify(scrapingRequest));
+                    const result = await this.webSearchTool._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success) {
                         scrapingResults.push(parsedResult);
-                        loggingService.info(`✅ Successfully scraped: ${source}`);
+                        loggingService.info(`✅ Successfully fetched: ${source}`);
                         loggingService.info(`📄 Extracted content length: ${parsedResult.data?.extractedText?.length || 0} chars`);
                         loggingService.info(`📄 Title: ${parsedResult.data?.title || 'No title'}`);
-                        loggingService.info(`📄 Content preview: ${(parsedResult.data?.extractedText || '').substring(0, 200)}...`);
                     } else {
-                        loggingService.warn(`❌ Failed to scrape: ${source} - ${parsedResult.error}`);
+                        loggingService.warn(`❌ Failed to fetch: ${source} - ${parsedResult.error}`);
                     }
 
                 } catch (error) {
-                    loggingService.error(`❌ Error scraping ${source}:`, { error: error instanceof Error ? error.message : String(error) });
+                    loggingService.error(`❌ Error fetching ${source}:`, { error: error instanceof Error ? error.message : String(error) });
                 }
             }
 
             if (scrapingResults.length === 0) {
-                loggingService.warn('❌ All web scraping failed, providing fallback response');
+                loggingService.warn('❌ All web fetches failed, providing fallback response');
                 return { 
                     agentPath: ['web_scraping_failed'],
                     failureCount: 1,
@@ -733,7 +718,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 };
             }
 
-            loggingService.info(`🎉 Successfully scraped ${scrapingResults.length} sources`);
+            loggingService.info(`🎉 Successfully fetched ${scrapingResults.length} sources`);
 
             return {
                 scrapingResults,
@@ -1529,9 +1514,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
      */
     async cleanup(): Promise<void> {
         try {
-            // Cleanup web scraper tool
-            await this.webScraperTool.cleanup();
-            
+        
             // Reset EventEmitter max listeners to default
             EventEmitter.defaultMaxListeners = 10;
             

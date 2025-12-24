@@ -86,6 +86,7 @@ export interface ChatSendMessageRequest {
     maxTokens?: number;
     chatMode?: 'fastest' | 'cheapest' | 'balanced';
     useMultiAgent?: boolean;
+    useWebSearch?: boolean; // Enable web search for this query
     documentIds?: string[]; // Document IDs for RAG context
     githubContext?: {
         connectionId: string;
@@ -149,6 +150,9 @@ export interface ChatSendMessageResponse {
         url: string;
         type: 'document' | 'spreadsheet' | 'presentation' | 'file' | 'email' | 'calendar' | 'form';
     }>;
+    // Web search metadata
+    webSearchUsed?: boolean;
+    quotaUsed?: number;
     metadata?: any;
 }
 
@@ -423,8 +427,16 @@ export class ChatService {
         };
     }
 
-    private static decideRoute(context: ConversationContext, message: string): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
+    private static decideRoute(context: ConversationContext, message: string, useWebSearch?: boolean): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
         const lowerMessage = message.toLowerCase();
+        
+        // If web search is explicitly enabled, force web scraper route
+        if (useWebSearch === true) {
+            loggingService.info('🌐 Web search explicitly enabled, routing to web scraper', {
+                query: message.substring(0, 100)
+            });
+            return 'web_scraper';
+        }
         
         // High confidence CostKatana queries go to knowledge base
         if (context.lastDomain === 'costkatana' && context.subjectConfidence > 0.7) {
@@ -611,7 +623,7 @@ export class ChatService {
             });
         } else {
             // Decide routing based on context
-            route = this.decideRoute(context, resolvedMessage || '');
+            route = this.decideRoute(context, resolvedMessage || '', request.useWebSearch);
         }
         
         loggingService.info('🎯 Route decision', {
@@ -857,47 +869,139 @@ Please analyze the content from the Google Drive files above and provide a relev
         context: ConversationContext,
         contextPreamble: string,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; webSearchUsed?: boolean; quotaUsed?: number }> {
         
         loggingService.info('🌐 Routing to web scraper', {
             subject: context.currentSubject,
-            domain: context.lastDomain
+            domain: context.lastDomain,
+            useWebSearch: request.useWebSearch
         });
         
         try {
-            const { agentService } = await import('./agent.service');
+            const { WebSearchTool } = await import('../tools/webSearch.tool');
+            const { googleSearchService } = await import('./googleSearch.service');
+            const { ChatBedrockConverse } = await import('@langchain/aws');
             
-            // Build enhanced query with context
-            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
-            
-            const agentResponse = await agentService.query({
-                userId: request.userId,
-                query: enhancedQuery,
-                context: {
-                    conversationId: context.conversationId,
-                    previousMessages: recentMessages.map(msg => ({
-                        role: msg.role,
-                        content: msg.content,
-                        metadata: (msg as any).metadata // Include metadata for document content
-                    })),
-                    useWebScraper: true,
-                    searchTerms: this.extractSearchTerms(request.message || '')
+            // Directly call web search tool to ensure web search is performed
+            const webSearchTool = new WebSearchTool();
+            const searchRequest = {
+                operation: 'search' as const,
+                query: request.message || '',
+                options: {
+                    deepContent: true,
+                    costDomains: true // Restrict to trusted cost/pricing domains
+                },
+                cache: {
+                    enabled: true,
+                    ttl: 3600 // 1 hour cache
                 }
+            };
+            
+            loggingService.info('🔍 Performing direct web search', {
+                query: request.message,
+                operation: 'search'
             });
-
-            if (agentResponse.success && agentResponse.response) {
-                return {
-                    response: agentResponse.response,
-                    agentThinking: agentResponse.thinking,
-                    agentPath: ['web_scraper'],
-                    optimizationsApplied: ['context_enhancement', 'web_scraper_routing'],
-                    cacheHit: false,
-                    riskLevel: 'medium'
-                };
+            
+            const webSearchResultString = await webSearchTool._call(JSON.stringify(searchRequest));
+            const webSearchResult = JSON.parse(webSearchResultString);
+            
+            // Get quota status
+            let quotaUsed: number | undefined;
+            if (googleSearchService.isConfigured()) {
+                try {
+                    const quotaStatus = await googleSearchService.getQuotaStatus();
+                    quotaUsed = quotaStatus.count;
+                } catch (error) {
+                    loggingService.warn('Failed to get quota status', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
             }
+            
+            if (!webSearchResult.success || !webSearchResult.data.searchResults || webSearchResult.data.searchResults.length === 0) {
+                loggingService.warn('Web search returned no results, falling back to conversational flow', {
+                    error: webSearchResult.error
+                });
+                return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+            }
+            
+            // Use LLM to generate response based on web search results
+            const llm = new ChatBedrockConverse({
+                model: request.modelId || 'amazon.nova-pro-v1:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.3,
+                maxTokens: 2000,
+            });
+            
+            // Build prompt with web search results
+            const searchResultsText = webSearchResult.data.searchResults
+                .map((result: any, index: number) => 
+                    `[${index + 1}] ${result.title}\nURL: ${result.url}\n${result.snippet || result.content || ''}`
+                )
+                .join('\n\n');
+            
+            const responsePrompt = `You are a helpful AI assistant. The user asked: "${request.message}"
+
+I've performed a web search and found the following results:
+
+${searchResultsText}
+
+${webSearchResult.data.summary ? `\nSummary of search results:\n${webSearchResult.data.summary}\n` : ''}
+
+Based on the web search results above, provide a direct, accurate answer to the user's question. 
+- Cite specific sources when mentioning facts
+- Be concise but comprehensive
+- Focus on the most relevant information from the search results
+- If the search results don't fully answer the question, say so and provide what information is available
+
+Answer:`;
+            
+            const llmResponse = await llm.invoke(responsePrompt);
+            const response = llmResponse.content.toString();
+            
+            loggingService.info('✅ Web search response generated', {
+                query: request.message,
+                resultsCount: webSearchResult.data.searchResults.length,
+                responseLength: response.length
+            });
+            
+            return {
+                response: response,
+                agentThinking: {
+                    title: 'Web Search Analysis',
+                    summary: `Searched the web for "${request.message}" and found ${webSearchResult.data.searchResults.length} relevant results.`,
+                    steps: [
+                        {
+                            step: 1,
+                            description: 'Web Search',
+                            reasoning: `Performed web search using Google Custom Search API for: "${request.message}"`,
+                            outcome: `Found ${webSearchResult.data.searchResults.length} relevant results from trusted sources`
+                        },
+                        {
+                            step: 2,
+                            description: 'Content Analysis',
+                            reasoning: 'Analyzed search results and extracted key information',
+                            outcome: webSearchResult.data.summary || 'Extracted relevant information from search results'
+                        },
+                        {
+                            step: 3,
+                            description: 'Response Generation',
+                            reasoning: 'Generated comprehensive answer based on web search results',
+                            outcome: 'Provided accurate, up-to-date information with source citations'
+                        }
+                    ]
+                },
+                agentPath: ['web_scraper', 'web_search_completed'],
+                optimizationsApplied: ['context_enhancement', 'web_scraper_routing', 'direct_web_search'],
+                cacheHit: false,
+                riskLevel: 'medium',
+                webSearchUsed: true,
+                quotaUsed
+            };
         } catch (error) {
-            loggingService.warn('Web scraper routing failed, falling back to conversational flow', {
-                error: error instanceof Error ? error.message : String(error)
+            loggingService.error('Web scraper routing failed', {
+                error: error instanceof Error ? error.message : String(error),
+                errorStack: error instanceof Error ? error.stack : undefined
             });
         }
         
@@ -905,32 +1009,6 @@ Please analyze the content from the Google Drive files above and provide a relev
         return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
     }
 
-    private static extractSearchTerms(message: string): string[] {
-        const lowerMessage = message.toLowerCase();
-        const searchTerms: string[] = [];
-        
-        // Extract potential search terms
-        const words = message.split(/\s+/).filter(word => 
-            word.length > 3 && 
-            !['what', 'how', 'when', 'where', 'why', 'which', 'who', 'the', 'and', 'or', 'but', 'for', 'with', 'from', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once'].includes(word.toLowerCase())
-        );
-        
-        // Add specific terms based on context
-        if (lowerMessage.includes('latest') || lowerMessage.includes('recent')) {
-            searchTerms.push('latest', 'recent', 'new');
-        }
-        if (lowerMessage.includes('news') || lowerMessage.includes('update')) {
-            searchTerms.push('news', 'update', 'announcement');
-        }
-        if (lowerMessage.includes('trending') || lowerMessage.includes('popular')) {
-            searchTerms.push('trending', 'popular', 'viral');
-        }
-        
-        // Add extracted words
-        searchTerms.push(...words.slice(0, 5)); // Limit to 5 terms
-        
-        return [...new Set(searchTerms)]; // Remove duplicates
-    }
 
     private static async handleMultiAgentRoute(
         request: ChatSendMessageRequest,
@@ -1761,7 +1839,10 @@ Please analyze the content from the Google Drive files above and provide a relev
                 cacheHit,
                 agentPath,
                 riskLevel,
-                templateUsed: templateMetadata
+                templateUsed: templateMetadata,
+                // Web search metadata
+                webSearchUsed: (processingResult as any).webSearchUsed || false,
+                quotaUsed: (processingResult as any).quotaUsed
             };
 
         } catch (error) {

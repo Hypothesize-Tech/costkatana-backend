@@ -289,7 +289,7 @@ export class LifeUtilityTool extends Tool {
                         }
                     };
 
-                    const result = await this.lifeUtilityService.webScraper._call(JSON.stringify(scrapingRequest));
+                    const result = await this.lifeUtilityService.webSearch._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success && parsedResult.data?.extractedText) {
