@@ -1861,20 +1861,29 @@ Answer:`;
         offset: number = 0
     ): Promise<{ messages: ChatMessageResponse[]; total: number; conversation: ConversationResponse | null }> {
         try {
+            // Validate ObjectId format
+            if (!Types.ObjectId.isValid(conversationId)) {
+                loggingService.error('Invalid conversation ID format', { conversationId, userId });
+                throw new Error('Invalid conversation ID format');
+            }
+
             // Verify conversation ownership
             const conversation = await Conversation.findOne({
-                _id: conversationId,
+                _id: new Types.ObjectId(conversationId),
                 userId: userId,
                 isActive: true
             });
             
             if (!conversation) {
+                loggingService.warn('Conversation not found or access denied', { conversationId, userId });
                 throw new Error('Conversation not found or access denied');
             }
 
+            const conversationObjectId = new Types.ObjectId(conversationId);
+
             // Get messages with pagination
             const messages = await ChatMessage.find({
-                conversationId: new Types.ObjectId(conversationId)
+                conversationId: conversationObjectId
             })
             .sort({ createdAt: 1 })
             .skip(offset)
@@ -1882,18 +1891,27 @@ Answer:`;
             .lean();
 
             const total = await ChatMessage.countDocuments({
-                conversationId: new Types.ObjectId(conversationId)
+                conversationId: conversationObjectId
             });
 
             return {
-                messages: messages.map(this.convertMessageToResponse),
+                messages: messages.map(msg => this.convertMessageToResponse(msg)),
                 total,
                 conversation: this.convertConversationToResponse(conversation)
             };
 
         } catch (error) {
-            loggingService.error('Error getting conversation history:', { error: error instanceof Error ? error.message : String(error) });
-            throw new Error('Failed to get conversation history');
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            loggingService.error('Error getting conversation history', { 
+                error: errorMessage,
+                stack: errorStack,
+                conversationId,
+                userId,
+                limit,
+                offset
+            });
+            throw new Error(`Failed to get conversation history: ${errorMessage}`);
         }
     }
 
@@ -2207,16 +2225,34 @@ Answer:`;
      * Convert MongoDB message document to response format
      */
     private static convertMessageToResponse(message: any): ChatMessageResponse {
-        return {
-            id: message._id.toString(),
-            conversationId: message.conversationId.toString(),
-            role: message.role,
-            content: message.content,
-            modelId: message.modelId,
-            attachedDocuments: message.attachedDocuments,
-            timestamp: message.createdAt,
-            metadata: message.metadata
-        };
+        try {
+            return {
+                id: message._id ? (typeof message._id === 'string' ? message._id : message._id.toString()) : '',
+                conversationId: message.conversationId ? (typeof message.conversationId === 'string' ? message.conversationId : message.conversationId.toString()) : '',
+                role: message.role || 'user',
+                content: message.content || '',
+                modelId: message.modelId,
+                attachedDocuments: message.attachedDocuments || [],
+                timestamp: message.createdAt || message.timestamp || new Date(),
+                metadata: message.metadata || {}
+            };
+        } catch (error) {
+            loggingService.error('Error converting message to response', { 
+                error: error instanceof Error ? error.message : String(error),
+                messageId: message._id
+            });
+            // Return a safe default response
+            return {
+                id: message._id ? String(message._id) : '',
+                conversationId: message.conversationId ? String(message.conversationId) : '',
+                role: 'user',
+                content: message.content || '',
+                modelId: message.modelId,
+                attachedDocuments: [],
+                timestamp: new Date(),
+                metadata: {}
+            };
+        }
     }
 
     /**
