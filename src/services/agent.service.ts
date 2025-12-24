@@ -8,7 +8,7 @@ import { ProjectManagerTool } from "../tools/projectManager.tool";
 import { ModelSelectorTool } from "../tools/modelSelector.tool";
 import { AnalyticsManagerTool } from "../tools/analyticsManager.tool";
 import { OptimizationManagerTool } from "../tools/optimizationManager.tool";
-import { WebScraperTool } from "../tools/webScraper.tool";
+import { WebSearchTool } from "../tools/webSearch.tool";
 import { vectorStoreService } from "./vectorStore.service";
 import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
 import { loggingService } from "./logging.service";
@@ -141,7 +141,7 @@ export class AgentService {
         this.toolFactories.set('model_selector', () => new ModelSelectorTool());
         this.toolFactories.set('analytics_manager', () => new AnalyticsManagerTool());
         this.toolFactories.set('optimization_manager', () => new OptimizationManagerTool());
-        this.toolFactories.set('web_scraper', () => new WebScraperTool());
+        this.toolFactories.set('web_search', () => new WebSearchTool());
         
         loggingService.info('🔧 Tool factories initialized for lazy loading');
     }

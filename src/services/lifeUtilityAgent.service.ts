@@ -1,7 +1,7 @@
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 import { loggingService } from './logging.service';
-import { WebScraperTool } from '../tools/webScraper.tool';
+import { WebSearchTool } from '../tools/webSearch.tool';
 
 export interface WeatherAdviceRequest {
     location: string;
@@ -43,7 +43,7 @@ export class LifeUtilityAgentService {
     private healthAgent: ChatBedrockConverse;
     private travelAgent: ChatBedrockConverse;
     public priceAgent: ChatBedrockConverse;
-    public webScraper: WebScraperTool;
+    public webSearch: WebSearchTool;
 
     constructor() {
         this.weatherAgent = new ChatBedrockConverse({
@@ -74,7 +74,7 @@ export class LifeUtilityAgentService {
             maxTokens: 1000,
         });
 
-        this.webScraper = new WebScraperTool();
+        this.webSearch = new WebSearchTool();
     }
 
     /**
@@ -302,7 +302,7 @@ Set up tracking confirmation message.`;
                         }
                     };
 
-                    const result = await this.webScraper._call(JSON.stringify(scrapingRequest));
+                    const result = await this.webSearch._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success && parsedResult.data?.extractedText) {
@@ -338,7 +338,7 @@ Set up tracking confirmation message.`;
                         }
                     };
 
-                    const result = await this.webScraper._call(JSON.stringify(scrapingRequest));
+                    const result = await this.webSearch._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success && parsedResult.data?.extractedText) {
@@ -375,7 +375,7 @@ Set up tracking confirmation message.`;
                         }
                     };
 
-                    const result = await this.webScraper._call(JSON.stringify(scrapingRequest));
+                    const result = await this.webSearch._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success && parsedResult.data?.extractedText) {
@@ -412,7 +412,7 @@ Set up tracking confirmation message.`;
                         }
                     };
 
-                    const result = await this.webScraper._call(JSON.stringify(scrapingRequest));
+                    const result = await this.webSearch._call(JSON.stringify(scrapingRequest));
                     const parsedResult = JSON.parse(result);
                     
                     if (parsedResult.success && parsedResult.data?.extractedText) {
@@ -431,7 +431,7 @@ Set up tracking confirmation message.`;
 
     async cleanup(): Promise<void> {
         try {
-            await this.webScraper.cleanup();
+            loggingService.info('Life utility agent cleanup completed');
         } catch (error) {
             loggingService.error('Cleanup failed:', { error: error instanceof Error ? error.message : String(error) });
         }

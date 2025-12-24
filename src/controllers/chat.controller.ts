@@ -24,7 +24,10 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
         documentIds, 
         githubContext,
         templateId,
-        templateVariables 
+        templateVariables,
+        useWebSearch,
+        chatMode,
+        useMultiAgent
     } = req.body;
 
     try {
@@ -322,6 +325,9 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             githubContext,
             templateId,
             templateVariables,
+            useWebSearch,
+            chatMode,
+            useMultiAgent,
             req
         });
 

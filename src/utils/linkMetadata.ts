@@ -1,16 +1,16 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { WebScraperTool, type ScrapingRequest, type ScrapingResult } from '../tools/webScraper.tool';
+import { WebSearchTool, type WebSearchRequest, type WebSearchResult } from '../tools/webSearch.tool';
 import { loggingService } from '../services/logging.service';
 
 // Singleton instance for web scraper
-let webScraperInstance: WebScraperTool | null = null;
+let webSearchInstance: WebSearchTool | null = null;
 
-function getWebScraperInstance(): WebScraperTool {
-  if (!webScraperInstance) {
-    webScraperInstance = new WebScraperTool();
+function getWebSearchInstance(): WebSearchTool {
+  if (!webSearchInstance) {
+    webSearchInstance = new WebSearchTool();
   }
-  return webScraperInstance;
+  return webSearchInstance;
 }
 
 export interface LinkMetadata {
@@ -26,49 +26,35 @@ export interface LinkMetadata {
   summary?: string; // AI-generated summary from WebScraperTool
   structuredData?: Record<string, unknown>; // Structured data extracted by AI
   relevanceScore?: number; // Relevance score from AI
-  scrapingMethod?: 'axios-cheerio' | 'puppeteer-ai'; // Which method was used
+  scrapingMethod?: 'axios-cheerio' | 'google-search-api'; // Which method was used
 }
 
 /**
- * Use advanced Puppeteer-based scraping with AI summarization
- * This method handles JavaScript-heavy sites and provides AI-powered content analysis
+ * Use Google Search API to find and extract content from URL
+ * Fallback method when direct scraping is needed for complex sites
  */
 async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
   try {
-    const scraper = getWebScraperInstance();
+    const webSearchTool = getWebSearchInstance();
     
-    // Prepare scraping request with comprehensive selectors
-    const scrapingRequest: ScrapingRequest = {
-      operation: 'extract', // Use 'extract' for AI-powered structured data extraction
+    // Use direct URL scraping (no Puppeteer, just axios + cheerio)
+    const searchRequest: WebSearchRequest = {
+      operation: 'scrape', // Direct URL fetch
       url,
-      selectors: {
-        title: 'h1, .title, .headline, title',
-        content: 'main, article, .content, .main-content, .post-content, .article-content, body',
-        links: 'a[href]',
-        images: 'img[src]',
-      },
-      options: {
-        timeout: 30000,
-        javascript: true, // Enable JavaScript execution for dynamic content
-        extractText: true,
-        mobile: false,
-      },
       cache: {
         enabled: true,
-        ttl: 3600, // Cache for 1 hour
         key: `link_metadata_${Buffer.from(url).toString('base64').substring(0, 50)}`
       }
     };
 
-    loggingService.info('Using advanced WebScraperTool for link extraction', {
+    loggingService.info('Using WebScraperTool for link extraction', {
       url,
-      method: 'puppeteer-ai',
-      hasCache: scrapingRequest.cache?.enabled
+      method: 'google-search-api'
     });
 
     // Call the web scraper tool
-    const resultString = await scraper._call(JSON.stringify(scrapingRequest));
-    const result: ScrapingResult = JSON.parse(resultString);
+    const resultString = await webSearchTool._call(JSON.stringify(searchRequest));
+    const result: WebSearchResult = JSON.parse(resultString);
 
     if (!result.success) {
       throw new Error(result.error || 'Web scraping failed');
@@ -106,17 +92,14 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
       title: result.data.title ?? urlObj.hostname.replace('www.', ''),
       description: result.data.summary ?? result.data.extractedText?.substring(0, 300),
       fullContent: result.data.extractedText?.substring(0, 15000),
-      images: result.data.images,
       codeBlocks: codeBlocks.length > 0 ? codeBlocks : undefined,
       siteName: urlObj.hostname.replace('www.', ''),
       type: 'website',
       summary: result.data.summary, // AI-generated summary
-      structuredData: 'structuredData' in result.data ? (result.data.structuredData as Record<string, unknown>) : undefined,
-      relevanceScore: result.data.relevanceScore,
-      scrapingMethod: 'puppeteer-ai',
+      scrapingMethod: 'google-search-api',
     };
   } catch (error) {
-    loggingService.error('Advanced web scraping failed', {
+    loggingService.error('Web scraping failed', {
       url,
       error: error instanceof Error ? error.message : String(error)
     });
@@ -130,32 +113,22 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
  * Also scrapes full content including text, code blocks, and images
  * 
  * Strategy:
- * 1. For complex sites (LinkedIn, Twitter, etc.) or when AI summary is needed: Use Puppeteer + AI
- * 2. For simple sites: Use fast axios + cheerio approach
- * 3. Fallback gracefully if advanced method fails
+ * 1. Use fast axios + cheerio approach as default
+ * 2. Fallback to WebScraperTool if cheerio fails
  */
 export async function extractLinkMetadata(url: string, useAdvancedScraping: boolean = false): Promise<LinkMetadata> {
   const urlObj = new URL(url);
   
-  // Determine if we should use advanced scraping
-  const needsAdvancedScraping = useAdvancedScraping || 
-    urlObj.hostname.includes('linkedin.com') ||
-    urlObj.hostname.includes('twitter.com') ||
-    urlObj.hostname.includes('x.com') ||
-    urlObj.hostname.includes('facebook.com') ||
-    urlObj.hostname.includes('instagram.com') ||
-    urlObj.hostname.includes('medium.com');
-
-  // Try advanced scraping first if needed
-  if (needsAdvancedScraping) {
+  // Try web scraper tool if explicitly requested
+  if (useAdvancedScraping) {
     try {
-      loggingService.debug('Attempting advanced scraping with Puppeteer + AI', {
+      loggingService.debug('Using web scraper tool', {
         url,
-        reason: useAdvancedScraping ? 'explicitly requested' : 'site requires JavaScript'
+        reason: 'explicitly requested'
       });
       return await extractWithWebScraperTool(url);
     } catch (error) {
-      loggingService.warn('Advanced scraping failed, falling back to cheerio', {
+      loggingService.warn('Web scraper failed, falling back to cheerio', {
         url,
         error: error instanceof Error ? error.message : String(error)
       });
