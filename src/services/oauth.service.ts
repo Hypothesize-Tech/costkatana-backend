@@ -88,6 +88,7 @@ export class OAuthService {
                 'https://www.googleapis.com/auth/documents',
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/gmail.send',
+                'https://www.googleapis.com/auth/gmail.readonly', // READ emails for billing/invoice data
                 'https://www.googleapis.com/auth/calendar'
             ].join(' ');
             
