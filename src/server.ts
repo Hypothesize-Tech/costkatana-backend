@@ -145,13 +145,9 @@ app.use(sentryPerformanceMiddleware);
 // Sanitize input
 app.use(sanitizeInput);
 
-// Mixpanel tracking middleware
-app.use(trackApiRequests);
-app.use(trackAuthEvents);
-app.use(trackAnalyticsEvents);
-app.use(trackProjectEvents);
-app.use(trackUserSession);
-app.use(trackOptimizationEvents);
+// Unified Mixpanel tracking middleware (replaces individual tracking middleware)
+import { unifiedMixpanelTracking } from './middleware/unified-mixpanel.middleware';
+app.use(unifiedMixpanelTracking);
 
 // User session activity tracking middleware
 app.use(trackUserSessionActivity);

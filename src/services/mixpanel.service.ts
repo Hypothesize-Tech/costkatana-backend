@@ -778,6 +778,238 @@ export class MixpanelService {
     public isTrackingEnabled(): boolean {
         return this.isEnabled;
     }
+
+    /**
+     * ===== GROUP ANALYTICS (B2B) =====
+     */
+
+    /**
+     * Create a group profile (company, team, project)
+     */
+    public createGroupProfile(
+        groupKey: string,
+        groupId: string,
+        properties: {
+            name: string;
+            created_at?: Date;
+            plan?: string;
+            total_members?: number;
+            industry?: string;
+            company_size?: string;
+            total_spend?: number;
+            monthly_api_calls?: number;
+            [key: string]: any;
+        }
+    ): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            const profileData: Record<string, any> = {
+                $name: properties.name,
+                $created: properties.created_at ? properties.created_at.toISOString() : new Date().toISOString()
+            };
+
+            if (properties.plan) profileData.plan = properties.plan;
+            if (properties.total_members !== undefined) profileData.total_members = properties.total_members;
+            if (properties.industry) profileData.industry = properties.industry;
+            if (properties.company_size) profileData.company_size = properties.company_size;
+            if (properties.total_spend !== undefined) profileData.total_spend = properties.total_spend;
+            if (properties.monthly_api_calls !== undefined) profileData.monthly_api_calls = properties.monthly_api_calls;
+
+            // Add additional properties
+            Object.keys(properties).forEach(key => {
+                if (!['name', 'created_at', 'plan', 'total_members', 'industry', 'company_size', 'total_spend', 'monthly_api_calls'].includes(key)) {
+                    profileData[key] = properties[key];
+                }
+            });
+
+            // Note: mixpanel-node doesn't have full group support like browser SDK
+            // This tracks it as an event with group context
+            this.track('Group Profile Created', {
+                group_key: groupKey,
+                group_id: groupId,
+                ...profileData,
+                event_type: 'group_management'
+            });
+
+            loggingService.debug('Group profile created:', { value: { groupKey, groupId } });
+        } catch (error) {
+            loggingService.error('Error creating group profile:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Update group profile
+     */
+    public updateGroupProfile(
+        groupKey: string,
+        groupId: string,
+        properties: Record<string, any>
+    ): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            this.track('Group Profile Updated', {
+                group_key: groupKey,
+                group_id: groupId,
+                ...properties,
+                event_type: 'group_management',
+                timestamp: new Date().toISOString()
+            });
+
+            loggingService.debug('Group profile updated:', { value: { groupKey, groupId } });
+        } catch (error) {
+            loggingService.error('Error updating group profile:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Track group-level usage
+     */
+    public trackGroupUsage(
+        groupKey: string,
+        groupId: string,
+        usage: {
+            api_calls: number;
+            total_cost: number;
+            total_tokens: number;
+            cost_savings?: number;
+        }
+    ): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            this.track('Group Usage Tracked', {
+                group_key: groupKey,
+                group_id: groupId,
+                ...usage,
+                event_type: 'group_analytics',
+                timestamp: new Date().toISOString()
+            });
+
+            loggingService.debug('Group usage tracked:', { value: { groupKey, groupId, usage } });
+        } catch (error) {
+            loggingService.error('Error tracking group usage:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * ===== REVENUE TRACKING =====
+     */
+
+    /**
+     * Track server-side revenue (secure)
+     */
+    public trackServerSideRevenue(
+        userId: string,
+        amount: number,
+        properties: {
+            plan: string;
+            billing_cycle: 'monthly' | 'annual';
+            transaction_id: string;
+            currency?: string;
+        }
+    ): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            // Track charge to user profile
+            this.client.people.track_charge(userId, amount, {
+                $time: new Date().toISOString(),
+                plan: properties.plan,
+                billing_cycle: properties.billing_cycle,
+                transaction_id: properties.transaction_id,
+                currency: properties.currency || 'USD'
+            });
+
+            // Also track as event
+            this.track('Revenue Tracked', {
+                amount,
+                plan: properties.plan,
+                billing_cycle: properties.billing_cycle,
+                transaction_id: properties.transaction_id,
+                currency: properties.currency || 'USD',
+                event_type: 'revenue',
+                timestamp: new Date().toISOString()
+            }, userId);
+
+            loggingService.debug('Server-side revenue tracked:', { value: { userId, amount } });
+        } catch (error) {
+            loggingService.error('Error tracking server-side revenue:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Track subscription revenue
+     */
+    public trackSubscriptionRevenue(
+        userId: string,
+        amount: number,
+        properties: {
+            plan: string;
+            billing_cycle: 'monthly' | 'annual';
+            subscription_id: string;
+            is_renewal?: boolean;
+        }
+    ): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            this.client.people.track_charge(userId, amount, {
+                $time: new Date().toISOString(),
+                plan: properties.plan,
+                billing_cycle: properties.billing_cycle,
+                subscription_id: properties.subscription_id,
+                is_renewal: properties.is_renewal || false
+            });
+
+            this.track('Subscription Revenue', {
+                amount,
+                plan: properties.plan,
+                billing_cycle: properties.billing_cycle,
+                subscription_id: properties.subscription_id,
+                is_renewal: properties.is_renewal || false,
+                event_type: 'revenue',
+                timestamp: new Date().toISOString()
+            }, userId);
+
+            // Update LTV
+            this.calculateLTV(userId, amount);
+
+            loggingService.debug('Subscription revenue tracked:', { value: { userId, amount } });
+        } catch (error) {
+            loggingService.error('Error tracking subscription revenue:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
+
+    /**
+     * Calculate and update lifetime value
+     */
+    public calculateLTV(userId: string, additionalRevenue: number): void {
+        if (!this.isEnabled || !this.client) {
+            return;
+        }
+
+        try {
+            // Increment total revenue in user profile
+            this.client.people.increment(userId, 'lifetime_value', additionalRevenue);
+            this.client.people.increment(userId, 'total_revenue', additionalRevenue);
+
+            loggingService.debug('LTV calculated:', { value: { userId, additionalRevenue } });
+        } catch (error) {
+            loggingService.error('Error calculating LTV:', { error: error instanceof Error ? error.message : String(error) });
+        }
+    }
 }
 
 // Export singleton instance
