@@ -49,6 +49,7 @@
     "@aws-sdk/client-cloudwatch": "^3.500.0",
     "@aws-sdk/client-cloudwatch-logs": "^3.500.0",
     "@aws-sdk/client-s3": "^3.958.0",
+    "@aws-sdk/credential-providers": "^3.958.0",
     "@aws-sdk/s3-request-presigner": "^3.958.0",
     "@google/generative-ai": "^0.24.1",
     "@langchain/aws": "^0.1.12",
