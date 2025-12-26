@@ -400,7 +400,8 @@ export class ConversationalFlowService {
     }
 
     /**
-     * Detect what task the user wants to accomplish
+     * Detect what task the user wants to accomplish using AI
+     * Uses Nova Pro to intelligently determine if a multi-step workflow is needed
      */
     private async detectTaskIntent(message: string): Promise<string | null> {
         const lowerMessage = message.toLowerCase();
@@ -410,104 +411,68 @@ export class ConversationalFlowService {
             return null; // Let it go directly to handleGeneralQuery
         }
 
-        // Project creation intents
-        if (lowerMessage.includes('create project') || 
-            lowerMessage.includes('new project') || 
-            lowerMessage.includes('setup project') ||
-            lowerMessage.includes('start a project')) {
-            return 'create_project';
-        }
+        try {
+            // Use Nova Pro to analyze the message intent
+            const { BedrockService } = await import('./bedrock.service');
+            
+            const analysisPrompt = `Analyze this user message and determine if it requires a multi-step guided workflow or can be answered directly.
 
-        // Cost optimization intents
-        if (lowerMessage.includes('optimize cost') || 
-            lowerMessage.includes('reduce cost') || 
-            lowerMessage.includes('save money') ||
-            lowerMessage.includes('cost analysis') ||
-            (lowerMessage.includes('spending') && (lowerMessage.includes('reduce') || lowerMessage.includes('optimize')))) {
-            return 'cost_optimization';
-        }
+User Message: "${message}"
 
-        // Model selection intents
-        if (lowerMessage.includes('choose model') || 
-            lowerMessage.includes('select model') || 
-            lowerMessage.includes('recommend model') ||
-            lowerMessage.includes('which model') ||
-            lowerMessage.includes('best model')) {
-            return 'model_selection';
-        }
+Available Workflows:
+1. create_project - User wants to create a new project (requires project details collection)
+2. cost_optimization - User wants to actively optimize/reduce costs (requires analysis and action)
+3. model_selection - User wants help selecting/choosing a specific model (requires preference gathering)
+4. null - Simple question that can be answered directly without workflow
 
-        // Analytics and usage intents
-        if (lowerMessage.includes('analytics') || 
-            lowerMessage.includes('usage data') || 
-            lowerMessage.includes('metrics') ||
-            lowerMessage.includes('dashboard') ||
-            lowerMessage.includes('performance')) {
-            return 'analytics_request';
-        }
+Rules:
+- Return "null" for informational questions (What is X? How does Y work? Explain Z, etc.)
+- Return "null" for questions in any language (Arabic, English, etc.) that just need an answer
+- Return "null" for analysis requests (analyze my usage, show me data, etc.)
+- Return a workflow ONLY if the user explicitly wants to SET UP or CREATE something multi-step
+- Return "null" for questions about cost optimization methods (how to optimize, best practices)
+- Return "cost_optimization" ONLY if user says "optimize my costs now" or "reduce my spending"
 
-        // Usage analysis intents
-        if (lowerMessage.includes('token usage') ||
-            lowerMessage.includes('analyze usage') ||
-            lowerMessage.includes('usage patterns') ||
-            lowerMessage.includes('my usage') ||
-            lowerMessage.includes('how much') ||
-            lowerMessage.includes('spending')) {
-            return 'usage_analysis';
-        }
+Respond with ONLY the workflow name or "null" (no quotes, no explanation):`;
 
-        // Help and support intents
-        if (lowerMessage.includes('help') ||
-            lowerMessage.includes('how to') ||
-            lowerMessage.includes('guide') ||
-            lowerMessage.includes('support') ||
-            lowerMessage.includes('getting started') ||
-            lowerMessage.includes('tutorial')) {
-            return 'help_request';
-        }
+            const response = await BedrockService.invokeModel(
+                analysisPrompt,
+                'us.amazon.nova-pro-v1:0'
+            );
 
-        // API integration intents
-        if (lowerMessage.includes('api') ||
-            lowerMessage.includes('integration') ||
-            lowerMessage.includes('sdk') ||
-            lowerMessage.includes('setup') ||
-            lowerMessage.includes('connect') ||
-            lowerMessage.includes('implement')) {
-            return 'api_integration';
-        }
+            const intent = (response || '').toString().trim().toLowerCase();
+            
+            // Validate the response
+            const validIntents = [
+                'null',
+                'create_project', 
+                'cost_optimization',
+                'model_selection'
+            ];
 
-        // Performance issues intents
-        if (lowerMessage.includes('slow') ||
-            lowerMessage.includes('error') ||
-            lowerMessage.includes('issue') ||
-            lowerMessage.includes('problem') ||
-            lowerMessage.includes('not working') ||
-            lowerMessage.includes('performance') ||
-            lowerMessage.includes('rate limit')) {
-            return 'performance_issues';
-        }
+            if (validIntents.includes(intent)) {
+                loggingService.info('AI-detected task intent', {
+                    message: message.substring(0, 100),
+                    detectedIntent: intent
+                });
+                return intent === 'null' ? null : intent;
+            }
 
-        // Monitoring setup intents
-        if (lowerMessage.includes('monitor') ||
-            lowerMessage.includes('alert') ||
-            lowerMessage.includes('notification') ||
-            lowerMessage.includes('track') ||
-            lowerMessage.includes('watch')) {
-            return 'monitoring_setup';
-        }
+            // If AI returns something invalid, default to null (direct answer)
+            loggingService.warn('AI returned invalid intent, defaulting to null', {
+                message: message.substring(0, 100),
+                aiResponse: intent
+            });
+            return null;
 
-        // General inquiry - catch more general questions
-        if (lowerMessage.includes('what') ||
-            lowerMessage.includes('why') ||
-            lowerMessage.includes('explain') ||
-            lowerMessage.includes('tell me') ||
-            lowerMessage.includes('show me') ||
-            lowerMessage.includes('information') ||
-            lowerMessage.includes('about') ||
-            message.endsWith('?')) {
-            return 'general_inquiry';
+        } catch (error) {
+            loggingService.error('Error in AI intent detection, falling back to null', {
+                error: error instanceof Error ? error.message : String(error),
+                message: message.substring(0, 100)
+            });
+            // On error, default to null (direct answer) - safer than triggering wrong workflow
+            return null;
         }
-
-        return null;
     }
 
     /**
