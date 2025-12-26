@@ -1,6 +1,7 @@
 import { Response, NextFunction } from 'express';
 import { OAuthService } from '../services/oauth.service';
 import { AuthService } from '../services/auth.service';
+import { MFAService } from '../services/mfa.service';
 import { loggingService } from '../services/logging.service';
 import { redisService } from '../services/redis.service';
 
@@ -894,21 +895,43 @@ export class OAuthController {
             // regardless of whether Google/GitHub connection setup succeeded or failed.
             // Connection setup failures should NOT prevent MFA check for login flows.
             if (!isLinkingFlow && userDoc.mfa.enabled && userDoc.mfa.methods.length > 0) {
-                // Generate MFA token
-                const mfaToken = AuthService.generateMFAToken((userDoc as any)._id.toString());
-
-                loggingService.info(`${provider} OAuth login requires MFA`, {
-                    provider,
-                    userId: (userDoc as any)._id,
-                    email: userDoc.email,
-                    mfaMethods: userDoc.mfa.methods,
-                });
-
-                // Redirect to frontend with MFA requirement
-                const redirectUrl = `${frontendUrl}/oauth/callback?requiresMFA=true&mfaToken=${encodeURIComponent(mfaToken)}&userId=${encodeURIComponent((userDoc as any)._id.toString())}&availableMethods=${encodeURIComponent(userDoc.mfa.methods.join(','))}&lastLoginMethod=${provider}`;
+                // Check if device is trusted first
+                const userAgent = req.headers['user-agent'] || 'Unknown';
+                const ipAddress = req.ip || req.connection.remoteAddress || 'Unknown';
+                const deviceId = MFAService.generateDeviceId(userAgent, ipAddress);
                 
-                res.redirect(redirectUrl);
-                return;
+                const isTrusted = await MFAService.isTrustedDevice((userDoc as any)._id.toString(), deviceId);
+                
+                if (isTrusted) {
+                    loggingService.info(`${provider} OAuth login - trusted device, skipping MFA`, {
+                        provider,
+                        userId: (userDoc as any)._id,
+                        email: userDoc.email,
+                        deviceId,
+                        userAgent,
+                        ipAddress
+                    });
+                    // Device is trusted, proceed with normal login flow (skip MFA)
+                } else {
+                    // Generate MFA token
+                    const mfaToken = AuthService.generateMFAToken((userDoc as any)._id.toString());
+
+                    loggingService.info(`${provider} OAuth login requires MFA`, {
+                        provider,
+                        userId: (userDoc as any)._id,
+                        email: userDoc.email,
+                        mfaMethods: userDoc.mfa.methods,
+                        deviceId,
+                        userAgent,
+                        ipAddress
+                    });
+
+                    // Redirect to frontend with MFA requirement
+                    const redirectUrl = `${frontendUrl}/oauth/callback?requiresMFA=true&mfaToken=${encodeURIComponent(mfaToken)}&userId=${encodeURIComponent((userDoc as any)._id.toString())}&availableMethods=${encodeURIComponent(userDoc.mfa.methods.join(','))}&lastLoginMethod=${provider}`;
+                    
+                    res.redirect(redirectUrl);
+                    return;
+                }
             }
 
             // For linking flows, verify connection was created and redirect to integrations page

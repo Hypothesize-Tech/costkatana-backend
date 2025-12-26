@@ -366,30 +366,99 @@ export class MFAService {
     }
 
     /**
-     * Check if device is trusted
+     * Check if device is trusted with enhanced logging and fallback mechanisms
      */
     static async isTrustedDevice(userId: string, deviceId: string): Promise<boolean> {
         try {
-            const user = await User.findById(userId);
+            const user = await User.findById(userId).select('mfa.trustedDevices email');
             if (!user) {
+                loggingService.warn('Trusted device check failed - user not found', { userId, deviceId });
                 return false;
             }
 
             const now = new Date();
+            
+            // Log the device check attempt
+            loggingService.info('Checking trusted device', {
+                userId,
+                deviceId,
+                trustedDevicesCount: user.mfa.trustedDevices.length,
+                email: user.email
+            });
+
+            // Find exact match first
             const trustedDevice = user.mfa.trustedDevices.find(
                 device => device.deviceId === deviceId && device.expiresAt > now
             );
 
             if (trustedDevice) {
+                loggingService.info('Trusted device found - exact match', {
+                    userId,
+                    deviceId,
+                    deviceName: trustedDevice.deviceName,
+                    expiresAt: trustedDevice.expiresAt,
+                    email: user.email
+                });
+                
                 // Update last used
                 trustedDevice.lastUsed = now;
                 await user.save();
                 return true;
             }
 
+            // Try fallback matching for devices with similar fingerprints (in case of minor UA changes)
+            const devicePrefix = deviceId.substring(0, 12); // Use base fingerprint part
+            const fallbackDevice = user.mfa.trustedDevices.find(device => {
+                const storedPrefix = device.deviceId.substring(0, 12);
+                return storedPrefix === devicePrefix && device.expiresAt > now;
+            });
+
+            if (fallbackDevice) {
+                loggingService.info('Trusted device found - fallback match (updating device ID)', {
+                    userId,
+                    oldDeviceId: fallbackDevice.deviceId,
+                    newDeviceId: deviceId,
+                    deviceName: fallbackDevice.deviceName,
+                    email: user.email
+                });
+                
+                // Update the device ID and last used (handles minor UA changes/IP changes)
+                fallbackDevice.deviceId = deviceId;
+                fallbackDevice.lastUsed = now;
+                await user.save();
+                return true;
+            }
+
+            // Clean up expired devices while we're here
+            const expiredCount = user.mfa.trustedDevices.filter(device => device.expiresAt <= now).length;
+            if (expiredCount > 0) {
+                user.mfa.trustedDevices = user.mfa.trustedDevices.filter(device => device.expiresAt > now);
+                await user.save();
+                
+                loggingService.info('Cleaned up expired trusted devices', {
+                    userId,
+                    expiredCount,
+                    remainingCount: user.mfa.trustedDevices.length,
+                    email: user.email
+                });
+            }
+
+            loggingService.info('Device not trusted', {
+                userId,
+                deviceId,
+                trustedDevicesCount: user.mfa.trustedDevices.length,
+                expiredDevicesRemoved: expiredCount,
+                email: user.email
+            });
+
             return false;
         } catch (error) {
-            loggingService.error('Error checking trusted device:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('Error checking trusted device:', { 
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                deviceId,
+                stack: error instanceof Error ? error.stack : undefined
+            });
             return false;
         }
     }
@@ -471,13 +540,64 @@ export class MFAService {
 
     /**
      * Generate device ID from request info
+     * Uses a more stable fingerprinting approach that focuses on browser/OS rather than exact UA string
      */
     static generateDeviceId(userAgent: string, ipAddress: string): string {
-        return crypto
+        // Extract stable browser/OS information from user agent
+        const normalizedUA = this.normalizeUserAgent(userAgent);
+        
+        // Create base fingerprint with normalized UA - don't rely heavily on IP for home users
+        const baseFingerprint = crypto
             .createHash('sha256')
-            .update(`${userAgent}-${ipAddress}`)
+            .update(normalizedUA)
             .digest('hex')
-            .substring(0, 16);
+            .substring(0, 12);
+        
+        // Add IP-based suffix for additional security (but shorter to reduce IP change impact)
+        const ipSuffix = crypto
+            .createHash('sha256')
+            .update(ipAddress)
+            .digest('hex')
+            .substring(0, 4);
+            
+        return `${baseFingerprint}${ipSuffix}`;
+    }
+
+    /**
+     * Normalize user agent to focus on stable browser/OS characteristics
+     * This reduces false negatives from minor browser updates
+     */
+    private static normalizeUserAgent(userAgent: string): string {
+        const ua = userAgent.toLowerCase();
+        
+        // Extract browser type and major version only
+        let browserInfo = '';
+        if (ua.includes('chrome/')) {
+            const match = ua.match(/chrome\/(\d+)/);
+            const majorVersion = match ? Math.floor(parseInt(match[1]) / 10) * 10 : '0'; // Round to nearest 10
+            browserInfo = `chrome-${majorVersion}`;
+        } else if (ua.includes('firefox/')) {
+            const match = ua.match(/firefox\/(\d+)/);
+            const majorVersion = match ? Math.floor(parseInt(match[1]) / 5) * 5 : '0'; // Round to nearest 5
+            browserInfo = `firefox-${majorVersion}`;
+        } else if (ua.includes('safari/')) {
+            browserInfo = 'safari';
+        } else if (ua.includes('edge/')) {
+            browserInfo = 'edge';
+        } else {
+            browserInfo = 'other';
+        }
+        
+        // Extract OS information
+        let osInfo = '';
+        if (ua.includes('windows')) osInfo = 'windows';
+        else if (ua.includes('macos') || ua.includes('mac os')) osInfo = 'macos';
+        else if (ua.includes('linux')) osInfo = 'linux';
+        else if (ua.includes('android')) osInfo = 'android';
+        else if (ua.includes('ios')) osInfo = 'ios';
+        else osInfo = 'other';
+        
+        return `${browserInfo}-${osInfo}`;
     }
 
     // ============================================================================
