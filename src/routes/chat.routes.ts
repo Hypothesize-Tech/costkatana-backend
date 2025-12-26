@@ -37,7 +37,8 @@ router.post(
         body('maxTokens').optional().isInt({ min: 1, max: 100000 }).withMessage('maxTokens must be between 1 and 100000'),
         body('documentIds').optional().isArray().withMessage('documentIds must be an array'),
         body('templateId').optional().isMongoId().withMessage('Invalid templateId'),
-        body('templateVariables').optional().isObject().withMessage('templateVariables must be an object')
+        body('templateVariables').optional().isObject().withMessage('templateVariables must be an object'),
+        body('attachments').optional().isArray().withMessage('attachments must be an array')
     ],
     validateRequest,
     authenticate,

@@ -17,42 +17,28 @@ router.get('/connections/:id/health', GoogleController.checkConnectionHealth);
 // Drive
 router.get('/connections/:id/drive', GoogleController.listDriveFiles);
 router.get('/connections/:id/drive/:fileId', GoogleController.getDriveFile);
-router.post('/connections/:id/drive/upload', GoogleController.uploadFile);
-router.post('/connections/:id/drive/share/:fileId', GoogleController.shareDriveFile);
-router.post('/connections/:id/drive/folder', GoogleController.createDriveFolder);
+// Removed uploadFile, shareDriveFile, createDriveFolder - not compatible with drive.file scope
 router.get('/drive/files', GoogleController.listDriveFiles);
-router.get('/drive/file/:fileId/preview', GoogleController.getDriveFilePreview);
+// Removed getDriveFilePreview - requires full drive access
 
-// Export
+// Export to NEW files (works with drive.file scope)
 router.post('/export/cost-data', GoogleController.exportCostData);
 router.post('/export/report', GoogleController.createCostReport);
 router.get('/export/audits', GoogleController.getExportAudits);
 
-// Sheets & Docs Read APIs
-router.get('/sheets/:sheetId/data', GoogleController.getSheetData);
-router.get('/docs/:docId/content', GoogleController.getDocContent);
+// Sheets & Docs Read APIs (for user-selected files via Picker)
+// Removed getSheetData, getDocContent - will be handled differently
+router.get('/docs/:docId/content', GoogleController.getDocumentContent);
 
-// Calendar
-router.post('/connections/:id/calendar/budget-review', GoogleController.createBudgetReviewEvent);
-router.post('/connections/:id/calendar/events', GoogleController.createEvent);
-router.get('/connections/:id/calendar/events', GoogleController.listEvents);
-router.patch('/connections/:id/calendar/events/:eventId', GoogleController.updateEvent);
-router.delete('/connections/:id/calendar/events/:eventId', GoogleController.deleteEvent);
-
-// Gmail
-router.get('/connections/:id/gmail/alerts', GoogleController.getGmailAlerts);
-router.post('/connections/:id/gmail/send', GoogleController.sendEmail);
-router.get('/connections/:id/gmail/search', GoogleController.searchEmails);
-router.get('/gmail/inbox', GoogleController.getGmailInbox);
-router.get('/gmail/:messageId', GoogleController.getGmailMessage);
-
-// Sheets
+// Sheets & Docs Creation (creates NEW files with drive.file scope)
 router.post('/connections/:id/sheets', GoogleController.createSpreadsheet);
-
-// Docs
 router.post('/connections/:id/docs', GoogleController.createDocument);
 
-// List APIs
+// List user-accessible Docs/Sheets (via Picker selections cached)
+router.get('/connections/:id/documents', GoogleController.listDocuments);
+router.get('/connections/:id/spreadsheets', GoogleController.listSpreadsheets);
+
+// Backward compatibility routes for frontend
 router.get('/docs/list', GoogleController.listDocuments);
 router.get('/sheets/list', GoogleController.listSpreadsheets);
 
@@ -61,13 +47,9 @@ router.post('/gemini/analyze', GoogleController.analyzeCostTrends);
 router.post('/gemini/explain-anomaly', GoogleController.explainCostAnomaly);
 router.post('/gemini/suggest-strategy', GoogleController.generateOptimizationStrategy);
 
-// File Access Cache (for Picker API integration)
-router.post('/file-access/cache', GoogleController.cachePickerSelection);
-router.get('/file-access', GoogleController.getAccessibleFiles);
+// File Access Cache (for Picker API integration and Drive link access)
+router.post('/file-from-link', GoogleController.getFileFromLink);
 router.get('/file-access/check/:fileId', GoogleController.checkFileAccess);
-
-// Picker API token endpoint
-router.get('/connections/:id/picker-token', GoogleController.getPickerToken);
 
 export default router;
 

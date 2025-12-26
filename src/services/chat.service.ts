@@ -44,6 +44,15 @@ export interface ChatMessageResponse {
         chunksCount: number;
         fileType?: string;
     }>;
+    attachments?: Array<{
+        type: 'uploaded' | 'google';
+        fileId: string;
+        fileName: string;
+        fileSize: number;
+        mimeType: string;
+        fileType: string;
+        url: string;
+    }>;
     timestamp: Date;
     metadata?: {
         temperature?: number;
@@ -97,7 +106,16 @@ export interface ChatSendMessageRequest {
     // Template support
     templateId?: string; // Use a prompt template
     templateVariables?: Record<string, any>; // Variables for template
-    req?: any; // Express Request object for tracing context
+    attachments?: Array<{
+        type: 'uploaded' | 'google';
+        fileId: string;
+        fileName: string;
+        fileSize: number;
+        mimeType: string;
+        fileType: string;
+        url: string;
+    }>;
+    req?: any;
 }
 
 export interface ChatSendMessageResponse {
@@ -1149,13 +1167,15 @@ Answer:`;
         try {
             const startTime = Date.now();
             
-            // Validate that either message or templateId is provided
-            if (!request.message && !request.templateId) {
-                throw new Error('Either message or templateId must be provided');
+            // Validate that either message, templateId, or attachments is provided
+            if (!request.message && !request.templateId && !request.attachments?.length) {
+                throw new Error('Either message, templateId, or attachments must be provided');
             }
 
             let conversation: IConversation;
             let recentMessages: any[] = [];
+            let processedAttachments: any[] | undefined;
+            let attachmentsContext = '';
             let templateMetadata: {
                 id: string;
                 name: string;
@@ -1243,6 +1263,16 @@ Answer:`;
                         }));
                     }
 
+                    // Process attachments if present
+                    if (request.attachments && request.attachments.length > 0) {
+                        const { processedAttachments: processed, contextString } = await this.processAttachments(
+                            request.attachments,
+                            request.userId
+                        );
+                        processedAttachments = processed;
+                        attachmentsContext = contextString;
+                    }
+
                     // Save user message with attached documents (only if not using template initially)
                     // Template messages will be saved after resolution
                     if (!request.templateId) {
@@ -1254,7 +1284,8 @@ Answer:`;
                             userId: request.userId,
                             role: 'user',
                             content: messageToStore,
-                            attachedDocuments: attachedDocuments
+                            attachedDocuments: attachedDocuments,
+                            attachments: processedAttachments
                         }], { session });
                     }
                 });
@@ -1710,7 +1741,13 @@ Answer:`;
             }
 
             // Optimized: Enhanced processing with circuit breaker
-            const processingResult = await this.processWithFallback(request, conversation!, recentMessages);
+            // Add attachments context to the message if present
+            const finalMessage = attachmentsContext ? actualMessage + attachmentsContext : actualMessage;
+            const processingResult = await this.processWithFallback(
+                { ...request, message: finalMessage }, 
+                conversation!, 
+                recentMessages
+            );
             
             const response = processingResult.response;
             const agentThinking = processingResult.agentThinking;
@@ -2233,6 +2270,7 @@ Answer:`;
                 content: message.content || '',
                 modelId: message.modelId,
                 attachedDocuments: message.attachedDocuments || [],
+                attachments: message.attachments || [],
                 timestamp: message.createdAt || message.timestamp || new Date(),
                 metadata: message.metadata || {}
             };
@@ -2249,6 +2287,7 @@ Answer:`;
                 content: message.content || '',
                 modelId: message.modelId,
                 attachedDocuments: [],
+                attachments: [],
                 timestamp: new Date(),
                 metadata: {}
             };
@@ -2596,4 +2635,89 @@ Answer:`;
 
         return descriptionMap[modelId] || 'Advanced AI model for text generation and chat';
     }
-} 
+
+    /**
+     * Process attachments - format file metadata for AI
+     * Frontend already provides instruction context about analyzing files
+     */
+    static async processAttachments(
+        attachments: Array<{
+            type: 'uploaded' | 'google';
+            fileId: string;
+            fileName: string;
+            fileSize: number;
+            mimeType: string;
+            fileType: string;
+            url: string;
+        }>,
+        _userId: string
+    ): Promise<{
+        processedAttachments: Array<{
+            type: 'uploaded' | 'google';
+            fileId: string;
+            fileName: string;
+            fileSize: number;
+            mimeType: string;
+            fileType: string;
+            url: string;
+        }>;
+        contextString: string;
+    }> {
+        const processedAttachments = [];
+        const contentParts: string[] = [];
+
+        for (const attachment of attachments) {
+            try {
+                // Determine display file type
+                let displayFileType = attachment.fileType;
+                if (attachment.mimeType.includes('document')) {
+                    displayFileType = 'Google Docs';
+                } else if (attachment.mimeType.includes('spreadsheet')) {
+                    displayFileType = 'Google Sheets';
+                } else if (attachment.mimeType.includes('presentation')) {
+                    displayFileType = 'Google Slides';
+                } else if (attachment.mimeType === 'application/pdf') {
+                    displayFileType = 'PDF';
+                } else if (attachment.mimeType.includes('word')) {
+                    displayFileType = 'Word';
+                } else if (attachment.mimeType.includes('excel')) {
+                    displayFileType = 'Excel';
+                }
+
+                // Format file size
+                const formatFileSize = (bytes: number): string => {
+                    if (bytes < 1024) return `${bytes} B`;
+                    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+                    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+                };
+
+                // Create minimal file metadata - frontend already provides analysis instructions
+                const fileInfo = [
+                    `📎 **${attachment.fileName}**`,
+                    `   ${displayFileType} | ${formatFileSize(attachment.fileSize)}`,
+                    `   URL: ${attachment.url}`
+                ].join('\n');
+
+                contentParts.push(fileInfo);
+                processedAttachments.push(attachment);
+
+            } catch (error) {
+                loggingService.error('Failed to process attachment metadata', {
+                    attachment,
+                    error,
+                });
+                processedAttachments.push(attachment);
+            }
+        }
+
+        // Create minimal context - frontend already instructs AI to analyze
+        const contextString = contentParts.length > 0
+            ? `\n\n📁 **Attached Files:**\n\n${contentParts.join('\n\n')}\n`
+            : '';
+
+        return {
+            processedAttachments,
+            contextString,
+        };
+    }
+}

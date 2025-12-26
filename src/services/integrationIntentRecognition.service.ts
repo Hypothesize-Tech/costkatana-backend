@@ -402,16 +402,6 @@ IMPORTANT RULES:
         '@google share file with finance@company.com → {action: "drive", subAction: "share"}',
         '@google search emails about AWS billing → {action: "gmail", subAction: "search", params: {query: "AWS billing"}}'
       ],
-      gmail: [
-        '@gmail send email to team@company.com → {action: "email", subAction: "send", params: {to: "team@company.com"}}',
-        '@gmail search for cost alerts → {action: "email", subAction: "search", params: {query: "cost alerts"}}',
-        '@gmail list unread messages → {action: "email", subAction: "list", params: {query: "is:unread"}}'
-      ],
-      calendar: [
-        '@calendar create meeting tomorrow at 2pm → {action: "calendar", subAction: "create"}',
-        '@calendar list upcoming events → {action: "calendar", subAction: "list"}',
-        '@calendar delete event → {action: "calendar", subAction: "delete"}'
-      ],
       drive: [
         '@drive search monthly ai spend → {action: "drive", subAction: "search", params: {query: "monthly ai spend"}}',
         '@drive search budget report → {action: "drive", subAction: "search", params: {query: "budget report"}}',

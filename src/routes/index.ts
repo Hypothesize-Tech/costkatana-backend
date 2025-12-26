@@ -63,8 +63,6 @@ import visualComplianceRoutes from './visualCompliance.routes';
 import logsRoutes from './logs.routes';
 import referenceImageRoutes from './referenceImage.routes';
 import templateAnalyticsRoutes from './templateAnalytics.routes';
-import docsAnalyticsRoutes from './docsAnalytics.routes';
-import communityRoutes from './community.routes';
 import automationRoutes from './automation.routes';
 import billingRoutes from './billing.routes';
 import paymentWebhookRoutes from './paymentWebhook.routes';
@@ -76,6 +74,7 @@ import agentGovernanceRoutes from './agentGovernance.routes';
 import dataNetworkEffectsRoutes from './dataNetworkEffects.routes';
 import proactiveSuggestionsRoutes from './proactiveSuggestions.routes';
 import utilsRoutes from './utils.routes';
+import fileUploadRoutes from './fileUpload.routes';
 
 const router = Router();
 
@@ -155,8 +154,6 @@ router.use('/visual-compliance', visualComplianceRoutes);
 router.use('/logs', logsRoutes);
 router.use('/templates', referenceImageRoutes);
 router.use('/reference-image', referenceImageRoutes);
-router.use('/docs-analytics', docsAnalyticsRoutes);
-router.use('/community', communityRoutes);
 router.use('/automation', automationRoutes);
 router.use('/billing', billingRoutes);
 router.use('/webhooks/payment', paymentWebhookRoutes);
@@ -168,5 +165,6 @@ router.use('/agent-governance', agentGovernanceRoutes);
 router.use('/data-network-effects', dataNetworkEffectsRoutes);
 router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
 router.use('/utils', utilsRoutes);
+router.use('/files', fileUploadRoutes);
 
 export const apiRouter = router;

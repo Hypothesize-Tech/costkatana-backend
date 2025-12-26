@@ -13,6 +13,15 @@ export interface IChatMessage extends Document {
         chunksCount: number;
         fileType?: string;
     }>;
+    attachments?: Array<{
+        type: 'uploaded' | 'google';
+        fileId: string;
+        fileName: string;
+        fileSize: number;
+        mimeType: string;
+        fileType: string;
+        url: string;
+    }>;
     metadata?: {
         temperature?: number;
         maxTokens?: number;
@@ -63,6 +72,37 @@ const chatMessageSchema = new Schema<IChatMessage>({
             required: true
         },
         fileType: String
+    }],
+    attachments: [{
+        type: {
+            type: String,
+            enum: ['uploaded', 'google'],
+            required: true
+        },
+        fileId: {
+            type: String,
+            required: true
+        },
+        fileName: {
+            type: String,
+            required: true
+        },
+        fileSize: {
+            type: Number,
+            required: true
+        },
+        mimeType: {
+            type: String,
+            required: true
+        },
+        fileType: {
+            type: String,
+            required: true
+        },
+        url: {
+            type: String,
+            required: true
+        }
     }],
     metadata: {
         temperature: {

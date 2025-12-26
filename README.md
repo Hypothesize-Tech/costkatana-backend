@@ -355,6 +355,120 @@ curl -X POST "http://localhost:8000/api/onboarding/generate-magic-link" \
 
 ---
 
+## 🔗 Google Integration
+
+Cost Katana integrates with Google Workspace using **non-sensitive OAuth scopes only**, avoiding the need for expensive CASA security assessments.
+
+### OAuth Scopes Used
+
+```typescript
+// Non-sensitive scopes (No CASA required)
+const SCOPES = [
+  'openid',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'https://www.googleapis.com/auth/drive.file'  // Access only to files created by or selected via picker
+];
+```
+
+### What You Can Do
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **File Picker** | Select any Docs/Sheets from Drive | ✅ Available |
+| **Create Documents** | Create new Google Docs | ✅ Available |
+| **Create Spreadsheets** | Create new Google Sheets | ✅ Available |
+| **Export Cost Data** | Export to new Sheets | ✅ Available |
+| **Access Selected Files** | Read/write files selected via picker | ✅ Available |
+| **Chat Integration** | Use @docs and @sheets mentions | ✅ Available |
+
+### Setup
+
+1. **Create Google OAuth 2.0 Credentials**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Create a new project or select existing
+   - Enable Google Drive API
+   - Create OAuth 2.0 credentials
+   - Add authorized redirect URIs
+
+2. **Configure Environment Variables**:
+
+```bash
+# Google OAuth
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/callback/google
+
+# Google API (for File Picker)
+GOOGLE_API_KEY=your-google-api-key
+```
+
+3. **Configure Authorized Origins** (for Picker):
+   - Add `http://localhost:3000` to Authorized JavaScript origins
+   - Add `http://localhost:8000` to Authorized JavaScript origins
+
+### API Endpoints
+
+```typescript
+// OAuth Flow
+POST   /api/oauth/initiate/google          // Start OAuth flow
+GET    /api/oauth/callback/google          // OAuth callback
+POST   /api/oauth/refresh                  // Refresh access token
+
+// File Picker
+GET    /api/google/picker/token            // Get picker token
+POST   /api/google/picker/cache-selection  // Cache selected files
+GET    /api/google/accessible-files        // List accessible files
+
+// Documents & Sheets
+POST   /api/google/docs/create             // Create new Doc
+POST   /api/google/sheets/create           // Create new Sheet
+GET    /api/google/docs/list               // List accessible Docs
+GET    /api/google/sheets/list             // List accessible Sheets
+
+// Export
+POST   /api/google/export/cost-data        // Export cost data to Sheets
+POST   /api/google/export/cost-report      // Create cost report in Docs
+```
+
+### Frontend Integration
+
+```typescript
+import { useGooglePicker } from '@/hooks/useGooglePicker';
+
+// In your component
+const { openPicker, selectedFiles } = useGooglePicker({
+  viewType: 'DOCS',  // or 'SPREADSHEETS', 'DOCS_IMAGES_AND_VIDEOS'
+  multiselect: true,
+  callback: (data) => {
+    console.log('Files selected:', data.docs);
+  }
+});
+
+// Open picker
+<button onClick={() => openPicker(connectionId)}>
+  Select Files from Drive
+</button>
+```
+
+### File Access Model
+
+With `drive.file` scope, the app can only access:
+1. **Files created by the app** (e.g., exported cost reports)
+2. **Files explicitly selected by user via File Picker**
+
+This ensures maximum privacy while providing full functionality.
+
+### No CASA Assessment Needed
+
+By using only non-sensitive scopes, Cost Katana avoids:
+- ✅ $15,000 - $75,000+ CASA assessment fees
+- ✅ Lengthy security review process
+- ✅ Complex compliance requirements
+- ✅ Annual re-assessments
+
+---
+
 ## 📞 Support
 
 | Channel | Link |

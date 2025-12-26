@@ -364,8 +364,8 @@ export class IntegrationChatService {
         /(?:with\s+)?description\s+['"]([^'"]+)['"]/i
       ];
 
-    // Special handling for Google integrations (drive, sheets, docs, gmail, calendar)
-    const googleIntegrations = ['drive', 'sheets', 'docs', 'gmail', 'calendar', 'gdocs', 'google'];
+    // Special handling for Google integrations (drive, sheets, docs)
+    const googleIntegrations = ['drive', 'sheets', 'docs', 'gdocs', 'google'];
     if (googleIntegrations.includes(mention.integration.toLowerCase())) {
       // For Google integrations, the command is simple: @drive:list, @sheets:create, etc.
       // Check for export command (e.g., @google export to sheets, @sheets export)
@@ -3033,16 +3033,25 @@ export class IntegrationChatService {
         });
         
         const result = await GoogleCommandService.executeCommand(
-          integration.userId.toString(),
-          command,
-          originalMessage
+          originalMessage,
+          command.params,
+          connection
         );
         
-        return {
-          success: true,
-          message: result,
-          data: null
-        };
+        // GoogleCommandService returns { success: boolean, error: string }
+        if (result.success) {
+          return {
+            success: true,
+            message: '✅ Command executed successfully',
+            data: null
+          };
+        } else {
+          // Fall through to default error message
+          loggingService.info('Natural language Google command returned error', {
+            error: result.error,
+            integration: command.mention.integration
+          });
+        }
       } catch (nlpError: any) {
         loggingService.warn('Natural language Google command also failed', {
           error: nlpError.message,
