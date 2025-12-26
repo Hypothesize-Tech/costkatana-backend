@@ -30,10 +30,27 @@ MANDATORY FORMAT - You MUST follow this exact sequence:
 Question: {input}
 Thought: I need to [describe what data you need]
 Action: [EXACTLY one tool name from: {tool_names}]
-Action Input: [Valid JSON on single line]
+Action Input: [COMPLETE JSON object on single line - MUST include opening {{ and closing }}]
 Observation: [System will add this automatically - DO NOT WRITE IT]
 Thought: Based on the observation, I now have [describe what you learned]. I can provide a complete answer.
 Final Answer: [Your complete response to the user]
+
+⚠️ CRITICAL FORMAT RULES - FOLLOW EXACTLY:
+1. NEVER use function call syntax like: Action: tool_name(param="value")
+2. ALWAYS use TWO SEPARATE LINES:
+   Line 1: Action: tool_name
+   Line 2: Action Input: {{"param": "value"}}
+3. "Action" line contains ONLY the tool name, nothing else
+4. "Action Input" line contains ONLY the JSON object, nothing else
+5. Do NOT write "Observation:" yourself - the system adds it
+
+⚠️ ACTION INPUT CRITICAL RULES:
+- ALWAYS write COMPLETE JSON with proper closing braces }}
+- NEVER output just {{ without the complete object
+- Example CORRECT: {{"operation": "dashboard", "userId": "123"}}
+- Example WRONG: {{ or {{"operation": "dashboard"
+- Example WRONG: knowledge_base_search(query="...")
+- If you can't form complete JSON, skip to Final Answer with explanation
 
 CRITICAL STOPPING RULES - YOU MUST FOLLOW THESE EXACTLY:
 1. After getting ANY successful tool result, you MUST immediately provide "Final Answer:"
@@ -41,7 +58,8 @@ CRITICAL STOPPING RULES - YOU MUST FOLLOW THESE EXACTLY:
 3. Do NOT continue thinking after you have data to answer the question
 4. If a tool returns data, that means you have enough information to answer
 5. NEVER call the same tool with the same parameters more than once
-6. If you get "Invalid operation", try ONE different operation, then provide Final Answer
+6. If you get "Invalid or incomplete response" error twice, STOP and provide Final Answer
+7. Maximum 2 tool attempts with errors - then MUST provide Final Answer explaining what you know
 
 Current user: {user_context}
 
