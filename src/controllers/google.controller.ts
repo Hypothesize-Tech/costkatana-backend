@@ -1128,4 +1128,62 @@ export class GoogleController {
             });
         }
     }
+
+    /**
+     * Get accessible files for a connection
+     * GET /api/google/connections/:id/accessible-files
+     */
+    static async getAccessibleFiles(req: any, res: Response): Promise<void> {
+        try {
+            const userId = req.userId;
+            const { id } = req.params;
+            const { fileType } = req.query;
+
+            if (!userId) {
+                const error = GoogleErrors.AUTH_REQUIRED;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const connection = await GoogleConnection.findOne({
+                _id: id,
+                userId,
+                isActive: true
+            });
+
+            if (!connection) {
+                const error = GoogleErrors.CONNECTION_NOT_FOUND;
+                res.status(error.httpStatus).json(GoogleErrors.formatError(error));
+                return;
+            }
+
+            const files = await GoogleService.getAccessibleFiles(
+                userId,
+                id,
+                fileType as 'docs' | 'sheets' | 'drive' | undefined
+            );
+
+            loggingService.info('Retrieved accessible files', {
+                userId,
+                connectionId: id,
+                fileType,
+                filesCount: files.length
+            });
+
+            res.json({
+                success: true,
+                data: files
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to get accessible files', {
+                error: error.message
+            });
+
+            res.status(500).json({
+                success: false,
+                message: 'Failed to get accessible files',
+                error: error.message
+            });
+        }
+    }
 }
