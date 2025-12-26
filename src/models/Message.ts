@@ -1,5 +1,17 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+export interface IMessageAttachment {
+    type: 'uploaded' | 'google';
+    fileId: string;
+    fileName: string;
+    fileSize: number;
+    mimeType: string;
+    fileType: string;
+    url: string;
+    extractedText?: string;
+    extractedAt?: Date;
+}
+
 export interface IMessage extends Document {
     messageId: string;
     sessionId: string;
@@ -10,6 +22,7 @@ export interface IMessage extends Document {
     fullContentUrl?: string;
     timestamp: Date;
     metadata?: Record<string, any>;
+    attachments?: IMessageAttachment[];
     createdAt: Date;
     updatedAt: Date;
 }
@@ -46,7 +59,40 @@ const MessageSchema = new Schema<IMessage>(
             required: true, },
         metadata: {
             type: Schema.Types.Mixed
-        }
+        },
+        attachments: [{
+            type: {
+                type: String,
+                enum: ['uploaded', 'google'],
+                required: true
+            },
+            fileId: {
+                type: String,
+                required: true
+            },
+            fileName: {
+                type: String,
+                required: true
+            },
+            fileSize: {
+                type: Number,
+                required: true
+            },
+            mimeType: {
+                type: String,
+                required: true
+            },
+            fileType: {
+                type: String,
+                required: true
+            },
+            url: {
+                type: String,
+                required: true
+            },
+            extractedText: String,
+            extractedAt: Date
+        }]
     },
     {
         timestamps: true

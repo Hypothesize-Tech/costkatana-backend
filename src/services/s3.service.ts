@@ -287,4 +287,102 @@ export class S3Service {
             throw new Error('Could not generate presigned URL.');
         }
     }
+
+    /**
+     * Upload a chat attachment file to S3
+     */
+    static async uploadChatFile(
+        userId: string,
+        fileName: string,
+        fileBuffer: Buffer,
+        mimeType: string
+    ): Promise<{ s3Key: string; presignedUrl: string }> {
+        const timestamp = Date.now();
+        const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const key = `chat-uploads/${userId}/${timestamp}-${sanitizedFileName}`;
+
+        const command = new PutObjectCommand({
+            Bucket: AWS_CONFIG.s3.bucketName,
+            Key: key,
+            Body: fileBuffer,
+            ContentType: mimeType,
+            Metadata: {
+                userId,
+                originalFileName: fileName,
+                uploadedAt: new Date().toISOString(),
+            }
+        });
+
+        try {
+            await s3Client.send(command);
+
+            // Generate presigned URL for 7 days
+            const presignedUrl = await S3Service.generatePresignedUrl(key, 7 * 24 * 60 * 60);
+
+            loggingService.info('Chat file uploaded to S3', {
+                component: 'S3Service',
+                operation: 'uploadChatFile',
+                userId,
+                fileName,
+                s3Key: key,
+                fileSize: fileBuffer.length
+            });
+
+            return { s3Key: key, presignedUrl };
+        } catch (error) {
+            loggingService.error('Error uploading chat file to S3', {
+                component: 'S3Service',
+                operation: 'uploadChatFile',
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                fileName
+            });
+            throw new Error('Could not upload chat file to S3.');
+        }
+    }
+
+    /**
+     * Get file buffer from S3 (for text extraction)
+     */
+    static async getFileBuffer(s3Key: string): Promise<Buffer> {
+        try {
+            return await S3Service.downloadDocument(s3Key);
+        } catch (error) {
+            loggingService.error('Error getting file buffer from S3', {
+                component: 'S3Service',
+                operation: 'getFileBuffer',
+                error: error instanceof Error ? error.message : String(error),
+                s3Key
+            });
+            throw new Error('Could not get file buffer from S3.');
+        }
+    }
+
+    /**
+     * Delete a chat file from S3
+     */
+    static async deleteChatFile(s3Key: string): Promise<void> {
+        const command = new DeleteObjectCommand({
+            Bucket: AWS_CONFIG.s3.bucketName,
+            Key: s3Key
+        });
+
+        try {
+            await s3Client.send(command);
+
+            loggingService.info('Chat file deleted from S3', {
+                component: 'S3Service',
+                operation: 'deleteChatFile',
+                s3Key
+            });
+        } catch (error) {
+            loggingService.error('Error deleting chat file from S3', {
+                component: 'S3Service',
+                operation: 'deleteChatFile',
+                error: error instanceof Error ? error.message : String(error),
+                s3Key
+            });
+            throw new Error('Could not delete chat file from S3.');
+        }
+    }
 } 

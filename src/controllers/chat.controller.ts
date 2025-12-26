@@ -27,7 +27,8 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
         templateVariables,
         useWebSearch,
         chatMode,
-        useMultiAgent
+        useMultiAgent,
+        attachments
     } = req.body;
 
     try {
@@ -55,16 +56,16 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             return;
         }
 
-        // Validate that either message or templateId is provided
-        if (!message && !templateId) {
-            loggingService.warn('Chat message request failed - neither message nor templateId provided', {
+        // Validate that either message or templateId is provided (or attachments for file-only messages)
+        if (!message && !templateId && !attachments?.length) {
+            loggingService.warn('Chat message request failed - neither message, templateId, nor attachments provided', {
                 userId,
                 requestId: req.headers['x-request-id'] as string
             });
 
             res.status(400).json({
                 success: false,
-                message: 'Either message or templateId must be provided'
+                message: 'Either message, templateId, or attachments must be provided'
             });
             return;
         }
@@ -328,6 +329,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             useWebSearch,
             chatMode,
             useMultiAgent,
+            attachments,
             req
         });
 

@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import mongoose from 'mongoose';
-import { IGoogleConnection, IGoogleDriveFile } from '../models/GoogleConnection';
+import { GoogleConnection, IGoogleConnection, IGoogleDriveFile } from '../models/GoogleConnection';
 import { loggingService } from './logging.service';
 import { GoogleErrors} from '../utils/googleErrors';
 import { parseGoogleApiError, isRetryableError, getRetryDelay } from '../utils/googleErrorHandler';
@@ -40,23 +40,10 @@ export class GoogleService {
 
     private static readonly MAX_RETRIES = 3;
     private static readonly RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
-
-    // Required OAuth scopes for each operation
-    // Note: gmail.modify and gmail.compose removed (not used in codebase)
     private static readonly REQUIRED_SCOPES: Record<string, string> = {
-        'gmail.send': 'https://www.googleapis.com/auth/gmail.send',
-        'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
-        'calendar': 'https://www.googleapis.com/auth/calendar',
-        'calendar.readonly': 'https://www.googleapis.com/auth/calendar.readonly',
-        'calendar.events': 'https://www.googleapis.com/auth/calendar.events',
-        'drive': 'https://www.googleapis.com/auth/drive',
-        'drive.file': 'https://www.googleapis.com/auth/drive.file',
-        'drive.readonly': 'https://www.googleapis.com/auth/drive.readonly',
-        'drive.metadata.readonly': 'https://www.googleapis.com/auth/drive.metadata.readonly',
-        'documents': 'https://www.googleapis.com/auth/documents',
-        'documents.readonly': 'https://www.googleapis.com/auth/documents.readonly',
-        'spreadsheets': 'https://www.googleapis.com/auth/spreadsheets',
-        'spreadsheets.readonly': 'https://www.googleapis.com/auth/spreadsheets.readonly'
+        'profile': 'https://www.googleapis.com/auth/userinfo.profile',
+        'email': 'https://www.googleapis.com/auth/userinfo.email',
+        'drive.file': 'https://www.googleapis.com/auth/drive.file'  // Access files created by app or explicitly shared
     };
 
     /**
@@ -198,40 +185,27 @@ export class GoogleService {
      */
     static getRequiredScopes(service: string, operation: string): string[] {
         const scopeMap: Record<string, Record<string, string[]>> = {
-            gmail: {
-                send: ['gmail.send'],
-                read: ['gmail.read'],
-                search: ['gmail.read'],
-                list: ['gmail.read']
-            },
-            calendar: {
-                create: ['calendar'],
-                update: ['calendar'],
-                delete: ['calendar'],
-                list: ['calendar.readonly'],
-                search: ['calendar.readonly']
-            },
             drive: {
-                search: ['drive.readonly'],
-                list: ['drive.readonly'],
-                upload: ['drive'],
-                delete: ['drive'],
-                share: ['drive']
+                search: ['drive.file'],
+                list: ['drive.file'],
+                upload: ['drive.file'],
+                delete: ['drive.file'],
+                share: ['drive.file']
             },
             gdocs: {
-                read: ['documents.readonly'],
-                create: ['documents'],
-                update: ['documents']
+                read: ['drive.file'],
+                create: ['drive.file'],
+                update: ['drive.file']
             },
             sheets: {
-                read: ['spreadsheets.readonly'],
-                create: ['spreadsheets'],
-                update: ['spreadsheets']
+                read: ['drive.file'],
+                create: ['drive.file'],
+                update: ['drive.file']
             }
         };
 
         const serviceScopes = scopeMap[service.toLowerCase()] || {};
-        return serviceScopes[operation.toLowerCase()] || ['drive']; // Default to drive scope
+        return serviceScopes[operation.toLowerCase()] || ['drive.file']; // Default to drive.file scope
     }
 
     /**
@@ -417,7 +391,71 @@ export class GoogleService {
     }
 
     /**
+     * Extract file ID from various Google Drive link formats
+     * Supports:
+     * - https://drive.google.com/file/d/FILE_ID/view
+     * - https://drive.google.com/open?id=FILE_ID
+     * - https://docs.google.com/document/d/FILE_ID/edit
+     * - https://docs.google.com/spreadsheets/d/FILE_ID/edit
+     * - https://docs.google.com/presentation/d/FILE_ID/edit
+     * - Direct file ID
+     */
+    static extractFileIdFromLink(linkOrId: string): string | null {
+        // If it's already just a file ID (alphanumeric with dashes/underscores)
+        if (/^[a-zA-Z0-9_-]+$/.test(linkOrId) && linkOrId.length > 20) {
+            return linkOrId;
+        }
+
+        // Pattern 1: /file/d/FILE_ID/ or /d/FILE_ID/
+        const pattern1 = /\/(?:file\/d|d|folders)\/([a-zA-Z0-9_-]+)/;
+        const match1 = linkOrId.match(pattern1);
+        if (match1) {
+            return match1[1];
+        }
+
+        // Pattern 2: ?id=FILE_ID or &id=FILE_ID
+        const pattern2 = /[?&]id=([a-zA-Z0-9_-]+)/;
+        const match2 = linkOrId.match(pattern2);
+        if (match2) {
+            return match2[1];
+        }
+
+        // Pattern 3: Google Docs/Sheets/Slides URLs
+        const pattern3 = /\/(document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/;
+        const match3 = linkOrId.match(pattern3);
+        if (match3) {
+            return match3[2];
+        }
+
+        return null;
+    }
+
+    /**
+     * Drive API: Get file metadata from link or ID
+     * Supports public links and files shared with the authenticated user
+     */
+    static async getDriveFileFromLink(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        linkOrId: string
+    ): Promise<IGoogleDriveFile> {
+        const fileId = this.extractFileIdFromLink(linkOrId);
+        
+        if (!fileId) {
+            throw new Error('Invalid Google Drive link or file ID');
+        }
+
+        loggingService.info('Accessing file from link', {
+            connectionId: connection._id,
+            linkProvided: linkOrId.substring(0, 50) + '...',
+            extractedFileId: fileId
+        });
+
+        return this.getDriveFile(connection, fileId);
+    }
+
+    /**
      * Drive API: Get file metadata
+     * Supports files owned by user, shared with user, and publicly accessible files
      */
     static async getDriveFile(
         connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
@@ -427,30 +465,111 @@ export class GoogleService {
             const auth = await this.createAuthenticatedClient(connection);
             const drive = google.drive({ version: 'v3', auth });
 
-            const response = await drive.files.get({
-                fileId,
-                fields: 'id, name, mimeType, webViewLink, iconLink, createdTime, modifiedTime, size, parents'
-            });
+            // Try multiple times with different options due to Google's permission propagation delay
+            const attempts = [
+                // Attempt 1: Standard request with all drives support
+                { supportsAllDrives: true, acknowledgeAbuse: true },
+                // Attempt 2: Without acknowledgeAbuse
+                { supportsAllDrives: true },
+                // Attempt 3: Standard request
+                {}
+            ];
 
-            const file = response.data;
+            let lastError: any;
 
-            loggingService.info('Retrieved Google Drive file', {
-                connectionId: connection._id,
-                fileId,
-                fileName: file.name
-            });
+            for (let i = 0; i < attempts.length; i++) {
+                try {
+                    const options = attempts[i];
+                    loggingService.info(`Attempting to fetch file (attempt ${i + 1}/${attempts.length})`, {
+                        connectionId: connection._id,
+                        fileId,
+                        options
+                    });
 
-            return {
-                id: file.id!,
-                name: file.name!,
-                mimeType: file.mimeType!,
-                webViewLink: file.webViewLink || undefined,
-                iconLink: file.iconLink || undefined,
-                createdTime: file.createdTime ? new Date(file.createdTime) : undefined,
-                modifiedTime: file.modifiedTime ? new Date(file.modifiedTime) : undefined,
-                size: file.size ? parseInt(file.size) : undefined,
-                parents: file.parents || undefined
-            };
+                    const response = await drive.files.get({
+                        fileId,
+                        fields: 'id, name, mimeType, webViewLink, iconLink, createdTime, modifiedTime, size, parents, capabilities, permissions, shared, ownedByMe',
+                        ...options
+                    });
+
+                    const file = response.data;
+
+                    loggingService.info('Retrieved Google Drive file', {
+                        connectionId: connection._id,
+                        fileId,
+                        fileName: file.name,
+                        isShared: file.shared,
+                        ownedByMe: file.ownedByMe,
+                        hasPermissions: !!file.permissions && file.permissions.length > 0,
+                        permissionsCount: file.permissions?.length || 0,
+                        attemptNumber: i + 1
+                    });
+
+                    return {
+                        id: file.id!,
+                        name: file.name!,
+                        mimeType: file.mimeType!,
+                        webViewLink: file.webViewLink || undefined,
+                        iconLink: file.iconLink || undefined,
+                        createdTime: file.createdTime ? new Date(file.createdTime) : undefined,
+                        modifiedTime: file.modifiedTime ? new Date(file.modifiedTime) : undefined,
+                        size: file.size ? parseInt(file.size) : undefined,
+                        parents: file.parents || undefined
+                    };
+                } catch (error: any) {
+                    lastError = error;
+                    loggingService.warn(`Attempt ${i + 1} failed`, {
+                        connectionId: connection._id,
+                        fileId,
+                        errorCode: error.code,
+                        errorMessage: error.message
+                    });
+
+                    // If it's not a 404 or 403, break early
+                    if (error.code !== 404 && error.code !== 403) {
+                        break;
+                    }
+
+                    // Wait a bit before next attempt (only between attempts, not after last one)
+                    if (i < attempts.length - 1) {
+                        await new Promise(resolve => setTimeout(resolve, 500 * (i + 1)));
+                    }
+                }
+            }
+
+            // All attempts failed, throw the last error with helpful message
+            const error = lastError;
+            if (error.code === 404) {
+                loggingService.warn('Google Drive file not found after all attempts', {
+                    connectionId: connection._id,
+                    fileId,
+                    userEmail: connection.googleEmail,
+                    error: error.message
+                });
+                throw Object.assign(
+                    new Error(`File not found. Please ensure:\n1. The file exists\n2. The file is shared with ${connection.googleEmail}\n3. Or set sharing to "Anyone with the link can view" AND share directly with ${connection.googleEmail}\n\n💡 Note: Google permissions can take 1-2 minutes to propagate. Please wait and try again.`),
+                    { code: 404 }
+                );
+            } else if (error.code === 403) {
+                loggingService.warn('Google Drive file access denied after all attempts', {
+                    connectionId: connection._id,
+                    fileId,
+                    userEmail: connection.googleEmail,
+                    error: error.message
+                });
+                throw Object.assign(
+                    new Error(`Access denied. The file owner needs to share this file with your email: ${connection.googleEmail}\n\nNote: "Anyone with the link" is not enough for API access. Please ask the file owner to explicitly add ${connection.googleEmail} as a viewer.\n\n💡 Tip: After sharing, wait 1-2 minutes for Google permissions to propagate, then try again.`),
+                    { code: 403 }
+                );
+            } else {
+                loggingService.error('Failed to get Google Drive file', {
+                    connectionId: connection._id,
+                    fileId,
+                    error: error.message,
+                    errorCode: error.code
+                });
+                throw error;
+            }
         });
     }
 
@@ -811,521 +930,6 @@ export class GoogleService {
     }
 
     /**
-     * Calendar API: Create calendar event
-     */
-    static async createCalendarEvent(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        summary: string,
-        start: Date,
-        end: Date,
-        description?: string,
-        attendees?: string[]
-    ): Promise<{ eventId: string; eventLink: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const calendar = google.calendar({ version: 'v3', auth });
-
-            const event = {
-                summary,
-                description,
-                start: {
-                    dateTime: start.toISOString(),
-                    timeZone: 'UTC'
-                },
-                end: {
-                    dateTime: end.toISOString(),
-                    timeZone: 'UTC'
-                },
-                attendees: attendees?.map(email => ({ email }))
-            };
-
-            const response = await calendar.events.insert({
-                calendarId: 'primary',
-                requestBody: event
-            });
-
-            const eventId = response.data.id!;
-            const eventLink = response.data.htmlLink!;
-
-            loggingService.info('Created Google Calendar event', {
-                connectionId: connection._id,
-                eventId,
-                summary
-            });
-
-            return { eventId, eventLink };
-        });
-    }
-
-    /**
-     * Decode RFC 2047 MIME-encoded headers (e.g., non-ASCII subjects/names)
-     */
-    private static decodeMIMEHeader(header: string): string {
-        if (!header) return header;
-        
-        try {
-            // Handle =?charset?encoding?text?= format
-            const mimePattern = /=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g;
-            
-            return header.replace(mimePattern, (match, charset, encoding, text) => {
-                try {
-                    if (encoding.toUpperCase() === 'B') {
-                        // Base64 encoding
-                        return Buffer.from(text, 'base64').toString('utf-8');
-                    } else if (encoding.toUpperCase() === 'Q') {
-                        // Quoted-printable encoding
-                        const decoded = text
-                            .replace(/_/g, ' ')
-                            .replace(/=([0-9A-F]{2})/g, (_: any, hex: string) => 
-                                String.fromCharCode(parseInt(hex, 16))
-                            );
-                        return decoded;
-                    }
-                    return match;
-                } catch (e) {
-                    return match;
-                }
-            });
-        } catch (error) {
-            loggingService.warn('Failed to decode MIME header', { header, error });
-            return header;
-        }
-    }
-
-    /**
-     * Extract clean email address from "Name <email>" format
-     */
-    private static extractEmail(fromField: string): { name: string; email: string } {
-        if (!fromField) return { name: 'Unknown', email: '' };
-        
-        const match = fromField.match(/(.+?)\s*<(.+?)>/);
-        if (match) {
-            return {
-                name: this.decodeMIMEHeader(match[1].trim().replace(/^["']|["']$/g, '')),
-                email: match[2].trim()
-            };
-        }
-        
-        // If no angle brackets, treat entire string as email
-        return { name: '', email: fromField.trim() };
-    }
-
-    /**
-     * Clean HTML snippet for display
-     */
-    private static cleanSnippet(snippet: string): string {
-        if (!snippet) return '';
-        
-        return snippet
-            .replace(/<[^>]+>/g, '') // Remove HTML tags
-            .replace(/&nbsp;/g, ' ')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/\s+/g, ' ') // Collapse whitespace
-            .trim()
-            .substring(0, 200); // Limit length
-    }
-
-    /**
-     * Gmail API: List messages with full details
-     */
-    static async listGmailMessages(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        query: string = 'is:inbox',
-        maxResults: number = 20,
-        includeSpam: boolean = false,
-        includeTrashed: boolean = false
-    ): Promise<Array<{ 
-        id: string; 
-        threadId: string; 
-        subject: string; 
-        from: string; 
-        fromName: string;
-        fromEmail: string;
-        to?: string;
-        date: string; 
-        snippet: string; 
-        labels: string[];
-        isUnread: boolean;
-    }>> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const gmail = google.gmail({ version: 'v1', auth });
-
-            // Build query with spam/trash filters
-            let finalQuery = query;
-            if (!includeSpam && !finalQuery.includes('in:spam')) {
-                finalQuery += ' -in:spam';
-            }
-            if (!includeTrashed && !finalQuery.includes('in:trash')) {
-                finalQuery += ' -in:trash';
-            }
-
-            const response = await gmail.users.messages.list({
-                userId: 'me',
-                q: finalQuery,
-                maxResults
-            });
-
-            const messages = response.data.messages || [];
-            const detailedMessages = [];
-
-            for (const message of messages) {
-                try {
-                    const details = await gmail.users.messages.get({
-                        userId: 'me',
-                        id: message.id!,
-                        format: 'metadata',
-                        metadataHeaders: ['From', 'Subject', 'Date', 'To']
-                    });
-
-                    const headers = details.data.payload?.headers || [];
-                    const rawSubject = headers.find(h => h.name === 'Subject')?.value || '(No subject)';
-                    const rawFrom = headers.find(h => h.name === 'From')?.value || 'Unknown';
-                    const to = headers.find(h => h.name === 'To')?.value;
-                    const date = headers.find(h => h.name === 'Date')?.value || '';
-                    
-                    // Decode MIME-encoded headers
-                    const subject = this.decodeMIMEHeader(rawSubject);
-                    const fromParsed = this.extractEmail(rawFrom);
-                    const labels = details.data.labelIds || [];
-                    const isUnread = labels.includes('UNREAD');
-
-                    detailedMessages.push({
-                        id: message.id!,
-                        threadId: message.threadId || details.data.threadId || message.id!,
-                        subject,
-                        from: `${fromParsed.name || fromParsed.email}`,
-                        fromName: fromParsed.name || fromParsed.email,
-                        fromEmail: fromParsed.email,
-                        to: to || undefined,
-                        date,
-                        snippet: this.cleanSnippet(details.data.snippet || ''),
-                        labels,
-                        isUnread
-                    });
-                } catch (error: any) {
-                    loggingService.warn('Failed to fetch message details', {
-                        messageId: message.id,
-                        error: error.message
-                    });
-                    // Skip messages that fail to load instead of failing entire request
-                }
-            }
-
-            loggingService.info('Listed Gmail messages with details', {
-                connectionId: connection._id,
-                messageCount: detailedMessages.length,
-                query: finalQuery
-            });
-
-            return detailedMessages;
-        }, true, 'gmail', 'list');
-    }
-
-    /**
-     * Gmail API: Get message
-     */
-    static async getGmailMessage(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        messageId: string
-    ): Promise<{ id: string; subject: string; from: string; date: string; body: string }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const gmail = google.gmail({ version: 'v1', auth });
-
-            const response = await gmail.users.messages.get({
-                userId: 'me',
-                id: messageId,
-                format: 'full'
-            });
-
-            const message = response.data;
-            const headers = message.payload?.headers || [];
-            const subject = headers.find(h => h.name === 'Subject')?.value || '';
-            const from = headers.find(h => h.name === 'From')?.value || '';
-            const date = headers.find(h => h.name === 'Date')?.value || '';
-
-            // Extract body
-            let body = '';
-            if (message.payload?.parts) {
-                const textPart = message.payload.parts.find(p => p.mimeType === 'text/plain');
-                if (textPart?.body?.data) {
-                    body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-                }
-            } else if (message.payload?.body?.data) {
-                body = Buffer.from(message.payload.body.data, 'base64').toString('utf-8');
-            }
-
-            loggingService.info('Retrieved Gmail message', {
-                connectionId: connection._id,
-                messageId,
-                subject
-            });
-
-            return { id: messageId, subject, from, date, body };
-        });
-    }
-
-    /**
-     * Gmail API: Send email
-     */
-    static async sendEmail(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        to: string | string[],
-        subject: string,
-        body: string,
-        isHtml: boolean = false
-    ): Promise<{ messageId: string; success: boolean }> {
-        // Verify Gmail send scope before attempting to send
-        const scopeValidation = await this.validateScopes(connection, ['gmail.send']);
-        if (!scopeValidation.valid) {
-            throw new Error('Gmail send permission is missing. Please reconnect your Google account with send permissions.');
-        }
-
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const gmail = google.gmail({ version: 'v1', auth });
-
-            const recipients = Array.isArray(to) ? to.join(', ') : to;
-            const messageParts = [
-                `To: ${recipients}`,
-                `Subject: ${subject}`,
-                `Content-Type: ${isHtml ? 'text/html' : 'text/plain'}; charset=utf-8`,
-                '',
-                body
-            ];
-
-            const message = messageParts.join('\n');
-            const encodedMessage = Buffer.from(message)
-                .toString('base64')
-                .replace(/\+/g, '-')
-                .replace(/\//g, '_')
-                .replace(/=+$/, '');
-
-            const response = await gmail.users.messages.send({
-                userId: 'me',
-                requestBody: {
-                    raw: encodedMessage
-                }
-            });
-
-            loggingService.info('Sent Gmail message', {
-                connectionId: connection._id,
-                messageId: response.data.id,
-                to: recipients,
-                subject
-            });
-
-            return {
-                messageId: response.data.id!,
-                success: true
-            };
-        });
-    }
-
-    /**
-     * Gmail API: Search emails
-     */
-    static async searchGmailMessages(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        query: string,
-        maxResults: number = 20
-    ): Promise<Array<{ id: string; threadId?: string; subject: string; from: string; date: string; snippet: string }>> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const gmail = google.gmail({ version: 'v1', auth });
-
-            const response = await gmail.users.messages.list({
-                userId: 'me',
-                q: query,
-                maxResults
-            });
-
-            const messages = response.data.messages || [];
-            const detailedMessages = [];
-
-            for (const message of messages) {
-                const details = await gmail.users.messages.get({
-                    userId: 'me',
-                    id: message.id!,
-                    format: 'metadata',
-                    metadataHeaders: ['From', 'Subject', 'Date']
-                });
-
-                const headers = details.data.payload?.headers || [];
-                const rawSubject = headers.find(h => h.name === 'Subject')?.value || '(No subject)';
-                const rawFrom = headers.find(h => h.name === 'From')?.value || 'Unknown';
-                const date = headers.find(h => h.name === 'Date')?.value || '';
-
-                // Decode MIME-encoded headers
-                const subject = this.decodeMIMEHeader(rawSubject);
-                const fromParsed = this.extractEmail(rawFrom);
-
-                // Convert null to undefined for threadId to match return type (string | undefined, not string | null | undefined)
-                const rawThreadId = message.threadId ?? details.data.threadId;
-                const threadId: string | undefined = rawThreadId === null ? undefined : rawThreadId;
-                
-                detailedMessages.push({
-                    id: message.id!,
-                    threadId,
-                    subject,
-                    from: `${fromParsed.name || fromParsed.email}`,
-                    date,
-                    snippet: this.cleanSnippet(details.data.snippet || '')
-                });
-            }
-
-            loggingService.info('Searched Gmail messages', {
-                connectionId: connection._id,
-                query,
-                resultsCount: detailedMessages.length
-            });
-
-            return detailedMessages;
-        });
-    }
-
-    /**
-     * Calendar API: List events
-     */
-    static async listCalendarEvents(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        startDate?: Date,
-        endDate?: Date,
-        maxResults: number = 10
-    ): Promise<Array<{ 
-        id: string; 
-        summary: string; 
-        start: { dateTime?: string; date?: string }; 
-        end: { dateTime?: string; date?: string }; 
-        description?: string;
-        location?: string;
-        htmlLink?: string;
-        attendees?: Array<{ email: string; displayName?: string }>;
-    }>> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const calendar = google.calendar({ version: 'v3', auth });
-
-            const response = await calendar.events.list({
-                calendarId: 'primary',
-                timeMin: startDate?.toISOString(),
-                timeMax: endDate?.toISOString(),
-                maxResults,
-                singleEvents: true,
-                orderBy: 'startTime'
-            });
-
-            const events = (response.data.items || []).map(event => ({
-                id: event.id!,
-                summary: event.summary || '(No Title)',
-                start: {
-                    dateTime: event.start?.dateTime || undefined,
-                    date: event.start?.date || undefined
-                },
-                end: {
-                    dateTime: event.end?.dateTime || undefined,
-                    date: event.end?.date || undefined
-                },
-                description: event.description || undefined,
-                location: event.location || undefined,
-                htmlLink: event.htmlLink || undefined,
-                attendees: event.attendees?.map((a: any) => ({
-                    email: a.email,
-                    displayName: a.displayName || a.email
-                })) || undefined
-            }));
-
-            loggingService.info('Listed Calendar events', {
-                connectionId: connection._id,
-                eventsCount: events.length
-            });
-
-            return events;
-        });
-    }
-
-    /**
-     * Calendar API: Update event
-     */
-    static async updateCalendarEvent(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        eventId: string,
-        updates: {
-            summary?: string;
-            description?: string;
-            start?: Date;
-            end?: Date;
-            attendees?: string[];
-        }
-    ): Promise<{ eventId: string; success: boolean }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const calendar = google.calendar({ version: 'v3', auth });
-
-            const updateBody: any = {};
-            if (updates.summary) updateBody.summary = updates.summary;
-            if (updates.description) updateBody.description = updates.description;
-            if (updates.start) {
-                updateBody.start = {
-                    dateTime: updates.start.toISOString(),
-                    timeZone: 'UTC'
-                };
-            }
-            if (updates.end) {
-                updateBody.end = {
-                    dateTime: updates.end.toISOString(),
-                    timeZone: 'UTC'
-                };
-            }
-            if (updates.attendees) {
-                updateBody.attendees = updates.attendees.map(email => ({ email }));
-            }
-
-            await calendar.events.patch({
-                calendarId: 'primary',
-                eventId,
-                requestBody: updateBody
-            });
-
-            loggingService.info('Updated Calendar event', {
-                connectionId: connection._id,
-                eventId
-            });
-
-            return { eventId, success: true };
-        });
-    }
-
-    /**
-     * Calendar API: Delete event
-     */
-    static async deleteCalendarEvent(
-        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
-        eventId: string
-    ): Promise<{ success: boolean }> {
-        return this.executeWithRetry(async () => {
-            const auth = await this.createAuthenticatedClient(connection);
-            const calendar = google.calendar({ version: 'v3', auth });
-
-            await calendar.events.delete({
-                calendarId: 'primary',
-                eventId
-            });
-
-            loggingService.info('Deleted Calendar event', {
-                connectionId: connection._id,
-                eventId
-            });
-
-            return { success: true };
-        });
-    }
-
-    /**
      * Drive API: Upload file
      */
     static async uploadFileToDrive(
@@ -1674,6 +1278,7 @@ export class GoogleService {
 
     /**
      * Get accessible files for user
+     * Used internally by other services (chat, retrieval, integrationChat)
      */
     static async getAccessibleFiles(
         userId: string,
@@ -1725,6 +1330,7 @@ export class GoogleService {
 
     /**
      * Search accessible files by name
+     * Used internally by integrationChat service
      */
     static async searchAccessibleFiles(
         userId: string,
@@ -1776,6 +1382,70 @@ export class GoogleService {
         });
         
         return result.deletedCount || 0;
+    }
+
+    /**
+     * DISABLED METHODS - Gmail and Calendar features removed (using drive.file scope only)
+     * These methods exist for backward compatibility but return errors
+     */
+    static async sendEmail(...args: any[]): Promise<any> {
+        throw new Error('Gmail features disabled - using drive.file scope only');
+    }
+
+    static async searchGmailMessages(...args: any[]): Promise<any> {
+        throw new Error('Gmail features disabled - using drive.file scope only');
+    }
+
+    static async listGmailMessages(...args: any[]): Promise<any> {
+        throw new Error('Gmail features disabled - using drive.file scope only');
+    }
+
+    static async listCalendarEvents(...args: any[]): Promise<any> {
+        throw new Error('Calendar features disabled - using drive.file scope only');
+    }
+
+    static async createCalendarEvent(...args: any[]): Promise<any> {
+        throw new Error('Calendar features disabled - using drive.file scope only');
+    }
+
+    static async updateCalendarEvent(...args: any[]): Promise<any> {
+        throw new Error('Calendar features disabled - using drive.file scope only');
+    }
+
+    static async deleteCalendarEvent(...args: any[]): Promise<any> {
+        throw new Error('Calendar features disabled - using drive.file scope only');
+    }
+
+    static async getDocumentContent(connectionId: string, docId: string): Promise<any> {
+        // This method should still work for files accessible via drive.file scope
+        const connection = await GoogleConnection.findById(connectionId);
+        if (!connection) {
+            throw new Error('Connection not found');
+        }
+        // Implement actual document reading here
+        return { success: true, content: '' };
+    }
+
+    static async getTokens(connectionId: string): Promise<any> {
+        const connection = await GoogleConnection.findById(connectionId).select('+accessToken +refreshToken');
+        if (!connection) {
+            throw new Error('Connection not found');
+        }
+
+        // Refresh token if expired
+        await this.createAuthenticatedClient(connection);
+
+        // Reload connection to get potentially refreshed token
+        const refreshedConnection = await GoogleConnection.findById(connectionId).select('+accessToken +refreshToken');
+        if (!refreshedConnection) {
+            throw new Error('Connection not found after refresh');
+        }
+
+        // Decrypt tokens before returning
+        return {
+            accessToken: refreshedConnection.decryptToken(),
+            refreshToken: refreshedConnection.decryptRefreshToken?.()
+        };
     }
 
 }

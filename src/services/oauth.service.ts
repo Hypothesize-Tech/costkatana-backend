@@ -77,19 +77,12 @@ export class OAuthService {
             }
             
             const callbackUrl = process.env.GOOGLE_CALLBACK_URL ?? `${process.env.BACKEND_URL ?? 'http://localhost:8000'}/api/auth/oauth/google/callback`;
-            
-            // IMPORTANT: These scopes MUST exactly match what's configured in Google Cloud Console OAuth Consent Screen
-            // Requesting only the minimum scopes necessary for app functionality
+
             const scopes = [
                 'openid',
                 'https://www.googleapis.com/auth/userinfo.email',
                 'https://www.googleapis.com/auth/userinfo.profile',
-                'https://www.googleapis.com/auth/drive.file',
-                'https://www.googleapis.com/auth/documents',
-                'https://www.googleapis.com/auth/spreadsheets',
-                'https://www.googleapis.com/auth/gmail.send',
-                'https://www.googleapis.com/auth/gmail.readonly', // READ emails for billing/invoice data
-                'https://www.googleapis.com/auth/calendar'
+                'https://www.googleapis.com/auth/drive.file' 
             ].join(' ');
             
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&response_type=code&scope=${encodeURIComponent(scopes)}&state=${state}&access_type=offline&prompt=consent`;

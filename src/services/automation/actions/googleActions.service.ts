@@ -60,103 +60,6 @@ export interface ActionResult {
 }
 
 export class GoogleActionsService {
-    /**
-     * Send email via Gmail
-     */
-    static async sendEmail(
-        connectionId: string,
-        to: string | string[],
-        subject: string,
-        body: string,
-        isHtml: boolean = false
-    ): Promise<ActionResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { success: false, error: 'Connection not found' };
-            }
-
-            const result = await GoogleService.sendEmail(
-                connection,
-                to,
-                subject,
-                body,
-                isHtml
-            );
-
-            loggingService.info('Sent email via automation', {
-                connectionId,
-                to: Array.isArray(to) ? to.join(', ') : to,
-                subject
-            });
-
-            return {
-                success: true,
-                data: result,
-                message: 'Email sent successfully'
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to send email via automation', {
-                error: error.message,
-                connectionId
-            });
-            return { success: false, error: error.message };
-        }
-    }
-
-    /**
-     * Create calendar event
-     */
-    static async createCalendarEvent(
-        connectionId: string,
-        summary: string,
-        start: Date,
-        end: Date,
-        description?: string,
-        attendees?: string[]
-    ): Promise<ActionResult> {
-        try {
-            const connection = await GoogleConnection.findOne({
-                _id: new mongoose.Types.ObjectId(connectionId),
-                isActive: true
-            }).select('+accessToken +refreshToken');
-
-            if (!connection) {
-                return { success: false, error: 'Connection not found' };
-            }
-
-            const result = await GoogleService.createCalendarEvent(
-                connection,
-                summary,
-                start,
-                end,
-                description,
-                attendees
-            );
-
-            loggingService.info('Created calendar event via automation', {
-                connectionId,
-                summary,
-                eventId: result.eventId
-            });
-
-            return {
-                success: true,
-                data: result,
-                message: 'Calendar event created successfully'
-            };
-        } catch (error: any) {
-            loggingService.error('Failed to create calendar event via automation', {
-                error: error.message,
-                connectionId
-            });
-            return { success: false, error: error.message };
-        }
-    }
 
     /**
      * Export data to Google Sheets
@@ -475,23 +378,18 @@ export class GoogleActionsService {
 
         switch (actionType) {
             case 'send_email':
-                return this.sendEmail(
-                    connectionId,
-                    config.to!,
-                    config.subject!,
-                    config.body!,
-                    config.isHtml
-                );
+                // Gmail disabled - return error
+                return {
+                    success: false,
+                    error: 'Gmail features disabled - using drive.file scope only'
+                };
 
             case 'create_calendar_event':
-                return this.createCalendarEvent(
-                    connectionId,
-                    config.eventSummary!,
-                    config.eventStart!,
-                    config.eventEnd!,
-                    config.eventDescription,
-                    config.attendees
-                );
+                // Calendar disabled - return error
+                return {
+                    success: false,
+                    error: 'Calendar features disabled - using drive.file scope only'
+                };
 
             case 'export_to_sheets':
                 return this.exportToSheets(
