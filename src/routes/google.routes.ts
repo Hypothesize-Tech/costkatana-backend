@@ -50,6 +50,7 @@ router.post('/gemini/suggest-strategy', GoogleController.generateOptimizationStr
 // File Access Cache (for Picker API integration and Drive link access)
 router.post('/file-from-link', GoogleController.getFileFromLink);
 router.get('/file-access/check/:fileId', GoogleController.checkFileAccess);
+router.get('/connections/:id/accessible-files', GoogleController.getAccessibleFiles);
 
 export default router;
 
