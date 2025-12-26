@@ -11,6 +11,7 @@ import mongoose from 'mongoose';
 import { loggingService } from './logging.service';
 import { IntegrationChatService, ParsedMention } from './integrationChat.service';
 import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
+import { GoogleService } from './google.service';
 
 // Conversation Context Types
 export interface ConversationContext {
@@ -2637,7 +2638,7 @@ Answer:`;
     }
 
     /**
-     * Process attachments - format file metadata for AI
+     * Process attachments - format file metadata for AI and fetch Google file content
      * Frontend already provides instruction context about analyzing files
      */
     static async processAttachments(
@@ -2649,8 +2650,13 @@ Answer:`;
             mimeType: string;
             fileType: string;
             url: string;
+            googleFileId?: string;
+            connectionId?: string;
+            webViewLink?: string;
+            modifiedTime?: string;
+            createdTime?: string;
         }>,
-        _userId: string
+        userId: string
     ): Promise<{
         processedAttachments: Array<{
             type: 'uploaded' | 'google';
@@ -2660,6 +2666,12 @@ Answer:`;
             mimeType: string;
             fileType: string;
             url: string;
+            googleFileId?: string;
+            connectionId?: string;
+            webViewLink?: string;
+            modifiedTime?: string;
+            createdTime?: string;
+            extractedContent?: string;
         }>;
         contextString: string;
     }> {
@@ -2691,26 +2703,85 @@ Answer:`;
                     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
                 };
 
-                // Create minimal file metadata - frontend already provides analysis instructions
-                const fileInfo = [
+                // Try to fetch Google file content
+                let extractedContent = '';
+                if (attachment.type === 'google' && attachment.googleFileId && attachment.connectionId) {
+                    try {
+                        const { GoogleConnection } = await import('../models/GoogleConnection');
+                        const connection = await GoogleConnection.findById(attachment.connectionId);
+                        
+                        if (connection && connection.isActive) {
+                            if (attachment.mimeType === 'application/vnd.google-apps.document') {
+                                extractedContent = await GoogleService.readDocument(connection, attachment.googleFileId);
+                            } else if (attachment.mimeType === 'application/vnd.google-apps.spreadsheet') {
+                                const sheetData = await GoogleService.readSpreadsheet(connection, attachment.googleFileId, 'Sheet1!A1:Z100');
+                                if (Array.isArray(sheetData)) {
+                                    extractedContent = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
+                                }
+                            }
+                            
+                            loggingService.info('Retrieved Google file content for chat', {
+                                fileName: attachment.fileName,
+                                fileId: attachment.googleFileId,
+                                mimeType: attachment.mimeType,
+                                contentLength: extractedContent.length,
+                                userId
+                            });
+                        }
+                    } catch (error) {
+                        loggingService.warn('Failed to fetch Google file content', {
+                            fileName: attachment.fileName,
+                            fileId: attachment.googleFileId,
+                            error: error instanceof Error ? error.message : String(error),
+                            userId
+                        });
+                    }
+                }
+
+                // Create file metadata with optional content
+                const fileInfoLines = [
                     `📎 **${attachment.fileName}**`,
                     `   ${displayFileType} | ${formatFileSize(attachment.fileSize)}`,
                     `   URL: ${attachment.url}`
-                ].join('\n');
+                ];
 
+                if (attachment.modifiedTime) {
+                    fileInfoLines.push(`   Modified: ${new Date(attachment.modifiedTime).toLocaleDateString()}`);
+                }
+
+                if (extractedContent && extractedContent.trim()) {
+                    // Truncate content if too long
+                    const maxContentLength = 3000;
+                    const truncatedContent = extractedContent.length > maxContentLength 
+                        ? extractedContent.substring(0, maxContentLength) + '...'
+                        : extractedContent;
+                    
+                    fileInfoLines.push('');
+                    fileInfoLines.push('📄 **File Content:**');
+                    fileInfoLines.push(truncatedContent);
+                }
+
+                const fileInfo = fileInfoLines.join('\n');
                 contentParts.push(fileInfo);
-                processedAttachments.push(attachment);
+
+                // Add extracted content to processed attachment
+                const processedAttachment = {
+                    ...attachment,
+                    ...(extractedContent && { extractedContent })
+                };
+                processedAttachments.push(processedAttachment);
 
             } catch (error) {
                 loggingService.error('Failed to process attachment metadata', {
                     attachment,
                     error,
+                    userId
                 });
                 processedAttachments.push(attachment);
             }
         }
 
-        // Create minimal context - frontend already instructs AI to analyze
+        // Create enhanced context with file content
         const contextString = contentParts.length > 0
             ? `\n\n📁 **Attached Files:**\n\n${contentParts.join('\n\n')}\n`
             : '';
