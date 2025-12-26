@@ -411,36 +411,43 @@ export class ConversationalFlowService {
             return null; // Let it go directly to handleGeneralQuery
         }
 
+        // DISABLE AI-based workflows temporarily - always return null for direct answers
+        // This ensures all questions get immediate answers without workflow interruptions
+        loggingService.info('Routing all queries to direct answer (workflows disabled)', {
+            message: message.substring(0, 100)
+        });
+        return null;
+
+        /* COMMENTED OUT - AI workflow detection (keeping for future use if needed)
         try {
             // Use Nova Pro to analyze the message intent
             const { BedrockService } = await import('./bedrock.service');
             
-            const analysisPrompt = `Analyze this user message and determine if it requires a multi-step guided workflow or can be answered directly.
+            const analysisPrompt = `You are a routing classifier. Analyze if this message needs a multi-step setup workflow.
 
-User Message: "${message}"
+Message: "${message}"
 
-Available Workflows:
-1. create_project - User wants to create a new project (requires project details collection)
-2. cost_optimization - User wants to actively optimize/reduce costs (requires analysis and action)
-3. model_selection - User wants help selecting/choosing a specific model (requires preference gathering)
-4. null - Simple question that can be answered directly without workflow
+ONLY return one of these EXACT words (nothing else):
+- null (for questions, analysis requests, comparisons, explanations)
+- create_project (ONLY if explicitly creating/starting a new project)
+- cost_optimization (ONLY if explicitly requesting to optimize/reduce costs NOW)
+- model_selection (ONLY if explicitly selecting/choosing between models NOW)
 
-Rules:
-- Return "null" for informational questions (What is X? How does Y work? Explain Z, etc.)
-- Return "null" for questions in any language (Arabic, English, etc.) that just need an answer
-- Return "null" for analysis requests (analyze my usage, show me data, etc.)
-- Return a workflow ONLY if the user explicitly wants to SET UP or CREATE something multi-step
-- Return "null" for questions about cost optimization methods (how to optimize, best practices)
-- Return "cost_optimization" ONLY if user says "optimize my costs now" or "reduce my spending"
+Default to "null" for:
+- All informational questions (how, what, why, explain)
+- All analysis requests (analyze, show me, report, data)
+- All comparison requests (compare, difference between)
+- Questions in any language
 
-Respond with ONLY the workflow name or "null" (no quotes, no explanation):`;
+Answer with ONE WORD ONLY:`;
 
             const response = await BedrockService.invokeModel(
                 analysisPrompt,
                 'us.amazon.nova-pro-v1:0'
             );
 
-            const intent = (response || '').toString().trim().toLowerCase();
+            // Extract just the first word from response
+            const intent = (response || '').toString().trim().toLowerCase().split(/[\s\n]/)[0];
             
             // Validate the response
             const validIntents = [
@@ -473,6 +480,7 @@ Respond with ONLY the workflow name or "null" (no quotes, no explanation):`;
             // On error, default to null (direct answer) - safer than triggering wrong workflow
             return null;
         }
+        */
     }
 
     /**
