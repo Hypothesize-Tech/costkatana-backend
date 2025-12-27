@@ -251,6 +251,6 @@ optimizationSchema.index({ category: 1 });
 optimizationSchema.index({ createdAt: -1 });
 
 // Text index for searching prompts
-optimizationSchema.index({ originalPrompt: 'text', optimizedPrompt: 'text' });
+optimizationSchema.index({ userQuery: 'text', generatedAnswer: 'text' });
 
 export const Optimization = mongoose.model<IOptimization>('Optimization', optimizationSchema);
