@@ -650,6 +650,21 @@ export class MFAController {
                 // Complete the login process
                 const { tokens } = await AuthService.completeLogin(user, deviceInfo);
 
+                // Ensure role field is present (fallback to 'user' only if truly missing)
+                // Check if role is undefined or null - preserve existing 'admin' or 'user' values
+                let userRole = user.role;
+                if (!userRole) {
+                    // Only set to 'user' if role is truly missing
+                    userRole = 'user';
+                    user.role = 'user';
+                    await user.save().catch((err: unknown) => {
+                        loggingService.warn('Failed to update user role in database during MFA verification', {
+                            userId,
+                            error: err instanceof Error ? err.message : String(err)
+                        });
+                    });
+                }
+
                 // Check if user wants to remember device
                 let trustedDeviceAdded = false;
                 if (rememberDevice === true) {
@@ -713,7 +728,7 @@ export class MFAController {
                             id: (user as any)._id,
                             email: user.email,
                             name: user.name,
-                            role: user.role,
+                            role: userRole,
                             emailVerified: user.emailVerified,
                             subscriptionId: user.subscriptionId,
                         },

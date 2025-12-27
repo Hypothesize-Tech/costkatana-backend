@@ -11,6 +11,12 @@ export interface IUserMemory extends Document {
     metadata: any;
     isActive: boolean;
     expiresAt?: Date;
+    
+    // Vector fields for semantic search
+    semanticEmbedding?: number[]; // 1024 dimensions for Amazon Titan v2
+    vectorizedAt?: Date; // Timestamp when vectorization was completed
+    semanticContent?: string; // The content that was actually embedded (may be processed/truncated)
+    
     createdAt: Date;
     updatedAt: Date;
 }
@@ -55,6 +61,24 @@ const UserMemorySchema = new Schema<IUserMemory>({
     },
     expiresAt: {
         type: Date
+    },
+    
+    // Vector fields for semantic search
+    semanticEmbedding: {
+        type: [Number],
+        validate: {
+            validator: function(v: number[]) {
+                return !v || v.length === 0 || v.length === 1024;
+            },
+            message: 'Semantic embedding must be 1024 dimensions for Amazon Titan v2'
+        }
+    },
+    vectorizedAt: {
+        type: Date
+    },
+    semanticContent: {
+        type: String,
+        maxlength: 2000
     }
 }, {
     timestamps: true
@@ -69,7 +93,9 @@ export interface IConversationMemory extends Document {
     conversationId: string;
     query: string;
     response: string;
-    queryEmbedding?: number[]; // For vector similarity (optional, using in-memory for now)
+    queryEmbedding?: number[]; // Enhanced - 1024 dimensions for Amazon Titan v2
+    responseEmbedding?: number[]; // New - 1024 dimensions for response vectorization
+    vectorizedAt?: Date; // Timestamp when vectorization was completed
     metadata: {
         timestamp: Date;
         modelUsed?: string;
@@ -110,6 +136,18 @@ const ConversationMemorySchema = new Schema<IConversationMemory>({
     queryEmbedding: [{
         type: Number
     }],
+    responseEmbedding: {
+        type: [Number],
+        validate: {
+            validator: function(v: number[]) {
+                return !v || v.length === 0 || v.length === 1024;
+            },
+            message: 'Response embedding must be 1024 dimensions for Amazon Titan v2'
+        }
+    },
+    vectorizedAt: {
+        type: Date
+    },
     metadata: {
         timestamp: {
             type: Date,

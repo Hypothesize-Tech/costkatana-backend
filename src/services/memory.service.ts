@@ -2,6 +2,7 @@ import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { HumanMessage } from "@langchain/core/messages";
 import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory';
+import { Message } from '../models/Message';
 import { VectorMemoryService } from './vectorMemory.service';
 import { UserPreferenceService } from './userPreference.service';
 import { cacheService } from './cache.service';
@@ -977,6 +978,475 @@ export class MemoryService {
             if (objectMatch) return JSON.parse(objectMatch[0]);
             
             throw error;
+        }
+    }
+
+    // ============================================================================
+    // ENHANCED VECTOR-POWERED METHODS (Internal Use - Not Exposed via API)
+    // ============================================================================
+
+    /**
+     * Get vectorized memories with enhanced semantic search
+     * Internal method that leverages vector embeddings when available
+     */
+    async getVectorizedMemories(userId: string, query?: string, limit: number = 5): Promise<MemoryInsight[]> {
+        try {
+            // Try vector search first if query is provided
+            if (query) {
+                const vectorResults = await this.performVectorMemorySearch(userId, query, limit);
+                if (vectorResults.length > 0) {
+                    return vectorResults;
+                }
+            }
+
+            // Fallback to traditional memory retrieval
+            const memories = await UserMemory.find({
+                userId,
+                isActive: true
+            }).sort({ createdAt: -1 }).limit(limit).lean();
+
+            return memories.map(memory => ({
+                type: memory.memoryType as 'preference' | 'pattern' | 'security' | 'context',
+                content: memory.content,
+                confidence: memory.confidence,
+                timestamp: memory.createdAt,
+                source: memory.source
+            }));
+        } catch (error) {
+            loggingService.error('Failed to get vectorized memories:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Cross-modal search across memory types simultaneously
+     * Searches UserMemory, ConversationMemory, and high-value Messages
+     */
+    async crossModalSearch(userId: string, query: string, options?: {
+        includeMemories?: boolean;
+        includeConversations?: boolean; 
+        includeMessages?: boolean;
+        limit?: number;
+    }): Promise<{
+        memories: MemoryInsight[];
+        conversations: SimilarConversation[];
+        messages: any[];
+        totalResults: number;
+    }> {
+        const opts = {
+            includeMemories: true,
+            includeConversations: true,
+            includeMessages: true,
+            limit: 10,
+            ...options
+        };
+
+        try {
+            loggingService.info('🔍 Starting cross-modal memory search', {
+                userId,
+                query: query.substring(0, 100),
+                options: opts
+            });
+
+            const searches: Promise<any>[] = [];
+            
+            // Search vectorized memories
+            if (opts.includeMemories) {
+                searches.push(this.performVectorMemorySearch(userId, query, opts.limit));
+            }
+
+            // Search conversation memories with vectors
+            if (opts.includeConversations) {
+                searches.push(this.performVectorConversationSearch(userId, query, opts.limit));
+            }
+
+            // Search high-value vectorized messages
+            if (opts.includeMessages) {
+                searches.push(this.performVectorMessageSearch(userId, query, opts.limit));
+            }
+
+            const results = await Promise.all(searches);
+            
+            const response = {
+                memories: opts.includeMemories ? (results[0] || []) : [],
+                conversations: opts.includeConversations ? (results[opts.includeMemories ? 1 : 0] || []) : [],
+                messages: opts.includeMessages ? (results[searches.length - 1] || []) : [],
+                totalResults: 0
+            };
+
+            response.totalResults = response.memories.length + response.conversations.length + response.messages.length;
+
+            loggingService.info('✅ Cross-modal search completed', {
+                userId,
+                totalResults: response.totalResults,
+                breakdown: {
+                    memories: response.memories.length,
+                    conversations: response.conversations.length,
+                    messages: response.messages.length
+                }
+            });
+
+            return response;
+        } catch (error) {
+            loggingService.error('❌ Cross-modal search failed:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                query: query.substring(0, 100)
+            });
+
+            return {
+                memories: [],
+                conversations: [],
+                messages: [],
+                totalResults: 0
+            };
+        }
+    }
+
+    /**
+     * Generate contextual insights using vectorized data
+     * Creates personalized recommendations based on cross-modal patterns
+     */
+    async generateContextualInsights(userId: string, currentQuery?: string): Promise<{
+        personalizedRecommendations: string[];
+        behaviorPatterns: string[];
+        contextualTips: string[];
+    }> {
+        try {
+            // Get cross-modal context
+            const context = currentQuery 
+                ? await this.crossModalSearch(userId, currentQuery, { limit: 5 })
+                : await this.getUserMemoryContext(userId);
+
+            // Generate insights using AI
+            const insightsPrompt = `Based on this user's memory and conversation patterns, generate personalized insights:
+
+USER CONTEXT:
+Memories: ${context.memories.map(m => `${m.type}: ${m.content.substring(0, 100)}`).join('\n')}
+Recent Conversations: ${context.conversations.map(c => `Q: ${c.query.substring(0, 80)}`).join('\n')}
+${currentQuery ? `Current Query: ${currentQuery}` : ''}
+
+Generate insights as JSON:
+{
+  "personalizedRecommendations": ["rec1", "rec2", "rec3"],
+  "behaviorPatterns": ["pattern1", "pattern2"],
+  "contextualTips": ["tip1", "tip2"]
+}
+
+Focus on cost optimization, AI model usage, and technical preferences.`;
+
+            const response = await this.memoryAgent.invoke([new HumanMessage(insightsPrompt)]);
+            const insights = this.parseAIResponseHelper(response.content.toString());
+
+            return {
+                personalizedRecommendations: insights.personalizedRecommendations || [],
+                behaviorPatterns: insights.behaviorPatterns || [],
+                contextualTips: insights.contextualTips || []
+            };
+        } catch (error) {
+            loggingService.error('Failed to generate contextual insights:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+
+            return {
+                personalizedRecommendations: [],
+                behaviorPatterns: [],
+                contextualTips: []
+            };
+        }
+    }
+
+    /**
+     * Enhanced prompt enhancement using full vector context
+     * Improves the existing enhancePromptWithMemory with cross-modal intelligence
+     */
+    async enhanceWithVectorContext(state: {
+        query: string;
+        userId: string;
+        memoryInsights?: MemoryInsight[];
+        userPreferences?: any;
+        similarConversations?: SimilarConversation[];
+        personalizedRecommendations?: string[];
+    }): Promise<string> {
+        try {
+            // Get enhanced context using cross-modal search
+            const vectorContext = await this.crossModalSearch(state.userId, state.query, { limit: 3 });
+            
+            // Combine existing context with vector context
+            const enhancedMemoryInsights = [
+                ...(state.memoryInsights || []),
+                ...vectorContext.memories
+            ];
+
+            const enhancedConversations = [
+                ...(state.similarConversations || []),
+                ...vectorContext.conversations
+            ];
+
+            // Generate contextual insights if not provided
+            const insights = await this.generateContextualInsights(state.userId, state.query);
+
+            const enhancementPrompt = `Enhance this user query with comprehensive memory context:
+
+Original Query: "${state.query}"
+
+ENHANCED MEMORY CONTEXT:
+${enhancedMemoryInsights.map(insight => `- ${insight.type}: ${insight.content.substring(0, 150)}`).join('\n')}
+
+USER PREFERENCES:
+${state.userPreferences ? `
+- Preferred Model: ${state.userPreferences.preferredModel || 'Not set'}
+- Technical Level: ${state.userPreferences.technicalLevel || 'Not set'}
+- Response Length: ${state.userPreferences.responseLength || 'Not set'}
+- Common Topics: ${state.userPreferences.commonTopics?.join(', ') || 'None'}
+` : 'No preferences set'}
+
+SIMILAR PAST CONVERSATIONS:
+${enhancedConversations.map(conv => `- "${conv.query.substring(0, 100)}" (similarity: ${conv.similarity?.toFixed(2) || 'N/A'})`).join('\n')}
+
+HIGH-VALUE MESSAGES CONTEXT:
+${vectorContext.messages.map(msg => `- [${msg.role}]: ${msg.contentPreview?.substring(0, 100) || 'No preview'}`).join('\n')}
+
+PERSONALIZED INSIGHTS:
+${insights.personalizedRecommendations.map(rec => `- ${rec}`).join('\n')}
+
+BEHAVIORAL PATTERNS:
+${insights.behaviorPatterns.map(pattern => `- ${pattern}`).join('\n')}
+
+Create an enhanced version of the query that incorporates relevant context.
+The enhanced query should:
+1. Reference relevant past conversations and solutions
+2. Adjust complexity based on user's technical level and patterns
+3. Include user preferences and behavioral insights where relevant
+4. Maintain the original intent while adding helpful context
+5. Leverage cross-modal intelligence from memories, conversations, and messages
+
+Return only the enhanced query, no other text.`;
+
+            const response = await this.memoryAgent.invoke([new HumanMessage(enhancementPrompt)]);
+            const enhancedQuery = response.content.toString().trim();
+
+            loggingService.info('🎯 Enhanced query with vector context', {
+                originalLength: state.query.length,
+                enhancedLength: enhancedQuery.length,
+                contextSources: {
+                    memories: enhancedMemoryInsights.length,
+                    conversations: enhancedConversations.length,
+                    messages: vectorContext.messages.length
+                }
+            });
+
+            return enhancedQuery;
+        } catch (error) {
+            loggingService.error('❌ Failed to enhance with vector context:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return state.query;
+        }
+    }
+
+    // ============================================================================
+    // PRIVATE VECTOR SEARCH METHODS
+    // ============================================================================
+
+    /**
+     * Perform vector search on user memories
+     */
+    private async performVectorMemorySearch(userId: string, query: string, limit: number): Promise<MemoryInsight[]> {
+        try {
+            // Use MongoDB vector search if embeddings are available
+            const pipeline = [
+                {
+                    $vectorSearch: {
+                        index: "usermemory_semantic_index",
+                        path: "semanticEmbedding",
+                        queryVector: await this.generateQueryEmbedding(query),
+                        numCandidates: limit * 10,
+                        limit: limit,
+                        filter: { userId, isActive: true }
+                    }
+                },
+                {
+                    $addFields: {
+                        score: { $meta: "vectorSearchScore" }
+                    }
+                },
+                {
+                    $match: {
+                        score: { $gte: 0.7 } // Similarity threshold
+                    }
+                }
+            ];
+
+            const results = await UserMemory.aggregate(pipeline);
+            
+            return results.map(memory => ({
+                type: memory.memoryType as 'preference' | 'pattern' | 'security' | 'context',
+                content: memory.content,
+                confidence: memory.confidence * (memory.score || 1), // Boost confidence with similarity
+                timestamp: memory.createdAt,
+                source: `${memory.source} (vector search)`
+            }));
+        } catch (error) {
+            // Fallback to traditional search
+            loggingService.warn('Vector search failed, using fallback:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Perform vector search on conversation memories
+     */
+    private async performVectorConversationSearch(userId: string, query: string, limit: number): Promise<SimilarConversation[]> {
+        try {
+            const pipeline = [
+                {
+                    $vectorSearch: {
+                        index: "conversation_semantic_index",
+                        path: "queryEmbedding",
+                        queryVector: await this.generateQueryEmbedding(query),
+                        numCandidates: limit * 10,
+                        limit: limit,
+                        filter: { userId, isArchived: false }
+                    }
+                },
+                {
+                    $addFields: {
+                        score: { $meta: "vectorSearchScore" }
+                    }
+                },
+                {
+                    $match: {
+                        score: { $gte: 0.6 }
+                    }
+                }
+            ];
+
+            const results = await ConversationMemory.aggregate(pipeline);
+            
+            return results.map(conv => ({
+                conversationId: conv.conversationId,
+                query: conv.query,
+                response: conv.response,
+                similarity: conv.score || 0,
+                timestamp: conv.createdAt,
+                metadata: { ...conv.metadata, vectorSearch: true }
+            }));
+        } catch (error) {
+            loggingService.warn('Conversation vector search failed:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Perform vector search on high-value messages
+     */
+    private async performVectorMessageSearch(userId: string, query: string, limit: number): Promise<any[]> {
+        try {
+            const pipeline = [
+                {
+                    $vectorSearch: {
+                        index: "message_semantic_index",
+                        path: "semanticEmbedding",
+                        queryVector: await this.generateQueryEmbedding(query),
+                        numCandidates: limit * 10,
+                        limit: limit,
+                        filter: { isVectorized: true }
+                    }
+                },
+                {
+                    $addFields: {
+                        score: { $meta: "vectorSearchScore" }
+                    }
+                },
+                {
+                    $match: {
+                        score: { $gte: 0.65 }
+                    }
+                }
+            ];
+
+            const results = await Message.aggregate(pipeline);
+            return results;
+        } catch (error) {
+            loggingService.warn('Message vector search failed:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Generate query embedding for vector search
+     */
+    private async generateQueryEmbedding(query: string): Promise<number[]> {
+        try {
+            // Use the same embedding service as vectorization
+            const { BedrockEmbeddings } = await import("@langchain/aws");
+            const embeddings = new BedrockEmbeddings({
+                region: process.env.AWS_REGION || 'us-east-1',
+                model: 'amazon.titan-embed-text-v2:0',
+                maxRetries: 3,
+            });
+            
+            return await embeddings.embedQuery(query);
+        } catch (error) {
+            loggingService.error('Failed to generate query embedding:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw error;
+        }
+    }
+
+    /**
+     * Get user memory context for insights generation
+     */
+    private async getUserMemoryContext(userId: string): Promise<{
+        memories: MemoryInsight[];
+        conversations: SimilarConversation[];
+        messages: any[];
+        totalResults: number;
+    }> {
+        try {
+            const [memories, conversations, messages] = await Promise.all([
+                UserMemory.find({ userId, isActive: true }).limit(5).lean(),
+                ConversationMemory.find({ userId, isArchived: false }).sort({ createdAt: -1 }).limit(3).lean(),
+                Message.find({ isVectorized: true }).sort({ createdAt: -1 }).limit(2).lean()
+            ]);
+
+            return {
+                memories: memories.map(m => ({
+                    type: m.memoryType as 'preference' | 'pattern' | 'security' | 'context',
+                    content: m.content,
+                    confidence: m.confidence,
+                    timestamp: m.createdAt,
+                    source: m.source
+                })),
+                conversations: conversations.map(c => ({
+                    conversationId: c.conversationId,
+                    query: c.query,
+                    response: c.response,
+                    similarity: 0.8, // Default high similarity for recent conversations
+                    timestamp: c.createdAt,
+                    metadata: c.metadata
+                })),
+                messages,
+                totalResults: memories.length + conversations.length + messages.length
+            };
+        } catch (error) {
+            loggingService.error('Failed to get user memory context:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            return { memories: [], conversations: [], messages: [], totalResults: 0 };
         }
     }
 

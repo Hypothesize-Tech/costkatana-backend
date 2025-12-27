@@ -3,6 +3,7 @@ import { AuthService } from '../services/auth.service';
 import { registerSchema, loginSchema } from '../utils/validators';
 import { loggingService } from '../services/logging.service';
 import { config } from '../config';
+import { User } from '../models/User';
 
 export interface IUser {
     _id?: string;
@@ -71,13 +72,29 @@ export class AuthController {
                 name: validatedData.name
             });
 
+            // Ensure role field is present (fallback to 'user' only if truly missing)
+            // Check if role is undefined or null - preserve existing 'admin' or 'user' values
+            let userRole = user.role;
+            if (!userRole) {
+                // Only set to 'user' if role is truly missing
+                userRole = 'user';
+                const userDoc = user as any as InstanceType<typeof User>;
+                userDoc.role = 'user';
+                await userDoc.save().catch((err: unknown) => {
+                    loggingService.warn('Failed to update user role in database during registration', {
+                        userId: (user as any)._id,
+                        error: err instanceof Error ? err.message : String(err)
+                    });
+                });
+            }
+
             const duration = Date.now() - startTime;
 
             loggingService.info('User registration completed successfully', {
                 email,
                 name,
                 userId: (user as any)._id,
-                role: user.role,
+                role: userRole,
                 duration,
                 requestId: req.headers['x-request-id'] as string
             });
@@ -91,7 +108,7 @@ export class AuthController {
                     email,
                     name,
                     userId: (user as any)._id,
-                    role: user.role
+                    role: userRole
                 }
             });
 
@@ -111,7 +128,7 @@ export class AuthController {
                         id: (user as any)._id,
                         email: user.email,
                         name: user.name,
-                        role: user.role,
+                        role: userRole,
                     },
                     accessToken: tokens.accessToken,
                     refreshToken: tokens.refreshToken,
@@ -197,12 +214,28 @@ export class AuthController {
             // Complete login (no MFA required)
             const { user, tokens } = result as { user: any; tokens: any };
 
+            // Ensure role field is present (fallback to 'user' only if truly missing)
+            // Check if role is undefined or null - preserve existing 'admin' or 'user' values
+            let userRole = user.role;
+            if (!userRole) {
+                // Only set to 'user' if role is truly missing
+                userRole = 'user';
+                const userDoc = user as any as InstanceType<typeof User>;
+                userDoc.role = 'user';
+                await userDoc.save().catch((err: unknown) => {
+                    loggingService.warn('Failed to update user role in database during login', {
+                        userId: user._id,
+                        error: err instanceof Error ? err.message : String(err)
+                    });
+                });
+            }
+
             const duration = Date.now() - startTime;
 
             loggingService.info('User login completed successfully', {
                 email: validatedEmail,
                 userId: user._id,
-                role: user.role,
+                role: userRole,
                 emailVerified: user.emailVerified,
                 duration,
                 userAgent,
@@ -218,7 +251,7 @@ export class AuthController {
                 metadata: {
                     email: validatedEmail,
                     userId: user._id,
-                    role: user.role,
+                    role: userRole,
                     emailVerified: user.emailVerified,
                     userAgent,
                     ipAddress
@@ -241,7 +274,7 @@ export class AuthController {
                         id: user._id,
                         email: user.email,
                         name: user.name,
-                        role: user.role,
+                        role: userRole,
                         emailVerified: user.emailVerified,
                         subscription: user.subscription,
                         preferences: user.preferences,

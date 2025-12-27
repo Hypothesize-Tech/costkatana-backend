@@ -1857,5 +1857,193 @@ export class AdminDashboardController {
             next(error);
         }
     }
+
+    /**
+     * Get vectorization system health and statistics
+     * GET /api/admin/dashboard/vectorization
+     */
+    static async getVectorizationDashboard(req: any, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        try {
+            loggingService.info('Getting vectorization dashboard data', {
+                component: 'AdminDashboardController',
+                operation: 'getVectorizationDashboard',
+                adminUserId: req.user?.id
+            });
+
+            // Import services dynamically to avoid circular dependencies
+            const { backgroundVectorizationService } = await import('../services/backgroundVectorization.service');
+            const { smartSamplingService } = await import('../services/smartSampling.service');
+            const { crossModalIntelligenceService } = await import('../services/crossModalIntelligence.service');
+            const { vectorMemoryService } = await import('../services/vectorMemory.service');
+
+            // Get comprehensive vectorization statistics
+            const [
+                healthStats,
+                timeEstimates,
+                samplingStats,
+                crossModelStats
+            ] = await Promise.all([
+                backgroundVectorizationService.getVectorizationHealth(),
+                backgroundVectorizationService.estimateProcessingTime(),
+                smartSamplingService.getSamplingStats(),
+                vectorMemoryService.getCrossModelStats()
+            ]);
+
+            // Calculate additional metrics
+            const totalVectorizedRecords = 
+                healthStats.storageUsage.userMemories.vectorized +
+                healthStats.storageUsage.conversations.vectorized +
+                healthStats.storageUsage.messages.vectorized;
+
+            const totalRecords = 
+                healthStats.storageUsage.userMemories.total +
+                healthStats.storageUsage.conversations.total +
+                healthStats.storageUsage.messages.total;
+
+            const overallVectorizationRate = totalRecords > 0 ? 
+                Math.round((totalVectorizedRecords / totalRecords) * 100) : 0;
+
+            // Prepare dashboard data matching frontend interface
+            const dashboardData = {
+                health: {
+                    embeddingService: healthStats.embeddingService,
+                    vectorIndexes: healthStats.vectorIndexes,
+                    storageUsage: {
+                        current: healthStats.storageUsage.current,
+                        projected: healthStats.storageUsage.projected,
+                        userMemories: healthStats.storageUsage.userMemories,
+                        conversations: healthStats.storageUsage.conversations,
+                        messages: healthStats.storageUsage.messages
+                    },
+                    lastProcessing: healthStats.lastProcessing,
+                    currentlyProcessing: healthStats.currentlyProcessing
+                },
+                processingStats: {
+                    userMemories: {
+                        total: timeEstimates.userMemories.total,
+                        estimated: timeEstimates.userMemories.estimated
+                    },
+                    conversations: {
+                        total: timeEstimates.conversations.total,
+                        estimated: timeEstimates.conversations.estimated
+                    },
+                    messages: {
+                        total: timeEstimates.messages.total,
+                        estimated: timeEstimates.messages.estimated
+                    },
+                    totalEstimated: timeEstimates.totalEstimated
+                },
+                crossModalStats: {
+                    totalVectors: crossModelStats.totalVectors,
+                    avgEmbeddingDimensions: crossModelStats.avgEmbeddingDimensions,
+                    memoryEfficiency: crossModelStats.totalVectors > 1000 ? 'high' as const : 
+                                    crossModelStats.totalVectors > 100 ? 'medium' as const : 'building' as const
+                },
+                alerts: [] as Array<{ level: string; message: string; action: string }>
+            };
+
+            // Generate system alerts
+            if (healthStats.embeddingService === 'error') {
+                dashboardData.alerts.push({
+                    level: 'error',
+                    message: 'Embedding service is down - vectorization halted',
+                    action: 'Check AWS Bedrock connectivity and credentials'
+                });
+            }
+
+            if (healthStats.vectorIndexes === 'error') {
+                dashboardData.alerts.push({
+                    level: 'error', 
+                    message: 'Vector indexes are not optimal',
+                    action: 'Check MongoDB Atlas vector search index configuration'
+                });
+            }
+
+            if (overallVectorizationRate < 30) {
+                dashboardData.alerts.push({
+                    level: 'warning',
+                    message: `Low vectorization coverage (${overallVectorizationRate}%)`,
+                    action: 'Consider running manual vectorization or adjusting cron schedules'
+                });
+            }
+
+            if (timeEstimates.totalEstimated > 3600) { // > 1 hour
+                dashboardData.alerts.push({
+                    level: 'info',
+                    message: `Large backlog detected (${Math.round(timeEstimates.totalEstimated / 3600)} hours)`,
+                    action: 'Monitor processing progress or consider increasing batch sizes'
+                });
+            }
+
+            // Add sampling-related alerts based on selection rate
+            if (samplingStats.selectionRate < 0.05) {
+                dashboardData.alerts.push({
+                    level: 'info',
+                    message: `Smart sampling active at ${Math.round(samplingStats.selectionRate * 100)}% rate`,
+                    action: 'System is intelligently sampling to optimize processing'
+                });
+            }
+
+            const duration = Date.now() - startTime;
+            
+            loggingService.info('Vectorization dashboard data retrieved successfully', {
+                component: 'AdminDashboardController',
+                operation: 'getVectorizationDashboard',
+                adminUserId: req.user?.id,
+                duration,
+                overallVectorizationRate,
+                systemHealth: healthStats.embeddingService,
+                alertsCount: dashboardData.alerts.length,
+                samplingRate: samplingStats.selectionRate
+            });
+
+            // Log business event for dashboard usage
+            loggingService.logBusiness({
+                event: 'admin_vectorization_dashboard_accessed',
+                category: 'admin_operations',
+                value: duration,
+                metadata: {
+                    adminUserId: req.user?.id,
+                    overallVectorizationRate,
+                    systemHealth: healthStats.embeddingService,
+                    totalVectorizedRecords,
+                    alertsGenerated: dashboardData.alerts.length,
+                    samplingRate: samplingStats.selectionRate
+                }
+            });
+
+            res.json({
+                success: true,
+                data: dashboardData,
+                timestamp: new Date().toISOString(),
+                refreshedAt: new Date().toISOString()
+            });
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            
+            loggingService.error('Error getting vectorization dashboard:', {
+                error: error instanceof Error ? error.message : String(error),
+                component: 'AdminDashboardController',
+                operation: 'getVectorizationDashboard',
+                adminUserId: req.user?.id,
+                duration
+            });
+
+            // Log business error event
+            loggingService.logBusiness({
+                event: 'admin_vectorization_dashboard_error',
+                category: 'admin_operations_errors',
+                value: 1,
+                metadata: {
+                    adminUserId: req.user?.id,
+                    error: error instanceof Error ? error.message : String(error),
+                    duration
+                }
+            });
+
+            next(error);
+        }
+    }
 }
 
