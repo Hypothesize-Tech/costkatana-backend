@@ -84,5 +84,8 @@ router.get('/analytics/integrations/top', AdminDashboardController.getTopIntegra
 // Report Export
 router.post('/reports/export', AdminDashboardController.exportReport);
 
+// Vectorization Monitoring
+router.get('/dashboard/vectorization', AdminDashboardController.getVectorizationDashboard);
+
 export default router;
 

@@ -265,7 +265,7 @@ export class AuthService {
             }
 
             // Find user with optimized query - only select needed fields
-            const user = await User.findOne({ email }).select('email password isActive mfa lastLogin accountClosure _id name');
+            const user = await User.findOne({ email }).select('email password role isActive mfa lastLogin accountClosure _id name emailVerified avatar subscriptionId preferences usage onboarding createdAt company');
             if (!user) {
                 throw new Error('Invalid credentials');
             }

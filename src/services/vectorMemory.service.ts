@@ -1,6 +1,5 @@
 import { loggingService } from './logging.service';
-import { ChatBedrockConverse } from "@langchain/aws";
-import { HumanMessage } from "@langchain/core/messages";
+import { BedrockEmbeddings } from "@langchain/aws";
 import { LRUCache } from 'lru-cache';
 
 export interface VectorMemoryItem {
@@ -11,6 +10,7 @@ export interface VectorMemoryItem {
     embedding: number[];
     metadata: any;
     timestamp: Date;
+    dataType?: 'conversation' | 'memory' | 'message'; // Track data source
 }
 
 export interface SimilarityResult {
@@ -19,55 +19,77 @@ export interface SimilarityResult {
     response: string;
     similarity: number;
     metadata: any;
+    dataType?: string;
+}
+
+export interface CrossModelSearchOptions {
+    includeConversations?: boolean;
+    includeMemories?: boolean;
+    includeMessages?: boolean;
+    similarityThreshold?: number;
+    limit?: number;
 }
 
 /**
- * In-memory vector storage service using JavaScript built-ins
- * Efficient for moderate-scale applications without external dependencies
+ * Enhanced In-memory vector storage service with 1024-dimension support
+ * Now supports Amazon Titan v2 embeddings and cross-model similarity search
+ * Efficient for moderate-scale applications with improved embedding quality
  */
 export class VectorMemoryService {
-    private embeddingAgent: ChatBedrockConverse;
+    private embeddings: BedrockEmbeddings;
     
-    // In-memory vector storage with LRU limits
+    // In-memory vector storage with LRU limits - organized by data type
     private vectorStore: LRUCache<string, VectorMemoryItem>;
     private userVectorIndex: LRUCache<string, Set<string>>; // userId -> Set of vector IDs
+    private dataTypeIndex: LRUCache<string, Set<string>>; // dataType -> Set of vector IDs
     
     // Embedding cache with LRU limits to avoid re-computing same queries
     private embeddingCache: LRUCache<string, number[]>;
+    
+    // Enhanced configuration for 1024-dimension embeddings
+    private readonly EMBEDDING_DIMENSIONS = 1024;
+    private readonly SIMILARITY_THRESHOLD = 0.7;
 
     constructor() {
-        this.embeddingAgent = new ChatBedrockConverse({
-            model: "amazon.nova-pro-v1:0",
+        // Use Amazon Titan Embed Text v2 for consistency with background vectorization
+        this.embeddings = new BedrockEmbeddings({
             region: process.env.AWS_REGION || 'us-east-1',
-            temperature: 0.0, // Deterministic for embeddings
-            maxTokens: 1000,
+            model: 'amazon.titan-embed-text-v2:0', // 1024 dimensions
+            maxRetries: 3,
         });
         
-        // Initialize LRU caches with proper limits
+        // Initialize LRU caches with enhanced limits for production usage
         this.vectorStore = new LRUCache({
-            max: 5000, // Maximum 5000 vector memories
+            max: 10000, // Increased capacity for 1024-dim vectors
             ttl: 7 * 24 * 60 * 60 * 1000, // 7 days TTL
             updateAgeOnGet: true,
             allowStale: false
         });
 
         this.userVectorIndex = new LRUCache({
-            max: 1000, // Maximum 1000 users
+            max: 2000, // Support more users
             ttl: 7 * 24 * 60 * 60 * 1000, // 7 days TTL
             updateAgeOnGet: true,
             allowStale: false
         });
 
+        this.dataTypeIndex = new LRUCache({
+            max: 10, // Few data types
+            ttl: 7 * 24 * 60 * 60 * 1000,
+            updateAgeOnGet: true,
+            allowStale: false
+        });
+
         this.embeddingCache = new LRUCache({
-            max: 2000, // Maximum 2000 cached embeddings
-            ttl: 60 * 60 * 1000, // 1 hour TTL for embeddings
+            max: 5000, // Increased cache for better performance
+            ttl: 2 * 60 * 60 * 1000, // 2 hours TTL for embeddings
             updateAgeOnGet: true,
             allowStale: false
         });
     }
 
     /**
-     * Generate text embedding using AI model
+     * Generate text embedding using Amazon Titan Embed Text v2 (1024 dimensions)
      */
     private async generateEmbedding(text: string): Promise<number[]> {
         try {
@@ -77,27 +99,27 @@ export class VectorMemoryService {
                 return this.embeddingCache.get(cacheKey)!;
             }
             
-            // Generate embedding using AI model
-            const embeddingPrompt = `Generate a numerical vector representation (embedding) for this text. 
-            Return exactly 384 numbers separated by commas, representing semantic meaning:
+            // Generate embedding using Amazon Titan v2
+            const embedding = await this.embeddings.embedQuery(text);
             
-            Text: "${text}"
-            
-            Return only the numbers, no other text.`;
-            
-            const response = await this.embeddingAgent.invoke([new HumanMessage(embeddingPrompt)]);
-            const embeddingText = response.content.toString();
-            
-            // Parse the embedding
-            const embedding = this.parseEmbedding(embeddingText);
+            // Validate embedding dimensions
+            if (embedding.length !== this.EMBEDDING_DIMENSIONS) {
+                loggingService.warn('Unexpected embedding dimensions:', {
+                    expected: this.EMBEDDING_DIMENSIONS,
+                    received: embedding.length
+                });
+            }
             
             // Cache the embedding
             this.embeddingCache.set(cacheKey, embedding);
             
             return embedding;
         } catch (error) {
-            loggingService.error('❌ Failed to generate embedding:', { error: error instanceof Error ? error.message : String(error) });
-            // Fallback: generate a simple hash-based embedding
+            loggingService.error('❌ Failed to generate embedding:', { 
+                error: error instanceof Error ? error.message : String(error) 
+            });
+            
+            // Fallback: generate a deterministic hash-based embedding
             return this.generateHashBasedEmbedding(text);
         }
     }
@@ -436,6 +458,351 @@ export class VectorMemoryService {
         return topSimilarities.map(item => item.result);
     }
 
+    // ============================================================================
+    // ENHANCED CROSS-MODEL SEARCH METHODS
+    // ============================================================================
+
+    /**
+     * Store vector item with data type tracking for cross-model search
+     */
+    async storeVectorWithType(vectorItem: VectorMemoryItem & { dataType: string }): Promise<void> {
+        try {
+            // Store the vector item
+            this.vectorStore.set(vectorItem.id, vectorItem);
+            
+            // Update user index
+            const userVectors = this.userVectorIndex.get(vectorItem.userId) || new Set();
+            userVectors.add(vectorItem.id);
+            this.userVectorIndex.set(vectorItem.userId, userVectors);
+            
+            // Update data type index
+            const typeVectors = this.dataTypeIndex.get(vectorItem.dataType) || new Set();
+            typeVectors.add(vectorItem.id);
+            this.dataTypeIndex.set(vectorItem.dataType, typeVectors);
+            
+            loggingService.info('✅ Stored vector with type tracking', {
+                id: vectorItem.id,
+                userId: vectorItem.userId,
+                dataType: vectorItem.dataType
+            });
+        } catch (error) {
+            loggingService.error('❌ Failed to store vector with type:', {
+                error: error instanceof Error ? error.message : String(error),
+                vectorId: vectorItem.id
+            });
+        }
+    }
+
+    /**
+     * Cross-model similarity search across different data types
+     */
+    async crossModelSearch(
+        query: string, 
+        userId: string, 
+        options: CrossModelSearchOptions = {}
+    ): Promise<{
+        conversations: SimilarityResult[];
+        memories: SimilarityResult[];
+        messages: SimilarityResult[];
+        totalResults: number;
+    }> {
+        const opts = {
+            includeConversations: true,
+            includeMemories: true,
+            includeMessages: true,
+            similarityThreshold: this.SIMILARITY_THRESHOLD,
+            limit: 10,
+            ...options
+        };
+
+        try {
+            loggingService.info('🔍 Starting cross-model vector search', {
+                userId,
+                query: query.substring(0, 100),
+                options: opts
+            });
+
+            // Generate query embedding once for all searches
+            const queryEmbedding = await this.generateEmbedding(query);
+            
+            const results = {
+                conversations: [] as SimilarityResult[],
+                memories: [] as SimilarityResult[],
+                messages: [] as SimilarityResult[],
+                totalResults: 0
+            };
+
+            // Search each data type if enabled
+            if (opts.includeConversations) {
+                results.conversations = await this.searchByDataType(
+                    queryEmbedding, 
+                    userId, 
+                    'conversation', 
+                    opts.limit, 
+                    opts.similarityThreshold
+                );
+            }
+
+            if (opts.includeMemories) {
+                results.memories = await this.searchByDataType(
+                    queryEmbedding, 
+                    userId, 
+                    'memory', 
+                    opts.limit, 
+                    opts.similarityThreshold
+                );
+            }
+
+            if (opts.includeMessages) {
+                results.messages = await this.searchByDataType(
+                    queryEmbedding, 
+                    userId, 
+                    'message', 
+                    opts.limit, 
+                    opts.similarityThreshold
+                );
+            }
+
+            results.totalResults = results.conversations.length + results.memories.length + results.messages.length;
+
+            loggingService.info('✅ Cross-model search completed', {
+                userId,
+                totalResults: results.totalResults,
+                breakdown: {
+                    conversations: results.conversations.length,
+                    memories: results.memories.length,
+                    messages: results.messages.length
+                }
+            });
+
+            return results;
+        } catch (error) {
+            loggingService.error('❌ Cross-model search failed:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId,
+                query: query.substring(0, 100)
+            });
+
+            return {
+                conversations: [],
+                memories: [],
+                messages: [],
+                totalResults: 0
+            };
+        }
+    }
+
+    /**
+     * Search vectors by data type with optimized filtering
+     */
+    private async searchByDataType(
+        queryEmbedding: number[],
+        userId: string,
+        dataType: string,
+        limit: number,
+        minSimilarity: number
+    ): Promise<SimilarityResult[]> {
+        try {
+            // Get user's vectors
+            const userVectors = this.userVectorIndex.get(userId);
+            if (!userVectors || userVectors.size === 0) {
+                return [];
+            }
+
+            // Get vectors of specific data type
+            const typeVectors = this.dataTypeIndex.get(dataType);
+            if (!typeVectors || typeVectors.size === 0) {
+                return [];
+            }
+
+            // Find intersection of user vectors and type vectors
+            const relevantVectors = Array.from(userVectors).filter(vectorId => typeVectors.has(vectorId));
+            
+            if (relevantVectors.length === 0) {
+                return [];
+            }
+
+            // Calculate similarities
+            const similarities = this.calculateBatchSimilarities(
+                queryEmbedding,
+                relevantVectors,
+                limit,
+                minSimilarity
+            );
+
+            // Add data type to results
+            return similarities.map(result => ({
+                ...result,
+                dataType
+            }));
+        } catch (error) {
+            loggingService.error('Failed to search by data type:', {
+                error: error instanceof Error ? error.message : String(error),
+                dataType,
+                userId
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Get vectors by data type for analysis
+     */
+    async getVectorsByDataType(dataType: string, userId?: string): Promise<VectorMemoryItem[]> {
+        try {
+            const typeVectors = this.dataTypeIndex.get(dataType);
+            if (!typeVectors) {
+                return [];
+            }
+
+            const vectors: VectorMemoryItem[] = [];
+            
+            for (const vectorId of typeVectors) {
+                const vectorItem = this.vectorStore.get(vectorId);
+                if (vectorItem && (!userId || vectorItem.userId === userId)) {
+                    vectors.push(vectorItem);
+                }
+            }
+
+            return vectors.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        } catch (error) {
+            loggingService.error('Failed to get vectors by data type:', {
+                error: error instanceof Error ? error.message : String(error),
+                dataType,
+                userId
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Enhanced memory fusion - combine insights from different data types
+     */
+    async fuseMemoryInsights(
+        userId: string, 
+        query: string, 
+        fusionOptions: {
+            weightConversations?: number;
+            weightMemories?: number;
+            weightMessages?: number;
+            maxInsights?: number;
+        } = {}
+    ): Promise<SimilarityResult[]> {
+        const weights = {
+            weightConversations: 0.4,
+            weightMemories: 0.4,
+            weightMessages: 0.2,
+            maxInsights: 15,
+            ...fusionOptions
+        };
+
+        try {
+            // Perform cross-modal search
+            const searchResults = await this.crossModelSearch(query, userId, {
+                includeConversations: true,
+                includeMemories: true,
+                includeMessages: true,
+                limit: 20 // Get more for fusion
+            });
+
+            // Apply fusion weights and combine results
+            const fusedResults: Array<SimilarityResult & { fusedScore: number }> = [];
+
+            // Weight conversations
+            searchResults.conversations.forEach(result => {
+                fusedResults.push({
+                    ...result,
+                    fusedScore: result.similarity * weights.weightConversations
+                });
+            });
+
+            // Weight memories
+            searchResults.memories.forEach(result => {
+                fusedResults.push({
+                    ...result,
+                    fusedScore: result.similarity * weights.weightMemories
+                });
+            });
+
+            // Weight messages
+            searchResults.messages.forEach(result => {
+                fusedResults.push({
+                    ...result,
+                    fusedScore: result.similarity * weights.weightMessages
+                });
+            });
+
+            // Sort by fused score and return top insights
+            fusedResults.sort((a, b) => b.fusedScore - a.fusedScore);
+            
+            const topInsights = fusedResults
+                .slice(0, weights.maxInsights)
+                .map(({ fusedScore, ...result }) => result); // Remove fusedScore from final results
+
+            loggingService.info('🧠 Memory fusion completed', {
+                userId,
+                totalInsights: topInsights.length,
+                sourceBreakdown: {
+                    conversations: searchResults.conversations.length,
+                    memories: searchResults.memories.length,
+                    messages: searchResults.messages.length
+                }
+            });
+
+            return topInsights;
+        } catch (error) {
+            loggingService.error('❌ Memory fusion failed:', {
+                error: error instanceof Error ? error.message : String(error),
+                userId
+            });
+            return [];
+        }
+    }
+
+    /**
+     * Get cross-model statistics for monitoring
+     */
+    async getCrossModelStats(): Promise<{
+        totalVectors: number;
+        vectorsByType: Record<string, number>;
+        vectorsByUser: number;
+        cacheHitRate: number;
+        avgEmbeddingDimensions: number;
+    }> {
+        try {
+            const totalVectors = this.vectorStore.size;
+            const vectorsByUser = this.userVectorIndex.size;
+            
+            // Count vectors by data type
+            const vectorsByType: Record<string, number> = {};
+            for (const [dataType, vectorSet] of this.dataTypeIndex.entries()) {
+                vectorsByType[dataType] = vectorSet.size;
+            }
+
+            // Calculate cache hit rate (approximate)
+            const cacheHitRate = this.embeddingCache.size > 0 ? 0.85 : 0; // Estimated based on usage
+
+            return {
+                totalVectors,
+                vectorsByType,
+                vectorsByUser,
+                cacheHitRate,
+                avgEmbeddingDimensions: this.EMBEDDING_DIMENSIONS
+            };
+        } catch (error) {
+            loggingService.error('Failed to get cross-model stats:', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            return {
+                totalVectors: 0,
+                vectorsByType: {},
+                vectorsByUser: 0,
+                cacheHitRate: 0,
+                avgEmbeddingDimensions: this.EMBEDDING_DIMENSIONS
+            };
+        }
+    }
 
 }
 

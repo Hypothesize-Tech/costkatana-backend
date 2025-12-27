@@ -117,6 +117,26 @@ export class UserController {
                 userObject.id = userObject._id.toString();
             }
 
+            // Ensure role field is present (fallback to 'user' only if truly missing)
+            // Check if role is undefined or null - preserve existing 'admin' or 'user' values
+            if (!userObject.role) {
+                const dbRole = user.role;
+                if (!dbRole) {
+                    // Role is truly missing in both object and DB, set to 'user'
+                    userObject.role = 'user';
+                    user.role = 'user';
+                    await user.save().catch(err => {
+                        loggingService.warn('Failed to update user role in database', {
+                            userId,
+                            error: err instanceof Error ? err.message : String(err)
+                        });
+                    });
+                } else {
+                    // Role exists in DB but not in object, use DB value
+                    userObject.role = dbRole;
+                }
+            }
+
             // Add subscription to user object
             if (subscription) {
                 userObject.subscription = subscription.toObject();

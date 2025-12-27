@@ -1,7 +1,8 @@
 import cron from 'node-cron';
 import { loggingService } from '../services/logging.service';
 import { GuardrailsService } from '../services/guardrails.service';
-import { AICostTrackingService } from '../services/aiCostTracking.service';
+
+import { VectorizationJob } from '../jobs/vectorization.job';
 
 export const initializeCronJobs = () => {
     loggingService.info('Initializing cron jobs', {
@@ -304,6 +305,141 @@ export const initializeCronJobs = () => {
                 operation: 'usageAlertsCheck',
                 step: 'error',
                 schedule: '0 */4 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Smart Sampling for Message Selection - Daily at 1 AM (before conversation processing)
+    cron.schedule('0 1 * * *', async () => {
+        loggingService.info('Running smart sampling for message selection', {
+            component: 'cronJobs',
+            operation: 'smartSampling',
+            step: 'start',
+            schedule: '0 1 * * *'
+        });
+        try {
+            await VectorizationJob.performSmartSampling();
+            loggingService.info('Smart sampling completed', {
+                component: 'cronJobs',
+                operation: 'smartSampling',
+                step: 'complete',
+                schedule: '0 1 * * *'
+            });
+        } catch (error) {
+            loggingService.error('Smart sampling failed', {
+                component: 'cronJobs',
+                operation: 'smartSampling',
+                step: 'error',
+                schedule: '0 1 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // UserMemory Vectorization - Every hour
+    cron.schedule('0 * * * *', async () => {
+        loggingService.info('Running UserMemory vectorization', {
+            component: 'cronJobs',
+            operation: 'userMemoryVectorization',
+            step: 'start',
+            schedule: '0 * * * *'
+        });
+        try {
+            await VectorizationJob.processUserMemories();
+            loggingService.info('UserMemory vectorization completed', {
+                component: 'cronJobs',
+                operation: 'userMemoryVectorization',
+                step: 'complete',
+                schedule: '0 * * * *'
+            });
+        } catch (error) {
+            loggingService.error('UserMemory vectorization failed', {
+                component: 'cronJobs',
+                operation: 'userMemoryVectorization',
+                step: 'error',
+                schedule: '0 * * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // ConversationMemory Vectorization - Daily at 2 AM
+    cron.schedule('0 2 * * *', async () => {
+        loggingService.info('Running ConversationMemory vectorization', {
+            component: 'cronJobs',
+            operation: 'conversationVectorization',
+            step: 'start',
+            schedule: '0 2 * * *'
+        });
+        try {
+            await VectorizationJob.processConversations();
+            loggingService.info('ConversationMemory vectorization completed', {
+                component: 'cronJobs',
+                operation: 'conversationVectorization',
+                step: 'complete',
+                schedule: '0 2 * * *'
+            });
+        } catch (error) {
+            loggingService.error('ConversationMemory vectorization failed', {
+                component: 'cronJobs',
+                operation: 'conversationVectorization',
+                step: 'error',
+                schedule: '0 2 * * *',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // High-Value Message Vectorization - Weekly on Sunday at 3 AM
+    cron.schedule('0 3 * * 0', async () => {
+        loggingService.info('Running high-value message vectorization', {
+            component: 'cronJobs',
+            operation: 'messageVectorization',
+            step: 'start',
+            schedule: '0 3 * * 0'
+        });
+        try {
+            await VectorizationJob.processMessages();
+            loggingService.info('High-value message vectorization completed', {
+                component: 'cronJobs',
+                operation: 'messageVectorization',
+                step: 'complete',
+                schedule: '0 3 * * 0'
+            });
+        } catch (error) {
+            loggingService.error('High-value message vectorization failed', {
+                component: 'cronJobs',
+                operation: 'messageVectorization',
+                step: 'error',
+                schedule: '0 3 * * 0',
+                error: error instanceof Error ? error.message : String(error)
+            });
+        }
+    });
+
+    // Vectorization Health Check - Monthly on 1st at 4 AM
+    cron.schedule('0 4 1 * *', async () => {
+        loggingService.info('Running vectorization health check', {
+            component: 'cronJobs',
+            operation: 'vectorizationHealthCheck',
+            step: 'start',
+            schedule: '0 4 1 * *'
+        });
+        try {
+            await VectorizationJob.performHealthCheck();
+            loggingService.info('Vectorization health check completed', {
+                component: 'cronJobs',
+                operation: 'vectorizationHealthCheck',
+                step: 'complete',
+                schedule: '0 4 1 * *'
+            });
+        } catch (error) {
+            loggingService.error('Vectorization health check failed', {
+                component: 'cronJobs',
+                operation: 'vectorizationHealthCheck',
+                step: 'error',
+                schedule: '0 4 1 * *',
                 error: error instanceof Error ? error.message : String(error)
             });
         }
