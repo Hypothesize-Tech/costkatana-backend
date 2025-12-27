@@ -234,44 +234,51 @@ export class GoogleIntegrationService {
                 averageCost: 0
             };
 
-            // Top models
-            let topModelsText = '';
-            if (options.includeTopModels) {
-                const topModels = await Usage.aggregate([
-                    { $match: match },
-                    {
-                        $group: {
-                            _id: '$model',
-                            totalCost: { $sum: '$cost' },
-                            requests: { $sum: 1 }
-                        }
-                    },
-                    { $sort: { totalCost: -1 } },
-                    { $limit: 10 }
-                ]);
+            // Top models by cost
+            const topModels = options.includeTopModels ? await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: '$model',
+                        totalCost: { $sum: '$cost' },
+                        totalTokens: { $sum: '$totalTokens' },
+                        requests: { $sum: 1 },
+                        avgCost: { $avg: '$cost' }
+                    }
+                },
+                { $sort: { totalCost: -1 } },
+                { $limit: 10 }
+            ]) : [];
 
-                topModelsText = '\n\nTop Models by Cost:\n' +
-                    topModels.map((m, i) => `${i + 1}. ${m._id}: $${m.totalCost.toFixed(2)} (${m.requests} requests)`).join('\n');
-            }
+            // Cost by date (trend analysis)
+            const costByDate = await Usage.aggregate([
+                { $match: match },
+                {
+                    $group: {
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+                        dailyCost: { $sum: '$cost' },
+                        dailyRequests: { $sum: 1 }
+                    }
+                },
+                { $sort: { _id: 1 } },
+                { $limit: 30 } // Last 30 days of data
+            ]);
 
-            // Build report content using template
+            // Create document with title
             const title = `${this.TEMPLATES.COST_REVIEW_REPORT} - ${new Date().toISOString().split('T')[0]}`;
-            const content = `${title}\n\n` +
-                `Generated: ${new Date().toLocaleString()}\n` +
-                `Period: ${options.startDate ? options.startDate.toLocaleDateString() : 'All time'} - ${options.endDate ? options.endDate.toLocaleDateString() : 'Present'}\n\n` +
-                `Summary:\n` +
-                `- Total Cost: $${summary.totalCost.toFixed(2)}\n` +
-                `- Total Tokens: ${summary.totalTokens.toLocaleString()}\n` +
-                `- Total Requests: ${summary.totalRequests.toLocaleString()}\n` +
-                `- Average Cost per Request: $${summary.averageCost.toFixed(4)}\n` +
-                topModelsText +
-                (options.includeRecommendations ? '\n\nRecommendations:\n- Consider optimizing high-cost models\n- Enable caching for repeated requests\n- Use Cortex optimization for cost savings' : '');
-
-            // Create document
             const { documentId, documentUrl } = await GoogleService.createDocument(connection, title);
 
-            // Insert content
-            await GoogleService.insertTextIntoDocument(connection, documentId, content);
+            // Format the document with professional styling
+            await GoogleService.formatCostReportDocument(connection, documentId, {
+                title,
+                generatedDate: new Date(),
+                startDate: options.startDate,
+                endDate: options.endDate,
+                summary,
+                topModels,
+                costByDate,
+                includeRecommendations: options.includeRecommendations || false
+            });
 
             // Create audit record
             const audit = await GoogleExportAudit.create({

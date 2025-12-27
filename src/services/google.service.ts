@@ -793,6 +793,350 @@ export class GoogleService {
     }
 
     /**
+     * Format a professional cost report document with styling
+     */
+    static async formatCostReportDocument(
+        connection: IGoogleConnection & { decryptToken: () => string; decryptRefreshToken?: () => string | undefined },
+        documentId: string,
+        data: {
+            title: string;
+            generatedDate: Date;
+            startDate?: Date;
+            endDate?: Date;
+            summary: any;
+            topModels: any[];
+            costByDate: any[];
+            includeRecommendations: boolean;
+        }
+    ): Promise<void> {
+        return this.executeWithRetry(async () => {
+            const auth = await this.createAuthenticatedClient(connection);
+            const docs = google.docs({ version: 'v1', auth });
+
+            // Build content sections
+            const requests: any[] = [];
+            let currentIndex = 1;
+
+            // Helper function to add text with tracking
+            const addText = (text: string) => {
+                requests.push({
+                    insertText: {
+                        location: { index: currentIndex },
+                        text
+                    }
+                });
+                const textLength = text.length;
+                currentIndex += textLength;
+                return { start: currentIndex - textLength, end: currentIndex };
+            };
+
+            // Helper function to add styling
+            const addStyle = (startIndex: number, endIndex: number, style: any) => {
+                requests.push({
+                    updateTextStyle: {
+                        range: {
+                            startIndex,
+                            endIndex
+                        },
+                        textStyle: style,
+                        fields: Object.keys(style).join(',')
+                    }
+                });
+            };
+
+            // Helper function to add paragraph style
+            const addParagraphStyle = (startIndex: number, endIndex: number, style: any) => {
+                requests.push({
+                    updateParagraphStyle: {
+                        range: {
+                            startIndex,
+                            endIndex
+                        },
+                        paragraphStyle: style,
+                        fields: Object.keys(style).join(',')
+                    }
+                });
+            };
+
+            // 1. Header Section with Logo/Brand
+            const headerRange = addText('COST KATANA\n');
+            addStyle(headerRange.start, headerRange.end - 1, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.024, green: 0.925, blue: 0.619 } } }, // #06ec9e - Brand green
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+            addParagraphStyle(headerRange.start, headerRange.end, {
+                alignment: 'END',
+                spaceAbove: { magnitude: 8, unit: 'PT' },
+                spaceBelow: { magnitude: 8, unit: 'PT' }
+            });
+
+            // 2. Main Title with gradient effect (using green)
+            const titleRange = addText(`${data.title}\n\n`);
+            addStyle(titleRange.start, titleRange.end - 2, {
+                fontSize: { magnitude: 32, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.0, green: 0.58, blue: 0.33 } } }, // #009454 - Darker brand green
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+            addParagraphStyle(titleRange.start, titleRange.end, {
+                alignment: 'CENTER',
+                spaceAbove: { magnitude: 16, unit: 'PT' },
+                spaceBelow: { magnitude: 16, unit: 'PT' }
+            });
+
+            // 3. Metadata Section
+            const dateStr = `${data.startDate ? data.startDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'All time'} - ${data.endDate ? data.endDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'Present'}`;
+            const metaRange = addText(`📅 Report Period: ${dateStr}\n⏰ Generated: ${data.generatedDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}\n\n`);
+            addStyle(metaRange.start, metaRange.end - 2, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.392, green: 0.455, blue: 0.545 } } }, // #64748b - Professional slate
+                weightedFontFamily: { fontFamily: 'Inter', weight: 400 }
+            });
+            addParagraphStyle(metaRange.start, metaRange.end, {
+                alignment: 'CENTER',
+                spaceBelow: { magnitude: 24, unit: 'PT' }
+            });
+
+            // Add gradient divider
+            addText('━'.repeat(90) + '\n\n');
+
+            // 4. Executive Summary Section
+            const summaryHeaderRange = addText('💰 EXECUTIVE SUMMARY\n\n');
+            addStyle(summaryHeaderRange.start, summaryHeaderRange.end - 2, {
+                fontSize: { magnitude: 20, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.024, green: 0.925, blue: 0.619 } } }, // #06ec9e - Brand green
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+            addParagraphStyle(summaryHeaderRange.start, summaryHeaderRange.end, {
+                spaceAbove: { magnitude: 20, unit: 'PT' },
+                spaceBelow: { magnitude: 16, unit: 'PT' }
+            });
+
+            // Summary metrics with modern styling - Fixed to prevent subscript/superscript issues
+            // Important: Do NOT use toLocaleString() as it can cause formatting issues
+            const totalCostLabel = '💵 Total AI Costs';
+            const totalCostValue = `$${data.summary.totalCost.toFixed(2)}`;
+            const totalCostText = `${totalCostLabel}\n${totalCostValue}\n\n`;
+            const totalCostRange = addText(totalCostText);
+            
+            // Style label
+            addStyle(totalCostRange.start, totalCostRange.start + totalCostLabel.length, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.278, green: 0.333, blue: 0.412 } } },
+                weightedFontFamily: { fontFamily: 'Inter', weight: 600 }
+            });
+            // Style value (starts after label + newline)
+            const valueStart = totalCostRange.start + totalCostLabel.length + 1;
+            addStyle(valueStart, valueStart + totalCostValue.length, {
+                fontSize: { magnitude: 24, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.133, green: 0.773, blue: 0.369 } } },
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+
+            const requestsLabel = '📊 Total Requests';
+            // Format number manually without commas for now
+            const requestsValue = `${data.summary.totalRequests}`;
+            const requestsText = `${requestsLabel}\n${requestsValue}\n\n`;
+            const requestsRange = addText(requestsText);
+            
+            addStyle(requestsRange.start, requestsRange.start + requestsLabel.length, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.278, green: 0.333, blue: 0.412 } } },
+                weightedFontFamily: { fontFamily: 'Inter', weight: 600 }
+            });
+            const reqValueStart = requestsRange.start + requestsLabel.length + 1;
+            addStyle(reqValueStart, reqValueStart + requestsValue.length, {
+                fontSize: { magnitude: 24, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.055, green: 0.647, blue: 0.914 } } },
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+
+            const tokensLabel = '🎯 Total Tokens';
+            // Format number manually without commas
+            const tokensValue = `${data.summary.totalTokens}`;
+            const tokensText = `${tokensLabel}\n${tokensValue}\n\n`;
+            const tokensRange = addText(tokensText);
+            
+            addStyle(tokensRange.start, tokensRange.start + tokensLabel.length, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.278, green: 0.333, blue: 0.412 } } },
+                weightedFontFamily: { fontFamily: 'Inter', weight: 600 }
+            });
+            const tokValueStart = tokensRange.start + tokensLabel.length + 1;
+            addStyle(tokValueStart, tokValueStart + tokensValue.length, {
+                fontSize: { magnitude: 24, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.059, green: 0.09, blue: 0.165 } } },
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+
+            const avgCostLabel = '⚡ Average Cost per Request';
+            const avgCostValue = `$${data.summary.averageCost.toFixed(4)}`;
+            const avgCostText = `${avgCostLabel}\n${avgCostValue}\n\n`;
+            const avgCostRange = addText(avgCostText);
+            
+            addStyle(avgCostRange.start, avgCostRange.start + avgCostLabel.length, {
+                fontSize: { magnitude: 11, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.278, green: 0.333, blue: 0.412 } } },
+                weightedFontFamily: { fontFamily: 'Inter', weight: 600 }
+            });
+            const avgValueStart = avgCostRange.start + avgCostLabel.length + 1;
+            addStyle(avgValueStart, avgValueStart + avgCostValue.length, {
+                fontSize: { magnitude: 24, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.918, green: 0.702, blue: 0.031 } } },
+                weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+            });
+
+            addText('\n');
+
+            // 5. Top Models Section - Simple Clean Format
+            if (data.topModels && data.topModels.length > 0) {
+                const modelsHeaderRange = addText('🏆 TOP MODELS BY COST\n\n');
+                addStyle(modelsHeaderRange.start, modelsHeaderRange.end - 2, {
+                    fontSize: { magnitude: 18, unit: 'PT' },
+                    foregroundColor: { color: { rgbColor: { red: 0.024, green: 0.925, blue: 0.619 } } },
+                    weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+                });
+                addParagraphStyle(modelsHeaderRange.start, modelsHeaderRange.end, {
+                    spaceAbove: { magnitude: 20, unit: 'PT' },
+                    spaceBelow: { magnitude: 12, unit: 'PT' }
+                });
+
+                // Simple list format - clean and readable
+                data.topModels.forEach((model, index) => {
+                    const rank = index + 1;
+                    const modelName = model._id || 'Unknown';
+                    const cost = `$${model.totalCost.toFixed(2)}`;
+                    const requests = model.requests;
+                    const avgCost = `$${model.avgCost.toFixed(4)}`;
+                    
+                    // Rank and model name
+                    const rankText = `${rank}. ${modelName}\n`;
+                    const rankRange = addText(rankText);
+                    addStyle(rankRange.start, rankRange.end - 1, {
+                        fontSize: { magnitude: 12, unit: 'PT' },
+                        weightedFontFamily: { fontFamily: 'Inter', weight: 600 },
+                        foregroundColor: { color: { rgbColor: { red: 0.059, green: 0.09, blue: 0.165 } } }
+                    });
+
+                    // Cost, requests, and avg cost details
+                    const detailText = `   Cost: ${cost}  •  Requests: ${requests}  •  Avg Cost: ${avgCost}\n\n`;
+                    const detailRange = addText(detailText);
+                    addStyle(detailRange.start, detailRange.end - 2, {
+                        fontSize: { magnitude: 11, unit: 'PT' },
+                        weightedFontFamily: { fontFamily: 'Inter', weight: 400 },
+                        foregroundColor: { color: { rgbColor: { red: 0.278, green: 0.333, blue: 0.412 } } }
+                    });
+                });
+
+                addText('\n');
+            }
+
+            // 6. Daily Cost Trend
+            if (data.costByDate && data.costByDate.length > 0) {
+                const trendHeaderRange = addText('📈 DAILY COST TRENDS\n\n');
+                addStyle(trendHeaderRange.start, trendHeaderRange.end - 2, {
+                    fontSize: { magnitude: 18, unit: 'PT' },
+                    foregroundColor: { color: { rgbColor: { red: 0.024, green: 0.925, blue: 0.619 } } }, // #06ec9e - Brand green
+                    weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+                });
+                addParagraphStyle(trendHeaderRange.start, trendHeaderRange.end, {
+                    spaceAbove: { magnitude: 20, unit: 'PT' },
+                    spaceBelow: { magnitude: 12, unit: 'PT' }
+                });
+
+                // Show last 7 days with modern formatting
+                const recentTrends = data.costByDate.slice(-7);
+                recentTrends.forEach((day, index) => {
+                    const dateStr = day._id.padEnd(18);
+                    const cost = `$${day.dailyCost.toFixed(2)}`.padEnd(15);
+                    const requests = `${day.dailyRequests} requests`;
+                    
+                    const dayRange = addText(`${dateStr}${cost}${requests}\n`);
+                    
+                    // Alternate colors with green tint
+                    const dayColor = index % 2 === 0 
+                        ? { red: 0.2, green: 0.28, blue: 0.24 }  // Darker with green tint
+                        : { red: 0.278, green: 0.333, blue: 0.412 }; // Slate
+                    
+                    addStyle(dayRange.start, dayRange.end - 1, {
+                        fontSize: { magnitude: 11, unit: 'PT' },
+                        weightedFontFamily: { fontFamily: 'Inter', weight: 500 },
+                        foregroundColor: { color: { rgbColor: dayColor } }
+                    });
+                });
+                addText('\n\n');
+            }
+
+            // 7. Recommendations Section
+            if (data.includeRecommendations) {
+                const recoHeaderRange = addText('✨ OPTIMIZATION RECOMMENDATIONS\n\n');
+                addStyle(recoHeaderRange.start, recoHeaderRange.end - 2, {
+                    fontSize: { magnitude: 18, unit: 'PT' },
+                    foregroundColor: { color: { rgbColor: { red: 0.918, green: 0.702, blue: 0.031 } } }, // #eab308 - Golden yellow accent
+                    weightedFontFamily: { fontFamily: 'Manrope', weight: 700 }
+                });
+                addParagraphStyle(recoHeaderRange.start, recoHeaderRange.end, {
+                    spaceAbove: { magnitude: 20, unit: 'PT' },
+                    spaceBelow: { magnitude: 12, unit: 'PT' }
+                });
+
+                const recommendations = [
+                    { icon: '⚡', text: 'Enable Cortex Meta-Language Optimization', detail: '40-75% cost reduction' },
+                    { icon: '💾', text: 'Implement Semantic Caching', detail: '70-80% savings on repeated queries' },
+                    { icon: '🔍', text: 'Review high-cost models', detail: 'Consider cost-effective alternatives' },
+                    { icon: '🎯', text: 'Set up budget alerts and rate limiting', detail: 'Control spending proactively' },
+                    { icon: '🚀', text: 'Use intelligent model routing', detail: 'Optimal model selection per task' }
+                ];
+
+                recommendations.forEach((reco) => {
+                    const recoRange = addText(`${reco.icon} ${reco.text}\n`);
+                    addStyle(recoRange.start, recoRange.end - 1, {
+                        fontSize: { magnitude: 13, unit: 'PT' },
+                        foregroundColor: { color: { rgbColor: { red: 0.059, green: 0.09, blue: 0.165 } } }, // #0f172a - Deep slate
+                        weightedFontFamily: { fontFamily: 'Inter', weight: 600 }
+                    });
+                    
+                    const detailRange = addText(`   ${reco.detail}\n\n`);
+                    addStyle(detailRange.start, detailRange.end - 2, {
+                        fontSize: { magnitude: 11, unit: 'PT' },
+                        foregroundColor: { color: { rgbColor: { red: 0.392, green: 0.455, blue: 0.545 } } }, // #64748b - Professional slate
+                        weightedFontFamily: { fontFamily: 'Inter', weight: 400 },
+                        italic: true
+                    });
+                    addParagraphStyle(detailRange.start, detailRange.end, {
+                        spaceBelow: { magnitude: 8, unit: 'PT' }
+                    });
+                });
+            }
+
+            // 8. Footer with modern styling
+            addText('\n\n' + '━'.repeat(90) + '\n\n');
+            const footerRange = addText(`✨ Generated by Cost Katana\nAI Cost Optimization Platform • https://costkatana.com\n`);
+            addStyle(footerRange.start, footerRange.end - 1, {
+                fontSize: { magnitude: 9, unit: 'PT' },
+                foregroundColor: { color: { rgbColor: { red: 0.392, green: 0.455, blue: 0.545 } } }, // #64748b - Professional slate
+                weightedFontFamily: { fontFamily: 'Inter', weight: 400 }
+            });
+            addParagraphStyle(footerRange.start, footerRange.end, {
+                alignment: 'CENTER',
+                spaceAbove: { magnitude: 24, unit: 'PT' }
+            });
+
+            // Execute all formatting requests
+            await docs.documents.batchUpdate({
+                documentId,
+                requestBody: { requests }
+            });
+
+            loggingService.info('Formatted cost report document', {
+                connectionId: connection._id,
+                documentId,
+                requestsCount: requests.length
+            });
+        });
+    }
+
+    /**
      * Sheets API: Get cell values from a range
      */
     static async getSheetValues(
