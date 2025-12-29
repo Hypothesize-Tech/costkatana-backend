@@ -968,30 +968,30 @@ Please analyze the content from the Google Drive files above and provide a relev
                     })
                     .join('\n\n---\n\n');
                 
-                const response = `**Web Search Results for:** "${request.message}"\n\n${directResponse}\n\n---\n\n_These are direct, unmodified results from Google Search API to ensure maximum accuracy. No AI interpretation applied._`;
+                const response = directResponse;
                 
                 return {
                     response: response,
                     agentThinking: {
-                        title: 'Direct Google Search Results',
-                        summary: `Retrieved ${webSearchResult.data.searchResults.length} factual results directly from Google Custom Search API`,
+                        title: 'Web Search',
+                        summary: `Retrieved ${webSearchResult.data.searchResults.length} results from the web`,
                         steps: [
                             {
                                 step: 1,
-                                description: 'Google Custom Search API',
-                                reasoning: 'Query identified as simple factual lookup - using direct results to prevent AI hallucination',
-                                outcome: `Found ${webSearchResult.data.searchResults.length} relevant results from trusted sources`
+                                description: 'Web Search',
+                                reasoning: `Searched for: "${request.message}"`,
+                                outcome: `Found ${webSearchResult.data.searchResults.length} relevant results`
                             },
                             {
                                 step: 2,
-                                description: 'Zero-Hallucination Mode',
-                                reasoning: 'Returning raw Google snippets without AI interpretation to guarantee accuracy',
-                                outcome: 'Direct search results delivered with source URLs for verification'
+                                description: 'Results Compilation',
+                                reasoning: 'Compiled search results with source attribution',
+                                outcome: 'Direct search results with verified sources'
                             }
                         ]
                     },
-                    agentPath: ['web_scraper', 'direct_google_results', 'zero_hallucination'],
-                    optimizationsApplied: ['zero_hallucination', 'direct_google_results', 'factual_accuracy_mode'],
+                    agentPath: ['web_scraper', 'direct_results'],
+                    optimizationsApplied: ['web_search', 'direct_results'],
                     cacheHit: false,
                     riskLevel: 'low',
                     webSearchUsed: true,
@@ -1040,42 +1040,34 @@ Based ONLY on the search results above, provide a factual answer:`;
             const llmResponse = await llm.invoke(responsePrompt);
             const response = llmResponse.content.toString();
             
-            loggingService.info('✅ AI-synthesized web search response generated', {
+            loggingService.info('✅ Web search response generated', {
                 query: request.message,
                 resultsCount: webSearchResult.data.searchResults.length,
-                responseLength: response.length,
-                model: 'claude-3-5-sonnet',
-                temperature: 0
+                responseLength: response.length
             });
             
             return {
                 response: response,
                 agentThinking: {
-                    title: 'AI-Synthesized Web Search Analysis',
-                    summary: `Searched the web for "${request.message}" and synthesized ${webSearchResult.data.searchResults.length} results using Claude 3.5 Sonnet with zero temperature for maximum accuracy.`,
+                    title: 'Web Search Analysis',
+                    summary: `Searched the web for "${request.message}" and analyzed ${webSearchResult.data.searchResults.length} results.`,
                     steps: [
                         {
                             step: 1,
-                            description: 'Google Custom Search API',
-                            reasoning: `Performed web search using Google Custom Search API for: "${request.message}"`,
-                            outcome: `Found ${webSearchResult.data.searchResults.length} relevant results from trusted sources`
+                            description: 'Web Search',
+                            reasoning: `Performed web search for: "${request.message}"`,
+                            outcome: `Found ${webSearchResult.data.searchResults.length} relevant results`
                         },
                         {
                             step: 2,
-                            description: 'AI Synthesis with Strong Grounding',
-                            reasoning: 'Complex query requires synthesis - using Claude 3.5 Sonnet (temp=0) with strict factual grounding',
-                            outcome: 'Generated response using ONLY information from search results'
-                        },
-                        {
-                            step: 3,
-                            description: 'Source Citation',
-                            reasoning: 'All facts cited with source URLs for verification',
-                            outcome: 'Response includes explicit source attribution and uncertainty statements where applicable'
+                            description: 'Content Analysis',
+                            reasoning: 'Analyzed search results and synthesized key information',
+                            outcome: 'Generated comprehensive response with source citations'
                         }
                     ]
                 },
-                agentPath: ['web_scraper', 'ai_synthesis', 'factual_grounding'],
-                optimizationsApplied: ['claude_sonnet_accuracy', 'zero_temperature', 'strict_factual_grounding'],
+                agentPath: ['web_scraper', 'web_search_completed'],
+                optimizationsApplied: ['web_search', 'content_synthesis'],
                 cacheHit: false,
                 riskLevel: 'low',
                 webSearchUsed: true,
