@@ -125,14 +125,6 @@ export class WebSearchTool extends Tool {
                     throw new Error(`Invalid operation: ${request.operation}`);
             }
 
-            // AI-powered content summarization
-            if (result.success && result.data.extractedText) {
-                result.data.summary = await this.summarizeContent(
-                    result.data.extractedText,
-                    request.query || 'web content'
-                );
-            }
-
             result.processingTime = Date.now() - startTime;
 
             loggingService.info('Web search operation completed', {

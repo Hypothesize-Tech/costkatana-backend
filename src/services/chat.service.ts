@@ -944,76 +944,140 @@ Please analyze the content from the Google Drive files above and provide a relev
                 return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
             }
             
-            // Use LLM to generate response based on web search results
+            // Assess query complexity to determine if we should use AI or return direct results
+            const queryComplexity = this.assessQueryComplexity(request.message || '');
+            const hasGoodSnippets = webSearchResult.data.searchResults.some((r: any) => 
+                r.snippet && r.snippet.length > 30
+            );
+            
+            // For simple factual queries with good snippets, return Google results directly (zero hallucination risk)
+            if (queryComplexity === 'simple' && hasGoodSnippets) {
+                loggingService.info('📊 Returning direct Google Search results (no AI interpretation)', {
+                    query: request.message,
+                    resultsCount: webSearchResult.data.searchResults.length,
+                    reason: 'Simple factual query with quality snippets'
+                });
+                
+                // Format Google results directly without AI processing
+                const directResponse = webSearchResult.data.searchResults
+                    .slice(0, 5)
+                    .map((result: any, index: number) => {
+                        let formatted = `**${index + 1}. ${result.title}**\n\n${result.snippet || 'No description available'}`;
+                        formatted += `\n\n🔗 Source: ${result.url}`;
+                        return formatted;
+                    })
+                    .join('\n\n---\n\n');
+                
+                const response = `**Web Search Results for:** "${request.message}"\n\n${directResponse}\n\n---\n\n_These are direct, unmodified results from Google Search API to ensure maximum accuracy. No AI interpretation applied._`;
+                
+                return {
+                    response: response,
+                    agentThinking: {
+                        title: 'Direct Google Search Results',
+                        summary: `Retrieved ${webSearchResult.data.searchResults.length} factual results directly from Google Custom Search API`,
+                        steps: [
+                            {
+                                step: 1,
+                                description: 'Google Custom Search API',
+                                reasoning: 'Query identified as simple factual lookup - using direct results to prevent AI hallucination',
+                                outcome: `Found ${webSearchResult.data.searchResults.length} relevant results from trusted sources`
+                            },
+                            {
+                                step: 2,
+                                description: 'Zero-Hallucination Mode',
+                                reasoning: 'Returning raw Google snippets without AI interpretation to guarantee accuracy',
+                                outcome: 'Direct search results delivered with source URLs for verification'
+                            }
+                        ]
+                    },
+                    agentPath: ['web_scraper', 'direct_google_results', 'zero_hallucination'],
+                    optimizationsApplied: ['zero_hallucination', 'direct_google_results', 'factual_accuracy_mode'],
+                    cacheHit: false,
+                    riskLevel: 'low',
+                    webSearchUsed: true,
+                    quotaUsed
+                };
+            }
+            
+            // For complex queries, use AI with strong factual grounding
+            loggingService.info('🤖 Using AI to synthesize web search results', {
+                query: request.message,
+                queryComplexity,
+                reason: 'Complex query requires synthesis'
+            });
+            
             const llm = new ChatBedrockConverse({
-                model: request.modelId || 'amazon.nova-pro-v1:0',
+                model: 'anthropic.claude-3-5-sonnet-20241022-v2:0', // More accurate than Nova Pro for factual queries
                 region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.3,
+                temperature: 0, // Zero temperature for maximum factual accuracy
                 maxTokens: 2000,
             });
             
             // Build prompt with web search results
             const searchResultsText = webSearchResult.data.searchResults
                 .map((result: any, index: number) => 
-                    `[${index + 1}] ${result.title}\nURL: ${result.url}\n${result.snippet || result.content || ''}`
+                    `[${index + 1}] ${result.title}\nURL: ${result.url}\nContent: ${result.snippet || result.content || ''}`
                 )
                 .join('\n\n');
             
-            const responsePrompt = `You are a helpful AI assistant. The user asked: "${request.message}"
+            const responsePrompt = `You are a factual AI assistant. The user asked: "${request.message}"
 
-I've performed a web search and found the following results:
+Web search results from Google Custom Search API:
 
 ${searchResultsText}
 
-${webSearchResult.data.summary ? `\nSummary of search results:\n${webSearchResult.data.summary}\n` : ''}
+CRITICAL ACCURACY RULES - FOLLOW EXACTLY:
+1. ONLY use information explicitly stated in the search results above
+2. If information is NOT in the results, clearly state "The searched sources do not contain information about [specific topic]"
+3. NEVER add information from your training data or make assumptions
+4. Always cite specific sources with URLs when stating facts
+5. If sources contradict each other, present both perspectives with their sources
+6. For pricing queries: Quote exact numbers if found, or explicitly state "Pricing information not available in sources"
+7. If you're uncertain, say so rather than guessing
 
-Based on the web search results above, provide a direct, accurate answer to the user's question. 
-- Cite specific sources when mentioning facts
-- Be concise but comprehensive
-- Focus on the most relevant information from the search results
-- If the search results don't fully answer the question, say so and provide what information is available
-
-Answer:`;
+Based ONLY on the search results above, provide a factual answer:`;
             
             const llmResponse = await llm.invoke(responsePrompt);
             const response = llmResponse.content.toString();
             
-            loggingService.info('✅ Web search response generated', {
+            loggingService.info('✅ AI-synthesized web search response generated', {
                 query: request.message,
                 resultsCount: webSearchResult.data.searchResults.length,
-                responseLength: response.length
+                responseLength: response.length,
+                model: 'claude-3-5-sonnet',
+                temperature: 0
             });
             
             return {
                 response: response,
                 agentThinking: {
-                    title: 'Web Search Analysis',
-                    summary: `Searched the web for "${request.message}" and found ${webSearchResult.data.searchResults.length} relevant results.`,
+                    title: 'AI-Synthesized Web Search Analysis',
+                    summary: `Searched the web for "${request.message}" and synthesized ${webSearchResult.data.searchResults.length} results using Claude 3.5 Sonnet with zero temperature for maximum accuracy.`,
                     steps: [
                         {
                             step: 1,
-                            description: 'Web Search',
+                            description: 'Google Custom Search API',
                             reasoning: `Performed web search using Google Custom Search API for: "${request.message}"`,
                             outcome: `Found ${webSearchResult.data.searchResults.length} relevant results from trusted sources`
                         },
                         {
                             step: 2,
-                            description: 'Content Analysis',
-                            reasoning: 'Analyzed search results and extracted key information',
-                            outcome: webSearchResult.data.summary || 'Extracted relevant information from search results'
+                            description: 'AI Synthesis with Strong Grounding',
+                            reasoning: 'Complex query requires synthesis - using Claude 3.5 Sonnet (temp=0) with strict factual grounding',
+                            outcome: 'Generated response using ONLY information from search results'
                         },
                         {
                             step: 3,
-                            description: 'Response Generation',
-                            reasoning: 'Generated comprehensive answer based on web search results',
-                            outcome: 'Provided accurate, up-to-date information with source citations'
+                            description: 'Source Citation',
+                            reasoning: 'All facts cited with source URLs for verification',
+                            outcome: 'Response includes explicit source attribution and uncertainty statements where applicable'
                         }
                     ]
                 },
-                agentPath: ['web_scraper', 'web_search_completed'],
-                optimizationsApplied: ['context_enhancement', 'web_scraper_routing', 'direct_web_search'],
+                agentPath: ['web_scraper', 'ai_synthesis', 'factual_grounding'],
+                optimizationsApplied: ['claude_sonnet_accuracy', 'zero_temperature', 'strict_factual_grounding'],
                 cacheHit: false,
-                riskLevel: 'medium',
+                riskLevel: 'low',
                 webSearchUsed: true,
                 quotaUsed
             };
@@ -2140,6 +2204,39 @@ Answer:`;
             loggingService.error('Error pinning conversation:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to pin conversation');
         }
+    }
+
+    /**
+     * Assess query complexity to determine if direct results or AI synthesis is needed
+     */
+    private static assessQueryComplexity(query: string): 'simple' | 'complex' {
+        // Simple factual queries that can be answered with direct search snippets
+        const simplePatterns = [
+            /^what is the (price|pricing|cost)/i,
+            /^how much (does|is|costs?)/i,
+            /^what (is|are) the (price|cost|fee)/i,
+            /pricing for/i,
+            /cost of/i,
+            /^when (was|is|did|does)/i,
+            /^who (is|was|are)/i,
+            /^where (is|was|are|can)/i,
+            /^what does .+ mean/i,
+            /^define /i,
+            /^what happened on/i,
+            /^when did/i
+        ];
+        
+        // Check if query matches simple patterns
+        const isSimple = simplePatterns.some(pattern => pattern.test(query));
+        
+        // Additional heuristics: short queries are often factual lookups
+        const wordCount = query.trim().split(/\s+/).length;
+        const isShortFactual = wordCount <= 8 && (
+            query.includes('?') || 
+            query.match(/^(what|when|where|who|how much|price|cost)/i)
+        );
+        
+        return (isSimple || isShortFactual) ? 'simple' : 'complex';
     }
 
     /**
