@@ -16,11 +16,14 @@ export interface IChatMessage extends Document {
     attachments?: Array<{
         type: 'uploaded' | 'google';
         fileId: string;
+        googleFileId?: string; // For Google Drive files
         fileName: string;
         fileSize: number;
         mimeType: string;
         fileType: string;
         url: string;
+        webViewLink?: string; // For Google Drive files
+        createdTime?: string; // For Google Drive files
     }>;
     metadata?: {
         temperature?: number;
@@ -83,6 +86,7 @@ const chatMessageSchema = new Schema<IChatMessage>({
             type: String,
             required: true
         },
+        googleFileId: String,
         fileName: {
             type: String,
             required: true
@@ -102,7 +106,9 @@ const chatMessageSchema = new Schema<IChatMessage>({
         url: {
             type: String,
             required: true
-        }
+        },
+        webViewLink: String,
+        createdTime: String
     }],
     metadata: {
         temperature: {
