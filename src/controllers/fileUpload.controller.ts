@@ -3,6 +3,7 @@ import multer from 'multer';
 import { S3Service } from '../services/s3.service';
 import { UploadedFile } from '../models/UploadedFile';
 import { loggingService } from '../services/logging.service';
+import { ChatMessage } from '../models/ChatMessage';
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
@@ -162,17 +163,27 @@ class FileUploadController {
                 .sort({ uploadedAt: -1 })
                 .limit(50);
 
+            // Generate presigned URLs for each file
+            const filesWithUrls = await Promise.all(
+                files.map(async (file) => {
+                    const url = await S3Service.generatePresignedUrl(file.s3Key, 3600);
+                    return {
+                        fileId: String(file._id),
+                        fileName: file.fileName,
+                        fileSize: file.fileSize,
+                        mimeType: file.mimeType,
+                        fileType: file.fileType,
+                        uploadedAt: file.uploadedAt,
+                        hasExtractedText: !!file.extractedText,
+                        url, // Add the S3 presigned URL
+                        conversationId: file.conversationId?.toString(),
+                    };
+                })
+            );
+
             return res.status(200).json({
                 success: true,
-                data: files.map((file) => ({
-                    fileId: file._id,
-                    fileName: file.fileName,
-                    fileSize: file.fileSize,
-                    mimeType: file.mimeType,
-                    fileType: file.fileType,
-                    uploadedAt: file.uploadedAt,
-                    hasExtractedText: !!file.extractedText,
-                })),
+                data: filesWithUrls,
             });
         } catch (error) {
             loggingService.error('Failed to get user files', {
@@ -183,6 +194,123 @@ class FileUploadController {
             return res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to get user files',
+            });
+        }
+    }
+
+    /**
+     * Get ALL user's files from all sources (uploaded, Google Drive, and documents)
+     */
+    async getAllUserFiles(req: Request, res: Response): Promise<Response> {
+        try {
+            const userId = (req as any).user?._id || (req as any).user?.id;
+            const { conversationId } = req.query;
+
+            const allFiles: any[] = [];
+
+            // 1. Get uploaded files
+            const uploadQuery: any = { userId };
+            if (conversationId) {
+                uploadQuery.conversationId = conversationId;
+            }
+
+            const uploadedFiles = await UploadedFile.find(uploadQuery)
+                .sort({ uploadedAt: -1 })
+                .limit(100);
+
+            for (const file of uploadedFiles) {
+                const url = await S3Service.generatePresignedUrl(file.s3Key, 3600);
+                allFiles.push({
+                    id: String(file._id),
+                    name: file.fileName,
+                    size: file.fileSize,
+                    type: 'uploaded',
+                    mimeType: file.mimeType,
+                    fileType: file.fileType,
+                    url,
+                    uploadedAt: file.uploadedAt,
+                    source: 'Uploaded',
+                    conversationId: file.conversationId?.toString(),
+                });
+            }
+
+            // 2. Get Google Drive files and attached documents from chat messages
+            const messageQuery: any = { userId };
+            if (conversationId) {
+                messageQuery.conversationId = conversationId;
+            }
+
+            const messages = await ChatMessage.find(messageQuery)
+                .select('attachments attachedDocuments conversationId createdAt')
+                .sort({ createdAt: -1 })
+                .limit(500);
+
+            const seenGoogleFiles = new Set<string>();
+            const seenDocuments = new Set<string>();
+
+            for (const message of messages) {
+                // Process Google Drive attachments
+                if (message.attachments) {
+                    for (const att of message.attachments) {
+                        if (att.type === 'google') {
+                            const fileId = att.googleFileId || att.fileId;
+                            if (!seenGoogleFiles.has(fileId)) {
+                                seenGoogleFiles.add(fileId);
+                                allFiles.push({
+                                    id: fileId,
+                                    name: att.fileName,
+                                    size: att.fileSize || 0,
+                                    type: 'google',
+                                    mimeType: att.mimeType,
+                                    fileType: att.fileType,
+                                    url: att.webViewLink || att.url,
+                                    uploadedAt: att.createdTime ? new Date(att.createdTime) : message.createdAt,
+                                    source: 'Google Drive',
+                                    conversationId: message.conversationId?.toString(),
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Process attached documents
+                if (message.attachedDocuments) {
+                    for (const doc of message.attachedDocuments) {
+                        if (!seenDocuments.has(doc.documentId)) {
+                            seenDocuments.add(doc.documentId);
+                            allFiles.push({
+                                id: doc.documentId,
+                                name: doc.fileName,
+                                size: 0,
+                                type: 'document',
+                                fileType: doc.fileType,
+                                uploadedAt: message.createdAt,
+                                source: 'Document',
+                                chunksCount: doc.chunksCount,
+                                documentId: doc.documentId,
+                                conversationId: message.conversationId?.toString(),
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Sort all files by uploadedAt descending
+            allFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+
+            return res.status(200).json({
+                success: true,
+                data: allFiles,
+            });
+        } catch (error) {
+            loggingService.error('Failed to get all user files', {
+                error,
+                userId: (req as any).user?._id,
+            });
+
+            return res.status(500).json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to get all user files',
             });
         }
     }

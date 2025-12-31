@@ -26,7 +26,7 @@ const UploadedFileSchema = new Schema<IUploadedFile>(
         },
         messageId: {
             type: Schema.Types.ObjectId,
-            ref: 'Message'
+            ref: 'ChatMessage'
         },
         conversationId: {
             type: Schema.Types.ObjectId,

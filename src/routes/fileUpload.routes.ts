@@ -26,6 +26,15 @@ router.delete('/:fileId', (req, res) =>
 );
 
 /**
+ * @route   GET /api/files/all
+ * @desc    Get ALL user's files from all sources (uploaded, Google Drive, and documents)
+ * @access  Private
+ */
+router.get('/all', (req, res) => 
+    fileUploadController.getAllUserFiles(req, res)
+);
+
+/**
  * @route   GET /api/files
  * @desc    Get user's uploaded files
  * @access  Private
