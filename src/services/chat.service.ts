@@ -1447,7 +1447,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             
             while (actualMessage && (match = mentionPattern.exec(actualMessage)) !== null) {
                 const [, integration, part1, part2, subEntityType, subEntityId] = match;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel'].includes(integration)) {
                     // If part2 exists, it's entityId (Pattern 1: @integration:entityType:entityId)
                     // If part2 doesn't exist but part1 exists, it might be a command (Pattern 2: @integration:command)
                     // Commands with dashes (like list-issues) will be in part1
@@ -1467,7 +1467,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             let simpleMatch;
             while (actualMessage && (simpleMatch = simpleMentionPattern.exec(actualMessage)) !== null) {
                 const [, integration] = simpleMatch;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel'].includes(integration)) {
                     // Check if this integration is already in mentions
                     if (!mentions.some(m => m.integration === integration)) {
                         mentions.push({
@@ -1482,9 +1482,13 @@ Based ONLY on the search results above, provide a factual answer:`;
             }
 
             // If mentions found, try to execute integration command
-            if (mentions.length > 0) {
+            // SKIP Vercel mentions - let the agent handle them with the Vercel tools
+            const vercelMentions = mentions.filter(m => m.integration === 'vercel');
+            const otherMentions = mentions.filter(m => m.integration !== 'vercel');
+            
+            if (otherMentions.length > 0) {
                 try {
-                    const command = await IntegrationChatService.parseCommand(actualMessage, mentions);
+                    const command = await IntegrationChatService.parseCommand(actualMessage, otherMentions);
                     if (command) {
                         // Execute via MCP handler
                         const result = await MCPIntegrationHandler.handleIntegrationOperation({
@@ -1492,7 +1496,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                             command,
                             context: {
                                 message: request.message,
-                                mentions
+                                mentions: otherMentions
                             }
                         });
 
@@ -1698,6 +1702,15 @@ Based ONLY on the search results above, provide a factual answer:`;
                         riskLevel: 'low' as const
                     };
                 }
+            }
+
+            // If Vercel mentions were found, log that they'll be handled by the agent
+            if (vercelMentions.length > 0) {
+                loggingService.info('Vercel mentions detected - letting agent handle with Vercel tools', {
+                    userId: request.userId,
+                    vercelMentionCount: vercelMentions.length,
+                    message: (request.message || '').substring(0, 100)
+                });
             }
 
             // Check if this is a GitHub-related message with repository context

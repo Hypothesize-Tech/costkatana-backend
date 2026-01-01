@@ -780,10 +780,10 @@ Answer with ONE WORD ONLY:`;
             return await this.handleKnowledgeBaseQuery(userId, message, context);
         }
 
-        // For truly general queries, still provide a conversational approach
-        // but execute immediately since they don't need structured data collection
+        // For truly general queries, use multi-LLM orchestration for intelligent tool selection
+        // This ensures Vercel queries are routed to Vercel tools, not CostKatana projects
         try {
-            const agentResponse = await agentService.query({
+            const agentResponse = await agentService.queryWithMultiLlm({
                 userId,
                 query: message,
                 context,

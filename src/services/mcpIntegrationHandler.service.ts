@@ -183,6 +183,29 @@ export class MCPIntegrationHandler {
         return hasGoogleAccess;
       }
 
+      // For Vercel, check the VercelConnection model
+      if (integrationType === 'vercel') {
+        const { VercelConnection } = await import('../models/VercelConnection');
+        const vercelConnections = await VercelConnection.find({
+          userId,
+          isActive: true
+        });
+        
+        const hasVercelAccess = vercelConnections.length > 0;
+        
+        if (hasVercelAccess) {
+          loggingService.info('Vercel access validated', {
+            component: 'MCPIntegrationHandler',
+            operation: 'validateUserAccess',
+            userId,
+            integrationType,
+            connectionCount: vercelConnections.length
+          });
+        }
+        
+        return hasVercelAccess;
+      }
+
       // For other integrations, check the standard Integration model
       const integrations = await IntegrationService.getUserIntegrations(userId, {
         status: 'active'

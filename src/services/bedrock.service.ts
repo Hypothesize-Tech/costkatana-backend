@@ -67,8 +67,16 @@ export class BedrockService {
             if ((msg.role === 'user' || msg.role === 'assistant') && msg.content) {
                 let messageContent = msg.content;
                 
-                // If this is an assistant message with document content in metadata, append it to provide context
-                if (msg.role === 'assistant' && msg.metadata?.type === 'document_content' && msg.metadata?.content) {
+                // Only include document content metadata if the new message is asking about documents/files
+                // This prevents old document context from polluting new queries about integrations (Vercel, GitHub, etc.)
+                const isDocumentQuery = newMessage.toLowerCase().includes('document') || 
+                                       newMessage.toLowerCase().includes('file') ||
+                                       newMessage.toLowerCase().includes('pdf') ||
+                                       newMessage.toLowerCase().includes('what does it say') ||
+                                       newMessage.toLowerCase().includes('what did') ||
+                                       newMessage.toLowerCase().includes('analyze');
+                
+                if (msg.role === 'assistant' && msg.metadata?.type === 'document_content' && msg.metadata?.content && isDocumentQuery) {
                     // Add document content as context (truncate if too long to avoid token limits)
                     const maxContentLength = 10000; // Limit to ~2500 tokens
                     const docContent = msg.metadata.content.length > maxContentLength 

@@ -790,7 +790,41 @@ export class IntegrationChatService {
         return await this.executeGoogleCommand(command, mockGoogleIntegration, mockGoogleIntegration.getCredentials());
       }
 
-      // Find matching integration for non-Google services
+      // Vercel uses VercelConnection, not Integration model
+      if (command.mention.integration === 'vercel') {
+        const { VercelConnection } = await import('../models/VercelConnection');
+        const vercelConnection = await VercelConnection.findOne({
+          userId,
+          isActive: true
+        }).select('+accessToken');
+
+        if (!vercelConnection) {
+          return {
+            success: false,
+            message: `❌ No active Vercel account connected. Please connect your Vercel account from Settings → Integrations → Vercel.`,
+            error: 'VERCEL_CONNECTION_NOT_FOUND'
+          };
+        }
+
+        // Create a mock integration object for Vercel
+        const mockVercelIntegration: any = {
+          _id: vercelConnection._id,
+          userId,
+          type: 'vercel_oauth',
+          status: 'active',
+          metadata: {
+            connectionId: vercelConnection._id.toString()
+          },
+          getCredentials: () => ({
+            accessToken: vercelConnection.accessToken,
+            vercelConnectionId: vercelConnection._id.toString()
+          })
+        };
+
+        return await this.executeVercelCommand(command, mockVercelIntegration, mockVercelIntegration.getCredentials());
+      }
+
+      // Find matching integration for non-Google, non-Vercel services
       const integration = integrations.find(i => {
         const integrationType = command.mention.integration;
         if (integrationType === 'jira') return i.type === 'jira_oauth';
@@ -798,7 +832,6 @@ export class IntegrationChatService {
         if (integrationType === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
         if (integrationType === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
         if (integrationType === 'github') return i.type === 'github_oauth';
-        if (integrationType === 'vercel') return i.type === 'vercel_oauth';
         if (integrationType === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
@@ -825,8 +858,6 @@ export class IntegrationChatService {
           return await this.executeDiscordCommand(command, integration, credentials);
         case 'github':
           return await this.executeGitHubCommand(command, integration, credentials);
-        case 'vercel':
-          return await this.executeVercelCommand(command, integration, credentials);
         default:
           return {
             success: false,
@@ -3111,31 +3142,31 @@ export class IntegrationChatService {
 
   /**
    * Execute Vercel command via @vercel mention
+   * Uses Vercel's Official MCP Server for read operations
    */
   private static async executeVercelCommand(
     command: IntegrationCommand,
     integration: IIntegration,
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
-    const { VercelChatAgentService } = await import('./vercelChatAgent.service');
-    const { VercelService } = await import('./vercel.service');
-
     try {
-      // Get Vercel connection, optionally filter by credentials if provided
-      let connections = await VercelService.listConnections(integration.userId.toString());
-
-      // Attempt to match by provided credential if available
-      let connection;
-      if (credentials && credentials.vercelConnectionId) {
-        connection = connections.find(
-          c => c._id.toString() === credentials.vercelConnectionId!.toString()
-        );
-      } else if (integration._id) {
-        connection = connections.find(c => c._id.toString() === (integration._id as any).toString());
-      } else {
-        connection = connections[0]; // Fallback to first connection
+      // For Vercel, we already have the connection ID from credentials
+      const vercelConnectionId = credentials.vercelConnectionId;
+      
+      if (!vercelConnectionId) {
+        return {
+          success: false,
+          message: '❌ Vercel connection ID not found. Please reconnect in Settings → Integrations.',
+          error: 'VERCEL_CONNECTION_MISSING'
+        };
       }
 
+      // Get the Vercel connection
+      const { VercelService } = await import('./vercel.service');
+      const { VercelMCPService } = await import('./vercelMcp.service');
+      
+      const connection = await VercelService.getConnection(vercelConnectionId, integration.userId.toString());
+      
       if (!connection || !connection.isActive) {
         return {
           success: false,
@@ -3144,88 +3175,205 @@ export class IntegrationChatService {
         };
       }
 
-      // Convert command to natural language for the chat agent
-      let naturalMessage = '';
-      
+      // Handle different command types using MCP for read operations
       switch (command.type) {
-        case 'create':
-          if (command.entity === 'deployment') {
-            const projectName = command.params.project || command.mention.entityId;
-            const target = command.params.target || 'preview';
-            naturalMessage = `Deploy ${projectName} to ${target}`;
-          } else if (command.entity === 'domain') {
-            const domain = command.params.domain || command.params.name;
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Add domain ${domain} to ${project}`;
-          } else if (command.entity === 'env' || command.entity === 'environment') {
-            const key = command.params.key || command.params.name;
-            const value = command.params.value;
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Set env ${key} to ${value} for ${project}`;
-          }
-          break;
-
         case 'list':
           if (command.entity === 'project' || command.entity === 'projects') {
-            naturalMessage = 'Show my Vercel projects';
-          } else if (command.entity === 'deployment' || command.entity === 'deployments') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = project ? `Show deployments for ${project}` : 'Show my deployments';
+            // Use MCP to list projects
+            const projects = await VercelMCPService.listProjects(vercelConnectionId);
+            return {
+              success: true,
+              message: `Found ${projects.length} Vercel projects`,
+              data: { projects },
+              metadata: { type: 'vercel' }
+            };
           } else if (command.entity === 'domain' || command.entity === 'domains') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = project ? `Show domains for ${project}` : 'Show my domains';
-          } else if (command.entity === 'env' || command.entity === 'environment') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = project ? `Show env vars for ${project}` : 'Show environment variables';
+            // For domains, we need a project - use REST API for now
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to list domains',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            const domains = await VercelService.getDomains(vercelConnectionId, project.id);
+            return {
+              success: true,
+              message: `Found ${domains.length} Vercel domains for project '${projectName}'`,
+              data: { domains },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'deployment' || command.entity === 'deployments') {
+            // Use MCP to list deployments
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to list deployments',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            const deployments = await VercelMCPService.listDeployments(vercelConnectionId, project.id);
+            return {
+              success: true,
+              message: `Found ${deployments.length} deployments for project '${projectName}'`,
+              data: { deployments },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'env' || command.entity === 'environment' || command.entity === 'variables') {
+            // For environment variables, use REST API
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to list environment variables',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            const envVars = await VercelService.getEnvVars(vercelConnectionId, project.id);
+            return {
+              success: true,
+              message: `Found ${envVars.length} environment variables for project '${projectName}'`,
+              data: { envVars },
+              metadata: { type: 'vercel' }
+            };
           }
           break;
 
         case 'get':
-          if (command.entity === 'logs') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Get logs for ${project}`;
-          } else if (command.entity === 'analytics') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Get analytics for ${project}`;
+          if (command.entity === 'project') {
+            // Use MCP to get project details
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelMCPService.getProjectDetails(vercelConnectionId, projectName);
+            return {
+              success: true,
+              message: `Retrieved project: ${project.name}`,
+              data: { project },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'deployment') {
+            // Use MCP to get deployment details
+            const deploymentId = command.params.deploymentId || command.mention.entityId;
+            if (!deploymentId) {
+              return {
+                success: false,
+                message: '❌ Deployment ID is required',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const deployment = await VercelMCPService.getDeploymentDetails(vercelConnectionId, deploymentId);
+            return {
+              success: true,
+              message: `Retrieved deployment details`,
+              data: { deployment },
+              metadata: { type: 'vercel' }
+            };
           }
           break;
 
-        case 'update':
-          if (command.entity === 'deployment' && command.params.action === 'rollback') {
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Rollback ${project}`;
-          } else if (command.entity === 'deployment' && command.params.action === 'promote') {
-            const deploymentId = command.params.deploymentId || command.params.id;
-            naturalMessage = `Promote ${deploymentId} to production`;
+        case 'create':
+        case 'add':
+          if (command.entity === 'domain') {
+            // Add domain using REST API
+            const domain = command.params.domain || command.mention.entityId;
+            const projectName = command.params.project;
+            if (!domain || !projectName) {
+              return {
+                success: false,
+                message: '❌ Domain and project name are required',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const result = await VercelService.addDomain(vercelConnectionId, projectName, domain);
+            return {
+              success: true,
+              message: `Domain '${domain}' added to project '${projectName}'`,
+              data: { domain: result },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'deployment') {
+            // Trigger deployment using REST API
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to trigger deployment',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const deployment = await VercelService.triggerDeployment(vercelConnectionId, projectName);
+            return {
+              success: true,
+              message: `Deployment triggered for project '${projectName}'`,
+              data: { deployment },
+              metadata: { type: 'vercel' }
+            };
           }
           break;
 
         case 'delete':
+        case 'remove':
           if (command.entity === 'domain') {
-            const domain = command.params.domain || command.params.name;
-            const project = command.params.project || command.mention.entityId;
-            naturalMessage = `Remove domain ${domain} from ${project}`;
+            // Remove domain using REST API
+            const domain = command.params.domain || command.mention.entityId;
+            const projectName = command.params.project;
+            if (!domain || !projectName) {
+              return {
+                success: false,
+                message: '❌ Domain and project name are required',
+                error: 'MISSING_PARAM'
+              };
+            }
+            await VercelService.removeDomain(vercelConnectionId, projectName, domain);
+            return {
+              success: true,
+              message: `Domain '${domain}' removed from project '${projectName}'`,
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'deployment') {
+            // Rollback deployment using REST API
+            const projectName = command.params.project;
+            const deploymentId = command.params.deploymentId || command.mention.entityId;
+            if (!projectName || !deploymentId) {
+              return {
+                success: false,
+                message: '❌ Project name and deployment ID are required',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const result = await VercelService.rollbackDeployment(vercelConnectionId, projectName, deploymentId);
+            return {
+              success: true,
+              message: `Deployment rolled back for project '${projectName}'`,
+              data: { deployment: result },
+              metadata: { type: 'vercel' }
+            };
           }
           break;
 
         default:
-          naturalMessage = command.naturalLanguage || 'Help with Vercel';
+          return {
+            success: false,
+            message: `❌ Vercel command type '${command.type}' is not yet supported`,
+            error: 'UNSUPPORTED_COMMAND'
+          };
       }
 
-      // Pass credentials to the chat agent if appropriate
-      const response = await VercelChatAgentService.processMessage(naturalMessage, {
-        userId: integration.userId.toString(),
-        vercelConnectionId: connection._id.toString()
-      });
-
       return {
-        success: !response.requiresAction,
-        message: response.message,
-        data: response.data,
-        metadata: {
-          type: 'vercel',
-          suggestions: response.suggestions
-        }
+        success: false,
+        message: `❌ Unable to process Vercel command for entity '${command.entity}'`,
+        error: 'COMMAND_FAILED'
       };
     } catch (error: any) {
       loggingService.error('Vercel command failed', {

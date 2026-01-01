@@ -126,7 +126,8 @@ export class VercelMCPService {
     ): Promise<VercelMCPResponse> {
         try {
             // Get connection with decrypted access token
-            const connection = await VercelConnection.findById(connectionId);
+            // Must explicitly select accessToken field since it has select: false in schema
+            const connection = await VercelConnection.findById(connectionId).select('+accessToken');
             if (!connection || !connection.isActive) {
                 throw new Error('Vercel connection not found or inactive');
             }
