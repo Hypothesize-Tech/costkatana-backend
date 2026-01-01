@@ -9,6 +9,12 @@ export interface IGitHubContext {
     branchName?: string;
 }
 
+export interface IVercelContext {
+    connectionId?: Types.ObjectId;
+    projectId?: string;
+    projectName?: string;
+}
+
 export interface IConversation extends Document {
     _id: Types.ObjectId;
     userId: string;
@@ -23,6 +29,7 @@ export interface IConversation extends Document {
     isArchived: boolean;
     deletedAt?: Date;
     githubContext?: IGitHubContext;
+    vercelContext?: IVercelContext;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -82,6 +89,14 @@ const conversationSchema = new Schema<IConversation>({
             repositoryFullName: String,
             integrationId: Schema.Types.ObjectId,
             branchName: String
+        },
+        required: false
+    },
+    vercelContext: {
+        type: {
+            connectionId: Schema.Types.ObjectId,
+            projectId: String,
+            projectName: String
         },
         required: false
     }

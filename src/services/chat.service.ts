@@ -104,6 +104,11 @@ export interface ChatSendMessageRequest {
         repositoryName: string;
         repositoryFullName: string;
     };
+    vercelContext?: {
+        connectionId: string;
+        projectId: string;
+        projectName: string;
+    };
     // Template support
     templateId?: string; // Use a prompt template
     templateVariables?: Record<string, any>; // Variables for template
@@ -150,6 +155,9 @@ export interface ChatSendMessageResponse {
         currentStep?: string;
         prUrl?: string;
     };
+    // Vercel integration data
+    vercelIntegrationData?: any;
+    suggestions?: string[];
     // Template metadata
     templateUsed?: {
         id: string;
@@ -1224,6 +1232,9 @@ Based ONLY on the search results above, provide a factual answer:`;
         try {
             const startTime = Date.now();
             
+            // Generate messageId
+            const messageId = new Types.ObjectId().toString();
+            
             // Validate that either message, templateId, or attachments is provided
             if (!request.message && !request.templateId && !request.attachments?.length) {
                 throw new Error('Either message, templateId, or attachments must be provided');
@@ -1549,7 +1560,7 @@ Based ONLY on the search results above, provide a factual answer:`;
 
                             const latency = Date.now() - startTime;
                             return {
-                                messageId: new Types.ObjectId().toString(),
+                                messageId: messageId, // Use pre-generated messageId
                                 conversationId: conversation!._id.toString(),
                                 response: sanitizedMessage,
                                 cost: 0, // Integration operations don't cost tokens
@@ -1590,7 +1601,7 @@ Based ONLY on the search results above, provide a factual answer:`;
 
                             const latency = Date.now() - startTime;
                             return {
-                                messageId: new Types.ObjectId().toString(),
+                                messageId: messageId, // Use pre-generated messageId
                                 conversationId: conversation!._id.toString(),
                                 response: `❌ ${errorMessage}`,
                                 cost: 0,
@@ -1697,6 +1708,111 @@ Based ONLY on the search results above, provide a factual answer:`;
                 repositoryName: conversation!.githubContext.repositoryName,
                 repositoryFullName: conversation!.githubContext.repositoryFullName
             } : null);
+
+            // Handle Vercel context
+            const vercelContext = request.vercelContext;
+            if (vercelContext) {
+                try {
+                    const { VercelChatAgentService } = await import('./vercelChatAgent.service');
+                    const { VercelConnection, Conversation: ConversationModel } = await import('../models');
+                    
+                    // Get Vercel connection
+                    const connectionId = typeof vercelContext.connectionId === 'string' 
+                        ? vercelContext.connectionId 
+                        : vercelContext.connectionId;
+                    const connection = await VercelConnection.findById(connectionId);
+                    if (!connection || !connection.isActive) {
+                        throw new Error('Vercel connection not found or inactive');
+                    }
+
+                    // Get conversation Vercel context if exists, otherwise create from request
+                    let conversationVercelContext = null;
+                    if (conversation!.vercelContext) {
+                        conversationVercelContext = conversation!.vercelContext;
+                    } else {
+                        // Create Vercel context from request
+                        conversationVercelContext = {
+                            connectionId: connection._id,
+                            projectId: vercelContext.projectId,
+                            projectName: vercelContext.projectName
+                        };
+                        // Save to conversation
+                        await ConversationModel.findByIdAndUpdate(conversation!._id, {
+                            vercelContext: conversationVercelContext
+                        });
+                    }
+
+                    // Process with Vercel chat agent
+                    const vercelResponse = await VercelChatAgentService.processMessage(
+                        request.message || '',
+                        {
+                            conversationId: conversation!._id.toString(),
+                            userId: request.userId,
+                            vercelConnectionId: connection._id.toString()
+                        }
+                    );
+
+                    // Format response - include integration data for frontend polling
+                    const processingResult = {
+                        response: vercelResponse.message,
+                        agentPath: ['vercel_agent'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low' as const,
+                        agentThinking: undefined,
+                        // Include Vercel integration data if present
+                        vercelIntegrationData: vercelResponse.data || undefined,
+                        suggestions: vercelResponse.suggestions
+                    };
+
+                    // Save assistant response
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: vercelResponse.message,
+                                modelId: request.modelId
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = vercelResponse.message.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+
+                    const latency = Date.now() - startTime;
+                    const inputTokens = Math.ceil((request.message || '').length / 4);
+                    const outputTokens = Math.ceil(vercelResponse.message.length / 4);
+                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+
+                    return {
+                        messageId: new Types.ObjectId().toString(),
+                        conversationId: conversation!._id.toString(),
+                        response: vercelResponse.message,
+                        cost,
+                        latency,
+                        tokenCount: inputTokens + outputTokens,
+                        model: request.modelId,
+                        agentPath: processingResult.agentPath,
+                        optimizationsApplied: processingResult.optimizationsApplied,
+                        cacheHit: processingResult.cacheHit,
+                        riskLevel: processingResult.riskLevel,
+                        vercelIntegrationData: processingResult.vercelIntegrationData,
+                        suggestions: processingResult.suggestions
+                    };
+                } catch (error) {
+                    loggingService.warn('Vercel chat agent failed, falling back to normal processing', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    // Fall through to normal processing
+                }
+            }
 
             if (githubContext) {
                 try {
@@ -1920,7 +2036,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             loggingService.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
 
             return {
-                messageId: 'temp-id', // Will be updated after save
+                messageId, // Use pre-generated messageId for activity streaming
                 conversationId: conversation!._id.toString(),
                 response,
                 cost,

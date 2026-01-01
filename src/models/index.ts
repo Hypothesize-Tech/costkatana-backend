@@ -8,7 +8,7 @@ export { Activity, IActivity } from './Activity';
 export { Project, IProject } from './Project';
 export { PromptTemplate, IPromptTemplate } from './PromptTemplate';
 export { ApprovalRequest, IApprovalRequest } from './ApprovalRequest';
-export { Conversation, IConversation, IGitHubContext } from './Conversation';
+export { Conversation, IConversation, IGitHubContext, IVercelContext } from './Conversation';
 export { ChatMessage, IChatMessage } from './ChatMessage';
 export { Experiment, IExperiment } from './Experiment';
 export { WhatIfScenario, IWhatIfScenario } from './WhatIfScenario';
@@ -36,3 +36,4 @@ export { AutomationConnection, IAutomationConnection } from './AutomationConnect
 export { WorkflowVersion, IWorkflowVersion } from './WorkflowVersion';
 export { GitHubCodeChunkModel, IGitHubCodeChunk } from './GitHubCodeChunk';
 export { SymbolIndexModel, ISymbolIndex } from './SymbolIndex';
+export { VercelConnection, IVercelConnection, IVercelProject } from './VercelConnection';

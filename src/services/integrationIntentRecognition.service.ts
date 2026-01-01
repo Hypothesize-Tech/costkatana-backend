@@ -37,6 +37,7 @@ export class IntegrationIntentRecognitionService {
     linear: 'medium',
     jira: 'medium',
     github: 'complex',
+    vercel: 'complex',
     google: 'complex',
     gmail: 'complex',
     calendar: 'medium',
@@ -285,6 +286,7 @@ IMPORTANT RULES:
       jira: ['issue', 'project', 'board', 'sprint', 'user', 'filter', 'comment', 'attachment'],
       linear: ['issue', 'project', 'team', 'cycle', 'user', 'workflow', 'comment', 'label'],
       github: ['issue', 'pullrequest', 'repository', 'branch', 'commit', 'user', 'release', 'comment'],
+      vercel: ['project', 'deployment', 'domain', 'env', 'analytics', 'log'],
       webhook: ['webhook', 'event', 'delivery', 'retry']
     };
 
@@ -333,6 +335,20 @@ IMPORTANT RULES:
 - create repository: {name: string (required), description?: string, private?: boolean}
 - list issues: {state?: string, labels?: string}
 - list pullrequests: {state?: string}`,
+      vercel: `
+- list projects: {}
+- create deployment: {projectName: string (required), target?: 'production'|'preview'}
+- get deployment: {projectName: string (required)}
+- list deployments: {projectName: string (required)}
+- get log: {projectName: string (required)}
+- create domain: {projectName: string (required), domain: string (required)}
+- list domains: {projectName: string (required)}
+- delete domain: {projectName: string (required), domain: string (required)}
+- list env: {projectName: string (required)}
+- create env: {projectName: string (required), key: string (required), value: string (required), target?: string[]}
+- delete env: {projectName: string (required), key: string (required)}
+- get analytics: {projectName: string (required)}
+- update deployment: {projectName: string (required), deploymentId: string (required), action: 'rollback'|'promote'}`,
       webhook: `
 - send webhook: {url: string (required), payload: object (required)}
 - list webhooks: {}
@@ -389,6 +405,19 @@ IMPORTANT RULES:
         '@github create issue "Bug in auth" → {title: "Bug in auth"}',
         '@github list pull requests',
         '@github create repository my-app → {name: "my-app"}'
+      ],
+      vercel: [
+        '@vercel list projects',
+        '@vercel deploy my-app → {projectName: "my-app"}',
+        '@vercel deploy my-app to production → {projectName: "my-app", target: "production"}',
+        '@vercel show deployments for my-app → {projectName: "my-app"}',
+        '@vercel get logs for my-app → {projectName: "my-app"}',
+        '@vercel rollback my-app → {projectName: "my-app", action: "rollback"}',
+        '@vercel add domain example.com to my-app → {projectName: "my-app", domain: "example.com"}',
+        '@vercel list domains for my-app → {projectName: "my-app"}',
+        '@vercel set env API_KEY to xyz123 for my-app → {projectName: "my-app", key: "API_KEY", value: "xyz123"}',
+        '@vercel list env vars for my-app → {projectName: "my-app"}',
+        '@vercel get analytics for my-app → {projectName: "my-app"}'
       ],
       google: [
         '@google send email to team@company.com about monthly costs → {action: "gmail", subAction: "send", params: {to: "team@company.com", subject: "Monthly costs"}}',

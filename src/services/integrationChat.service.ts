@@ -41,6 +41,7 @@ export interface IntegrationCommandResult {
     service?: 'gmail' | 'calendar' | 'drive' | 'gdocs' | 'sheets';
     requiresPicker?: boolean;
     fileType?: 'docs' | 'sheets' | 'drive';
+    suggestions?: string[];
   };
 }
 
@@ -797,6 +798,7 @@ export class IntegrationChatService {
         if (integrationType === 'slack') return i.type === 'slack_oauth' || i.type === 'slack_webhook';
         if (integrationType === 'discord') return i.type === 'discord_oauth' || i.type === 'discord_webhook';
         if (integrationType === 'github') return i.type === 'github_oauth';
+        if (integrationType === 'vercel') return i.type === 'vercel_oauth';
         if (integrationType === 'webhook') return i.type === 'custom_webhook';
         return false;
       });
@@ -823,6 +825,8 @@ export class IntegrationChatService {
           return await this.executeDiscordCommand(command, integration, credentials);
         case 'github':
           return await this.executeGitHubCommand(command, integration, credentials);
+        case 'vercel':
+          return await this.executeVercelCommand(command, integration, credentials);
         default:
           return {
             success: false,
@@ -3101,6 +3105,139 @@ export class IntegrationChatService {
         success: false,
         message: `❌ ${userMessage}`,
         error: googleError.type
+      };
+    }
+  }
+
+  /**
+   * Execute Vercel command via @vercel mention
+   */
+  private static async executeVercelCommand(
+    command: IntegrationCommand,
+    integration: IIntegration,
+    credentials: IntegrationCredentials
+  ): Promise<IntegrationCommandResult> {
+    const { VercelChatAgentService } = await import('./vercelChatAgent.service');
+    const { VercelService } = await import('./vercel.service');
+
+    try {
+      // Get Vercel connection, optionally filter by credentials if provided
+      let connections = await VercelService.listConnections(integration.userId.toString());
+
+      // Attempt to match by provided credential if available
+      let connection;
+      if (credentials && credentials.vercelConnectionId) {
+        connection = connections.find(
+          c => c._id.toString() === credentials.vercelConnectionId!.toString()
+        );
+      } else if (integration._id) {
+        connection = connections.find(c => c._id.toString() === (integration._id as any).toString());
+      } else {
+        connection = connections[0]; // Fallback to first connection
+      }
+
+      if (!connection || !connection.isActive) {
+        return {
+          success: false,
+          message: '❌ Vercel connection not found or inactive. Please reconnect in Settings → Integrations.',
+          error: 'VERCEL_CONNECTION_INACTIVE'
+        };
+      }
+
+      // Convert command to natural language for the chat agent
+      let naturalMessage = '';
+      
+      switch (command.type) {
+        case 'create':
+          if (command.entity === 'deployment') {
+            const projectName = command.params.project || command.mention.entityId;
+            const target = command.params.target || 'preview';
+            naturalMessage = `Deploy ${projectName} to ${target}`;
+          } else if (command.entity === 'domain') {
+            const domain = command.params.domain || command.params.name;
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Add domain ${domain} to ${project}`;
+          } else if (command.entity === 'env' || command.entity === 'environment') {
+            const key = command.params.key || command.params.name;
+            const value = command.params.value;
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Set env ${key} to ${value} for ${project}`;
+          }
+          break;
+
+        case 'list':
+          if (command.entity === 'project' || command.entity === 'projects') {
+            naturalMessage = 'Show my Vercel projects';
+          } else if (command.entity === 'deployment' || command.entity === 'deployments') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = project ? `Show deployments for ${project}` : 'Show my deployments';
+          } else if (command.entity === 'domain' || command.entity === 'domains') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = project ? `Show domains for ${project}` : 'Show my domains';
+          } else if (command.entity === 'env' || command.entity === 'environment') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = project ? `Show env vars for ${project}` : 'Show environment variables';
+          }
+          break;
+
+        case 'get':
+          if (command.entity === 'logs') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Get logs for ${project}`;
+          } else if (command.entity === 'analytics') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Get analytics for ${project}`;
+          }
+          break;
+
+        case 'update':
+          if (command.entity === 'deployment' && command.params.action === 'rollback') {
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Rollback ${project}`;
+          } else if (command.entity === 'deployment' && command.params.action === 'promote') {
+            const deploymentId = command.params.deploymentId || command.params.id;
+            naturalMessage = `Promote ${deploymentId} to production`;
+          }
+          break;
+
+        case 'delete':
+          if (command.entity === 'domain') {
+            const domain = command.params.domain || command.params.name;
+            const project = command.params.project || command.mention.entityId;
+            naturalMessage = `Remove domain ${domain} from ${project}`;
+          }
+          break;
+
+        default:
+          naturalMessage = command.naturalLanguage || 'Help with Vercel';
+      }
+
+      // Pass credentials to the chat agent if appropriate
+      const response = await VercelChatAgentService.processMessage(naturalMessage, {
+        userId: integration.userId.toString(),
+        vercelConnectionId: connection._id.toString()
+      });
+
+      return {
+        success: !response.requiresAction,
+        message: response.message,
+        data: response.data,
+        metadata: {
+          type: 'vercel',
+          suggestions: response.suggestions
+        }
+      };
+    } catch (error: any) {
+      loggingService.error('Vercel command failed', {
+        error: error.message,
+        command,
+        stack: error.stack
+      });
+
+      return {
+        success: false,
+        message: `❌ Vercel command failed: ${error.message}`,
+        error: 'VERCEL_COMMAND_FAILED'
       };
     }
   }

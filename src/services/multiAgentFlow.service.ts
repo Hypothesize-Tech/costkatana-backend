@@ -2,6 +2,7 @@ import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from "@langchain/aws";
 import { StateGraph, Annotation } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { langSmithService } from './langsmith.service';
 import { RetryWithBackoff, RetryConfigs } from '../utils/retryWithBackoff';
 import { WebSearchTool } from '../tools/webSearch.tool';
@@ -219,6 +220,7 @@ export class MultiAgentFlowService {
             chatMode?: 'fastest' | 'cheapest' | 'balanced';
             costBudget?: number;
             previousMessages?: BaseMessage[];
+            callbacks?: BaseCallbackHandler[]; // Optional callbacks for activity streaming
         } = {}
     ): Promise<{
         response: string;
@@ -264,7 +266,9 @@ export class MultiAgentFlowService {
                 initialState.messages = [...options.previousMessages, new HumanMessage(message)];
             }
 
-            const result = await this.graph.invoke(initialState);
+            const result = await this.graph.invoke(initialState, {
+                callbacks: options.callbacks // Pass callbacks if provided
+            });
             
             // Debug logging to understand the entire result structure
             loggingService.info('🔍 Multi-agent result structure:', { value:  { 

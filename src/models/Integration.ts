@@ -10,6 +10,7 @@ export type IntegrationType =
     | 'jira_oauth'
     | 'github_oauth'
     | 'google_oauth'
+    | 'vercel_oauth'
     | 'custom_webhook';
 
 export type IntegrationStatus = 'active' | 'inactive' | 'error' | 'pending';
@@ -58,6 +59,7 @@ export interface IntegrationCredentials {
     labels?: string[];
     components?: Array<{ id: string; name?: string }>;
     issueKey?: string;
+    vercelConnectionId?: string;
 }
 
 export interface DeliveryConfig {
