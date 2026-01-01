@@ -43,14 +43,41 @@ export class VercelController {
     /**
      * OAuth callback handler
      * GET /api/vercel/callback
+     * 
+     * For Vercel Integrations, the callback receives:
+     * - code: Authorization code to exchange for access token
+     * - configurationId: The integration configuration ID
+     * - teamId: (optional) The team ID if installed on a team
+     * - next: (optional) URL to redirect after setup
+     * - state: (optional) Our state token if passed through
      */
     static async handleOAuthCallback(req: any, res: Response): Promise<void> {
         try {
-            const { code, state } = req.query;
+            const { code, state, configurationId, teamId, next } = req.query;
 
-            if (!code || !state) {
-                const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-                res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent('Missing code or state parameter')}`);
+            loggingService.info('Vercel OAuth callback received', {
+                hasCode: !!code,
+                hasState: !!state,
+                hasConfigurationId: !!configurationId,
+                hasTeamId: !!teamId,
+                hasNext: !!next
+            });
+
+            if (!code) {
+                const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+                res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent('Missing authorization code')}`);
+                return;
+            }
+
+            if (!state) {
+                // No state means direct installation from Vercel Marketplace
+                // We cannot link this to a user account
+                loggingService.error('Vercel OAuth callback received without state', {
+                    hasConfigurationId: !!configurationId,
+                    hasTeamId: !!teamId
+                });
+                const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+                res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent('Please connect Vercel from the CostKatana integrations page')}`);
                 return;
             }
 
@@ -63,18 +90,20 @@ export class VercelController {
                 resourceType: 'vercel_connection',
                 resourceId: connection._id.toString(),
                 vercelUsername: connection.vercelUsername,
-                teamId: connection.teamId
+                teamId: connection.teamId,
+                configurationId
             });
 
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
             res.redirect(`${frontendUrl}/integrations?vercelConnected=true&message=${encodeURIComponent('Vercel account connected successfully!')}`);
         } catch (error: any) {
             loggingService.error('Vercel OAuth callback failed', {
                 error: error.message,
-                stack: error.stack
+                stack: error.stack,
+                query: req.query
             });
 
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+            const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
             res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(error.message || 'OAuth callback failed')}`);
         }
     }

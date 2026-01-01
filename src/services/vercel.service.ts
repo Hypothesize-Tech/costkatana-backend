@@ -138,8 +138,8 @@ export class VercelService {
      * Generate OAuth authorization URL with state token
      * Uses Redis for state storage to support distributed deployments
      * 
-     * For Vercel Integrations (marketplace apps), we use the integration installation URL
-     * which handles OAuth internally and redirects to our callback URL
+     * For Vercel Integrations, we use the standard OAuth authorize endpoint
+     * with client_id, redirect_uri, and state parameters
      */
     static async initiateOAuth(userId: string): Promise<string> {
         // Generate secure state token
@@ -157,23 +157,22 @@ export class VercelService {
             600 // 10 minutes TTL
         );
 
-        // For Vercel Integrations, use the marketplace installation URL
-        // This URL format is: https://vercel.com/integrations/{integration-slug}/new
-        // The integration slug is derived from the integration name (lowercase, hyphenated)
-        const integrationSlug = 'costkatana'; // This matches your Vercel Integration URL slug
-        
-        // Build the installation URL with state parameter
-        // Vercel will redirect to our callback URL after authorization
+        // Use the standard Vercel OAuth authorize endpoint
+        // This properly handles state parameter passthrough
         const params = new URLSearchParams({
+            client_id: this.config.clientId,
+            redirect_uri: this.config.callbackUrl,
             state: state,
         });
 
-        const authUrl = `${VERCEL_OAUTH_BASE}/integrations/${integrationSlug}/new?${params.toString()}`;
+        // For Vercel Integrations, use the integration-specific OAuth URL
+        const authUrl = `${VERCEL_OAUTH_BASE}/integrations/${this.config.clientId}/new?${params.toString()}`;
 
         loggingService.info('Generated Vercel OAuth URL', {
             userId,
             state: state.substring(0, 8) + '...',
-            integrationSlug
+            clientId: this.config.clientId,
+            redirectUri: this.config.callbackUrl
         });
 
         return authUrl;
