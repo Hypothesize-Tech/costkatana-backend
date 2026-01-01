@@ -1,5 +1,6 @@
 import { VercelConnection, IVercelConnection, IVercelProject } from '../models/VercelConnection';
 import { loggingService } from './logging.service';
+import { redisService } from './redis.service';
 import crypto from 'crypto';
 
 /**
@@ -16,6 +17,9 @@ import crypto from 'crypto';
 // Vercel API base URL
 const VERCEL_API_BASE = 'https://api.vercel.com';
 const VERCEL_OAUTH_BASE = 'https://vercel.com';
+
+// Redis key prefix for Vercel OAuth state tokens
+const VERCEL_STATE_KEY_PREFIX = 'vercel:oauth:state:';
 
 // OAuth configuration
 export interface VercelOAuthConfig {
@@ -123,31 +127,32 @@ export interface DeploymentOptions {
     name?: string;
 }
 
-// State token storage (in production, use Redis)
-const stateTokens: Map<string, { userId: string; expiresAt: Date }> = new Map();
-
 export class VercelService {
     private static config: VercelOAuthConfig = {
-        clientId: process.env.VERCEL_CLIENT_ID || '',
-        clientSecret: process.env.VERCEL_CLIENT_SECRET || '',
-        callbackUrl: process.env.VERCEL_CALLBACK_URL || 'http://localhost:8000/api/vercel/callback'
+        clientId: process.env.VERCEL_CLIENT_ID ?? '',
+        clientSecret: process.env.VERCEL_CLIENT_SECRET ?? '',
+        callbackUrl: process.env.VERCEL_CALLBACK_URL ?? 'http://localhost:8000/api/vercel/callback'
     };
 
     /**
      * Generate OAuth authorization URL with state token
+     * Uses Redis for state storage to support distributed deployments
      */
     static async initiateOAuth(userId: string): Promise<string> {
         // Generate secure state token
         const state = crypto.randomBytes(32).toString('hex');
         
-        // Store state token with expiration (10 minutes)
-        stateTokens.set(state, {
+        // Store state token in Redis with 10 minute expiration
+        const stateData = {
             userId,
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000)
-        });
-
-        // Clean up expired tokens
-        this.cleanupExpiredTokens();
+            createdAt: Date.now()
+        };
+        
+        await redisService.set(
+            `${VERCEL_STATE_KEY_PREFIX}${state}`,
+            stateData,
+            600 // 10 minutes TTL
+        );
 
         const params = new URLSearchParams({
             client_id: this.config.clientId,
@@ -170,21 +175,24 @@ export class VercelService {
 
     /**
      * Handle OAuth callback - exchange code for token
+     * Retrieves state from Redis for distributed deployment support
      */
     static async handleCallback(code: string, state: string): Promise<IVercelConnection> {
-        // Validate state token
-        const stateData = stateTokens.get(state);
+        // Validate state token from Redis
+        const stateData = await redisService.get(`${VERCEL_STATE_KEY_PREFIX}${state}`) as { userId: string; createdAt: number } | null;
+        
         if (!stateData) {
+            loggingService.error('Vercel OAuth state validation failed', {
+                state: state.substring(0, 8) + '...',
+                reason: 'State not found in Redis'
+            });
             throw new Error('Invalid or expired state token');
         }
 
-        if (new Date() > stateData.expiresAt) {
-            stateTokens.delete(state);
-            throw new Error('State token has expired');
-        }
-
-        const userId = stateData.userId;
-        stateTokens.delete(state);
+        const userId: string = stateData.userId;
+        
+        // Delete the state token after use (one-time use)
+        await redisService.del(`${VERCEL_STATE_KEY_PREFIX}${state}`);
 
         try {
             // Exchange code for access token
@@ -784,23 +792,12 @@ export class VercelService {
     }
 
     /**
-     * Clean up expired state tokens
-     */
-    private static cleanupExpiredTokens(): void {
-        const now = new Date();
-        for (const [key, value] of stateTokens.entries()) {
-            if (value.expiresAt < now) {
-                stateTokens.delete(key);
-            }
-        }
-    }
-
-    /**
      * Validate state token (for testing)
+     * Now uses Redis instead of in-memory storage
      */
-    static validateStateToken(state: string): { userId: string } | null {
-        const stateData = stateTokens.get(state);
-        if (!stateData || new Date() > stateData.expiresAt) {
+    static async validateStateToken(state: string): Promise<{ userId: string } | null> {
+        const stateData = await redisService.get(`${VERCEL_STATE_KEY_PREFIX}${state}`) as { userId: string; createdAt: number } | null;
+        if (!stateData) {
             return null;
         }
         return { userId: stateData.userId };
