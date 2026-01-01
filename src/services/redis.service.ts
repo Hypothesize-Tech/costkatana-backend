@@ -274,10 +274,7 @@ export class RedisService {
             };
 
             this.client = createClient(nodeRedisConfig);
-            this.readerClient = createClient({
-                ...nodeRedisConfig,
-                readonly: true,
-            });
+            this.readerClient = this.client;
 
             // Handle connection errors - fallback immediately
             this.client.on('error', (err: any) => {
