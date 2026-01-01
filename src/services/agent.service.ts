@@ -15,6 +15,9 @@ import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
 import { loggingService } from "./logging.service";
 import { buildSystemPrompt, getCompressedPrompt } from "../config/agent-prompt-template";
 import { ResponseFormattersService } from "./response-formatters.service";
+import { VercelToolsService } from "./vercelTools.service";
+import { VercelConnection } from "../models/VercelConnection";
+import { multiLlmOrchestratorService } from "./multiLlmOrchestrator.service";
 import crypto from 'crypto';
 
 export interface AgentQuery {
@@ -377,66 +380,14 @@ export class AgentService {
                 throw new Error('Agent not properly initialized');
             }
 
-            // Check if this is a CostKatana-specific query and handle it directly
-            const lowerQuery = queryData.query.toLowerCase();
-            loggingService.info('🔍 Query analysis:', { 
-                query: queryData.query, 
-                lowerQuery, 
-                containsCostkatana: lowerQuery.includes('costkatana'),
-                containsNpm: lowerQuery.includes('npm'),
-                containsPackage: lowerQuery.includes('package'),
-                containsAiCostTracker: lowerQuery.includes('ai-cost-tracker'),
-                containsCostKatanaCli: lowerQuery.includes('cost-katana-cli'),
-                containsCostKatana: lowerQuery.includes('cost-katana'),
-                containsPypi: lowerQuery.includes('pypi')
+            // Dynamically add Vercel tools if user has a Vercel connection
+            await this.addVercelToolsIfConnected(queryData.userId);
+
+            // Log query for debugging
+            loggingService.info('🔍 Processing user query', { 
+                query: queryData.query.substring(0, 100),
+                userId: queryData.userId
             });
-            
-            if (lowerQuery.includes('costkatana') || lowerQuery.includes('npm') || lowerQuery.includes('package') || 
-                lowerQuery.includes('ai-cost-tracker') || lowerQuery.includes('cost-katana-cli') || 
-                lowerQuery.includes('cost-katana') || lowerQuery.includes('pypi')) {
-                
-                loggingService.info('🎯 CostKatana-specific query detected, using knowledge base tool directly');
-                
-                const knowledgeBaseTool = this.getToolInstance('knowledge_base_search');
-                const knowledgeResponse = await knowledgeBaseTool.invoke({ input: queryData.query });
-                
-                const executionTime = Date.now() - startTime;
-                
-                return {
-                    success: true,
-                    response: knowledgeResponse,
-                    metadata: {
-                        executionTime,
-                        sources: ['Knowledge Base'],
-                        fromCache: false,
-                        knowledgeEnhanced: true
-                    },
-                    thinking: {
-                        title: "CostKatana Package Information",
-                        summary: "Retrieved comprehensive information about CostKatana packages, integration guides, and troubleshooting resources.",
-                        steps: [
-                            {
-                                step: 1,
-                                description: "Knowledge Base Search",
-                                reasoning: "Searched the comprehensive CostKatana knowledge base for relevant package information and integration details.",
-                                outcome: "Found detailed information about npm packages, Python SDK, and CLI tools"
-                            },
-                            {
-                                step: 2,
-                                description: "Package Information Retrieval",
-                                reasoning: "Extracted specific details about available packages, installation commands, and official links.",
-                                outcome: "Compiled complete package information with installation instructions"
-                            },
-                            {
-                                step: 3,
-                                description: "Integration Guidance",
-                                reasoning: "Provided step-by-step integration examples and best practices for each package.",
-                                outcome: "Generated actionable integration guidance with code examples"
-                            }
-                        ]
-                    }
-                };
-            }
 
             // Build user context (with caching)
             const userContext = this.buildUserContextCached(queryData);
@@ -737,8 +688,16 @@ export class AgentService {
             queryData.context.previousMessages.slice(-3).forEach((msg: any) => {
                 let messageContent = msg.content;
                 
-                // If message has document content in metadata, include it for context
-                if (msg.metadata?.type === 'document_content' && msg.metadata?.content) {
+                // Only include document content metadata if the query is document-related
+                // This prevents old document context from polluting new queries about integrations (Vercel, GitHub, etc.)
+                const isDocumentQuery = queryData.query.toLowerCase().includes('document') || 
+                                       queryData.query.toLowerCase().includes('file') ||
+                                       queryData.query.toLowerCase().includes('pdf') ||
+                                       queryData.query.toLowerCase().includes('what does it say') ||
+                                       queryData.query.toLowerCase().includes('what did') ||
+                                       queryData.query.toLowerCase().includes('analyze');
+                
+                if (msg.metadata?.type === 'document_content' && msg.metadata?.content && isDocumentQuery) {
                     const maxContentLength = 8000; // Limit for agent context
                     const docContent = msg.metadata.content.length > maxContentLength 
                         ? msg.metadata.content.substring(0, maxContentLength) + '... [truncated]'
@@ -1532,6 +1491,185 @@ export class AgentService {
         recommendations.push('Log all agent interactions for observability and debugging');
 
         return recommendations;
+    }
+
+    /**
+     * Process query using multi-LLM orchestration pipeline
+     * Stage 1: Fast LLM analyzes query intent
+     * Stage 2: Smart LLM selects best tools
+     * Stage 3: Tools are executed
+     * Stage 4: Quality LLM generates final response
+     */
+    async queryWithMultiLlm(queryData: AgentQuery): Promise<AgentResponse> {
+        const startTime = Date.now();
+        this.metrics.totalRequests++;
+
+        try {
+            loggingService.info('🚀 Processing query with multi-LLM orchestration', {
+                userId: queryData.userId,
+                query: queryData.query.substring(0, 100)
+            });
+
+            if (!this.initialized) {
+                await this.initialize();
+            }
+
+            // Dynamically add Vercel tools if user has a Vercel connection
+            await this.addVercelToolsIfConnected(queryData.userId);
+
+            // Get all available tools with descriptions
+            const availableTools = this.getAllToolsWithDescriptions();
+
+            // Create tool executor function
+            const toolExecutor = async (toolName: string, params?: Record<string, any>) => {
+                try {
+                    const tool = this.getToolInstance(toolName);
+                    const input = params ? JSON.stringify(params) : queryData.query;
+                    return await tool.invoke({ input });
+                } catch (error: any) {
+                    loggingService.error(`Tool execution failed: ${toolName}`, {
+                        error: error.message
+                    });
+                    throw error;
+                }
+            };
+
+            // Build user context
+            const userContext = this.buildUserContextCached(queryData);
+
+            // Execute multi-LLM orchestration pipeline
+            const orchestrationResult = await multiLlmOrchestratorService.orchestrate(
+                queryData.query,
+                availableTools,
+                toolExecutor,
+                userContext
+            );
+
+            const executionTime = Date.now() - startTime;
+
+            // Update performance metrics
+            this.updatePerformanceMetrics(executionTime);
+
+            const response: AgentResponse = {
+                success: true,
+                response: orchestrationResult.finalResponse,
+                metadata: {
+                    executionTime,
+                    sources: orchestrationResult.toolSelection.selectedTools.map(t => t.name),
+                    fromCache: false
+                },
+                thinking: {
+                    title: `Query Analysis: ${orchestrationResult.analysis.intent}`,
+                    summary: `Used ${orchestrationResult.toolSelection.selectedTools.length} tools with ${(orchestrationResult.confidence * 100).toFixed(1)}% confidence`,
+                    steps: orchestrationResult.toolSelection.selectedTools.map((tool, idx) => ({
+                        step: idx + 1,
+                        description: `Execute ${tool.name}`,
+                        reasoning: tool.reason,
+                        outcome: `Tool executed with priority ${tool.priority}`
+                    }))
+                }
+            };
+
+            loggingService.info('✅ Multi-LLM query processing complete', {
+                userId: queryData.userId,
+                executionTime,
+                toolsUsed: orchestrationResult.toolSelection.selectedTools.length,
+                confidence: orchestrationResult.confidence
+            });
+
+            return response;
+
+        } catch (error: any) {
+            loggingService.error('Multi-LLM query processing failed', {
+                error: error.message,
+                userId: queryData.userId
+            });
+
+            return {
+                success: false,
+                error: error.message,
+                response: 'Failed to process your query with multi-LLM orchestration. Please try again.',
+                metadata: {
+                    executionTime: Date.now() - startTime,
+                    errorType: 'multi_llm_error'
+                }
+            };
+        }
+    }
+
+    /**
+     * Get all tools with descriptions for multi-LLM orchestrator
+     */
+    private getAllToolsWithDescriptions(): Array<{ name: string; description: string }> {
+        const toolDescriptions: { [key: string]: string } = {
+            'knowledge_base_search': 'Search the knowledge base for documentation, guides, and best practices about CostKatana features',
+            'mongodb_reader': 'Read and query data from MongoDB database for analytics and reporting',
+            'project_manager': 'Manage projects, create new projects, and handle project-related operations',
+            'model_selector': 'Select and recommend the best AI models based on cost and performance criteria',
+            'analytics_manager': 'Analyze usage patterns, costs, tokens, and generate analytics reports',
+            'optimization_manager': 'Provide cost optimization recommendations and strategies',
+            'web_search': 'Search the web for external information and current data',
+            'vercel_list_projects': 'List all Vercel projects for the connected account',
+            'vercel_get_project': 'Get detailed information about a specific Vercel project',
+            'vercel_list_deployments': 'List all deployments for a specific Vercel project',
+            'vercel_get_deployment': 'Get detailed information about a specific deployment',
+            'vercel_list_domains': 'List all domains configured for a Vercel project',
+            'vercel_list_env_vars': 'List all environment variables for a Vercel project',
+            'vercel_trigger_deployment': 'Trigger a new deployment for a Vercel project',
+            'vercel_rollback_deployment': 'Rollback a Vercel project to a previous deployment'
+        };
+
+        return Object.entries(toolDescriptions).map(([name, description]) => ({
+            name,
+            description
+        }));
+    }
+
+    /**
+     * Dynamically add Vercel tools if user has a Vercel connection
+     */
+    private async addVercelToolsIfConnected(userId: string): Promise<void> {
+        try {
+            // Check if user has a Vercel connection
+            const vercelConnection = await VercelConnection.findOne({
+                userId,
+                isActive: true
+            });
+
+            if (!vercelConnection) {
+                return; // No Vercel connection, skip adding tools
+            }
+
+            // Check if Vercel tools are already registered
+            if (this.toolFactories.has('vercel_list_projects')) {
+                return; // Already registered
+            }
+
+            loggingService.info('🔌 Adding Vercel tools for user', { userId });
+
+            // Create Vercel tools
+            const vercelTools = VercelToolsService.createVercelTools(vercelConnection._id.toString());
+
+            // Register each tool
+            for (const tool of vercelTools) {
+                this.toolFactories.set(tool.name, () => tool);
+            }
+
+            // Clear the tools cache to force reload
+            this.tools = [];
+
+            loggingService.info('✅ Vercel tools added successfully', {
+                userId,
+                toolCount: vercelTools.length,
+                tools: vercelTools.map(t => t.name)
+            });
+        } catch (error: any) {
+            loggingService.warn('⚠️ Failed to add Vercel tools', {
+                userId,
+                error: error.message
+            });
+            // Don't throw - continue without Vercel tools
+        }
     }
 }
 

@@ -395,6 +395,15 @@ export class VercelService {
         } else {
             url = `${VERCEL_API_BASE}${endpoint}`;
         }
+        
+        loggingService.info('Making Vercel API request', {
+            connectionId,
+            endpoint,
+            url,
+            method: options.method || 'GET',
+            hasToken: !!accessToken,
+            teamId: connection?.teamId
+        });
 
         const response = await fetch(url, {
             ...options,
@@ -415,7 +424,17 @@ export class VercelService {
             throw new Error(`Vercel API error: ${response.status} - ${errorText}`);
         }
 
-        return response.json() as Promise<T>;
+        const data = await response.json() as T;
+        
+        loggingService.info('Vercel API response received', {
+            connectionId,
+            endpoint,
+            status: response.status,
+            dataKeys: Object.keys(data as any),
+            projectsLength: (data as any).projects?.length
+        });
+
+        return data;
     }
 
     /**
@@ -456,10 +475,22 @@ export class VercelService {
      * Sync projects from Vercel
      */
     static async syncProjects(connectionId: string): Promise<IVercelProject[]> {
+        loggingService.info('Starting Vercel project sync', { connectionId });
+        
         const data = await this.apiRequest<{ projects: VercelProject[] }>(
             connectionId,
             '/v9/projects'
         );
+
+        loggingService.info('Received Vercel API response', {
+            connectionId,
+            projectCount: data.projects?.length || 0,
+            firstProject: data.projects?.[0] ? {
+                id: data.projects[0].id,
+                name: data.projects[0].name,
+                framework: data.projects[0].framework
+            } : null
+        });
 
         const projects: IVercelProject[] = data.projects.map(p => ({
             id: p.id,
@@ -480,11 +511,12 @@ export class VercelService {
         await VercelConnection.findByIdAndUpdate(connectionId, {
             projects,
             lastSyncedAt: new Date()
-        });
+        }, { new: true });
 
         loggingService.info('Synced Vercel projects', {
             connectionId,
-            projectCount: projects.length
+            projectCount: projects.length,
+            projectNames: projects.map(p => p.name)
         });
 
         return projects;
@@ -495,7 +527,14 @@ export class VercelService {
      */
     static async getProjects(connectionId: string, refresh = false): Promise<IVercelProject[]> {
         if (refresh) {
-            return this.syncProjects(connectionId);
+            const syncedProjects = await this.syncProjects(connectionId);
+            loggingService.info('getProjects after sync', {
+                connectionId,
+                refresh: true,
+                projectCount: syncedProjects.length,
+                projectNames: syncedProjects.map(p => p.name)
+            });
+            return syncedProjects;
         }
 
         const connection = await VercelConnection.findById(connectionId);
