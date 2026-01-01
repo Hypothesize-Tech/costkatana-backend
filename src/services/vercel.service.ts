@@ -137,6 +137,9 @@ export class VercelService {
     /**
      * Generate OAuth authorization URL with state token
      * Uses Redis for state storage to support distributed deployments
+     * 
+     * For Vercel Integrations (marketplace apps), we use the integration installation URL
+     * which handles OAuth internally and redirects to our callback URL
      */
     static async initiateOAuth(userId: string): Promise<string> {
         // Generate secure state token
@@ -154,20 +157,23 @@ export class VercelService {
             600 // 10 minutes TTL
         );
 
+        // For Vercel Integrations, use the marketplace installation URL
+        // This URL format is: https://vercel.com/integrations/{integration-slug}/new
+        // The integration slug is derived from the integration name (lowercase, hyphenated)
+        const integrationSlug = 'costkatana'; // This matches your Vercel Integration URL slug
+        
+        // Build the installation URL with state parameter
+        // Vercel will redirect to our callback URL after authorization
         const params = new URLSearchParams({
-            client_id: this.config.clientId,
-            redirect_uri: this.config.callbackUrl,
             state: state,
-            // Request necessary scopes
-            // Note: Vercel OAuth doesn't use traditional scopes like GitHub
-            // Access is granted based on the integration configuration
         });
 
-        const authUrl = `${VERCEL_OAUTH_BASE}/integrations/oauth/authorize?${params.toString()}`;
+        const authUrl = `${VERCEL_OAUTH_BASE}/integrations/${integrationSlug}/new?${params.toString()}`;
 
         loggingService.info('Generated Vercel OAuth URL', {
             userId,
-            state: state.substring(0, 8) + '...'
+            state: state.substring(0, 8) + '...',
+            integrationSlug
         });
 
         return authUrl;
