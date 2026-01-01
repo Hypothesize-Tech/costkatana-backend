@@ -93,8 +93,8 @@ app.use(express.json({
             res.status(413).json({ error: 'Request too large' });
             return;
         }
-        // Store raw body for GitHub webhook signature verification
-        if (req.path.includes('/github/webhook')) {
+        // Store raw body for webhook signature verification (GitHub and Vercel)
+        if (req.path.includes('/webhook') || req.path.includes('/vercel/webhooks')) {
             (req as any).rawBody = buf.toString(encoding || 'utf8');
         }
     }

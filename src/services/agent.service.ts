@@ -2,6 +2,7 @@ import { ChatBedrockConverse } from "@langchain/aws";
 import { AgentExecutor, createReactAgent } from "langchain/agents";
 import { Tool } from "@langchain/core/tools";
 import { ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate } from "@langchain/core/prompts";
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { KnowledgeBaseTool } from "../tools/knowledgeBase.tool";
 import { MongoDbReaderTool } from "../tools/mongoDbReader.tool";
 import { ProjectManagerTool } from "../tools/projectManager.tool";
@@ -29,6 +30,7 @@ export interface AgentQuery {
         previousResponses?: any;
         [key: string]: any; // Allow additional context properties
     };
+    callbacks?: BaseCallbackHandler[]; // Optional callbacks for activity streaming
 }
 
 export interface AgentResponse {
@@ -464,6 +466,8 @@ export class AgentService {
                             input: enhancedQuery,
                             user_context: userContext,
                             queryType // Pass queryType to the agent
+                        }, {
+                            callbacks: queryData.callbacks // Pass callbacks if provided
                         });
                     });
                 }),

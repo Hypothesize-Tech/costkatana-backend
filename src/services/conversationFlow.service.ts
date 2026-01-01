@@ -1,5 +1,6 @@
 import { loggingService } from './logging.service';
 import { agentService } from './agent.service';
+import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 
 // Define the structure for conversation states
 export interface ConversationState {
@@ -360,7 +361,7 @@ export class ConversationalFlowService {
         conversationId: string,
         userId: string,
         message: string,
-        context?: any
+        context?: any & { callbacks?: BaseCallbackHandler[] }
     ): Promise<{
         response: string;
         isComplete: boolean;
@@ -785,7 +786,8 @@ Answer with ONE WORD ONLY:`;
             const agentResponse = await agentService.query({
                 userId,
                 query: message,
-                context
+                context,
+                callbacks: context?.callbacks // Pass callbacks if provided
             });
 
             // Debug logging to understand the response structure
