@@ -42,27 +42,50 @@ export class VercelToolsService {
           // Always refresh to get latest data from Vercel API
           const projects = await VercelService.getProjects(connectionId, true);
           
+          loggingService.info('Projects received in vercel tool', {
+            connectionId,
+            projectsReceived: projects.length,
+            projectNames: projects.map((p: any) => p.name),
+            firstProject: projects[0],
+            projectsType: typeof projects,
+            isArray: Array.isArray(projects)
+          });
+          
           // Parse input if it's a JSON string
           let parsedInput: any = {};
           try {
-            if (input && input.trim()) {
+            if (input && input.trim() && input.trim() !== '{}') {
               parsedInput = JSON.parse(input);
             }
           } catch (e) {
-            // If parsing fails, treat as a search term
-            parsedInput = { search: input };
+            // If parsing fails, treat as a search term only if it's not empty JSON
+            if (input !== '{}') {
+              parsedInput = { search: input };
+            }
           }
           
           // Filter projects if search term is provided
           let filteredProjects = projects;
-          const searchTerm = parsedInput.search || (typeof input === 'string' ? input : '');
-          if (searchTerm && searchTerm.trim()) {
+          const searchTerm = parsedInput.search || '';
+          
+          // Only filter if we have a real search term (not empty JSON)
+          if (searchTerm && searchTerm.trim() && searchTerm !== '{}') {
             const search = searchTerm.toLowerCase();
             filteredProjects = projects.filter((p: any) => 
               p.name.toLowerCase().includes(search) || 
               p.id.toLowerCase().includes(search)
             );
           }
+          
+          loggingService.info('After filtering projects', {
+            connectionId,
+            originalCount: projects.length,
+            filteredCount: filteredProjects.length,
+            hasSearchTerm: !!searchTerm,
+            searchTerm,
+            input,
+            parsedInput
+          });
 
           const result = {
             success: true,

@@ -454,9 +454,16 @@ export class ChatService {
         };
     }
 
-    private static decideRoute(context: ConversationContext, message: string, useWebSearch?: boolean): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
-        const lowerMessage = message.toLowerCase();
-        
+    /**
+     * AI-powered route decision using the AI Query Router
+     * Replaces regex-based routing with intelligent AI decisions
+     */
+    private static async decideRouteWithAI(
+        context: ConversationContext, 
+        message: string, 
+        userId: string,
+        useWebSearch?: boolean
+    ): Promise<'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper'> {
         // If web search is explicitly enabled, force web scraper route
         if (useWebSearch === true) {
             loggingService.info('🌐 Web search explicitly enabled, routing to web scraper', {
@@ -464,55 +471,118 @@ export class ChatService {
             });
             return 'web_scraper';
         }
+
+        try {
+            // Import AI router dynamically to avoid circular dependencies
+            const { aiQueryRouter } = await import('./aiQueryRouter.service');
+            const { VercelConnection } = await import('../models');
+            const { GitHubConnection } = await import('../models/GitHubConnection');
+            const { GoogleConnection } = await import('../models/GoogleConnection');
+
+            // Check user's integration connections
+            const [vercelConn, githubConn, googleConn] = await Promise.all([
+                VercelConnection.findOne({ userId, isActive: true }).lean(),
+                GitHubConnection.findOne({ userId, isActive: true }).lean(),
+                GoogleConnection.findOne({ userId, isActive: true }).lean()
+            ]);
+
+            // Build router context
+            const routerContext = {
+                userId,
+                hasVercelConnection: !!vercelConn,
+                hasGithubConnection: !!githubConn,
+                hasGoogleConnection: !!googleConn,
+                conversationSubject: context.currentSubject
+            };
+
+            // Get AI routing decision
+            const decision = await aiQueryRouter.routeQuery(message, routerContext);
+
+            loggingService.info('🧠 AI Router decision', {
+                route: decision.route,
+                confidence: decision.confidence,
+                reasoning: decision.reasoning,
+                userId
+            });
+
+            // Map AI router routes to internal routes
+            switch (decision.route) {
+                case 'vercel_tools':
+                case 'github_tools':
+                case 'google_tools':
+                case 'multi_agent':
+                    // These go to conversational flow which uses the agent with appropriate tools
+                    return 'conversational_flow';
+                
+                case 'knowledge_base':
+                    return 'knowledge_base';
+                
+                case 'analytics':
+                case 'optimization':
+                    return 'multi_agent';
+                
+                case 'web_search':
+                    return 'web_scraper';
+                
+                case 'direct_response':
+                default:
+                    return 'conversational_flow';
+            }
+
+        } catch (error: any) {
+            loggingService.warn('AI Router failed, using legacy routing', {
+                error: error.message,
+                message: message.substring(0, 100)
+            });
+
+            // Fallback to legacy regex-based routing
+            return this.decideRouteLegacy(context, message, useWebSearch);
+        }
+    }
+
+    /**
+     * Legacy regex-based routing (fallback when AI router fails)
+     */
+    private static decideRouteLegacy(
+        context: ConversationContext, 
+        message: string, 
+        useWebSearch?: boolean
+    ): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
+        const lowerMessage = message.toLowerCase();
+        
+        // If web search is explicitly enabled, force web scraper route
+        if (useWebSearch === true) {
+            return 'web_scraper';
+        }
+        
+        // Integration commands should go to conversational flow
+        if (message.includes('@vercel') || message.includes('@github') || message.includes('@google')) {
+            return 'conversational_flow';
+        }
         
         // High confidence CostKatana queries go to knowledge base
         if (context.lastDomain === 'costkatana' && context.subjectConfidence > 0.7) {
             return 'knowledge_base';
         }
         
-        // Cost Katana specific queries - Check for product-specific terms
-        const costKatanaTerms = [
-            'costkatana', 'cost katana', 'cortex', 'multi-agent', 'workflow',
-            'integration guide', 'api documentation', 'how to use', 'getting started',
-            'setup', 'configure', 'tutorial', 'documentation', 'guide',
-            'features', 'capabilities', 'architecture', 'best practices'
-        ];
-        
+        // CostKatana specific queries
+        const costKatanaTerms = ['costkatana', 'cost katana', 'cortex', 'documentation', 'guide'];
         if (costKatanaTerms.some(term => lowerMessage.includes(term))) {
             return 'knowledge_base';
         }
         
-        // Package-related queries
-        if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi') || 
-            lowerMessage.includes('install') || lowerMessage.includes('integrate') || lowerMessage.includes('python') ||
-            lowerMessage.includes('cli') || lowerMessage.includes('sdk')) {
-            return 'knowledge_base';
-        }
-        
-        // "How to" and "What is" questions likely need documentation
-        if ((lowerMessage.startsWith('how ') || lowerMessage.startsWith('what ') || 
-             lowerMessage.startsWith('where ') || lowerMessage.startsWith('why ') ||
-             lowerMessage.includes('how do') || lowerMessage.includes('what is') ||
-             lowerMessage.includes('tell me about')) && 
-            !lowerMessage.includes('latest news') && !lowerMessage.includes('current')) {
-            return 'knowledge_base';
-        }
-        
-        // Web scraping for external content (news, trends, latest info)
-        if ((lowerMessage.includes('latest') || lowerMessage.includes('news') || 
-             lowerMessage.includes('trending') || lowerMessage.includes('current')) &&
+        // Web scraping for external content
+        if ((lowerMessage.includes('latest') || lowerMessage.includes('news')) &&
             (lowerMessage.includes('search') || lowerMessage.includes('find'))) {
             return 'web_scraper';
         }
         
         // Analytics queries about user's own data
-        if ((lowerMessage.includes('my cost') || lowerMessage.includes('my billing') || 
-             lowerMessage.includes('my usage') || lowerMessage.includes('my analytics')) &&
-            (lowerMessage.includes('show') || lowerMessage.includes('what') || lowerMessage.includes('analyze'))) {
+        if (lowerMessage.includes('my cost') || lowerMessage.includes('my usage')) {
             return 'multi_agent';
         }
         
-        // Default to conversational flow for general queries
+        // Default to conversational flow
         return 'conversational_flow';
     }
 
@@ -649,8 +719,8 @@ export class ChatService {
                 documentCount: request.documentIds.length
             });
         } else {
-            // Decide routing based on context
-            route = this.decideRoute(context, resolvedMessage || '', request.useWebSearch);
+            // Use AI-powered routing instead of regex-based routing
+            route = await this.decideRouteWithAI(context, resolvedMessage || '', request.userId, request.useWebSearch);
         }
         
         loggingService.info('🎯 Route decision', {

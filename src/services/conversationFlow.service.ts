@@ -780,12 +780,19 @@ Answer with ONE WORD ONLY:`;
             return await this.handleKnowledgeBaseQuery(userId, message, context);
         }
 
+        // Extract the actual user query from the enhanced message
+        let actualQuery = message;
+        const userQueryMatch = message.match(/User query:\s*(.+?)(?:\n|$)/i);
+        if (userQueryMatch) {
+            actualQuery = userQueryMatch[1].trim();
+        }
+
         // For truly general queries, use multi-LLM orchestration for intelligent tool selection
         // This ensures Vercel queries are routed to Vercel tools, not CostKatana projects
         try {
             const agentResponse = await agentService.queryWithMultiLlm({
                 userId,
-                query: message,
+                query: actualQuery, // Use the extracted query, not the enhanced message
                 context,
                 callbacks: context?.callbacks // Pass callbacks if provided
             });
@@ -844,52 +851,51 @@ Answer with ONE WORD ONLY:`;
     }
 
     /**
-     * Check if a message is a knowledge base query
+     * Check if a message is a knowledge base query using AI-assisted detection
+     * Falls back to pattern matching if AI fails
      */
     private isKnowledgeBaseQuery(message: string): boolean {
-        const knowledgeBaseMentions = [
-            '@knowledge-base/',
-            '@knowledge-base',
-            'knowledge base',
-            'knowledge-base',
-            'cost katana',
-            'costkatana',
-            'what is cost katana',
-            'what is costkatana',
-            'cost optimization platform',
-            'costkatana',
-            'ai cost optimization',
-            'cost optimizer platform',
-            'cost optimization system',
-            'costkatana platform',
-            'cost katana platform',
-            'what does costkatana do',
-            'what does costkatana do'
+        // Extract just the user's actual query, not the context
+        let actualQuery = message;
+        const userQueryMatch = message.match(/User query:\s*(.+?)(?:\n|$)/i);
+        if (userQueryMatch) {
+            actualQuery = userQueryMatch[1].trim();
+        }
+        
+        const actualQueryLower = actualQuery.toLowerCase();
+        
+        // First, check for integration commands - these are NEVER knowledge base queries
+        const integrationPatterns = [
+            '@vercel', '@github', '@google', '@drive', '@docs', '@sheets',
+            '@calendar', '@gmail', '@linear', '@jira', '@slack', '@discord'
         ];
         
-        const messageLower = message.toLowerCase();
+        if (integrationPatterns.some(pattern => actualQueryLower.includes(pattern))) {
+            loggingService.info('🔀 Integration command detected, not a knowledge base query', {
+                query: actualQuery.substring(0, 50)
+            });
+            return false;
+        }
         
-        // Special handling for Cost Katana variations to prevent confusion with sword katana
-        const costKatanaPatterns = [
-            /cost\s*katana/i,
-            /costkatana/i,
-            /what\s+is\s+cost\s*katana/i,
-            /what\s+is\s+costkatana/i,
-            /tell\s+me\s+about\s+cost\s*katana/i,
-            /explain\s+cost\s*katana/i,
-            /ai\s+cost\s+optimizer/i,
-            /cost\s+optimization\s+platform/i,
-            /what\s+does\s+cost\s*katana\s+do/i,
-            /what\s+does\s+costkatana\s+do/i
+        // Check for explicit CostKatana/knowledge base mentions
+        const knowledgeBaseIndicators = [
+            'costkatana', 'cost katana', 'cost-katana',
+            '@knowledge-base', 'knowledge base',
+            'what is costkatana', 'how does costkatana',
+            'costkatana features', 'costkatana pricing',
+            'costkatana documentation', 'costkatana guide'
         ];
         
-        // Check for Cost Katana specific patterns first
-        if (costKatanaPatterns.some(pattern => pattern.test(message))) {
+        if (knowledgeBaseIndicators.some(indicator => actualQueryLower.includes(indicator))) {
+            loggingService.info('📚 Knowledge base query detected via indicators', {
+                query: actualQuery.substring(0, 50)
+            });
             return true;
         }
         
-        // Check for general knowledge base mentions
-        return knowledgeBaseMentions.some(mention => messageLower.includes(mention.toLowerCase()));
+        // For ambiguous queries, default to NOT being a knowledge base query
+        // Let the AI router in chat.service.ts make the final decision
+        return false;
     }
 
     /**
