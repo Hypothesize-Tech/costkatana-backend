@@ -122,6 +122,14 @@ export interface ChatSendMessageRequest {
         url: string;
     }>;
     req?: any;
+    // Integration agent selection response (for multi-turn parameter collection)
+    selectionResponse?: {
+        parameterName: string;
+        value: string | number | boolean;
+        pendingAction: string;
+        collectedParams: Record<string, unknown>;
+        integration?: string;
+    };
 }
 
 export interface ChatSendMessageResponse {
@@ -181,6 +189,25 @@ export interface ChatSendMessageResponse {
     webSearchUsed?: boolean;
     quotaUsed?: number;
     metadata?: any;
+    // Integration agent selection (for interactive parameter collection)
+    requiresSelection?: boolean;
+    selection?: {
+        parameterName: string;
+        question: string;
+        options: Array<{
+            id: string;
+            label: string;
+            value: string;
+            description?: string;
+            icon?: string;
+        }>;
+        allowCustom: boolean;
+        customPlaceholder?: string;
+        integration: string;
+        pendingAction: string;
+        collectedParams: Record<string, unknown>;
+        originalMessage?: string;
+    };
 }
 
 export class ChatService {
@@ -1552,13 +1579,183 @@ Based ONLY on the search results above, provide a factual answer:`;
             }
 
             // If mentions found, try to execute integration command
-            // SKIP Vercel mentions - let the agent handle them with the Vercel tools
-            const vercelMentions = mentions.filter(m => m.integration === 'vercel');
-            const otherMentions = mentions.filter(m => m.integration !== 'vercel');
-            
-            if (otherMentions.length > 0) {
+            // Process ALL mentions including Vercel through the new Integration Agent
+            // Also handle selection response continuation (multi-turn parameter collection)
+            if (mentions.length > 0 || request.selectionResponse) {
                 try {
-                    const command = await IntegrationChatService.parseCommand(actualMessage, otherMentions);
+                    // Use the new AI-powered Integration Agent for parameter extraction
+                    const { IntegrationAgentService } = await import('./integrationAgent.service');
+                    
+                    // Determine integration from mentions or selection response
+                    const integration = mentions.length > 0 
+                        ? mentions[0].integration 
+                        : (request.selectionResponse as { parameterName: string; value: string | number | boolean; pendingAction: string; collectedParams: Record<string, unknown>; integration?: string })?.integration || 'vercel';
+                    
+                    const agentResult = await IntegrationAgentService.processIntegrationCommand({
+                        message: actualMessage,
+                        integration,
+                        userId: request.userId,
+                        selectionResponse: request.selectionResponse
+                    });
+
+                    // If the agent needs user to select from options, return the selection UI
+                    if (agentResult.requiresSelection && agentResult.selection) {
+                        // Save assistant message with the question
+                        const session2 = await mongoose.startSession();
+                        try {
+                            await session2.withTransaction(async () => {
+                                await ChatMessage.create([{
+                                    conversationId: conversation._id,
+                                    userId: request.userId,
+                                    role: 'assistant',
+                                    content: agentResult.selection!.question,
+                                    modelId: request.modelId,
+                                    metadata: {
+                                        type: 'integration_selection',
+                                        selection: agentResult.selection
+                                    }
+                                }], { session: session2 });
+
+                                conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                                conversation!.lastMessage = agentResult.selection!.question.substring(0, 100);
+                                conversation!.lastMessageAt = new Date();
+                                await conversation!.save({ session: session2 });
+                            });
+                        } finally {
+                            await session2.endSession();
+                        }
+
+                        const latency = Date.now() - startTime;
+                        return {
+                            messageId: messageId,
+                            conversationId: conversation!._id.toString(),
+                            response: agentResult.selection.question,
+                            cost: 0,
+                            latency,
+                            tokenCount: 0,
+                            model: request.modelId,
+                            agentPath: ['integration_agent'],
+                            optimizationsApplied: [],
+                            cacheHit: false,
+                            riskLevel: 'low' as const,
+                            // Include selection data for frontend to render interactive UI
+                            requiresSelection: true,
+                            selection: agentResult.selection
+                        };
+                    }
+
+                    // If agent succeeded, format and return the result
+                    if (agentResult.success) {
+                        const { formatIntegrationResultForDisplay } = await import('../utils/responseSanitizer');
+                        const formattedResult = formatIntegrationResultForDisplay({
+                            success: true,
+                            message: agentResult.message,
+                            data: agentResult.data
+                        });
+
+                        const sanitizedMessage = typeof formattedResult === 'string' 
+                            ? formattedResult 
+                            : formattedResult.message;
+                        const viewLinks = typeof formattedResult === 'object' ? formattedResult.viewLinks : undefined;
+                        const resultMetadata = typeof formattedResult === 'object' ? formattedResult.metadata : undefined;
+
+                        // Build integration metadata
+                        let integrationMetadata: any = undefined;
+                        if (agentResult.data && typeof agentResult.data === 'object') {
+                            integrationMetadata = {
+                                type: 'integration_data',
+                                data: agentResult.data
+                            };
+                        }
+
+                        // Save assistant response
+                        const session2 = await mongoose.startSession();
+                        try {
+                            await session2.withTransaction(async () => {
+                                await ChatMessage.create([{
+                                    conversationId: conversation._id,
+                                    userId: request.userId,
+                                    role: 'assistant',
+                                    content: sanitizedMessage,
+                                    modelId: request.modelId,
+                                    metadata: integrationMetadata
+                                }], { session: session2 });
+
+                                conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                                conversation!.lastMessage = sanitizedMessage.substring(0, 100);
+                                conversation!.lastMessageAt = new Date();
+                                await conversation!.save({ session: session2 });
+                            });
+                        } finally {
+                            await session2.endSession();
+                        }
+
+                        const latency = Date.now() - startTime;
+                        return {
+                            messageId: messageId,
+                            conversationId: conversation!._id.toString(),
+                            response: sanitizedMessage,
+                            cost: 0,
+                            latency,
+                            tokenCount: 0,
+                            model: request.modelId,
+                            agentPath: ['integration_agent'],
+                            optimizationsApplied: [],
+                            cacheHit: false,
+                            riskLevel: 'low' as const,
+                            viewLinks: viewLinks,
+                            metadata: resultMetadata
+                        };
+                    }
+
+                    // Agent returned an error - show it to user
+                    const errorMessage = agentResult.message || agentResult.error || 'Integration command failed';
+                    
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: `❌ ${errorMessage}`,
+                                modelId: request.modelId
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = errorMessage.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+
+                    const latency = Date.now() - startTime;
+                    return {
+                        messageId: messageId,
+                        conversationId: conversation!._id.toString(),
+                        response: `❌ ${errorMessage}`,
+                        cost: 0,
+                        latency,
+                        tokenCount: 0,
+                        model: request.modelId,
+                        agentPath: ['integration_agent'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low' as const
+                    };
+                } catch (error) {
+                    // Unexpected error - fall back to original handler
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown integration error';
+                    loggingService.error('Integration agent failed, falling back to original handler', {
+                        error: errorMessage,
+                        userId: request.userId,
+                        message: request.message
+                    });
+                    
+                    // Fall back to the original integration handler
+                    const command = await IntegrationChatService.parseCommand(actualMessage, mentions);
                     if (command) {
                         // Execute via MCP handler
                         const result = await MCPIntegrationHandler.handleIntegrationOperation({
@@ -1566,7 +1763,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                             command,
                             context: {
                                 message: request.message,
-                                mentions: otherMentions
+                                mentions
                             }
                         });
 
@@ -1728,59 +1925,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                             riskLevel: 'low' as const
                         };
                     }
-                } catch (error) {
-                    // Unexpected error - return error message instead of falling back
-                    const errorMessage = error instanceof Error ? error.message : 'Unknown integration error';
-                    loggingService.error('Integration command failed with unexpected error', {
-                        error: errorMessage,
-                        userId: request.userId,
-                        message: request.message
-                    });
-                    
-                    const session2 = await mongoose.startSession();
-                    try {
-                        await session2.withTransaction(async () => {
-                            await ChatMessage.create([{
-                                conversationId: conversation._id,
-                                userId: request.userId,
-                                role: 'assistant',
-                                content: `❌ ${errorMessage}`,
-                                modelId: request.modelId
-                            }], { session: session2 });
-
-                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
-                            conversation!.lastMessage = errorMessage.substring(0, 100);
-                            conversation!.lastMessageAt = new Date();
-                            await conversation!.save({ session: session2 });
-                        });
-                    } finally {
-                        await session2.endSession();
-                    }
-
-                    const latency = Date.now() - startTime;
-                    return {
-                        messageId: new Types.ObjectId().toString(),
-                        conversationId: conversation!._id.toString(),
-                        response: `❌ ${errorMessage}`,
-                        cost: 0,
-                        latency,
-                        tokenCount: 0,
-                        model: request.modelId,
-                        agentPath: ['integration_handler'],
-                        optimizationsApplied: [],
-                        cacheHit: false,
-                        riskLevel: 'low' as const
-                    };
                 }
-            }
-
-            // If Vercel mentions were found, log that they'll be handled by the agent
-            if (vercelMentions.length > 0) {
-                loggingService.info('Vercel mentions detected - letting agent handle with Vercel tools', {
-                    userId: request.userId,
-                    vercelMentionCount: vercelMentions.length,
-                    message: (request.message || '').substring(0, 100)
-                });
             }
 
             // Check if this is a GitHub-related message with repository context
