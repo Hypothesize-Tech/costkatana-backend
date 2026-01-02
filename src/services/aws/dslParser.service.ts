@@ -4,7 +4,6 @@ import { loggingService } from '../logging.service';
 import {
   ActionDefinition,
   ParsedAction,
-  ValidationResult,
   ValidationError,
   ValidationWarning,
   DSLVersion,
@@ -377,7 +376,7 @@ class DSLParserService {
    */
   private signDSL(dsl: ActionDefinition): string {
     // In production, this would use a proper signing key
-    const signingKey = process.env.DSL_SIGNING_KEY || 'costkatana-dsl-signing-key';
+    const signingKey = process.env.DSL_SIGNING_KEY ?? 'costkatana-dsl-signing-key';
     const canonicalJson = JSON.stringify(dsl, Object.keys(dsl).sort());
     
     return crypto

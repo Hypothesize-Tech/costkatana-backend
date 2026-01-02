@@ -6,6 +6,10 @@ import { permissionBoundaryService } from './permissionBoundary.service';
 import { planGeneratorService } from './planGenerator.service';
 import { AWSConnection, IAWSConnection } from '../../models/AWSConnection';
 import { ExecutionPlan, ExecutionStep, StepResult } from '../../types/awsDsl.types';
+import { EC2Client, StopInstancesCommand, StartInstancesCommand, ModifyInstanceAttributeCommand } from '@aws-sdk/client-ec2';
+import { S3Client, PutBucketLifecycleConfigurationCommand, PutBucketIntelligentTieringConfigurationCommand } from '@aws-sdk/client-s3';
+import { RDSClient, StopDBInstanceCommand, StartDBInstanceCommand, CreateDBSnapshotCommand, ModifyDBInstanceCommand } from '@aws-sdk/client-rds';
+import { LambdaClient, UpdateFunctionConfigurationCommand } from '@aws-sdk/client-lambda';
 
 /**
  * Execution Engine Service - Controlled AWS Action Execution
@@ -388,11 +392,11 @@ class ExecutionEngineService {
         }
         
         // Execute the actual AWS API call
-        // In production, this would use the AWS SDK with the temporary credentials
         const result = await this.executeAwsApiCall(
           apiCall,
           credentials,
-          step.resources
+          step.resources,
+          connection
         );
         
         if (result.requestId) {
@@ -422,33 +426,384 @@ class ExecutionEngineService {
   }
   
   /**
-   * Execute an AWS API call
-   * This is where the actual AWS SDK calls would happen
+   * Execute an AWS API call using real AWS SDK
+   * Creates the appropriate AWS client and executes the operation with temporary credentials
    */
   private async executeAwsApiCall(
-    apiCall: { service: string; operation: string; parameters: Record<string, any> },
+    apiCall: { service: string; operation: string; parameters: Record<string, unknown> },
     credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string },
-    resources: string[]
-  ): Promise<{ requestId?: string; output?: any }> {
-    // In production, this would use the appropriate AWS SDK client
-    // For now, we simulate the call
+    resources: string[],
+    connection: IAWSConnection
+  ): Promise<{ requestId?: string; output?: Record<string, unknown> }> {
+    const regionParam = typeof apiCall.parameters.region === 'string' ? apiCall.parameters.region : undefined;
+    const region: string = regionParam ?? connection.allowedRegions[0] ?? 'us-east-1';
     
     loggingService.info('Executing AWS API call', {
       component: 'ExecutionEngineService',
       operation: 'executeAwsApiCall',
       service: apiCall.service,
       awsOperation: apiCall.operation,
+      region,
+      parameters: Object.keys(apiCall.parameters),
+      resources,
       resourceCount: resources.length,
-      // Never log credentials
+      // Never log credentials!
     });
-    
-    // Simulate API call delay
-    await this.simulateDelay(1000 + Math.random() * 2000);
-    
-    return {
-      requestId: `req-${Date.now()}-${Math.random().toString(36).substr(2, 8)}`,
-      output: { success: true },
+
+    const awsCredentials = {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
     };
+
+    try {
+      const serviceName = apiCall.service.toLowerCase();
+      switch (serviceName) {
+        case 'ec2':
+          return await this.executeEC2Operation(apiCall, awsCredentials, resources, region);
+        case 's3':
+          return await this.executeS3Operation(apiCall, awsCredentials, resources, region);
+        case 'rds':
+          return await this.executeRDSOperation(apiCall, awsCredentials, resources, region);
+        case 'lambda':
+          return await this.executeLambdaOperation(apiCall, awsCredentials, resources, region);
+        default:
+          throw new Error(`Unsupported AWS service: ${apiCall.service}`);
+      }
+    } catch (error) {
+      loggingService.error('AWS API call failed', {
+        component: 'ExecutionEngineService',
+        operation: 'executeAwsApiCall',
+        service: apiCall.service,
+        awsOperation: apiCall.operation,
+        region,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Execute EC2 operations
+   */
+  private async executeEC2Operation(
+    apiCall: { operation: string; parameters: Record<string, unknown> },
+    credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string },
+    resources: string[],
+    region: string
+  ): Promise<{ requestId?: string; output?: Record<string, unknown> }> {
+    const client = new EC2Client({
+      region,
+      credentials,
+    });
+
+    switch (apiCall.operation) {
+      case 'StopInstances': {
+        const command = new StopInstancesCommand({
+          InstanceIds: resources,
+          ...apiCall.parameters,
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            StoppingInstances: response.StoppingInstances?.map((inst) => ({
+              InstanceId: inst.InstanceId,
+              CurrentState: inst.CurrentState,
+              PreviousState: inst.PreviousState,
+            })) ?? [],
+          },
+        };
+      }
+
+      case 'StartInstances': {
+        const command = new StartInstancesCommand({
+          InstanceIds: resources,
+          ...apiCall.parameters,
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            StartingInstances: response.StartingInstances?.map((inst) => ({
+              InstanceId: inst.InstanceId,
+              CurrentState: inst.CurrentState,
+              PreviousState: inst.PreviousState,
+            })) ?? [],
+          },
+        };
+      }
+
+      case 'ModifyInstanceAttribute': {
+        // ModifyInstanceAttribute works on a single instance
+        const instanceId = resources[0];
+        if (!instanceId) {
+          throw new Error('Instance ID is required for ModifyInstanceAttribute');
+        }
+
+        // Extract attribute name and value from parameters
+        const { attribute, value, ...otherParams } = apiCall.parameters;
+        
+        const command = new ModifyInstanceAttributeCommand({
+          InstanceId: instanceId,
+          ...(attribute === 'InstanceType' && typeof value === 'string' && { InstanceType: { Value: value } }),
+          ...(attribute === 'InstanceInitiatedShutdownBehavior' && typeof value === 'string' && { 
+            InstanceInitiatedShutdownBehavior: { Value: value } 
+          }),
+          ...otherParams,
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            InstanceId: instanceId,
+            Modified: true,
+          },
+        };
+      }
+
+      default:
+        throw new Error(`Unsupported EC2 operation: ${apiCall.operation}`);
+    }
+  }
+
+  /**
+   * Execute S3 operations
+   */
+  private async executeS3Operation(
+    apiCall: { operation: string; parameters: Record<string, unknown> },
+    credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string },
+    resources: string[],
+    region: string
+  ): Promise<{ requestId?: string; output?: Record<string, unknown> }> {
+    const client = new S3Client({
+      region,
+      credentials,
+    });
+
+    switch (apiCall.operation) {
+      case 'PutBucketLifecycleConfiguration': {
+        const bucketName = resources[0];
+        if (!bucketName) {
+          throw new Error('Bucket name is required for PutBucketLifecycleConfiguration');
+        }
+
+        const { LifecycleConfiguration, ...otherParams } = apiCall.parameters;
+        
+        // LifecycleConfiguration comes from plan generator and should be properly structured
+        // Using type assertion since plan generator ensures correct structure
+        const command = new PutBucketLifecycleConfigurationCommand({
+          Bucket: bucketName,
+          LifecycleConfiguration: (LifecycleConfiguration || apiCall.parameters.LifecycleConfiguration) as any,
+          ...(otherParams as Record<string, unknown>),
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            Bucket: bucketName,
+            LifecycleConfigurationApplied: true,
+          },
+        };
+      }
+
+      case 'PutBucketIntelligentTieringConfiguration': {
+        const bucketNameForTiering = resources[0];
+        if (!bucketNameForTiering) {
+          throw new Error('Bucket name is required for PutBucketIntelligentTieringConfiguration');
+        }
+
+        const { Id, IntelligentTieringConfiguration, ...tieringParams } = apiCall.parameters;
+        
+        // IntelligentTieringConfiguration comes from plan generator and should be properly structured
+        // Using type assertion since plan generator ensures correct structure
+        const command = new PutBucketIntelligentTieringConfigurationCommand({
+          Bucket: bucketNameForTiering,
+          Id: (typeof Id === 'string' ? Id : 'CostKatanaOptimization'),
+          IntelligentTieringConfiguration: (IntelligentTieringConfiguration || apiCall.parameters.IntelligentTieringConfiguration) as any,
+          ...(tieringParams as Record<string, unknown>),
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            Bucket: bucketNameForTiering,
+            IntelligentTieringConfigurationApplied: true,
+          },
+        };
+      }
+
+      default:
+        throw new Error(`Unsupported S3 operation: ${apiCall.operation}`);
+    }
+  }
+
+  /**
+   * Execute RDS operations
+   */
+  private async executeRDSOperation(
+    apiCall: { operation: string; parameters: Record<string, unknown> },
+    credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string },
+    resources: string[],
+    region: string
+  ): Promise<{ requestId?: string; output?: Record<string, unknown> }> {
+    const client = new RDSClient({
+      region,
+      credentials,
+    });
+
+    switch (apiCall.operation) {
+      case 'StopDBInstance': {
+        const dbInstanceId = resources[0];
+        if (!dbInstanceId) {
+          throw new Error('DB Instance ID is required for StopDBInstance');
+        }
+
+        const command = new StopDBInstanceCommand({
+          DBInstanceIdentifier: dbInstanceId,
+          ...apiCall.parameters,
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            DBInstance: {
+              DBInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
+              DBInstanceStatus: response.DBInstance?.DBInstanceStatus,
+            },
+          },
+        };
+      }
+
+      case 'StartDBInstance': {
+        const startDbInstanceId = resources[0];
+        if (!startDbInstanceId) {
+          throw new Error('DB Instance ID is required for StartDBInstance');
+        }
+
+        const command = new StartDBInstanceCommand({
+          DBInstanceIdentifier: startDbInstanceId,
+          ...apiCall.parameters,
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            DBInstance: {
+              DBInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
+              DBInstanceStatus: response.DBInstance?.DBInstanceStatus,
+            },
+          },
+        };
+      }
+
+      case 'CreateDBSnapshot': {
+        const snapshotDbInstanceId = resources[0];
+        if (!snapshotDbInstanceId) {
+          throw new Error('DB Instance ID is required for CreateDBSnapshot');
+        }
+
+        const { DBSnapshotIdentifier, ...snapshotParams } = apiCall.parameters;
+        if (!DBSnapshotIdentifier || typeof DBSnapshotIdentifier !== 'string') {
+          throw new Error('DBSnapshotIdentifier is required for CreateDBSnapshot');
+        }
+
+        const command = new CreateDBSnapshotCommand({
+          DBInstanceIdentifier: snapshotDbInstanceId,
+          DBSnapshotIdentifier,
+          ...(snapshotParams as Record<string, unknown>),
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            DBSnapshot: {
+              DBSnapshotIdentifier: response.DBSnapshot?.DBSnapshotIdentifier,
+              DBInstanceIdentifier: response.DBSnapshot?.DBInstanceIdentifier,
+              Status: response.DBSnapshot?.Status,
+            },
+          },
+        };
+      }
+
+      case 'ModifyDBInstance': {
+        const modifyDbInstanceId = resources[0];
+        if (!modifyDbInstanceId) {
+          throw new Error('DB Instance ID is required for ModifyDBInstance');
+        }
+
+        const { DBInstanceClass, AllocatedStorage, ...modifyParams } = apiCall.parameters;
+        
+        const command = new ModifyDBInstanceCommand({
+          DBInstanceIdentifier: modifyDbInstanceId,
+          ...(typeof DBInstanceClass === 'string' && { DBInstanceClass }),
+          ...(typeof AllocatedStorage === 'number' && { AllocatedStorage }),
+          ApplyImmediately: apiCall.parameters.ApplyImmediately !== false, // Default to true for cost optimization
+          ...(modifyParams as Record<string, unknown>),
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            DBInstance: {
+              DBInstanceIdentifier: response.DBInstance?.DBInstanceIdentifier,
+              DBInstanceStatus: response.DBInstance?.DBInstanceStatus,
+              DBInstanceClass: response.DBInstance?.DBInstanceClass,
+            },
+          },
+        };
+      }
+
+      default:
+        throw new Error(`Unsupported RDS operation: ${apiCall.operation}`);
+    }
+  }
+
+  /**
+   * Execute Lambda operations
+   */
+  private async executeLambdaOperation(
+    apiCall: { operation: string; parameters: Record<string, unknown> },
+    credentials: { accessKeyId: string; secretAccessKey: string; sessionToken: string },
+    resources: string[],
+    region: string
+  ): Promise<{ requestId?: string; output?: Record<string, unknown> }> {
+    const client = new LambdaClient({
+      region,
+      credentials,
+    });
+
+    switch (apiCall.operation) {
+      case 'UpdateFunctionConfiguration': {
+        const functionName = resources[0];
+        if (!functionName) {
+          throw new Error('Function name is required for UpdateFunctionConfiguration');
+        }
+
+        const { MemorySize, Timeout, ...lambdaParams } = apiCall.parameters;
+        
+        const command = new UpdateFunctionConfigurationCommand({
+          FunctionName: functionName,
+          ...(typeof MemorySize === 'number' && { MemorySize }),
+          ...(typeof Timeout === 'number' && { Timeout }),
+          ...(lambdaParams as Record<string, unknown>),
+        });
+        const response = await client.send(command);
+        return {
+          requestId: response.$metadata.requestId,
+          output: {
+            FunctionName: response.FunctionName,
+            MemorySize: response.MemorySize,
+            Timeout: response.Timeout,
+            LastModified: response.LastModified,
+          },
+        };
+      }
+
+      default:
+        throw new Error(`Unsupported Lambda operation: ${apiCall.operation}`);
+    }
   }
   
   /**

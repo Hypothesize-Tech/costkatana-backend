@@ -1,5 +1,8 @@
-import { Types } from 'mongoose';
 import { loggingService } from '../logging.service';
+import speakeasy from 'speakeasy';
+import qrcode from 'qrcode';
+import crypto from 'crypto';
+import { BackupCodesService } from '../backupCodes.service';
 
 /**
  * Internal Access Control Service - Operator Threat Model Protection
@@ -43,6 +46,20 @@ export interface InternalOperator {
   ipAddress?: string;
 }
 
+export interface OperatorMFASetup {
+  secret: string;
+  qrCodeUrl: string;
+  backupCodes: string[];
+}
+
+interface OperatorMFAData {
+  secret: string; // Encrypted TOTP secret
+  backupCodes: string[]; // Hashed backup codes
+  enabled: boolean;
+  setupAt?: Date;
+  lastUsed?: Date;
+}
+
 export interface DualApprovalRequest {
   requestId: string;
   operation: PrivilegedOperation;
@@ -53,7 +70,7 @@ export interface DualApprovalRequest {
   status: 'pending' | 'approved' | 'rejected' | 'expired';
   expiresAt: Date;
   reason: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AccessControlCheckResult {
@@ -151,6 +168,14 @@ class InternalAccessControlService {
   // Dual approval expiration
   private readonly DUAL_APPROVAL_EXPIRATION_MS = 30 * 60 * 1000; // 30 minutes
   
+  // Operator MFA data storage (in production, use encrypted database)
+  private operatorMFAData: Map<string, OperatorMFAData> = new Map();
+  
+  // Encryption key for MFA secrets (in production, use AWS KMS or similar)
+  private readonly ENCRYPTION_KEY = process.env.INTERNAL_MFA_ENCRYPTION_KEY ?? 
+    crypto.createHash('sha256').update('default-key-change-in-production').digest();
+  private readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
+  
   private constructor() {
     // Start cleanup interval
     this.startCleanupInterval();
@@ -166,11 +191,11 @@ class InternalAccessControlService {
   /**
    * Check if an operator can perform a privileged operation
    */
-  public async checkAccess(
+  public checkAccess(
     operator: InternalOperator,
     operation: PrivilegedOperation,
     resource?: string
-  ): Promise<AccessControlCheckResult> {
+  ): AccessControlCheckResult {
     // Check if role has permission
     const rolePermissions = ROLE_PERMISSIONS[operator.role];
     if (!rolePermissions.has(operation)) {
@@ -230,25 +255,350 @@ class InternalAccessControlService {
   }
   
   /**
-   * Verify MFA for an operator
+   * Setup TOTP MFA for an operator
+   * Generates secret, QR code, and backup codes
    */
-  public verifyMfa(operatorId: string, mfaToken: string): boolean {
-    // In production, this would verify against TOTP or similar
-    // For now, we just cache the verification
-    
-    // TODO: Implement actual MFA verification
-    const isValid = mfaToken.length === 6 && /^\d+$/.test(mfaToken);
-    
-    if (isValid) {
-      this.mfaVerificationCache.set(operatorId, new Date());
-      loggingService.info('MFA verified for operator', {
+  public async setupMFA(operatorId: string, operatorEmail: string): Promise<OperatorMFASetup> {
+    try {
+      // Generate TOTP secret
+      const secret = speakeasy.generateSecret({
+        name: `CostKatana Internal (${operatorEmail})`,
+        issuer: 'CostKatana Internal',
+        length: 32,
+      });
+
+      if (!secret.base32) {
+        throw new Error('Failed to generate TOTP secret');
+      }
+
+      // Generate backup codes
+      const plainBackupCodes = BackupCodesService.generateBackupCodes();
+      const hashedBackupCodes = await BackupCodesService.hashBackupCodes(plainBackupCodes);
+
+      // Generate QR code
+      if (!secret.otpauth_url) {
+        throw new Error('Failed to generate OTP auth URL');
+      }
+      const qrCodeUrl = await qrcode.toDataURL(secret.otpauth_url);
+
+      // Encrypt the secret before storing
+      const encryptedSecret = this.encryptSecret(secret.base32);
+
+      // Store MFA data (not enabled yet - requires verification first)
+      this.operatorMFAData.set(operatorId, {
+        secret: encryptedSecret,
+        backupCodes: hashedBackupCodes,
+        enabled: false,
+        setupAt: new Date(),
+      });
+
+      loggingService.info('MFA setup initiated for operator', {
+        component: 'InternalAccessControlService',
+        operation: 'setupMFA',
+        operatorId,
+        operatorEmail,
+      });
+
+      return {
+        secret: secret.base32, // Return plain secret for QR code generation
+        qrCodeUrl,
+        backupCodes: plainBackupCodes, // Return plain codes for one-time display
+      };
+    } catch (error) {
+      loggingService.error('Error setting up MFA for operator', {
+        component: 'InternalAccessControlService',
+        operation: 'setupMFA',
+        operatorId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Verify TOTP token and enable MFA for an operator
+   */
+  public async verifyAndEnableMFA(operatorId: string, token: string): Promise<boolean> {
+    try {
+      const mfaData = this.operatorMFAData.get(operatorId);
+      if (!mfaData?.secret) {
+        loggingService.warn('MFA setup not found for operator', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyAndEnableMFA',
+          operatorId,
+        });
+        return false;
+      }
+
+      // Decrypt the secret
+      const decryptedSecret = this.decryptSecret(mfaData.secret);
+
+      // Check if it's a backup code first
+      const backupCodeResult = await BackupCodesService.verifyBackupCode(token, mfaData.backupCodes);
+      if (backupCodeResult.verified && backupCodeResult.codeIndex !== undefined) {
+        // Remove used backup code
+        const updatedBackupCodes = BackupCodesService.removeUsedCode(
+          mfaData.backupCodes,
+          backupCodeResult.codeIndex
+        );
+
+        // Enable MFA and update backup codes
+        mfaData.enabled = true;
+        mfaData.backupCodes = updatedBackupCodes;
+        mfaData.lastUsed = new Date();
+
+        loggingService.info('MFA enabled using backup code', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyAndEnableMFA',
+          operatorId,
+        });
+
+        return true;
+      }
+
+      // Verify TOTP token
+      const verified = speakeasy.totp.verify({
+        secret: decryptedSecret,
+        encoding: 'base32',
+        token,
+        window: 2, // Allow 2 time steps (60 seconds) tolerance
+      });
+
+      if (verified) {
+        // Enable MFA
+        mfaData.enabled = true;
+        mfaData.lastUsed = new Date();
+
+        loggingService.info('MFA enabled for operator', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyAndEnableMFA',
+          operatorId,
+        });
+
+        return true;
+      }
+
+      loggingService.warn('Invalid MFA token for operator', {
+        component: 'InternalAccessControlService',
+        operation: 'verifyAndEnableMFA',
+        operatorId,
+      });
+
+      return false;
+    } catch (error) {
+      loggingService.error('Error verifying and enabling MFA', {
+        component: 'InternalAccessControlService',
+        operation: 'verifyAndEnableMFA',
+        operatorId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Verify MFA for an operator (for ongoing verification)
+   */
+  public async verifyMfa(operatorId: string, mfaToken: string): Promise<boolean> {
+    try {
+      const mfaData = this.operatorMFAData.get(operatorId);
+      if (!mfaData || !mfaData.enabled || !mfaData.secret) {
+        loggingService.warn('MFA not enabled for operator', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyMfa',
+          operatorId,
+        });
+        return false;
+      }
+
+      // Decrypt the secret
+      const decryptedSecret = this.decryptSecret(mfaData.secret);
+
+      // Check if it's a backup code
+      const backupCodeResult = await BackupCodesService.verifyBackupCode(mfaToken, mfaData.backupCodes);
+      if (backupCodeResult.verified && backupCodeResult.codeIndex !== undefined) {
+        // Remove used backup code
+        const updatedBackupCodes = BackupCodesService.removeUsedCode(
+          mfaData.backupCodes,
+          backupCodeResult.codeIndex
+        );
+        mfaData.backupCodes = updatedBackupCodes;
+        mfaData.lastUsed = new Date();
+
+        // Cache verification
+        this.mfaVerificationCache.set(operatorId, new Date());
+
+        loggingService.info('MFA verified using backup code', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyMfa',
+          operatorId,
+        });
+
+        return true;
+      }
+
+      // Verify TOTP token
+      const verified = speakeasy.totp.verify({
+        secret: decryptedSecret,
+        encoding: 'base32',
+        token: mfaToken,
+        window: 2, // Allow 2 time steps (60 seconds) tolerance
+      });
+
+      if (verified) {
+        // Cache verification
+        this.mfaVerificationCache.set(operatorId, new Date());
+        mfaData.lastUsed = new Date();
+
+        loggingService.info('MFA verified for operator', {
+          component: 'InternalAccessControlService',
+          operation: 'verifyMfa',
+          operatorId,
+        });
+
+        return true;
+      }
+
+      loggingService.warn('Invalid MFA token for operator', {
         component: 'InternalAccessControlService',
         operation: 'verifyMfa',
         operatorId,
       });
+
+      return false;
+    } catch (error) {
+      loggingService.error('Error verifying MFA', {
+        component: 'InternalAccessControlService',
+        operation: 'verifyMfa',
+        operatorId,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return false;
     }
-    
-    return isValid;
+  }
+
+  /**
+   * Disable MFA for an operator
+   */
+  public disableMFA(operatorId: string): boolean {
+    try {
+      const mfaData = this.operatorMFAData.get(operatorId);
+      if (!mfaData) {
+        return false;
+      }
+
+      // Clear MFA data
+      this.operatorMFAData.delete(operatorId);
+      this.mfaVerificationCache.delete(operatorId);
+
+      loggingService.info('MFA disabled for operator', {
+        component: 'InternalAccessControlService',
+        operation: 'disableMFA',
+        operatorId,
+      });
+
+      return true;
+    } catch (error) {
+      loggingService.error('Error disabling MFA', {
+        component: 'InternalAccessControlService',
+        operation: 'disableMFA',
+        operatorId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Get MFA status for an operator
+   */
+  public getMFAStatus(operatorId: string): {
+    enabled: boolean;
+    setupAt?: Date;
+    lastUsed?: Date;
+    backupCodesRemaining: number;
+  } {
+    const mfaData = this.operatorMFAData.get(operatorId);
+    if (!mfaData) {
+      return {
+        enabled: false,
+        backupCodesRemaining: 0,
+      };
+    }
+
+    return {
+      enabled: mfaData.enabled,
+      setupAt: mfaData.setupAt,
+      lastUsed: mfaData.lastUsed,
+      backupCodesRemaining: mfaData.backupCodes.length,
+    };
+  }
+
+  /**
+   * Encrypt TOTP secret before storage
+   */
+  private encryptSecret(secret: string): string {
+    try {
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv(
+        this.ENCRYPTION_ALGORITHM,
+        this.ENCRYPTION_KEY.slice(0, 32),
+        iv
+      );
+
+      let encrypted = cipher.update(secret, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      const authTag = cipher.getAuthTag();
+
+      // Combine IV, authTag, and encrypted data
+      return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
+    } catch (error) {
+      loggingService.error('Error encrypting MFA secret', {
+        component: 'InternalAccessControlService',
+        operation: 'encryptSecret',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error('Failed to encrypt MFA secret');
+    }
+  }
+
+  /**
+   * Decrypt TOTP secret from storage
+   */
+  private decryptSecret(encryptedSecret: string): string {
+    try {
+      const parts = encryptedSecret.split(':');
+      if (parts.length !== 3) {
+        throw new Error('Invalid encrypted secret format');
+      }
+
+      const iv = Buffer.from(parts[0], 'hex');
+      const authTag = Buffer.from(parts[1], 'hex');
+      const encrypted = parts[2];
+
+      const decipher = crypto.createDecipheriv(
+        this.ENCRYPTION_ALGORITHM,
+        this.ENCRYPTION_KEY.slice(0, 32),
+        iv
+      );
+
+      decipher.setAuthTag(authTag);
+
+      let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+      decrypted += decipher.final('utf8');
+
+      return decrypted;
+    } catch (error) {
+      loggingService.error('Error decrypting MFA secret', {
+        component: 'InternalAccessControlService',
+        operation: 'decryptSecret',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new Error('Failed to decrypt MFA secret');
+    }
   }
   
   /**
@@ -473,10 +823,12 @@ class InternalAccessControlService {
         filtered = filtered.filter(e => e.result === filters.result);
       }
       if (filters.startDate) {
-        filtered = filtered.filter(e => e.timestamp >= filters.startDate!);
+        const startDate = filters.startDate;
+        filtered = filtered.filter(e => e.timestamp >= startDate);
       }
       if (filters.endDate) {
-        filtered = filtered.filter(e => e.timestamp <= filters.endDate!);
+        const endDate = filters.endDate;
+        filtered = filtered.filter(e => e.timestamp <= endDate);
       }
     }
     
@@ -499,7 +851,7 @@ class InternalAccessControlService {
       const now = new Date();
       
       // Clean up expired approval requests
-      for (const [id, request] of this.pendingApprovals) {
+      for (const [, request] of this.pendingApprovals) {
         if (request.expiresAt < now) {
           if (request.status === 'pending') {
             request.status = 'expired';

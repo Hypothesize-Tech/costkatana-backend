@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Types } from 'mongoose';
-import { AWSConnection, encryptExternalId } from '../models/AWSConnection';
+import { AWSConnection } from '../models/AWSConnection';
 import { externalIdService } from '../services/aws/externalId.service';
 import { tenantIsolationService } from '../services/aws/tenantIsolation.service';
 import { killSwitchService } from '../services/aws/killSwitch.service';
@@ -21,8 +21,10 @@ export class AWSController {
   // ============================================================================
 
   static async createConnection(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { connectionName, description, environment, roleArn, permissionMode, allowedRegions } = req.body;
 
       if (!userId) {
@@ -32,6 +34,21 @@ export class AWSController {
       if (!connectionName || !roleArn) {
         return res.status(400).json({ error: 'connectionName and roleArn are required' });
       }
+
+      // Create tenant context for isolation
+      tenantContext = tenantIsolationService.createTenantContext(
+        userId,
+        workspaceId,
+        undefined,
+        undefined // AWS account ID will be extracted from roleArn
+      );
+
+      loggingService.info('Tenant context created for connection creation', {
+        component: 'AWSController',
+        operation: 'createConnection',
+        tenantId: tenantContext.tenantId,
+        sessionId: tenantContext.sessionId,
+      });
 
       // Generate unique external ID
       const externalIdResult = await externalIdService.generateUniqueExternalId(userId, environment || 'development');
@@ -81,15 +98,29 @@ export class AWSController {
         error: error instanceof Error ? error.message : String(error),
       });
       return res.status(500).json({ error: 'Failed to create connection' });
+    } finally {
+      // Clear tenant context
+      tenantIsolationService.clearTenantContext();
     }
   }
 
   static async listConnections(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       if (!userId) {
         return res.status(401).json({ error: 'Authentication required' });
       }
+
+      // Create tenant context for isolation
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for listing connections', {
+        component: 'AWSController',
+        operation: 'listConnections',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connections = await AWSConnection.find({ userId: new Types.ObjectId(userId) })
         .select('-externalId')
@@ -114,15 +145,33 @@ export class AWSController {
       });
     } catch (error) {
       return res.status(500).json({ error: 'Failed to list connections' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
   static async deleteConnection(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { id } = req.params;
 
-      const connection = await AWSConnection.findOneAndDelete({
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for connection deletion', {
+        component: 'AWSController',
+        operation: 'deleteConnection',
+        tenantId: tenantContext.tenantId,
+      });
+
+      // Find connection first to validate tenant scope
+      const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
         userId: new Types.ObjectId(userId),
       });
@@ -130,6 +179,23 @@ export class AWSController {
       if (!connection) {
         return res.status(404).json({ error: 'Connection not found' });
       }
+
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        await auditLoggerService.logBlocked('connection_deleted', {
+          userId: new Types.ObjectId(userId),
+          connectionId: connection._id,
+        }, 'Tenant scope validation failed');
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
+      }
+
+      // Delete connection
+      await AWSConnection.findByIdAndDelete(connection._id);
 
       await auditLoggerService.logSuccess('connection_deleted', {
         userId: new Types.ObjectId(userId),
@@ -139,13 +205,30 @@ export class AWSController {
       return res.json({ success: true, message: 'Connection deleted' });
     } catch (error) {
       return res.status(500).json({ error: 'Failed to delete connection' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
   static async testConnection(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { id } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for plan generation', {
+        component: 'AWSController',
+        operation: 'generatePlan',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(id),
@@ -154,6 +237,16 @@ export class AWSController {
 
       if (!connection) {
         return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
       }
 
       const startTime = Date.now();
@@ -175,6 +268,8 @@ export class AWSController {
       }
     } catch (error) {
       return res.status(500).json({ error: 'Failed to test connection' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
@@ -183,15 +278,49 @@ export class AWSController {
   // ============================================================================
 
   static async parseIntent(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { request, connectionId } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
 
       if (!request) {
         return res.status(400).json({ error: 'request is required' });
       }
 
-      const intent = await intentParserService.parseIntent(request);
+      // Create tenant context for isolation
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      // Generate isolated prompt with tenant validation
+      const isolatedPrompt = await tenantIsolationService.generateIsolatedPrompt(
+        tenantContext.tenantId,
+        request
+      );
+
+      // Validate isolation before processing
+      const isolationValidation = tenantIsolationService.validateIsolation(isolatedPrompt);
+      if (!isolationValidation.valid) {
+        await auditLoggerService.logBlocked('intent_parsed', {
+          userId: new Types.ObjectId(userId),
+          connectionId: connectionId ? new Types.ObjectId(connectionId) : undefined,
+        }, `Isolation validation failed: ${isolationValidation.violations.join(', ')}`, undefined, {
+          intent: request,
+          blockedReason: `Isolation validation failed: ${isolationValidation.violations.join(', ')}`,
+        });
+
+        return res.status(403).json({
+          error: 'Intent contains potential cross-tenant data',
+          violations: isolationValidation.violations,
+          riskLevel: isolationValidation.riskLevel,
+        });
+      }
+
+      // Parse intent using isolated prompt
+      const intent = await intentParserService.parseIntent(isolatedPrompt.prompt);
 
       await auditLoggerService.log({
         eventType: 'intent_parsed',
@@ -208,17 +337,34 @@ export class AWSController {
       return res.json({ success: true, intent });
     } catch (error) {
       return res.status(500).json({ error: 'Failed to parse intent' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
   static async generatePlan(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { intent, connectionId, resources } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
 
       if (!intent || !connectionId) {
         return res.status(400).json({ error: 'intent and connectionId are required' });
       }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for plan generation', {
+        component: 'AWSController',
+        operation: 'generatePlan',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(connectionId),
@@ -227,6 +373,20 @@ export class AWSController {
 
       if (!connection) {
         return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        await auditLoggerService.logBlocked('plan_generated', {
+          userId: new Types.ObjectId(userId),
+          connectionId: connection._id,
+        }, 'Tenant scope validation failed');
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
       }
 
       const plan = await planGeneratorService.generatePlan(intent, connection, resources);
@@ -242,6 +402,8 @@ export class AWSController {
       return res.json({ success: true, plan });
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to generate plan' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
@@ -281,13 +443,28 @@ export class AWSController {
   }
 
   static async executePlan(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { plan, connectionId, approvalToken } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
 
       if (!plan || !connectionId || !approvalToken) {
         return res.status(400).json({ error: 'plan, connectionId, and approvalToken are required' });
       }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for plan generation', {
+        component: 'AWSController',
+        operation: 'generatePlan',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(connectionId),
@@ -296,6 +473,20 @@ export class AWSController {
 
       if (!connection) {
         return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        await auditLoggerService.logBlocked('execution_started', {
+          userId: new Types.ObjectId(userId),
+          connectionId: connection._id,
+        }, 'Tenant scope validation failed', { planId: plan.planId });
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
       }
 
       // Validate cost impact
@@ -343,13 +534,30 @@ export class AWSController {
       return res.json({ success: true, result });
     } catch (error) {
       return res.status(500).json({ error: error instanceof Error ? error.message : 'Execution failed' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
   static async simulatePlan(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { plan, connectionId } = req.body;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for plan generation', {
+        component: 'AWSController',
+        operation: 'generatePlan',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(connectionId),
@@ -358,6 +566,16 @@ export class AWSController {
 
       if (!connection) {
         return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
       }
 
       const result = await simulationEngineService.simulate(plan, connection);
@@ -370,6 +588,8 @@ export class AWSController {
       return res.json({ success: true, simulation: result });
     } catch (error) {
       return res.status(500).json({ error: 'Simulation failed' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 
@@ -404,7 +624,7 @@ export class AWSController {
     }
   }
 
-  static async getKillSwitchState(req: Request, res: Response): Promise<Response> {
+  static getKillSwitchState(req: Request, res: Response): Response {
     try {
       const state = killSwitchService.getState();
       return res.json({ success: true, state });
@@ -438,7 +658,7 @@ export class AWSController {
     }
   }
 
-  static async getAuditAnchor(req: Request, res: Response): Promise<Response> {
+  static getAuditAnchor(req: Request, res: Response): Response {
     try {
       const anchorData = auditAnchorService.getPublicAnchorData();
       return res.json({ success: true, ...anchorData });
@@ -466,7 +686,7 @@ export class AWSController {
   // Utilities
   // ============================================================================
 
-  static async getAllowedActions(req: Request, res: Response): Promise<Response> {
+  static getAllowedActions(req: Request, res: Response): Response {
     try {
       const actions = intentParserService.getAvailableActions();
       return res.json({ success: true, actions });
@@ -475,7 +695,7 @@ export class AWSController {
     }
   }
 
-  static async getPermissionBoundaries(req: Request, res: Response): Promise<Response> {
+  static getPermissionBoundaries(req: Request, res: Response): Response {
     try {
       return res.json({
         success: true,
@@ -489,9 +709,24 @@ export class AWSController {
   }
 
   static async getEmergencyStopInstructions(req: Request, res: Response): Promise<Response> {
+    let tenantContext;
     try {
       const userId = (req as any).user?.id;
+      const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
       const { connectionId } = req.params;
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Create tenant context
+      tenantContext = tenantIsolationService.createTenantContext(userId, workspaceId);
+
+      loggingService.info('Tenant context created for plan generation', {
+        component: 'AWSController',
+        operation: 'generatePlan',
+        tenantId: tenantContext.tenantId,
+      });
 
       const connection = await AWSConnection.findOne({
         _id: new Types.ObjectId(connectionId),
@@ -502,10 +737,41 @@ export class AWSController {
         return res.status(404).json({ error: 'Connection not found' });
       }
 
+      // Validate tenant scope
+      const isAuthorized = await tenantIsolationService.validateTenantScope(
+        new Types.ObjectId(userId),
+        connection.userId
+      );
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Unauthorized access to connection' });
+      }
+
+      // Verify external ID encryption is valid (defense in depth)
+      // Test decryption to ensure encryption format is valid
+      try {
+        connection.getDecryptedExternalId();
+        // If decryption succeeds, encryption is valid
+        loggingService.info('External ID encryption verified', {
+          component: 'AWSController',
+          operation: 'getEmergencyStopInstructions',
+          connectionId: connection._id.toString(),
+        });
+      } catch (error) {
+        loggingService.warn('External ID decryption failed - encryption may be invalid', {
+          component: 'AWSController',
+          operation: 'getEmergencyStopInstructions',
+          connectionId: connection._id.toString(),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+
       const instructions = stsCredentialService.getEmergencyStopInstructions(connection.roleArn);
       return res.json({ success: true, instructions });
     } catch (error) {
       return res.status(500).json({ error: 'Failed to get emergency stop instructions' });
+    } finally {
+      tenantIsolationService.clearTenantContext();
     }
   }
 }

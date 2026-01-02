@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { Types } from 'mongoose';
-import { AWSConnection, encryptExternalId, IAWSConnection } from '../../models/AWSConnection';
+import { AWSConnection, encryptExternalId } from '../../models/AWSConnection';
 import { loggingService } from '../logging.service';
 
 /**

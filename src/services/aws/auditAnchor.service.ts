@@ -62,8 +62,8 @@ class AuditAnchorService {
   };
   
   // S3 bucket for publishing (configured via environment)
-  private readonly S3_BUCKET = process.env.AUDIT_ANCHOR_S3_BUCKET || 'costkatana-audit-anchors';
-  private readonly S3_REGION = process.env.AUDIT_ANCHOR_S3_REGION || 'us-east-1';
+  private readonly S3_BUCKET = process.env.AUDIT_ANCHOR_S3_BUCKET ?? 'costkatana-audit-anchors';
+  private readonly S3_REGION = process.env.AUDIT_ANCHOR_S3_REGION ?? 'us-east-1';
   
   private constructor() {
     // Start daily anchor job
@@ -172,13 +172,13 @@ class AuditAnchorService {
     record.s3Location = `s3://${this.S3_BUCKET}/${s3Key}`;
     
     // In production:
-    // const s3Client = new S3Client({ region: this.S3_REGION });
-    // await s3Client.send(new PutObjectCommand({
-    //   Bucket: this.S3_BUCKET,
-    //   Key: s3Key,
-    //   Body: JSON.stringify(anchorDocument),
-    //   ContentType: 'application/json',
-    // }));
+    const s3Client = new S3Client({ region: this.S3_REGION ?? 'us-east-1' });
+    await s3Client.send(new PutObjectCommand({
+      Bucket: this.S3_BUCKET,
+      Key: s3Key,
+      Body: JSON.stringify(anchorDocument),
+      ContentType: 'application/json',
+    }));
   }
   
   /**

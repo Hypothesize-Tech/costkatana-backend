@@ -1,4 +1,4 @@
-import { STSClient, AssumeRoleCommand, Credentials } from '@aws-sdk/client-sts';
+import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
 import { Types } from 'mongoose';
 import { AWSConnection, IAWSConnection } from '../../models/AWSConnection';
 import { loggingService } from '../logging.service';

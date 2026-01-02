@@ -47,7 +47,7 @@ class AIIntentRouterService {
     constructor() {
         // Use Nova Lite for fast routing decisions
         this.routerLlm = new ChatBedrockConverse({
-            region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
+            region: process.env.AWS_REGION ?? 'us-east-1',
             model: 'amazon.nova-lite-v1:0',
             credentials: {
                 accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
