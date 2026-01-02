@@ -894,59 +894,6 @@ export class VercelController {
     }
 
     /**
-     * Get analytics for a project
-     * GET /api/vercel/connections/:id/projects/:projectId/analytics
-     */
-    static async getAnalytics(req: any, res: Response): Promise<void> {
-        try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-            const { from, to } = req.query;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
-            // Verify connection belongs to user
-            const connection = await VercelService.getConnection(id, userId);
-            if (!connection) {
-                res.status(404).json({
-                    success: false,
-                    message: 'Vercel connection not found'
-                });
-                return;
-            }
-
-            const analytics = await VercelService.getAnalytics(
-                id,
-                projectId,
-                from ? new Date(from as string) : undefined,
-                to ? new Date(to as string) : undefined
-            );
-
-            res.json({
-                success: true,
-                data: analytics
-            });
-        } catch (error: any) {
-            loggingService.error('Failed to get analytics', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get analytics',
-                error: error.message
-            });
-        }
-    }
-
-    /**
      * Handle Vercel webhook events
      * POST /api/vercel/webhooks
      */

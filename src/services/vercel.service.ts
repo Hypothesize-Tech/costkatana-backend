@@ -811,24 +811,6 @@ export class VercelService {
     }
 
     /**
-     * Get project analytics
-     */
-    static async getAnalytics(
-        connectionId: string,
-        projectId: string,
-        from?: Date,
-        to?: Date
-    ): Promise<any> {
-        const fromTime = from?.getTime() || Date.now() - 30 * 24 * 60 * 60 * 1000; // Default 30 days
-        const toTime = to?.getTime() || Date.now();
-
-        return this.apiRequest(
-            connectionId,
-            `/v1/web-analytics/projects/${projectId}/data?from=${fromTime}&to=${toTime}`
-        );
-    }
-
-    /**
      * Get usage analytics
      */
     static async getUsage(connectionId: string): Promise<any> {

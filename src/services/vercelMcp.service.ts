@@ -833,57 +833,6 @@ export class VercelMCPService {
     }
 
     /**
-     * Get project analytics using Vercel REST API
-     */
-    static async getAnalytics(
-        connectionId: string,
-        projectId: string,
-        from?: Date,
-        to?: Date
-    ): Promise<any> {
-        try {
-            const { accessToken, teamId } = await this.getConnection(connectionId);
-
-            const fromTime = from?.getTime() || Date.now() - 30 * 24 * 60 * 60 * 1000; // Default 30 days
-            const toTime = to?.getTime() || Date.now();
-
-            loggingService.info('Getting Vercel analytics', {
-                component: 'VercelMCPService',
-                operation: 'getAnalytics',
-                connectionId,
-                projectId,
-                fromTime,
-                toTime
-            });
-
-            const analytics = await this.apiRequest<any>(
-                accessToken,
-                `/v1/web-analytics/projects/${projectId}/data?from=${fromTime}&to=${toTime}`,
-                teamId
-            );
-
-            loggingService.info('Vercel analytics retrieved successfully', {
-                component: 'VercelMCPService',
-                operation: 'getAnalytics',
-                connectionId,
-                projectId
-            });
-
-            return analytics;
-        } catch (error: any) {
-            loggingService.error('Failed to get Vercel analytics', {
-                component: 'VercelMCPService',
-                operation: 'getAnalytics',
-                connectionId,
-                projectId,
-                error: error.message
-            });
-            this.handleApiError(error);
-            throw error;
-        }
-    }
-
-    /**
      * Handle API errors with appropriate messages
      */
     private static handleApiError(error: any): void {

@@ -28,7 +28,7 @@ export interface VercelChatContext {
 export interface VercelCommand {
     action: 'list_projects' | 'deploy' | 'rollback' | 'promote' | 'list_deployments' | 
             'get_logs' | 'list_domains' | 'add_domain' | 'list_env' | 'set_env' | 
-            'get_analytics' | 'connect' | 'help';
+            'connect' | 'help';
     parameters?: Record<string, any>;
 }
 
@@ -173,20 +173,6 @@ export class VercelChatAgentService {
             };
         }
 
-        // Analytics intent
-        if (lowerMessage.includes('analytics') || 
-            lowerMessage.includes('stats') ||
-            lowerMessage.includes('usage') ||
-            lowerMessage.includes('traffic')) {
-            const projectMatch = message.match(/(?:for|of)\s+["']?([a-zA-Z0-9-_]+)["']?/i);
-            return {
-                action: 'get_analytics',
-                parameters: {
-                    projectName: projectMatch?.[1]
-                }
-            };
-        }
-
         // Help intent
         if (lowerMessage.includes('help') && lowerMessage.includes('vercel')) {
             return { action: 'help' };
@@ -315,8 +301,7 @@ export class VercelChatAgentService {
             list_domains: { type: 'list', entity: 'domains' },
             add_domain: { type: 'create', entity: 'domain' },
             list_env: { type: 'list', entity: 'env' },
-            set_env: { type: 'create', entity: 'env' },
-            get_analytics: { type: 'get', entity: 'analytics' }
+            set_env: { type: 'create', entity: 'env' }
         };
 
         const mapping = actionMap[command.action];
@@ -337,17 +322,16 @@ export class VercelChatAgentService {
      */
     private static getSuggestionsForAction(action: string): string[] {
         const suggestionMap: Record<string, string[]> = {
-            list_projects: ['Deploy to Vercel', 'Show deployments', 'Get analytics'],
+            list_projects: ['Deploy to Vercel', 'Show deployments', 'List domains'],
             deploy: ['Show deployments', 'Get logs', 'Promote to production'],
             rollback: ['Show deployments', 'Deploy again'],
-            promote: ['Show deployments', 'Get analytics'],
+            promote: ['Show deployments', 'List domains'],
             list_deployments: ['Deploy', 'Get logs', 'Rollback'],
             get_logs: ['Deploy again', 'Show deployments'],
             list_domains: ['Add domain', 'Show projects'],
             add_domain: ['List domains', 'Deploy'],
             list_env: ['Set env var', 'Deploy'],
-            set_env: ['List env vars', 'Deploy'],
-            get_analytics: ['Deploy', 'Show projects']
+            set_env: ['List env vars', 'Deploy']
         };
 
         return suggestionMap[action] || ['Show my projects', 'Help with Vercel'];
@@ -393,9 +377,6 @@ export class VercelChatAgentService {
 
             case 'set_env':
                 return this.handleSetEnv(connectionId, command.parameters, context);
-
-            case 'get_analytics':
-                return this.handleGetAnalytics(connectionId, command.parameters, context);
 
             default:
                 return {
@@ -938,63 +919,6 @@ export class VercelChatAgentService {
             message: `✅ Environment variable **${params.key}** has been set for **${project.name}**!\n\nThe variable is encrypted and will be available in all environments.`,
             suggestions: [`Show env vars for ${project.name}`, `Deploy ${project.name}`]
         };
-    }
-
-    /**
-     * Handle get analytics command
-     * Uses context to infer project if not specified
-     */
-    private static async handleGetAnalytics(
-        connectionId: string,
-        params?: Record<string, any>,
-        context?: VercelChatContext
-    ): Promise<VercelChatResponse> {
-        const projects = await VercelService.getProjects(connectionId);
-
-        // Use context.projectName if params.projectName is not provided
-        if (!params?.projectName && context?.projectName) {
-            params = { projectName: context.projectName };
-        }
-
-        if (!params?.projectName) {
-            if (projects.length === 1) {
-                params = { projectName: projects[0].name };
-            } else {
-                return {
-                    message: 'Which project\'s analytics would you like to see?',
-                    suggestions: projects.slice(0, 5).map(p => `Get analytics for ${p.name}`)
-                };
-            }
-        }
-
-        const project = projects.find(p => 
-            p.name.toLowerCase() === params?.projectName?.toLowerCase()
-        );
-
-        if (!project) {
-            return {
-                message: `I couldn't find a project named "${params.projectName}".`,
-                suggestions: projects.slice(0, 5).map(p => `Get analytics for ${p.name}`)
-            };
-        }
-
-        try {
-            const analytics = await VercelService.getAnalytics(connectionId, project.id);
-
-            return {
-                message: `📊 Analytics for **${project.name}** (Last 30 days):\n\n` +
-                    `- **Page Views**: ${analytics.pageViews?.toLocaleString() || 'N/A'}\n` +
-                    `- **Unique Visitors**: ${analytics.visitors?.toLocaleString() || 'N/A'}\n` +
-                    `- **Bandwidth**: ${analytics.bandwidth || 'N/A'}`,
-                data: analytics,
-                suggestions: [`Deploy ${project.name}`, `Show deployments for ${project.name}`]
-            };
-        } catch (error) {
-            return {
-                message: `Analytics may not be enabled for **${project.name}**. Enable Vercel Analytics in your project settings.`,
-                suggestions: [`Show deployments for ${project.name}`, 'Show my projects']
-            };
-        }
     }
 
     /**

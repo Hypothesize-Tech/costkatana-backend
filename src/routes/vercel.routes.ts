@@ -33,9 +33,6 @@ router.get('/connections/:id/projects/:projectId/env', authenticate, VercelContr
 router.post('/connections/:id/projects/:projectId/env', authenticate, VercelController.setEnvVar);
 router.delete('/connections/:id/projects/:projectId/env/:envVarId', authenticate, VercelController.deleteEnvVar);
 
-// Analytics routes
-router.get('/connections/:id/projects/:projectId/analytics', authenticate, VercelController.getAnalytics);
-
 // Webhook route (no auth middleware - uses signature verification)
 router.post('/webhooks', VercelController.handleWebhook);
 
