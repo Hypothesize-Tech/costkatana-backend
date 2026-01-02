@@ -1,0 +1,267 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  CostKatana IAM Role for AWS Cost Optimization
+  This template creates an IAM role that allows CostKatana to access your AWS account
+  for cost optimization purposes. The role uses an External ID for security.
+
+Parameters:
+  ExternalId:
+    Type: String
+    Description: The External ID provided by CostKatana for secure cross-account access
+    MinLength: 20
+    MaxLength: 100
+    AllowedPattern: ^ck-[a-z]{4}-[0-9a-f-]+-[0-9a-f]+$
+    ConstraintDescription: Must be a valid CostKatana External ID
+
+  CostKatanaAccountId:
+    Type: String
+    Default: '123456789012'
+    Description: CostKatana's AWS Account ID (provided during setup)
+    AllowedPattern: ^\d{12}$
+    ConstraintDescription: Must be a 12-digit AWS account ID
+
+  PermissionMode:
+    Type: String
+    Default: ReadOnly
+    AllowedValues:
+      - ReadOnly
+      - ReadWrite
+    Description: Permission level for CostKatana
+
+Conditions:
+  IsReadWrite: !Equals [!Ref PermissionMode, ReadWrite]
+
+Resources:
+  CostKatanaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CostKatanaRole
+      Description: IAM role for CostKatana cost optimization service
+      MaxSessionDuration: 3600  # 1 hour max
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: CostKatanaTrust
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${CostKatanaAccountId}:root'
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      Tags:
+        - Key: ManagedBy
+          Value: CostKatana
+        - Key: Purpose
+          Value: CostOptimization
+        - Key: CreatedDate
+          Value: !Ref 'AWS::StackName'
+
+  CostKatanaReadOnlyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CostKatanaReadOnlyPolicy
+      Roles:
+        - !Ref CostKatanaRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EC2ReadOnly
+            Effect: Allow
+            Action:
+              - ec2:Describe*
+              - ec2:GetConsoleOutput
+            Resource: '*'
+          
+          - Sid: S3ReadOnly
+            Effect: Allow
+            Action:
+              - s3:GetBucket*
+              - s3:GetObject*
+              - s3:ListBucket*
+              - s3:ListAllMyBuckets
+              - s3:GetLifecycleConfiguration
+              - s3:GetBucketTagging
+              - s3:GetIntelligentTieringConfiguration
+            Resource: '*'
+          
+          - Sid: RDSReadOnly
+            Effect: Allow
+            Action:
+              - rds:Describe*
+              - rds:ListTagsForResource
+            Resource: '*'
+          
+          - Sid: LambdaReadOnly
+            Effect: Allow
+            Action:
+              - lambda:Get*
+              - lambda:List*
+            Resource: '*'
+          
+          - Sid: CloudWatchReadOnly
+            Effect: Allow
+            Action:
+              - cloudwatch:Describe*
+              - cloudwatch:Get*
+              - cloudwatch:List*
+            Resource: '*'
+          
+          - Sid: CloudTrailReadOnly
+            Effect: Allow
+            Action:
+              - cloudtrail:Describe*
+              - cloudtrail:Get*
+              - cloudtrail:List*
+              - cloudtrail:LookupEvents
+            Resource: '*'
+          
+          - Sid: CostExplorerReadOnly
+            Effect: Allow
+            Action:
+              - ce:Get*
+              - ce:Describe*
+              - ce:List*
+            Resource: '*'
+          
+          - Sid: TaggingReadOnly
+            Effect: Allow
+            Action:
+              - tag:GetResources
+              - tag:GetTagKeys
+              - tag:GetTagValues
+            Resource: '*'
+          
+          - Sid: STSIdentity
+            Effect: Allow
+            Action:
+              - sts:GetCallerIdentity
+            Resource: '*'
+
+  CostKatanaWritePolicy:
+    Type: AWS::IAM::Policy
+    Condition: IsReadWrite
+    Properties:
+      PolicyName: CostKatanaWritePolicy
+      Roles:
+        - !Ref CostKatanaRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EC2WriteOperations
+            Effect: Allow
+            Action:
+              - ec2:StopInstances
+              - ec2:StartInstances
+              - ec2:RebootInstances
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: '*'
+          
+          - Sid: S3WriteOperations
+            Effect: Allow
+            Action:
+              - s3:PutBucketLifecycleConfiguration
+              - s3:PutBucketTagging
+              - s3:PutBucketIntelligentTieringConfiguration
+            Resource: '*'
+          
+          - Sid: RDSWriteOperations
+            Effect: Allow
+            Action:
+              - rds:StopDBInstance
+              - rds:StartDBInstance
+              - rds:CreateDBSnapshot
+              - rds:AddTagsToResource
+              - rds:RemoveTagsFromResource
+            Resource: '*'
+          
+          - Sid: LambdaWriteOperations
+            Effect: Allow
+            Action:
+              - lambda:UpdateFunctionConfiguration
+              - lambda:TagResource
+              - lambda:UntagResource
+            Resource: '*'
+
+  CostKatanaDenyPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: CostKatanaDenyPolicy
+      Roles:
+        - !Ref CostKatanaRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyDestructiveOperations
+            Effect: Deny
+            Action:
+              - ec2:TerminateInstances
+              - ec2:DeleteVolume
+              - ec2:DeleteSnapshot
+              - ec2:DeleteVpc
+              - ec2:DeleteSubnet
+              - ec2:DeleteSecurityGroup
+              - s3:DeleteBucket
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+              - rds:DeleteDBInstance
+              - rds:DeleteDBCluster
+              - rds:DeleteDBSnapshot
+              - lambda:DeleteFunction
+              - dynamodb:DeleteTable
+            Resource: '*'
+          
+          - Sid: DenyIAMOperations
+            Effect: Deny
+            Action:
+              - iam:*
+            Resource: '*'
+          
+          - Sid: DenyOrganizationOperations
+            Effect: Deny
+            Action:
+              - organizations:*
+            Resource: '*'
+          
+          - Sid: DenyAccountOperations
+            Effect: Deny
+            Action:
+              - account:*
+            Resource: '*'
+          
+          - Sid: DenyBillingModification
+            Effect: Deny
+            Action:
+              - aws-portal:Modify*
+              - budgets:Modify*
+            Resource: '*'
+
+Outputs:
+  RoleArn:
+    Description: ARN of the CostKatana IAM Role
+    Value: !GetAtt CostKatanaRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleArn'
+
+  RoleName:
+    Description: Name of the CostKatana IAM Role
+    Value: !Ref CostKatanaRole
+    Export:
+      Name: !Sub '${AWS::StackName}-RoleName'
+
+  ExternalIdUsed:
+    Description: External ID configured for this role
+    Value: !Ref ExternalId
+
+  PermissionModeUsed:
+    Description: Permission mode configured for this role
+    Value: !Ref PermissionMode
+
+  SetupInstructions:
+    Description: Next steps after deployment
+    Value: |
+      1. Copy the Role ARN from the outputs
+      2. Paste it in the CostKatana connection setup
+      3. Test the connection to verify access
+      4. Your AWS account is now connected to CostKatana!

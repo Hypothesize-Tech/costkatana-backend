@@ -76,6 +76,7 @@ import dataNetworkEffectsRoutes from './dataNetworkEffects.routes';
 import proactiveSuggestionsRoutes from './proactiveSuggestions.routes';
 import utilsRoutes from './utils.routes';
 import fileUploadRoutes from './fileUpload.routes';
+import awsRoutes from './aws.routes';
 
 const router = Router();
 
@@ -168,5 +169,6 @@ router.use('/data-network-effects', dataNetworkEffectsRoutes);
 router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
 router.use('/utils', utilsRoutes);
 router.use('/files', fileUploadRoutes);
+router.use('/aws', awsRoutes);
 
 export const apiRouter = router;

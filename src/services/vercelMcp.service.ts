@@ -152,12 +152,12 @@ export class VercelMCPService {
         accessToken: string;
         teamId?: string;
     }> {
-        const connection = await VercelConnection.findById(connectionId).select('+accessToken');
-        if (!connection || !connection.isActive) {
-            throw new Error('Vercel connection not found or inactive');
-        }
+            const connection = await VercelConnection.findById(connectionId).select('+accessToken');
+            if (!connection || !connection.isActive) {
+                throw new Error('Vercel connection not found or inactive');
+            }
 
-        const accessToken = connection.decryptToken();
+            const accessToken = connection.decryptToken();
         return {
             connection,
             accessToken,
@@ -182,7 +182,7 @@ export class VercelMCPService {
         }
 
         loggingService.info('Making Vercel API request', {
-            component: 'VercelMCPService',
+                component: 'VercelMCPService',
             operation: 'apiRequest',
             endpoint,
             method: options.method || 'GET',
@@ -192,11 +192,11 @@ export class VercelMCPService {
         const response = await axios({
             url,
             method: (options.method || 'GET') as any,
-            headers: {
-                'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': 'application/json',
-                'User-Agent': 'CostKatana/2.0.0'
-            },
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'CostKatana/2.0.0'
+                    },
             data: options.body ? JSON.parse(options.body as string) : undefined,
             timeout: 30000
         });
@@ -782,7 +782,7 @@ export class VercelMCPService {
             });
             this.handleApiError(error);
             throw error;
-        }
+            }
     }
 
     /**
@@ -793,7 +793,7 @@ export class VercelMCPService {
         projectId: string,
         domain: string
     ): Promise<void> {
-        try {
+                try {
             const { accessToken, teamId } = await this.getConnection(connectionId);
 
             loggingService.info('Removing domain from Vercel project', {
@@ -829,8 +829,8 @@ export class VercelMCPService {
             });
             this.handleApiError(error);
             throw error;
-        }
-    }
+                }
+            }
 
     /**
      * Handle API errors with appropriate messages
