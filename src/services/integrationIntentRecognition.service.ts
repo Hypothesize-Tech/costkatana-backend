@@ -286,7 +286,7 @@ IMPORTANT RULES:
       jira: ['issue', 'project', 'board', 'sprint', 'user', 'filter', 'comment', 'attachment'],
       linear: ['issue', 'project', 'team', 'cycle', 'user', 'workflow', 'comment', 'label'],
       github: ['issue', 'pullrequest', 'repository', 'branch', 'commit', 'user', 'release', 'comment'],
-      vercel: ['project', 'deployment', 'domain', 'env', 'analytics', 'log'],
+      vercel: ['project', 'deployment', 'domain', 'env', 'log'],
       webhook: ['webhook', 'event', 'delivery', 'retry']
     };
 
@@ -347,7 +347,6 @@ IMPORTANT RULES:
 - list env: {projectName: string (required)}
 - create env: {projectName: string (required), key: string (required), value: string (required), target?: string[]}
 - delete env: {projectName: string (required), key: string (required)}
-- get analytics: {projectName: string (required)}
 - update deployment: {projectName: string (required), deploymentId: string (required), action: 'rollback'|'promote'}`,
       webhook: `
 - send webhook: {url: string (required), payload: object (required)}
@@ -416,8 +415,7 @@ IMPORTANT RULES:
         '@vercel add domain example.com to my-app → {projectName: "my-app", domain: "example.com"}',
         '@vercel list domains for my-app → {projectName: "my-app"}',
         '@vercel set env API_KEY to xyz123 for my-app → {projectName: "my-app", key: "API_KEY", value: "xyz123"}',
-        '@vercel list env vars for my-app → {projectName: "my-app"}',
-        '@vercel get analytics for my-app → {projectName: "my-app"}'
+        '@vercel list env vars for my-app → {projectName: "my-app"}'
       ],
       google: [
         '@google send email to team@company.com about monthly costs → {action: "gmail", subAction: "send", params: {to: "team@company.com", subject: "Monthly costs"}}',

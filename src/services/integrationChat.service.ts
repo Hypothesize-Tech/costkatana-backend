@@ -3306,24 +3306,6 @@ export class IntegrationChatService {
               data: { logs, deploymentId: deployments[0].uid },
               metadata: { type: 'vercel' }
             };
-          } else if (command.entity === 'analytics') {
-            // Get project analytics
-            const projectName = command.params.project || command.mention.entityId;
-            if (!projectName) {
-              return {
-                success: false,
-                message: '❌ Project name is required to get analytics',
-                error: 'MISSING_PARAM'
-              };
-            }
-            const project = await VercelService.getProject(vercelConnectionId, projectName);
-            const analytics = await VercelMCPService.getAnalytics(vercelConnectionId, project.id);
-            return {
-              success: true,
-              message: `Retrieved analytics for project '${projectName}'`,
-              data: { analytics },
-              metadata: { type: 'vercel' }
-            };
           }
           break;
 
