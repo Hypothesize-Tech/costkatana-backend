@@ -3224,7 +3224,7 @@ export class IntegrationChatService {
               metadata: { type: 'vercel' }
             };
           } else if (command.entity === 'env' || command.entity === 'environment' || command.entity === 'variables') {
-            // For environment variables, use REST API
+            // For environment variables, use MCP service
             const projectName = command.params.project || command.mention.entityId;
             if (!projectName) {
               return {
@@ -3234,7 +3234,7 @@ export class IntegrationChatService {
               };
             }
             const project = await VercelService.getProject(vercelConnectionId, projectName);
-            const envVars = await VercelService.getEnvVars(vercelConnectionId, project.id);
+            const envVars = await VercelMCPService.listEnvVars(vercelConnectionId, project.id);
             return {
               success: true,
               message: `Found ${envVars.length} environment variables for project '${projectName}'`,
@@ -3279,6 +3279,51 @@ export class IntegrationChatService {
               data: { deployment },
               metadata: { type: 'vercel' }
             };
+          } else if (command.entity === 'logs' || command.entity === 'log') {
+            // Get deployment logs - need project name to find latest deployment
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to get logs',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            // Get latest deployment
+            const deployments = await VercelMCPService.listDeployments(vercelConnectionId, project.id, 1);
+            if (!deployments || deployments.length === 0) {
+              return {
+                success: false,
+                message: `❌ No deployments found for project '${projectName}'`,
+                error: 'NO_DEPLOYMENTS'
+              };
+            }
+            const logs = await VercelMCPService.getDeploymentBuildLogs(vercelConnectionId, deployments[0].uid);
+            return {
+              success: true,
+              message: `Retrieved ${logs.length} log entries for project '${projectName}'`,
+              data: { logs, deploymentId: deployments[0].uid },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'analytics') {
+            // Get project analytics
+            const projectName = command.params.project || command.mention.entityId;
+            if (!projectName) {
+              return {
+                success: false,
+                message: '❌ Project name is required to get analytics',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            const analytics = await VercelMCPService.getAnalytics(vercelConnectionId, project.id);
+            return {
+              success: true,
+              message: `Retrieved analytics for project '${projectName}'`,
+              data: { analytics },
+              metadata: { type: 'vercel' }
+            };
           }
           break;
 
@@ -3317,6 +3362,27 @@ export class IntegrationChatService {
               success: true,
               message: `Deployment triggered for project '${projectName}'`,
               data: { deployment },
+              metadata: { type: 'vercel' }
+            };
+          } else if (command.entity === 'env' || command.entity === 'environment' || command.entity === 'variable') {
+            // Set environment variable using MCP service
+            const projectName = command.params.project || command.mention.entityId;
+            const key = command.params.key;
+            const value = command.params.value;
+            if (!projectName || !key || !value) {
+              return {
+                success: false,
+                message: '❌ Project name, key, and value are required to set environment variable',
+                error: 'MISSING_PARAM'
+              };
+            }
+            const project = await VercelService.getProject(vercelConnectionId, projectName);
+            const target = command.params.target || ['production', 'preview', 'development'];
+            const envVar = await VercelMCPService.setEnvVar(vercelConnectionId, project.id, key, value, target);
+            return {
+              success: true,
+              message: `Environment variable '${key}' set for project '${projectName}'`,
+              data: { envVar },
               metadata: { type: 'vercel' }
             };
           }
