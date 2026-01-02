@@ -3,13 +3,18 @@ import { VercelConnection } from '../models/VercelConnection';
 import axios from 'axios';
 
 /**
- * Vercel Official MCP Server Client
- * Connects to Vercel's hosted MCP server following the Model Context Protocol standard
- * Documentation: https://vercel.com/docs/mcp/vercel-mcp
+ * Vercel MCP Service
+ * 
+ * This service provides MCP-like interface to Vercel operations.
+ * It uses the direct Vercel REST API (https://api.vercel.com) for all operations.
+ * 
+ * Note: Vercel does not have a public hosted MCP server. The Vercel MCP server
+ * (https://github.com/vercel/mcp) is designed to be run locally. This service
+ * provides equivalent functionality using the REST API directly.
  */
 
-// Vercel MCP Server URL (official hosted server)
-const VERCEL_MCP_SERVER_URL = 'https://mcp.vercel.com';
+// Vercel REST API base URL
+const VERCEL_API_BASE = 'https://api.vercel.com';
 
 export interface VercelMCPTool {
     name: string;
@@ -40,12 +45,12 @@ export interface VercelMCPResponse {
 
 /**
  * Vercel MCP Service
- * Provides interface to Vercel's official MCP server
+ * Provides MCP-like interface using direct Vercel REST API
  */
 export class VercelMCPService {
     /**
      * Available Vercel MCP Tools
-     * Based on official Vercel MCP server capabilities
+     * Based on official Vercel API capabilities
      */
     private static readonly AVAILABLE_TOOLS = {
         list_projects: {
@@ -81,24 +86,13 @@ export class VercelMCPService {
                 required: ['deploymentId']
             }
         },
-        search_vercel_documentation: {
-            name: 'search_vercel_documentation',
-            description: 'Search Vercel documentation',
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    query: { type: 'string', description: 'Search query' }
-                },
-                required: ['query']
-            }
-        },
         get_project_details: {
             name: 'get_project_details',
             description: 'Get detailed information about a project',
             inputSchema: {
                 type: 'object',
                 properties: {
-                    projectId: { type: 'string', description: 'Project ID' }
+                    projectId: { type: 'string', description: 'Project ID or name' }
                 },
                 required: ['projectId']
             }
@@ -113,205 +107,795 @@ export class VercelMCPService {
                 },
                 required: ['deploymentId']
             }
+        },
+        list_domains: {
+            name: 'list_domains',
+            description: 'List domains for a project',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    projectId: { type: 'string', description: 'Project ID' }
+                },
+                required: ['projectId']
+            }
+        },
+        list_env_vars: {
+            name: 'list_env_vars',
+            description: 'List environment variables for a project',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    projectId: { type: 'string', description: 'Project ID' }
+                },
+                required: ['projectId']
+            }
+        },
+        trigger_deployment: {
+            name: 'trigger_deployment',
+            description: 'Trigger a new deployment for a project',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    projectId: { type: 'string', description: 'Project ID or name' },
+                    target: { type: 'string', description: 'Deployment target (production or preview)' }
+                },
+                required: ['projectId']
+            }
         }
     };
 
     /**
-     * Call Vercel MCP tool
+     * Get connection with decrypted access token
      */
-    static async callTool(
-        toolName: string,
-        parameters: Record<string, any>,
-        connectionId: string
-    ): Promise<VercelMCPResponse> {
+    private static async getConnection(connectionId: string): Promise<{
+        connection: any;
+        accessToken: string;
+        teamId?: string;
+    }> {
+        const connection = await VercelConnection.findById(connectionId).select('+accessToken');
+        if (!connection || !connection.isActive) {
+            throw new Error('Vercel connection not found or inactive');
+        }
+
+        const accessToken = connection.decryptToken();
+        return {
+            connection,
+            accessToken,
+            teamId: connection.teamId
+        };
+    }
+
+    /**
+     * Make authenticated API request to Vercel
+     */
+    private static async apiRequest<T>(
+        accessToken: string,
+        endpoint: string,
+        teamId?: string,
+        options: RequestInit = {}
+    ): Promise<T> {
+        // Build URL with team parameter if applicable
+        let url = `${VERCEL_API_BASE}${endpoint}`;
+        if (teamId) {
+            const separator = endpoint.includes('?') ? '&' : '?';
+            url = `${url}${separator}teamId=${teamId}`;
+        }
+
+        loggingService.info('Making Vercel API request', {
+            component: 'VercelMCPService',
+            operation: 'apiRequest',
+            endpoint,
+            method: options.method || 'GET',
+            hasTeamId: !!teamId
+        });
+
+        const response = await axios({
+            url,
+            method: (options.method || 'GET') as any,
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'User-Agent': 'CostKatana/2.0.0'
+            },
+            data: options.body ? JSON.parse(options.body as string) : undefined,
+            timeout: 30000
+        });
+
+        loggingService.info('Vercel API response received', {
+            component: 'VercelMCPService',
+            operation: 'apiRequest',
+            endpoint,
+            status: response.status
+        });
+
+        return response.data;
+    }
+
+    /**
+     * List projects using Vercel REST API
+     */
+    static async listProjects(connectionId: string, limit?: number): Promise<any[]> {
         try {
-            // Get connection with decrypted access token
-            // Must explicitly select accessToken field since it has select: false in schema
-            const connection = await VercelConnection.findById(connectionId).select('+accessToken');
-            if (!connection || !connection.isActive) {
-                throw new Error('Vercel connection not found or inactive');
-            }
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-            const accessToken = connection.decryptToken();
-
-            loggingService.info('Calling Vercel MCP tool', {
+            loggingService.info('Listing Vercel projects', {
                 component: 'VercelMCPService',
-                operation: 'callTool',
-                toolName,
-                connectionId
+                operation: 'listProjects',
+                connectionId,
+                limit
             });
 
-            // MCP protocol request
-            const mcpRequest: VercelMCPRequest = {
-                method: 'tools/call',
-                params: {
-                    name: toolName,
-                    arguments: parameters
-                }
-            };
-
-            // Call Vercel MCP server
-            const response = await axios.post(
-                `${VERCEL_MCP_SERVER_URL}/mcp`,
-                mcpRequest,
-                {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json',
-                        'User-Agent': 'CostKatana/2.0.0'
-                    },
-                    timeout: 30000 // 30 second timeout
-                }
+            const limitParam = limit ? `?limit=${limit}` : '?limit=100';
+            const data = await this.apiRequest<{ projects: any[] }>(
+                accessToken,
+                `/v9/projects${limitParam}`,
+                teamId
             );
 
-            loggingService.info('Vercel MCP tool call successful', {
+            loggingService.info('Vercel projects listed successfully', {
                 component: 'VercelMCPService',
-                operation: 'callTool',
-                toolName,
-                statusCode: response.status
+                operation: 'listProjects',
+                connectionId,
+                projectCount: data.projects?.length || 0
             });
 
-            return response.data;
+            return data.projects || [];
         } catch (error: any) {
-            loggingService.error('Vercel MCP tool call failed', {
+            loggingService.error('Failed to list Vercel projects', {
                 component: 'VercelMCPService',
-                operation: 'callTool',
-                toolName,
-                error: error.message,
-                stack: error.stack
+                operation: 'listProjects',
+                connectionId,
+                error: error.message
             });
-
-            // Handle specific errors
-            if (error.response?.status === 401) {
-                throw new Error('Vercel authentication failed. Please reconnect your Vercel account.');
-            } else if (error.response?.status === 429) {
-                throw new Error('Vercel API rate limit exceeded. Please try again later.');
-            } else if (error.response?.status === 403) {
-                throw new Error('Insufficient permissions. Please check your Vercel OAuth scopes.');
-            }
-
-            throw new Error(`Vercel MCP call failed: ${error.message}`);
+            this.handleApiError(error);
+            throw error;
         }
     }
 
     /**
-     * List projects using Vercel MCP
-     */
-    static async listProjects(connectionId: string, limit?: number): Promise<any> {
-        const response = await this.callTool(
-            'list_projects',
-            { limit: limit || 100 },
-            connectionId
-        );
-
-        return this.extractData(response);
-    }
-
-    /**
-     * List deployments using Vercel MCP
+     * List deployments using Vercel REST API
      */
     static async listDeployments(
         connectionId: string,
         projectId: string,
         limit?: number
-    ): Promise<any> {
-        const response = await this.callTool(
-            'list_deployments',
-            { projectId, limit: limit || 20 },
-            connectionId
-        );
+    ): Promise<any[]> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-        return this.extractData(response);
+            loggingService.info('Listing Vercel deployments', {
+                component: 'VercelMCPService',
+                operation: 'listDeployments',
+                connectionId,
+                projectId,
+                limit
+            });
+
+            const limitVal = limit || 20;
+            const data = await this.apiRequest<{ deployments: any[] }>(
+                accessToken,
+                `/v6/deployments?projectId=${projectId}&limit=${limitVal}`,
+                teamId
+            );
+
+            loggingService.info('Vercel deployments listed successfully', {
+                component: 'VercelMCPService',
+                operation: 'listDeployments',
+                connectionId,
+                projectId,
+                deploymentCount: data.deployments?.length || 0
+            });
+
+            return data.deployments || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Vercel deployments', {
+                component: 'VercelMCPService',
+                operation: 'listDeployments',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
     }
 
     /**
-     * Get deployment build logs using Vercel MCP
+     * Get deployment build logs using Vercel REST API
      */
     static async getDeploymentBuildLogs(
         connectionId: string,
         deploymentId: string
-    ): Promise<any> {
-        const response = await this.callTool(
-            'get_deployment_build_logs',
-            { deploymentId },
-            connectionId
-        );
+    ): Promise<any[]> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-        return this.extractData(response);
+            loggingService.info('Getting Vercel deployment logs', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentBuildLogs',
+                connectionId,
+                deploymentId
+            });
+
+            const data = await this.apiRequest<{ logs?: Array<{ text: string; created: number }> }>(
+                accessToken,
+                `/v2/deployments/${deploymentId}/events`,
+                teamId
+            );
+
+            const logs = data.logs?.map(log => log.text) || [];
+
+            loggingService.info('Vercel deployment logs retrieved successfully', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentBuildLogs',
+                connectionId,
+                deploymentId,
+                logCount: logs.length
+            });
+
+            return logs;
+        } catch (error: any) {
+            loggingService.error('Failed to get Vercel deployment logs', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentBuildLogs',
+                connectionId,
+                deploymentId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
     }
 
     /**
-     * Search Vercel documentation using Vercel MCP
-     */
-    static async searchDocumentation(
-        connectionId: string,
-        query: string
-    ): Promise<any> {
-        const response = await this.callTool(
-            'search_vercel_documentation',
-            { query },
-            connectionId
-        );
-
-        return this.extractData(response);
-    }
-
-    /**
-     * Get project details using Vercel MCP
+     * Get project details using Vercel REST API
      */
     static async getProjectDetails(
         connectionId: string,
         projectId: string
     ): Promise<any> {
-        const response = await this.callTool(
-            'get_project_details',
-            { projectId },
-            connectionId
-        );
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-        return this.extractData(response);
+            loggingService.info('Getting Vercel project details', {
+                component: 'VercelMCPService',
+                operation: 'getProjectDetails',
+                connectionId,
+                projectId
+            });
+
+            const project = await this.apiRequest<any>(
+                accessToken,
+                `/v9/projects/${projectId}`,
+                teamId
+            );
+
+            loggingService.info('Vercel project details retrieved successfully', {
+                component: 'VercelMCPService',
+                operation: 'getProjectDetails',
+                connectionId,
+                projectId,
+                projectName: project.name
+            });
+
+            return project;
+        } catch (error: any) {
+            loggingService.error('Failed to get Vercel project details', {
+                component: 'VercelMCPService',
+                operation: 'getProjectDetails',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
     }
 
     /**
-     * Get deployment details using Vercel MCP
+     * Get deployment details using Vercel REST API
      */
     static async getDeploymentDetails(
         connectionId: string,
         deploymentId: string
     ): Promise<any> {
-        const response = await this.callTool(
-            'get_deployment_details',
-            { deploymentId },
-            connectionId
-        );
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-        return this.extractData(response);
+            loggingService.info('Getting Vercel deployment details', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentDetails',
+                connectionId,
+                deploymentId
+            });
+
+            const deployment = await this.apiRequest<any>(
+                accessToken,
+                `/v13/deployments/${deploymentId}`,
+                teamId
+            );
+
+            loggingService.info('Vercel deployment details retrieved successfully', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentDetails',
+                connectionId,
+                deploymentId,
+                deploymentState: deployment.state
+            });
+
+            return deployment;
+        } catch (error: any) {
+            loggingService.error('Failed to get Vercel deployment details', {
+                component: 'VercelMCPService',
+                operation: 'getDeploymentDetails',
+                connectionId,
+                deploymentId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
     }
 
     /**
-     * Extract data from MCP response
+     * List domains for a project using Vercel REST API
      */
-    private static extractData(response: VercelMCPResponse): any {
-        if (response.isError) {
-            const errorText = response.content.find(c => c.type === 'text')?.text;
-            throw new Error(errorText || 'MCP tool call failed');
-        }
+    static async listDomains(
+        connectionId: string,
+        projectId: string
+    ): Promise<any[]> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
 
-        // Extract data from response content
-        for (const content of response.content) {
-            if (content.data) {
-                return content.data;
+            loggingService.info('Listing Vercel domains', {
+                component: 'VercelMCPService',
+                operation: 'listDomains',
+                connectionId,
+                projectId
+            });
+
+            const data = await this.apiRequest<{ domains: any[] }>(
+                accessToken,
+                `/v9/projects/${projectId}/domains`,
+                teamId
+            );
+
+            loggingService.info('Vercel domains listed successfully', {
+                component: 'VercelMCPService',
+                operation: 'listDomains',
+                connectionId,
+                projectId,
+                domainCount: data.domains?.length || 0
+            });
+
+            return data.domains || [];
+        } catch (error: any) {
+            loggingService.error('Failed to list Vercel domains', {
+                component: 'VercelMCPService',
+                operation: 'listDomains',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * List environment variables for a project using Vercel REST API
+     */
+    static async listEnvVars(
+        connectionId: string,
+        projectId: string
+    ): Promise<any[]> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Listing Vercel environment variables', {
+                component: 'VercelMCPService',
+                operation: 'listEnvVars',
+                connectionId,
+                projectId
+            });
+
+            const data = await this.apiRequest<{ envs: any[] }>(
+                accessToken,
+                `/v9/projects/${projectId}/env`,
+                teamId
+            );
+
+            // Strip values for security
+            const envVars = (data.envs || []).map(env => ({
+                ...env,
+                value: undefined
+            }));
+
+            loggingService.info('Vercel environment variables listed successfully', {
+                component: 'VercelMCPService',
+                operation: 'listEnvVars',
+                connectionId,
+                projectId,
+                envVarCount: envVars.length
+            });
+
+            return envVars;
+        } catch (error: any) {
+            loggingService.error('Failed to list Vercel environment variables', {
+                component: 'VercelMCPService',
+                operation: 'listEnvVars',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Set environment variable using Vercel REST API
+     */
+    static async setEnvVar(
+        connectionId: string,
+        projectId: string,
+        key: string,
+        value: string,
+        target: Array<'production' | 'preview' | 'development'> = ['production', 'preview', 'development'],
+        type: 'plain' | 'secret' | 'encrypted' = 'encrypted'
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Setting Vercel environment variable', {
+                component: 'VercelMCPService',
+                operation: 'setEnvVar',
+                connectionId,
+                projectId,
+                key,
+                target,
+                type
+            });
+
+            // Check if env var exists
+            const existingEnvs = await this.apiRequest<{ envs: any[] }>(
+                accessToken,
+                `/v9/projects/${projectId}/env`,
+                teamId
+            );
+            const existing = existingEnvs.envs?.find(e => e.key === key);
+
+            let result: any;
+            if (existing) {
+                // Update existing
+                result = await this.apiRequest<any>(
+                    accessToken,
+                    `/v9/projects/${projectId}/env/${existing.id}`,
+                    teamId,
+                    {
+                        method: 'PATCH',
+                        body: JSON.stringify({ value, target, type })
+                    }
+                );
+            } else {
+                // Create new
+                result = await this.apiRequest<any>(
+                    accessToken,
+                    `/v10/projects/${projectId}/env`,
+                    teamId,
+                    {
+                        method: 'POST',
+                        body: JSON.stringify({ key, value, target, type })
+                    }
+                );
             }
-            if (content.text) {
-                try {
-                    return JSON.parse(content.text);
-                } catch {
-                    return content.text;
+
+            loggingService.info('Vercel environment variable set successfully', {
+                component: 'VercelMCPService',
+                operation: 'setEnvVar',
+                connectionId,
+                projectId,
+                key,
+                isUpdate: !!existing
+            });
+
+            return result;
+        } catch (error: any) {
+            loggingService.error('Failed to set Vercel environment variable', {
+                component: 'VercelMCPService',
+                operation: 'setEnvVar',
+                connectionId,
+                projectId,
+                key,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Trigger deployment using Vercel REST API
+     */
+    static async triggerDeployment(
+        connectionId: string,
+        projectId: string,
+        target: 'production' | 'preview' = 'preview'
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Triggering Vercel deployment', {
+                component: 'VercelMCPService',
+                operation: 'triggerDeployment',
+                connectionId,
+                projectId,
+                target
+            });
+
+            // Get project details first to get the name
+            const project = await this.apiRequest<any>(
+                accessToken,
+                `/v9/projects/${projectId}`,
+                teamId
+            );
+
+            const deployment = await this.apiRequest<any>(
+                accessToken,
+                '/v13/deployments',
+                teamId,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        name: project.name,
+                        target
+                    })
                 }
-            }
-        }
+            );
 
-        return response.content;
+            loggingService.info('Vercel deployment triggered successfully', {
+                component: 'VercelMCPService',
+                operation: 'triggerDeployment',
+                connectionId,
+                projectId,
+                deploymentId: deployment.uid,
+                target
+            });
+
+            return deployment;
+        } catch (error: any) {
+            loggingService.error('Failed to trigger Vercel deployment', {
+                component: 'VercelMCPService',
+                operation: 'triggerDeployment',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Rollback deployment using Vercel REST API
+     */
+    static async rollbackDeployment(
+        connectionId: string,
+        projectId: string,
+        deploymentId: string
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Rolling back Vercel deployment', {
+                component: 'VercelMCPService',
+                operation: 'rollbackDeployment',
+                connectionId,
+                projectId,
+                deploymentId
+            });
+
+            // Get deployment details
+            const deployment = await this.apiRequest<any>(
+                accessToken,
+                `/v13/deployments/${deploymentId}`,
+                teamId
+            );
+
+            // Promote the old deployment to production
+            const result = await this.apiRequest<any>(
+                accessToken,
+                `/v10/projects/${deployment.name}/promote/${deploymentId}`,
+                teamId,
+                { method: 'POST' }
+            );
+
+            loggingService.info('Vercel deployment rolled back successfully', {
+                component: 'VercelMCPService',
+                operation: 'rollbackDeployment',
+                connectionId,
+                projectId,
+                deploymentId
+            });
+
+            return result;
+        } catch (error: any) {
+            loggingService.error('Failed to rollback Vercel deployment', {
+                component: 'VercelMCPService',
+                operation: 'rollbackDeployment',
+                connectionId,
+                projectId,
+                deploymentId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Add domain to project using Vercel REST API
+     */
+    static async addDomain(
+        connectionId: string,
+        projectId: string,
+        domain: string
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Adding domain to Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'addDomain',
+                connectionId,
+                projectId,
+                domain
+            });
+
+            const result = await this.apiRequest<any>(
+                accessToken,
+                `/v10/projects/${projectId}/domains`,
+                teamId,
+                {
+                    method: 'POST',
+                    body: JSON.stringify({ name: domain })
+                }
+            );
+
+            loggingService.info('Domain added to Vercel project successfully', {
+                component: 'VercelMCPService',
+                operation: 'addDomain',
+                connectionId,
+                projectId,
+                domain
+            });
+
+            return result;
+        } catch (error: any) {
+            loggingService.error('Failed to add domain to Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'addDomain',
+                connectionId,
+                projectId,
+                domain,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Remove domain from project using Vercel REST API
+     */
+    static async removeDomain(
+        connectionId: string,
+        projectId: string,
+        domain: string
+    ): Promise<void> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Removing domain from Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'removeDomain',
+                connectionId,
+                projectId,
+                domain
+            });
+
+            await this.apiRequest<any>(
+                accessToken,
+                `/v9/projects/${projectId}/domains/${domain}`,
+                teamId,
+                { method: 'DELETE' }
+            );
+
+            loggingService.info('Domain removed from Vercel project successfully', {
+                component: 'VercelMCPService',
+                operation: 'removeDomain',
+                connectionId,
+                projectId,
+                domain
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to remove domain from Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'removeDomain',
+                connectionId,
+                projectId,
+                domain,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get project analytics using Vercel REST API
+     */
+    static async getAnalytics(
+        connectionId: string,
+        projectId: string,
+        from?: Date,
+        to?: Date
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            const fromTime = from?.getTime() || Date.now() - 30 * 24 * 60 * 60 * 1000; // Default 30 days
+            const toTime = to?.getTime() || Date.now();
+
+            loggingService.info('Getting Vercel analytics', {
+                component: 'VercelMCPService',
+                operation: 'getAnalytics',
+                connectionId,
+                projectId,
+                fromTime,
+                toTime
+            });
+
+            const analytics = await this.apiRequest<any>(
+                accessToken,
+                `/v1/web-analytics/projects/${projectId}/data?from=${fromTime}&to=${toTime}`,
+                teamId
+            );
+
+            loggingService.info('Vercel analytics retrieved successfully', {
+                component: 'VercelMCPService',
+                operation: 'getAnalytics',
+                connectionId,
+                projectId
+            });
+
+            return analytics;
+        } catch (error: any) {
+            loggingService.error('Failed to get Vercel analytics', {
+                component: 'VercelMCPService',
+                operation: 'getAnalytics',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Handle API errors with appropriate messages
+     */
+    private static handleApiError(error: any): void {
+        if (error.response?.status === 401) {
+            throw new Error('Vercel authentication failed. Please reconnect your Vercel account.');
+        } else if (error.response?.status === 429) {
+            throw new Error('Vercel API rate limit exceeded. Please try again later.');
+        } else if (error.response?.status === 403) {
+            throw new Error('Insufficient permissions. Please check your Vercel OAuth scopes.');
+        } else if (error.response?.status === 404) {
+            throw new Error('Resource not found. Please check the project or deployment ID.');
+        }
     }
 
     /**
@@ -322,17 +906,66 @@ export class VercelMCPService {
     }
 
     /**
-     * Check if MCP server is available
+     * Check if Vercel API is accessible
      */
-    static async checkHealth(): Promise<boolean> {
+    static async checkHealth(connectionId: string): Promise<boolean> {
         try {
-            const response = await axios.get(`${VERCEL_MCP_SERVER_URL}/health`, {
-                timeout: 5000
-            });
-            return response.status === 200;
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+            await this.apiRequest<any>(accessToken, '/v2/user', teamId);
+            return true;
         } catch {
             return false;
         }
+    }
+
+    /**
+     * Search Vercel documentation (static - no API call needed)
+     * Returns helpful documentation links based on query
+     */
+    static async searchDocumentation(
+        _connectionId: string,
+        query: string
+    ): Promise<any[]> {
+        // This is a static helper that returns documentation links
+        // Vercel doesn't have a documentation search API
+        const docs: Record<string, { title: string; url: string }[]> = {
+            deploy: [
+                { title: 'Deployments Overview', url: 'https://vercel.com/docs/deployments/overview' },
+                { title: 'Deploy Button', url: 'https://vercel.com/docs/deploy-button' }
+            ],
+            domain: [
+                { title: 'Custom Domains', url: 'https://vercel.com/docs/projects/domains' },
+                { title: 'DNS Configuration', url: 'https://vercel.com/docs/projects/domains/dns' }
+            ],
+            env: [
+                { title: 'Environment Variables', url: 'https://vercel.com/docs/projects/environment-variables' }
+            ],
+            project: [
+                { title: 'Projects Overview', url: 'https://vercel.com/docs/projects/overview' }
+            ],
+            analytics: [
+                { title: 'Analytics', url: 'https://vercel.com/docs/analytics' }
+            ]
+        };
+
+        const lowerQuery = query.toLowerCase();
+        const results: { title: string; url: string }[] = [];
+
+        for (const [key, docList] of Object.entries(docs)) {
+            if (lowerQuery.includes(key)) {
+                results.push(...docList);
+            }
+        }
+
+        // If no specific matches, return general docs
+        if (results.length === 0) {
+            results.push(
+                { title: 'Vercel Documentation', url: 'https://vercel.com/docs' },
+                { title: 'Vercel API Reference', url: 'https://vercel.com/docs/rest-api' }
+            );
+        }
+
+        return results;
     }
 }
 
