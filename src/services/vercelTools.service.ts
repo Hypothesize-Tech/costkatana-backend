@@ -10,6 +10,25 @@ import { loggingService } from './logging.service';
 
 export class VercelToolsService {
   /**
+   * Parse input that might be a JSON object or plain string
+   * The AI sometimes passes {"project":"name"} instead of just "name"
+   */
+  private static parseProjectInput(input: string): string {
+    if (!input) return '';
+    
+    const trimmed = input.trim();
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return (parsed.project || parsed.projectName || parsed.name || trimmed).trim();
+      } catch {
+        // Not valid JSON, use as-is
+      }
+    }
+    return trimmed;
+  }
+
+  /**
    * Create Vercel tools for the agent
    */
   static createVercelTools(connectionId: string): DynamicTool[] {
@@ -127,8 +146,10 @@ export class VercelToolsService {
     return new DynamicTool({
       name: 'vercel_get_project',
       description: 'Get detailed information about a specific Vercel project. Input should be the project name or ID. Returns a JSON object with project details including id, name, framework, and latest deployments. Use this when user asks for details about a specific Vercel project.',
-      func: async (projectName: string) => {
+      func: async (input: string) => {
         try {
+          const projectName = this.parseProjectInput(input);
+          
           loggingService.info('AI calling Vercel tool: get_project', {
             connectionId,
             projectName,
@@ -159,7 +180,7 @@ export class VercelToolsService {
           loggingService.error('Vercel tool error: get_project', {
             error: error.message,
             connectionId,
-            projectName,
+            input,
           });
           return JSON.stringify({
             success: false,
@@ -177,9 +198,11 @@ export class VercelToolsService {
     return new DynamicTool({
       name: 'vercel_list_deployments',
       description: 'List all deployments for a specific Vercel project. Input REQUIRED: project name or ID. Returns a JSON object with count of deployments and array of deployment details. Use this when user asks about deployments, deployment history, or deployment status for a Vercel project.',
-      func: async (projectName: string) => {
+      func: async (input: string) => {
         try {
-          if (!projectName || !projectName.trim()) {
+          const projectName = this.parseProjectInput(input);
+
+          if (!projectName) {
             return JSON.stringify({
               success: false,
               error: 'Project name or ID is required. Please provide the project name or ID.',
@@ -218,7 +241,7 @@ export class VercelToolsService {
           loggingService.error('Vercel tool error: list_deployments', {
             error: error.message,
             connectionId,
-            projectName,
+            input,
           });
           return JSON.stringify({
             success: false,
@@ -292,9 +315,11 @@ export class VercelToolsService {
     return new DynamicTool({
       name: 'vercel_list_domains',
       description: 'List all domains for a specific Vercel project. Input REQUIRED: project name or ID. Returns a JSON object with count of domains and array of domain details. Use this when user asks about domains, custom domains, or domain configuration for a Vercel project.',
-      func: async (projectName: string) => {
+      func: async (input: string) => {
         try {
-          if (!projectName || !projectName.trim()) {
+          const projectName = this.parseProjectInput(input);
+          
+          if (!projectName) {
             return JSON.stringify({
               success: false,
               error: 'Project name or ID is required. Please provide the project name or ID.',
@@ -332,7 +357,7 @@ export class VercelToolsService {
           loggingService.error('Vercel tool error: list_domains', {
             error: error.message,
             connectionId,
-            projectName,
+            input,
           });
           return JSON.stringify({
             success: false,
@@ -350,9 +375,11 @@ export class VercelToolsService {
     return new DynamicTool({
       name: 'vercel_list_env_vars',
       description: 'List all environment variables for a specific Vercel project. Input REQUIRED: project name or ID. Returns a JSON object with count of env vars and array of env var details (keys only, not values). Use this when user asks about environment variables or project configuration.',
-      func: async (projectName: string) => {
+      func: async (input: string) => {
         try {
-          if (!projectName || !projectName.trim()) {
+          const projectName = this.parseProjectInput(input);
+          
+          if (!projectName) {
             return JSON.stringify({
               success: false,
               error: 'Project name or ID is required. Please provide the project name or ID.',
@@ -390,7 +417,7 @@ export class VercelToolsService {
           loggingService.error('Vercel tool error: list_env_vars', {
             error: error.message,
             connectionId,
-            projectName,
+            input,
           });
           return JSON.stringify({
             success: false,
@@ -408,9 +435,11 @@ export class VercelToolsService {
     return new DynamicTool({
       name: 'vercel_trigger_deployment',
       description: 'Trigger a new deployment for a Vercel project. Input REQUIRED: project name or ID. Returns a JSON object with deployment details. Use this when user asks to deploy, trigger deployment, or redeploy a Vercel project.',
-      func: async (projectName: string) => {
+      func: async (input: string) => {
         try {
-          if (!projectName || !projectName.trim()) {
+          const projectName = this.parseProjectInput(input);
+          
+          if (!projectName) {
             return JSON.stringify({
               success: false,
               error: 'Project name or ID is required. Please provide the project name or ID.',
@@ -448,7 +477,7 @@ export class VercelToolsService {
           loggingService.error('Vercel tool error: trigger_deployment', {
             error: error.message,
             connectionId,
-            projectName,
+            input,
           });
           return JSON.stringify({
             success: false,

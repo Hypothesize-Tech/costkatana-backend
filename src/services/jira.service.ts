@@ -906,6 +906,51 @@ export class JiraService {
     }
 
     /**
+     * Get users assignable to a project
+     * Uses the /user/assignable/search endpoint to get users that can be assigned to issues
+     * Supports both OAuth 2.0 (with cloudId) and API token (with siteUrl)
+     */
+    static async getProjectUsers(
+        siteUrlOrCloudId: string,
+        accessToken: string,
+        projectKey: string,
+        useCloudId: boolean = false
+    ): Promise<JiraUser[]> {
+        try {
+            const client = this.createClient(siteUrlOrCloudId, accessToken, useCloudId);
+            const response = await client.get('/user/assignable/search', {
+                params: {
+                    project: projectKey,
+                    maxResults: 100
+                }
+            });
+            
+            return (response.data || []).map((user: {
+                accountId: string;
+                accountType?: string;
+                displayName: string;
+                emailAddress?: string;
+                active?: boolean;
+            }) => ({
+                accountId: user.accountId,
+                accountType: user.accountType ?? 'atlassian',
+                displayName: user.displayName,
+                emailAddress: user.emailAddress,
+                active: user.active ?? true
+            }));
+        } catch (error: unknown) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            loggingService.error('Failed to get JIRA project users', {
+                error: errorMessage,
+                siteUrlOrCloudId,
+                useCloudId,
+                projectKey
+            });
+            throw error;
+        }
+    }
+
+    /**
      * Test JIRA integration
      */
     static async testIntegration(
