@@ -1544,7 +1544,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             
             while (actualMessage && (match = mentionPattern.exec(actualMessage)) !== null) {
                 const [, integration, part1, part2, subEntityType, subEntityId] = match;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel', 'aws'].includes(integration)) {
                     // If part2 exists, it's entityId (Pattern 1: @integration:entityType:entityId)
                     // If part2 doesn't exist but part1 exists, it might be a command (Pattern 2: @integration:command)
                     // Commands with dashes (like list-issues) will be in part1
@@ -1564,7 +1564,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             let simpleMatch;
             while (actualMessage && (simpleMatch = simpleMentionPattern.exec(actualMessage)) !== null) {
                 const [, integration] = simpleMatch;
-                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel'].includes(integration)) {
+                if (['jira', 'linear', 'slack', 'discord', 'github', 'webhook', 'gmail', 'calendar', 'drive', 'sheets', 'docs', 'slides', 'forms', 'google', 'vercel', 'aws'].includes(integration)) {
                     // Check if this integration is already in mentions
                     if (!mentions.some(m => m.integration === integration)) {
                         mentions.push({

@@ -226,7 +226,7 @@ export class LLMSecurityService {
             }
             
             // INTEGRATION WHITELIST: Detect Google/integration commands and bypass security for user's own data
-            const integrationMentions = /@(gmail|calendar|drive|sheets|docs|slides|forms|google|github|jira|linear|slack|discord|webhook|vercel)\b/i;
+            const integrationMentions = /@(gmail|calendar|drive|sheets|docs|slides|forms|google|github|jira|linear|slack|discord|webhook|vercel|aws)\b/i;
             const hasIntegrationMention = integrationMentions.test(prompt);
             
             if (hasIntegrationMention && userId) {
@@ -235,7 +235,7 @@ export class LLMSecurityService {
                     requestId,
                     userId,
                     source: context?.source,
-                    integrationDetected: prompt.match(integrationMentions)?.[1] || 'unknown',
+                    integrationDetected: prompt.match(integrationMentions)?.[1] ?? 'unknown',
                     promptPreview: prompt.substring(0, 100)
                 });
                 

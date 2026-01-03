@@ -6,6 +6,7 @@ import { tenantIsolationService } from '../services/aws/tenantIsolation.service'
 import { killSwitchService } from '../services/aws/killSwitch.service';
 import { stsCredentialService } from '../services/aws/stsCredential.service';
 import { permissionBoundaryService } from '../services/aws/permissionBoundary.service';
+import { permissionValidatorService } from '../services/aws/permissionValidator.service';
 import { intentParserService } from '../services/aws/intentParser.service';
 import { planGeneratorService } from '../services/aws/planGenerator.service';
 import { executionEngineService } from '../services/aws/executionEngine.service';
@@ -14,6 +15,12 @@ import { costAnomalyGuardService } from '../services/aws/costAnomalyGuard.servic
 import { auditLoggerService } from '../services/aws/auditLogger.service';
 import { auditAnchorService } from '../services/aws/auditAnchor.service';
 import { loggingService } from '../services/logging.service';
+// AWS Service Providers
+import { ec2ServiceProvider } from '../services/aws/providers/ec2.service';
+import { s3ServiceProvider } from '../services/aws/providers/s3.service';
+import { rdsServiceProvider } from '../services/aws/providers/rds.service';
+import { lambdaServiceProvider } from '../services/aws/providers/lambda.service';
+import { costExplorerServiceProvider } from '../services/aws/providers/costExplorer.service';
 
 export class AWSController {
   // ============================================================================
@@ -25,7 +32,16 @@ export class AWSController {
     try {
       const userId = (req as any).user?.id;
       const workspaceId = (req as any).user?.workspaceId || (req as any).workspaceId;
-      const { connectionName, description, environment, roleArn, permissionMode, allowedRegions } = req.body;
+      const { 
+        connectionName, 
+        description, 
+        environment, 
+        roleArn, 
+        permissionMode, 
+        allowedRegions, 
+        externalId: providedExternalId,
+        selectedPermissions // New: granular permissions from frontend
+      } = req.body;
 
       if (!userId) {
         return res.status(401).json({ error: 'Authentication required' });
@@ -50,8 +66,48 @@ export class AWSController {
         sessionId: tenantContext.sessionId,
       });
 
-      // Generate unique external ID
-      const externalIdResult = await externalIdService.generateUniqueExternalId(userId, environment || 'development');
+      // Use provided external ID or generate a new one
+      let externalIdResult;
+      if (providedExternalId) {
+        // User provided their own external ID (from CloudFormation template)
+        externalIdResult = await externalIdService.encryptExternalId(providedExternalId, userId);
+      } else {
+        // Generate unique external ID
+        externalIdResult = await externalIdService.generateUniqueExternalId(userId, environment || 'development');
+      }
+
+      // Extract AWS account ID from Role ARN
+      // Format: arn:aws:iam::123456789012:role/RoleName
+      const arnParts = roleArn.split(':');
+      const awsAccountId = arnParts[4]; // Account ID is at index 4
+
+      if (!awsAccountId || !/^\d{12}$/.test(awsAccountId)) {
+        return res.status(400).json({ error: 'Invalid Role ARN format. Expected: arn:aws:iam::{ACCOUNT_ID}:role/{ROLE_NAME}' });
+      }
+
+      // Process granular permissions into allowedServices format
+      const allowedServices: Array<{ service: string; actions: string[]; regions: string[] }> = [];
+      
+      if (selectedPermissions && typeof selectedPermissions === 'object') {
+        // selectedPermissions format: { 'ec2': ['ec2:Describe*', 'ec2:StartInstances'], 's3': ['s3:List*'] }
+        Object.entries(selectedPermissions).forEach(([serviceId, permissions]) => {
+          if (Array.isArray(permissions) && permissions.length > 0) {
+            allowedServices.push({
+              service: serviceId,
+              actions: permissions as string[],
+              regions: allowedRegions || ['*'], // Use specified regions or all
+            });
+          }
+        });
+
+        loggingService.info('Processed granular permissions', {
+          component: 'AWSController',
+          operation: 'createConnection',
+          userId,
+          servicesCount: allowedServices.length,
+          totalPermissions: allowedServices.reduce((sum, s) => sum + s.actions.length, 0),
+        });
+      }
 
       // Create connection
       const connection = new AWSConnection({
@@ -60,16 +116,18 @@ export class AWSController {
         description,
         environment: environment || 'development',
         roleArn,
+        awsAccountId, // Extract from roleArn
         externalId: externalIdResult.externalIdEncrypted,
         externalIdHash: externalIdResult.externalIdHash,
         permissionMode: permissionMode || 'read-only',
         allowedRegions: allowedRegions || ['us-east-1'],
+        allowedServices, // Store granular permissions
         createdBy: new Types.ObjectId(userId),
       });
 
       await connection.save();
 
-      // Log audit event
+      // Log audit event with permission details
       await auditLoggerService.logSuccess('connection_created', {
         userId: new Types.ObjectId(userId),
         connectionId: connection._id,
@@ -87,6 +145,7 @@ export class AWSController {
           roleArn: connection.roleArn,
           externalId: externalIdResult.externalId, // Return plain for initial setup
           permissionMode: connection.permissionMode,
+          allowedServices: connection.allowedServices, // Return granular permissions
           status: connection.status,
           createdAt: connection.createdAt,
         },
@@ -135,6 +194,8 @@ export class AWSController {
           environment: c.environment,
           roleArn: c.roleArn,
           permissionMode: c.permissionMode,
+          allowedServices: c.allowedServices, // Include granular permissions
+          allowedRegions: c.allowedRegions,
           executionMode: c.executionMode,
           status: c.status,
           health: c.health,
@@ -772,6 +833,541 @@ export class AWSController {
       return res.status(500).json({ error: 'Failed to get emergency stop instructions' });
     } finally {
       tenantIsolationService.clearTenantContext();
+    }
+  }
+
+  /**
+   * @route GET /aws/connections/:id/permissions
+   * @desc Get permission summary for a connection
+   * @access Private
+   */
+  static async getConnectionPermissions(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const summary = await permissionValidatorService.getPermissionSummary(new Types.ObjectId(id));
+      const hasWrite = await permissionValidatorService.hasWritePermissions(new Types.ObjectId(id));
+
+      return res.json({
+        success: true,
+        permissions: {
+          ...summary,
+          hasWritePermissions: hasWrite,
+          permissionMode: connection.permissionMode,
+          allowedServices: connection.allowedServices,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'Failed to get connection permissions' });
+    }
+  }
+
+  /**
+   * @route POST /aws/connections/:id/validate-action
+   * @desc Validate if an action is allowed for a connection
+   * @access Private
+   */
+  static async validateAction(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { action, region } = req.body;
+
+      if (!action) {
+        return res.status(400).json({ error: 'action is required' });
+      }
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const validation = await permissionValidatorService.validateAction(
+        new Types.ObjectId(id),
+        action,
+        region
+      );
+
+      return res.json({
+        success: true,
+        validation,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'Failed to validate action' });
+    }
+  }
+
+  // ============================================================================
+  // Resource Listing - EC2
+  // ============================================================================
+
+  /**
+   * @route GET /aws/connections/:id/ec2/instances
+   * @desc List EC2 instances
+   * @access Private
+   */
+  static async listEC2Instances(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { region } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const instances = await ec2ServiceProvider.listInstances(
+        connection,
+        undefined,
+        region as string | undefined
+      );
+
+      return res.json({
+        success: true,
+        instances,
+        count: instances.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to list EC2 instances', {
+        component: 'AWSController',
+        operation: 'listEC2Instances',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: 'Failed to list EC2 instances' });
+    }
+  }
+
+  /**
+   * @route POST /aws/connections/:id/ec2/stop
+   * @desc Stop EC2 instances
+   * @access Private
+   */
+  static async stopEC2Instances(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { instanceIds, region } = req.body;
+
+      if (!instanceIds || !Array.isArray(instanceIds) || instanceIds.length === 0) {
+        return res.status(400).json({ error: 'instanceIds array is required' });
+      }
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const result = await ec2ServiceProvider.stopInstances(connection, instanceIds, region);
+
+      await auditLoggerService.logSuccess('ec2_instances_stopped', {
+        userId: new Types.ObjectId(userId),
+        connectionId: connection._id,
+      }, { service: 'ec2', operation: 'StopInstances', resources: instanceIds });
+
+      return res.json({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      loggingService.error('Failed to stop EC2 instances', {
+        component: 'AWSController',
+        operation: 'stopEC2Instances',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to stop EC2 instances' });
+    }
+  }
+
+  /**
+   * @route POST /aws/connections/:id/ec2/start
+   * @desc Start EC2 instances
+   * @access Private
+   */
+  static async startEC2Instances(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { instanceIds, region } = req.body;
+
+      if (!instanceIds || !Array.isArray(instanceIds) || instanceIds.length === 0) {
+        return res.status(400).json({ error: 'instanceIds array is required' });
+      }
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const result = await ec2ServiceProvider.startInstances(connection, instanceIds, region);
+
+      await auditLoggerService.logSuccess('ec2_instances_started', {
+        userId: new Types.ObjectId(userId),
+        connectionId: connection._id,
+      }, { service: 'ec2', operation: 'StartInstances', resources: instanceIds });
+
+      return res.json({
+        success: true,
+        ...result,
+      });
+    } catch (error) {
+      loggingService.error('Failed to start EC2 instances', {
+        component: 'AWSController',
+        operation: 'startEC2Instances',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to start EC2 instances' });
+    }
+  }
+
+  // ============================================================================
+  // Resource Listing - S3
+  // ============================================================================
+
+  /**
+   * @route GET /aws/connections/:id/s3/buckets
+   * @desc List S3 buckets
+   * @access Private
+   */
+  static async listS3Buckets(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const buckets = await s3ServiceProvider.listBuckets(connection);
+
+      return res.json({
+        success: true,
+        buckets,
+        count: buckets.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to list S3 buckets', {
+        component: 'AWSController',
+        operation: 'listS3Buckets',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: 'Failed to list S3 buckets' });
+    }
+  }
+
+  // ============================================================================
+  // Resource Listing - RDS
+  // ============================================================================
+
+  /**
+   * @route GET /aws/connections/:id/rds/instances
+   * @desc List RDS instances
+   * @access Private
+   */
+  static async listRDSInstances(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { region } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const instances = await rdsServiceProvider.listInstances(connection, region as string | undefined);
+
+      return res.json({
+        success: true,
+        instances,
+        count: instances.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to list RDS instances', {
+        component: 'AWSController',
+        operation: 'listRDSInstances',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: 'Failed to list RDS instances' });
+    }
+  }
+
+  // ============================================================================
+  // Resource Listing - Lambda
+  // ============================================================================
+
+  /**
+   * @route GET /aws/connections/:id/lambda/functions
+   * @desc List Lambda functions
+   * @access Private
+   */
+  static async listLambdaFunctions(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { region } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const functions = await lambdaServiceProvider.listFunctions(connection, region as string | undefined);
+
+      return res.json({
+        success: true,
+        functions,
+        count: functions.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to list Lambda functions', {
+        component: 'AWSController',
+        operation: 'listLambdaFunctions',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: 'Failed to list Lambda functions' });
+    }
+  }
+
+  // ============================================================================
+  // Cost Explorer
+  // ============================================================================
+
+  /**
+   * @route GET /aws/connections/:id/costs
+   * @desc Get current month costs summary
+   * @access Private
+   */
+  static async getCosts(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const costs = await costExplorerServiceProvider.getCurrentMonthCosts(connection);
+
+      return res.json({
+        success: true,
+        ...costs,
+      });
+    } catch (error) {
+      loggingService.error('Failed to get costs', {
+        component: 'AWSController',
+        operation: 'getCosts',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get costs' });
+    }
+  }
+
+  /**
+   * @route GET /aws/connections/:id/costs/breakdown
+   * @desc Get cost breakdown by service
+   * @access Private
+   */
+  static async getCostBreakdown(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { startDate, endDate } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Default to last 30 days
+      const end = (endDate as string) || new Date().toISOString().split('T')[0];
+      const start = (startDate as string) || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const breakdown = await costExplorerServiceProvider.getCostBreakdownByService(connection, start, end);
+
+      return res.json({
+        success: true,
+        breakdown,
+        period: { start, end },
+      });
+    } catch (error) {
+      loggingService.error('Failed to get cost breakdown', {
+        component: 'AWSController',
+        operation: 'getCostBreakdown',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost breakdown' });
+    }
+  }
+
+  /**
+   * @route GET /aws/connections/:id/costs/forecast
+   * @desc Get cost forecast
+   * @access Private
+   */
+  static async getCostForecast(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { granularity } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      // Forecast for next 30 days
+      const start = new Date().toISOString().split('T')[0];
+      const end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const forecast = await costExplorerServiceProvider.getCostForecast(
+        connection,
+        start,
+        end,
+        (granularity as 'DAILY' | 'MONTHLY') || 'DAILY'
+      );
+
+      return res.json({
+        success: true,
+        forecast,
+        period: { start, end },
+      });
+    } catch (error) {
+      loggingService.error('Failed to get cost forecast', {
+        component: 'AWSController',
+        operation: 'getCostForecast',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost forecast' });
+    }
+  }
+
+  /**
+   * @route GET /aws/connections/:id/costs/anomalies
+   * @desc Get cost anomalies
+   * @access Private
+   */
+  static async getCostAnomalies(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+      const { startDate, endDate } = req.query;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const anomalies = await costExplorerServiceProvider.getAnomalies(
+        connection,
+        startDate as string | undefined,
+        endDate as string | undefined
+      );
+
+      return res.json({
+        success: true,
+        anomalies,
+        count: anomalies.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to get cost anomalies', {
+        component: 'AWSController',
+        operation: 'getCostAnomalies',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get cost anomalies' });
+    }
+  }
+
+  /**
+   * @route GET /aws/connections/:id/costs/optimize
+   * @desc Get cost optimization recommendations
+   * @access Private
+   */
+  static async getOptimizationRecommendations(req: Request, res: Response): Promise<Response> {
+    try {
+      const userId = (req as any).user?.id;
+      const { id } = req.params;
+
+      const connection = await AWSConnection.findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!connection) {
+        return res.status(404).json({ error: 'Connection not found' });
+      }
+
+      const insights = await costExplorerServiceProvider.getOptimizationInsights(connection);
+
+      return res.json({
+        success: true,
+        recommendations: insights,
+        count: insights.length,
+      });
+    } catch (error) {
+      loggingService.error('Failed to get optimization recommendations', {
+        component: 'AWSController',
+        operation: 'getOptimizationRecommendations',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to get optimization recommendations' });
     }
   }
 }

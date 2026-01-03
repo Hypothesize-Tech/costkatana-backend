@@ -39,6 +39,117 @@ router.delete('/connections/:id', AWSController.deleteConnection);
  */
 router.post('/connections/:id/test', AWSController.testConnection);
 
+/**
+ * @route GET /aws/connections/:id/permissions
+ * @desc Get permission summary for a connection
+ * @access Private
+ */
+router.get('/connections/:id/permissions', AWSController.getConnectionPermissions);
+
+/**
+ * @route POST /aws/connections/:id/validate-action
+ * @desc Validate if an action is allowed
+ * @access Private
+ */
+router.post('/connections/:id/validate-action', AWSController.validateAction);
+
+// ============================================================================
+// EC2 Resources
+// ============================================================================
+
+/**
+ * @route GET /aws/connections/:id/ec2/instances
+ * @desc List EC2 instances
+ * @access Private
+ */
+router.get('/connections/:id/ec2/instances', AWSController.listEC2Instances);
+
+/**
+ * @route POST /aws/connections/:id/ec2/stop
+ * @desc Stop EC2 instances
+ * @access Private
+ */
+router.post('/connections/:id/ec2/stop', AWSController.stopEC2Instances);
+
+/**
+ * @route POST /aws/connections/:id/ec2/start
+ * @desc Start EC2 instances
+ * @access Private
+ */
+router.post('/connections/:id/ec2/start', AWSController.startEC2Instances);
+
+// ============================================================================
+// S3 Resources
+// ============================================================================
+
+/**
+ * @route GET /aws/connections/:id/s3/buckets
+ * @desc List S3 buckets
+ * @access Private
+ */
+router.get('/connections/:id/s3/buckets', AWSController.listS3Buckets);
+
+// ============================================================================
+// RDS Resources
+// ============================================================================
+
+/**
+ * @route GET /aws/connections/:id/rds/instances
+ * @desc List RDS instances
+ * @access Private
+ */
+router.get('/connections/:id/rds/instances', AWSController.listRDSInstances);
+
+// ============================================================================
+// Lambda Resources
+// ============================================================================
+
+/**
+ * @route GET /aws/connections/:id/lambda/functions
+ * @desc List Lambda functions
+ * @access Private
+ */
+router.get('/connections/:id/lambda/functions', AWSController.listLambdaFunctions);
+
+// ============================================================================
+// Cost Explorer
+// ============================================================================
+
+/**
+ * @route GET /aws/connections/:id/costs
+ * @desc Get current month costs summary
+ * @access Private
+ */
+router.get('/connections/:id/costs', AWSController.getCosts);
+
+/**
+ * @route GET /aws/connections/:id/costs/breakdown
+ * @desc Get cost breakdown by service
+ * @access Private
+ */
+router.get('/connections/:id/costs/breakdown', AWSController.getCostBreakdown);
+
+/**
+ * @route GET /aws/connections/:id/costs/forecast
+ * @desc Get cost forecast
+ * @access Private
+ */
+router.get('/connections/:id/costs/forecast', AWSController.getCostForecast);
+
+/**
+ * @route GET /aws/connections/:id/costs/anomalies
+ * @desc Get cost anomalies
+ * @access Private
+ */
+router.get('/connections/:id/costs/anomalies', AWSController.getCostAnomalies);
+
+/**
+ * @route GET /aws/connections/:id/costs/optimize
+ * @desc Get cost optimization recommendations
+ * @access Private
+ */
+router.get('/connections/:id/costs/optimize', AWSController.getOptimizationRecommendations);
+
 // ============================================================================
 // Intent & Plan
 // ============================================================================

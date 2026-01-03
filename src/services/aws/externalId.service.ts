@@ -139,6 +139,41 @@ class ExternalIdService {
       .update(externalId)
       .digest('hex');
   }
+
+  /**
+   * Encrypt a user-provided external ID
+   * Used when the user provides their own external ID (from CloudFormation template)
+   */
+  public async encryptExternalId(
+    externalId: string,
+    customerId: string
+  ): Promise<ExternalIdGenerationResult> {
+    // Create SHA-256 hash for audit proof
+    const externalIdHash = this.hashExternalId(externalId);
+    
+    // Check for collision
+    const exists = await AWSConnection.findOne({ externalIdHash });
+    if (exists) {
+      throw new Error('External ID already exists. Please generate a new CloudFormation template.');
+    }
+    
+    // Encrypt the external ID for storage
+    const externalIdEncrypted = encryptExternalId(externalId);
+    
+    loggingService.info('Encrypted user-provided external ID', {
+      component: 'ExternalIdService',
+      operation: 'encryptExternalId',
+      customerId,
+      hashPrefix: externalIdHash.substring(0, 8),
+    });
+    
+    return {
+      externalId,
+      externalIdEncrypted,
+      externalIdHash,
+      createdAt: new Date(),
+    };
+  }
   
   /**
    * Validate external ID format

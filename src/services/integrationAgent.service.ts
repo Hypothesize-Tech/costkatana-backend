@@ -16,7 +16,8 @@ import {
 import { 
   getSchema, 
   getActionsForIntegration,
-  getQuestionForParameter 
+  getQuestionForParameter,
+  AWSAction
 } from '../schemas/integrationTools.schema';
 import { IntegrationOptionProviderService } from './integrationOptionProvider.service';
 import { loggingService } from './logging.service';
@@ -237,6 +238,19 @@ export class IntegrationAgentService {
       search: ['search', 'find', 'look for'],
       create: ['create', 'new', 'add'],
       delete: ['delete', 'remove'],
+      costs: ['cost', 'spending', 'bill', 'how much', 'usage cost', 'aws cost'],
+      cost_breakdown: ['cost breakdown', 'breakdown by service', 'service cost', 'which service'],
+      cost_forecast: ['forecast', 'predict', 'future cost', 'next month cost'],
+      cost_anomalies: ['anomal', 'unusual spending', 'spike', 'unexpected cost'],
+      list_ec2: ['list ec2', 'show ec2', 'ec2 instance', 'my instance', 'running instance', 'server'],
+      stop_ec2: ['stop ec2', 'stop instance', 'shutdown', 'turn off'],
+      start_ec2: ['start ec2', 'start instance', 'turn on', 'boot'],
+      idle_instances: ['idle', 'underutilized', 'unused', 'not used', 'waste'],
+      list_s3: ['list s3', 'show s3', 's3 bucket', 'bucket', 'storage'],
+      list_rds: ['list rds', 'show rds', 'database', 'rds instance'],
+      list_lambda: ['list lambda', 'show lambda', 'lambda function', 'serverless'],
+      optimize: ['optimize', 'recommendation', 'savings', 'reduce cost', 'save money'],
+      status: ['status', 'connection', 'overview', 'health'],
     };
 
     // Check each pattern
@@ -284,6 +298,7 @@ If you can't determine the action, respond with "unknown".`;
       gmail: 'list',
       drive: 'list',
       calendar: 'list',
+      aws: 'status',
     };
 
     return defaultActions[integration] || null;
@@ -494,6 +509,24 @@ JSON response:`;
     userId: string
   ): Promise<IntegrationAgentResponse> {
     try {
+      // Handle AWS commands through the dedicated AWS chat handler
+      if (integration === 'aws') {
+        const { awsChatHandlerService } = await import('./aws/awsChatHandler.service');
+        
+        const result = await awsChatHandlerService.processCommand({
+          userId,
+          action: action as AWSAction,
+          params,
+        });
+
+        return {
+          success: result.success,
+          message: result.message,
+          data: result.data as Record<string, unknown> | undefined,
+          error: result.error,
+        };
+      }
+
       // Import the IntegrationChatService to reuse existing execution logic
       const { IntegrationChatService } = await import('./integrationChat.service');
 

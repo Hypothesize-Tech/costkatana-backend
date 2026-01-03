@@ -33,7 +33,18 @@ export type AuditEventType =
   | 'cost_anomaly_detected'
   | 'simulation_executed'
   | 'credentials_issued'
-  | 'credentials_expired';
+  | 'credentials_expired'
+  | 'ec2_instances_listed'
+  | 'ec2_instances_stopped'
+  | 'ec2_instances_started'
+  | 's3_buckets_listed'
+  | 'rds_instances_listed'
+  | 'lambda_functions_listed'
+  | 'costs_retrieved'
+  | 'cost_breakdown_retrieved'
+  | 'cost_forecast_retrieved'
+  | 'cost_anomalies_retrieved'
+  | 'optimization_recommendations_retrieved';
 
 export type AuditResult = 'success' | 'failure' | 'blocked' | 'pending';
 

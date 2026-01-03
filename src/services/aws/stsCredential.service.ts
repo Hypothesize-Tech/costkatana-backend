@@ -60,7 +60,12 @@ const getScopedPolicy = (connection: IAWSConnection): string => {
   // Build allowed actions from connection config
   for (const service of connection.allowedServices) {
     for (const action of service.actions) {
-      allowedActions.push(`${service.service}:${action}`);
+      // Check if action already has service prefix to avoid duplication
+      if (action.includes(':')) {
+        allowedActions.push(action);
+      } else {
+        allowedActions.push(`${service.service}:${action}`);
+      }
     }
   }
   

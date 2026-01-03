@@ -1,3 +1,4 @@
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { loggingService } from '../logging.service';
 import { auditLoggerService } from './auditLogger.service';
@@ -185,7 +186,7 @@ class AuditAnchorService {
    * Sign an anchor for non-repudiation
    */
   private signAnchor(record: AnchorRecord): string {
-    const signingKey = process.env.AUDIT_ANCHOR_SIGNING_KEY || 'costkatana-anchor-signing-key';
+    const signingKey = process.env.AUDIT_ANCHOR_SIGNING_KEY ?? 'costkatana-anchor-signing-key';
     
     const content = JSON.stringify({
       anchorId: record.anchorId,
@@ -281,7 +282,7 @@ class AuditAnchorService {
    * Get anchor by ID
    */
   public getAnchor(anchorId: string): AnchorRecord | null {
-    return this.anchorRecords.get(anchorId) || null;
+    return this.anchorRecords.get(anchorId) ?? null;
   }
   
   /**
@@ -303,7 +304,7 @@ class AuditAnchorService {
    * Get daily summary
    */
   public getDailySummary(date: string): DailyAnchorSummary | null {
-    return this.dailySummaries.get(date) || null;
+    return this.dailySummaries.get(date) ?? null;
   }
   
   /**
@@ -351,11 +352,11 @@ class AuditAnchorService {
     
     setTimeout(() => {
       // Create daily anchor
-      this.createDailyAnchor();
+      void this.createDailyAnchor();
       
       // Schedule next day
       setInterval(() => {
-        this.createDailyAnchor();
+        void this.createDailyAnchor();
       }, 24 * 60 * 60 * 1000);
     }, msUntilMidnight);
     

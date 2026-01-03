@@ -98,7 +98,13 @@ const BANNED_ACTIONS: Set<string> = new Set([
   // Billing - Never allow billing access
   'billing:*',
   'aws-portal:*',
-  'ce:*',  // Cost Explorer write operations
+  'ce:CreateCostCategoryDefinition',  // Cost Explorer write operations
+  'ce:DeleteCostCategoryDefinition',
+  'ce:UpdateCostCategoryDefinition',
+  'ce:CreateAnomalyMonitor',
+  'ce:CreateAnomalySubscription',
+  'ce:DeleteAnomalyMonitor',
+  'ce:DeleteAnomalySubscription',
   'cur:*',  // Cost and Usage Reports
   
   // Support - Sensitive
@@ -233,6 +239,22 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
   ['sts', new Set([
     'GetCallerIdentity',
   ])],
+  ['ce', new Set([
+    'GetCostAndUsage',
+    'GetCostForecast',
+    'GetAnomalies',
+    'GetDimensionValues',
+    'GetTags',
+    'GetReservationCoverage',
+    'GetReservationPurchaseRecommendation',
+    'GetReservationUtilization',
+    'GetRightsizingRecommendation',
+    'GetSavingsPlansCoverage',
+    'GetSavingsPlansUtilization',
+    'GetSavingsPlansPurchaseRecommendation',
+    'DescribeCostCategoryDefinition',
+    'ListCostCategoryDefinitions',
+  ])],
 ]);
 
 // Risk levels for allowed actions
@@ -245,6 +267,9 @@ const ACTION_RISK_LEVELS: Map<string, RiskLevel> = new Map([
   ['lambda:Get*', 'low'],
   ['lambda:List*', 'low'],
   ['cloudwatch:*', 'low'],
+  ['ce:Get*', 'low'],
+  ['ce:Describe*', 'low'],
+  ['ce:List*', 'low'],
   
   // Start/Stop - Medium risk
   ['ec2:StopInstances', 'medium'],
