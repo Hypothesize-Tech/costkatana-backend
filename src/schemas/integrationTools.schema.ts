@@ -417,6 +417,91 @@ export const calendarSchemas = {
 };
 
 // ============================================================================
+// AWS SCHEMAS
+// ============================================================================
+
+export const awsSchemas = {
+  // Cost Explorer
+  costs: z.object({
+    action: z.literal('costs'),
+    startDate: z.string().optional().describe('Start date (YYYY-MM-DD, defaults to 30 days ago)'),
+    endDate: z.string().optional().describe('End date (YYYY-MM-DD, defaults to today)'),
+    granularity: z.enum(['DAILY', 'MONTHLY', 'HOURLY']).optional().describe('Cost granularity'),
+    groupBy: z.enum(['SERVICE', 'REGION', 'LINKED_ACCOUNT']).optional().describe('Group costs by dimension'),
+  }).describe('Get AWS cost and usage data'),
+
+  cost_breakdown: z.object({
+    action: z.literal('cost_breakdown'),
+    startDate: z.string().optional().describe('Start date (YYYY-MM-DD)'),
+    endDate: z.string().optional().describe('End date (YYYY-MM-DD)'),
+  }).describe('Get cost breakdown by AWS service'),
+
+  cost_forecast: z.object({
+    action: z.literal('cost_forecast'),
+    days: z.number().optional().describe('Number of days to forecast (default: 30)'),
+    granularity: z.enum(['DAILY', 'MONTHLY']).optional().describe('Forecast granularity'),
+  }).describe('Get AWS cost forecast'),
+
+  cost_anomalies: z.object({
+    action: z.literal('cost_anomalies'),
+    days: z.number().optional().describe('Number of days to check for anomalies (default: 30)'),
+  }).describe('List cost anomalies'),
+
+  // EC2
+  list_ec2: z.object({
+    action: z.literal('list_ec2'),
+    region: z.string().optional().describe('AWS region (e.g., us-east-1)'),
+    state: z.enum(['running', 'stopped', 'all']).optional().describe('Filter by instance state'),
+  }).describe('List EC2 instances'),
+
+  stop_ec2: z.object({
+    action: z.literal('stop_ec2'),
+    instanceIds: z.array(z.string().min(1)).min(1).describe('EC2 instance IDs to stop'),
+    region: z.string().optional().describe('AWS region'),
+  }).describe('Stop EC2 instances'),
+
+  start_ec2: z.object({
+    action: z.literal('start_ec2'),
+    instanceIds: z.array(z.string().min(1)).min(1).describe('EC2 instance IDs to start'),
+    region: z.string().optional().describe('AWS region'),
+  }).describe('Start EC2 instances'),
+
+  idle_instances: z.object({
+    action: z.literal('idle_instances'),
+    cpuThreshold: z.number().optional().describe('CPU utilization threshold % (default: 5)'),
+    days: z.number().optional().describe('Number of days to analyze (default: 7)'),
+    region: z.string().optional().describe('AWS region'),
+  }).describe('Find idle/underutilized EC2 instances'),
+
+  // S3
+  list_s3: z.object({
+    action: z.literal('list_s3'),
+  }).describe('List S3 buckets'),
+
+  // RDS
+  list_rds: z.object({
+    action: z.literal('list_rds'),
+    region: z.string().optional().describe('AWS region'),
+  }).describe('List RDS database instances'),
+
+  // Lambda
+  list_lambda: z.object({
+    action: z.literal('list_lambda'),
+    region: z.string().optional().describe('AWS region'),
+  }).describe('List Lambda functions'),
+
+  // General
+  optimize: z.object({
+    action: z.literal('optimize'),
+    service: z.enum(['ec2', 'rds', 'lambda', 's3', 'all']).optional().describe('Service to optimize'),
+  }).describe('Get cost optimization recommendations'),
+
+  status: z.object({
+    action: z.literal('status'),
+  }).describe('Get AWS connection status and overview'),
+};
+
+// ============================================================================
 // SCHEMA REGISTRY
 // ============================================================================
 
@@ -435,6 +520,7 @@ export const integrationSchemas = {
   sheets: sheetsSchemas,
   gdocs: gdocsSchemas,
   calendar: calendarSchemas,
+  aws: awsSchemas,
   // Aliases
   google: gmailSchemas, // Default to gmail for @google
 } as const;
@@ -563,6 +649,36 @@ export const parameterQuestions: Record<string, { question: string; placeholder:
     placeholder: 'Enter end time...',
   },
   
+  // AWS
+  instanceIds: {
+    question: 'Which EC2 instance(s) would you like to use?',
+    placeholder: 'Enter instance ID (e.g., i-1234567890abcdef0)...',
+  },
+  region: {
+    question: 'Which AWS region?',
+    placeholder: 'Enter region (e.g., us-east-1)...',
+  },
+  startDate: {
+    question: 'What start date would you like?',
+    placeholder: 'Enter start date (YYYY-MM-DD)...',
+  },
+  endDate: {
+    question: 'What end date would you like?',
+    placeholder: 'Enter end date (YYYY-MM-DD)...',
+  },
+  granularity: {
+    question: 'What granularity would you like?',
+    placeholder: 'Select granularity (DAILY, MONTHLY, HOURLY)...',
+  },
+  service: {
+    question: 'Which AWS service would you like to optimize?',
+    placeholder: 'Select service (ec2, rds, lambda, s3, all)...',
+  },
+  cpuThreshold: {
+    question: 'What CPU threshold should be considered idle?',
+    placeholder: 'Enter CPU % threshold (default: 5)...',
+  },
+  
   // Generic
   query: {
     question: 'What would you like to search for?',
@@ -599,3 +715,4 @@ export type DriveAction = keyof typeof driveSchemas;
 export type SheetsAction = keyof typeof sheetsSchemas;
 export type GdocsAction = keyof typeof gdocsSchemas;
 export type CalendarAction = keyof typeof calendarSchemas;
+export type AWSAction = keyof typeof awsSchemas;

@@ -96,6 +96,35 @@ const MultiAgentStateAnnotation = Annotation.Root({
         reducer: (current: string[], update: string[]) => current.concat(update),
         default: () => [],
     }),
+    // Add support for IntegrationSelector
+    userInputCollection: Annotation<{
+        active: boolean;
+        currentField?: any;
+        collectedData: Record<string, any>;
+        progress: number;
+    }>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => ({
+            active: false,
+            collectedData: {},
+            progress: 0
+        }),
+    }),
+    strategyFormation: Annotation<{
+        questions: string[];
+        responses: Record<string, any>;
+        currentQuestion: number;
+        isComplete: boolean;
+        adaptiveQuestions?: string[];
+    }>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => ({
+            questions: [],
+            responses: {},
+            currentQuestion: 0,
+            isComplete: false
+        }),
+    }),
 });
 
 type MultiAgentState = typeof MultiAgentStateAnnotation.State;
@@ -114,6 +143,12 @@ export class MultiAgentFlowService {
     
     // Semantic cache with LRU limits
     private semanticCache: LRUCache<string, { response: string; embedding: number[]; timestamp: number; hits: number }>;
+    
+    // Langchain Integration
+    private langchainIntegrationEnabled = false;
+    private langchainCoordinatorAgent?: ChatBedrockConverse;
+    private langchainStrategyAgent?: ChatBedrockConverse;
+    
 
     constructor() {
         // Increase EventEmitter limits to prevent memory leak warnings
@@ -147,6 +182,48 @@ export class MultiAgentFlowService {
                 loggingService.warn(`🔄 Multi-agent retry attempt ${attempt}: ${error.message}`);
             }
         });
+        
+        // Initialize Langchain integration
+        this.initializeLangchainIntegration();
+    }
+
+    /**
+     * Initialize Langchain integration for enhanced coordination
+     */
+    private initializeLangchainIntegration(): void {
+        try {
+            // Create Langchain Coordinator Agent
+            this.langchainCoordinatorAgent = new ChatBedrockConverse({
+                model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.6,
+                maxTokens: 6000,
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                },
+            });
+            
+            // Create Langchain Strategy Agent
+            this.langchainStrategyAgent = new ChatBedrockConverse({
+                model: 'amazon.nova-pro-v1:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.7,
+                maxTokens: 4000,
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                },
+            });
+            
+            this.langchainIntegrationEnabled = true;
+            loggingService.info('✅ Langchain integration enabled for MultiAgentFlowService');
+        } catch (error) {
+            loggingService.warn('⚠️ Langchain integration failed to initialize', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            this.langchainIntegrationEnabled = false;
+        }
     }
 
     private initializeAgents() {
@@ -465,6 +542,11 @@ export class MultiAgentFlowService {
 
     private async masterAgentNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
+            // Use Langchain coordination if enabled
+            if (this.langchainIntegrationEnabled && this.langchainCoordinatorAgent) {
+                return await this.masterAgentWithLangchain(state);
+            }
+            
             // Check if web scraping failed and provide fallback
             if (state.metadata?.scrapingFailed) {
                 const lastMessage = state.messages[state.messages.length - 1];
@@ -522,6 +604,69 @@ Would you like me to help you with anything else, or would you prefer to check t
                 agentPath: [...(state.agentPath || []), 'master_agent_error'],
                 failureCount: (state.failureCount || 0) + 1
             };
+        }
+    }
+
+    /**
+     * Enhanced master agent with Langchain coordination
+     */
+    private async masterAgentWithLangchain(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        try {
+            loggingService.info('🔗 Master agent using Langchain coordination');
+            
+            const lastMessage = state.messages[state.messages.length - 1];
+            
+            // First, use Langchain coordinator to analyze the situation
+            const coordinationPrompt = new HumanMessage(`
+                Analyze this multi-agent coordination state and provide strategic guidance:
+                
+                Current Message: ${lastMessage.content}
+                Agent Path: ${state.agentPath?.join(' -> ') || 'start'}
+                Optimizations: ${state.optimizationsApplied?.join(', ') || 'none'}
+                
+                Provide:
+                1. Coordination strategy for optimal response
+                2. Integration points across agents
+                3. Autonomous decision opportunities
+                4. User engagement strategy
+            `);
+            
+            const coordinationResponse = await this.langchainCoordinatorAgent!.invoke([coordinationPrompt]);
+            
+            // Then use the strategy agent to form the final response
+            const strategyPrompt = new HumanMessage(`
+                Based on this coordination analysis:
+                ${coordinationResponse.content}
+                
+                And the original request:
+                ${lastMessage.content}
+                
+                Generate a world-class response that:
+                1. Demonstrates advanced multi-agent coordination
+                2. Shows proactive insights and autonomous capabilities
+                3. Provides actionable next steps
+                4. Goes beyond traditional chatbot responses
+            `);
+            
+            const strategyResponse = await this.langchainStrategyAgent!.invoke([strategyPrompt]);
+            
+            return {
+                messages: [new AIMessage(strategyResponse.content as string)],
+                currentAgent: 'master_langchain',
+                agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                optimizationsApplied: [...(state.optimizationsApplied || []), 'langchain_coordination'],
+                metadata: {
+                    ...state.metadata,
+                    langchainEnhanced: true,
+                    coordinationAnalysis: coordinationResponse.content
+                }
+            };
+            
+        } catch (error) {
+            loggingService.error('Langchain master agent failed, falling back', { error });
+            // Remove the Langchain flag and retry with regular master agent
+            this.langchainIntegrationEnabled = false;
+            return this.masterAgentNode(state);
         }
     }
 

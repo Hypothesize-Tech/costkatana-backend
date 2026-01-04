@@ -96,6 +96,38 @@ export class PromptFirewallService {
     private static readonly MAX_SERVICE_FAILURES = 3;
     private static readonly CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
     private static lastServiceFailureTime: number = 0;
+
+    // Whitelisted integration patterns - these are legitimate platform commands
+    private static readonly INTEGRATION_PATTERNS = [
+        /@aws(?::|$|\s)/i,
+        /@vercel(?::|$|\s)/i,
+        /@github(?::|$|\s)/i,
+        /@google(?::|$|\s)/i,
+        /@jira(?::|$|\s)/i,
+        /@linear(?::|$|\s)/i,
+        /@slack(?::|$|\s)/i,
+        /@discord(?::|$|\s)/i,
+        /@drive(?::|$|\s)/i,
+        /@sheets(?::|$|\s)/i,
+        /@docs(?::|$|\s)/i,
+        /@webhook(?::|$|\s)/i,
+        /@calendar(?::|$|\s)/i,
+        /@gmail(?::|$|\s)/i,
+        /@forms(?::|$|\s)/i,
+        /@slides(?::|$|\s)/i
+    ];
+
+    /**
+     * Check if the prompt is a whitelisted integration command
+     */
+    private static isIntegrationCommand(prompt: string): boolean {
+        for (const pattern of this.INTEGRATION_PATTERNS) {
+            if (pattern.test(prompt)) {
+                return true;
+            }
+        }
+        return false;
+    }
     
     // Initialize Bedrock client
     static initialize() {
@@ -138,6 +170,22 @@ export class PromptFirewallService {
     ): Promise<ThreatDetectionResult> {
         try {
             this.initialize();
+
+            // WHITELIST: Allow integration mentions (@aws, @vercel, @github, etc.)
+            // These are legitimate platform commands and should never be blocked
+            if (this.isIntegrationCommand(prompt as string)) {
+                loggingService.debug('Integration command detected - whitelisted', {
+                    requestId,
+                    promptPreview: prompt.substring(0, 100)
+                });
+                return {
+                    isBlocked: false,
+                    confidence: 0.0,
+                    reason: 'Integration command - whitelisted',
+                    stage: 'prompt-guard',
+                    containmentAction: 'allow'
+                };
+            }
 
             // Pre-process: Extract text from HTML if present
             const preparedContent = HTMLSecurityService.prepareContentForScanning(prompt);

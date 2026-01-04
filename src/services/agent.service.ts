@@ -3,6 +3,8 @@ import { AgentExecutor, createReactAgent } from "langchain/agents";
 import { Tool } from "@langchain/core/tools";
 import { ChatPromptTemplate, HumanMessagePromptTemplate, SystemMessagePromptTemplate } from "@langchain/core/prompts";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
+import { StateGraph, Annotation } from "@langchain/langgraph";
+import { BaseMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { KnowledgeBaseTool } from "../tools/knowledgeBase.tool";
 import { MongoDbReaderTool } from "../tools/mongoDbReader.tool";
 import { ProjectManagerTool } from "../tools/projectManager.tool";
@@ -48,6 +50,7 @@ export interface AgentResponse {
         knowledgeEnhanced?: boolean;
         knowledgeContextLength?: number;
         fromCache?: boolean;
+        langchainEnhanced?: boolean;
     };
     thinking?: {
         title: string;
@@ -84,6 +87,11 @@ export class AgentService {
     private toolFactories: Map<string, ToolFactory> = new Map();
     private responseCache: Map<string, CachedResponse> = new Map();
     private userContextCache: Map<string, { context: string; timestamp: number }> = new Map();
+    
+    // Langchain Integration
+    private langchainGraph?: StateGraph<any>;
+    private langchainAgents: Map<string, ChatBedrockConverse> = new Map();
+    private isLangchainEnabled = false;
     
     // Cache configuration
     private readonly RESPONSE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -132,8 +140,160 @@ export class AgentService {
             }
         });
         
+        void this.initializeLangchainIntegration();
+        
         // Start cache cleanup interval
         this.startCacheCleanup();
+    }
+
+    /**
+     * Initialize Langchain integration for enhanced multi-agent coordination
+     */
+    private async initializeLangchainIntegration(): Promise<void> {
+        try {
+            loggingService.info('🔗 Initializing Langchain integration for AgentService');
+            
+            // Create specialized Langchain agents
+            this.langchainAgents.set('tool_coordinator', new ChatBedrockConverse({
+                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.5,
+                maxTokens: 4000,
+            }));
+            
+            this.langchainAgents.set('optimization_specialist', new ChatBedrockConverse({
+                model: 'amazon.nova-pro-v1:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                temperature: 0.7,
+                maxTokens: 6000,
+            }));
+            
+            // Build Langchain state graph for tool coordination
+            const AgentState = Annotation.Root({
+                messages: Annotation<BaseMessage[]>({
+                    reducer: (x, y) => x.concat(y),
+                }),
+                toolCalls: Annotation<string[]>({
+                    reducer: (x, y) => [...(x || []), ...(y || [])],
+                    default: () => [],
+                }),
+                toolResults: Annotation<Record<string, any>>({
+                    reducer: (x, y) => y ?? x,
+                    default: () => ({}),
+                }),
+                finalResponse: Annotation<string>({
+                    reducer: (x, y) => y ?? x,
+                }),
+            });
+            
+            const workflow = new StateGraph(AgentState)
+                .addNode('analyze', this.analyzeWithLangchain.bind(this))
+                .addNode('execute_tools', this.executeToolsWithLangchain.bind(this))
+                .addNode('synthesize', this.synthesizeWithLangchain.bind(this))
+                .addEdge('__start__', 'analyze')
+                .addEdge('analyze', 'execute_tools')
+                .addEdge('execute_tools', 'synthesize')
+                .addEdge('synthesize', '__end__');
+            
+            this.langchainGraph = workflow.compile() as any;
+            this.isLangchainEnabled = true;
+            
+            loggingService.info('✅ Langchain integration initialized successfully');
+        } catch (error) {
+            loggingService.warn('⚠️ Langchain integration failed to initialize', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            this.isLangchainEnabled = false;
+        }
+    }
+
+    /**
+     * Analyze query with Langchain for better tool selection
+     */
+    private async analyzeWithLangchain(state: any): Promise<any> {
+        const agent = this.langchainAgents.get('tool_coordinator');
+        if (!agent) return state;
+        
+        const lastMessage = state.messages[state.messages.length - 1];
+        const analysis = await agent.invoke([
+            new SystemMessage('Analyze the query and determine which tools to use.'),
+            lastMessage
+        ]);
+        
+        // Extract tool recommendations (simplified)
+        const toolCalls = this.extractToolRecommendations(analysis.content as string);
+        
+        return {
+            ...state,
+            toolCalls
+        };
+    }
+
+    /**
+     * Execute tools with Langchain coordination
+     */
+    private async executeToolsWithLangchain(state: any): Promise<any> {
+        const toolResults: Record<string, any> = {};
+        
+        for (const toolName of state.toolCalls) {
+            try {
+                const tool = this.getToolInstance(toolName);
+                const result = await tool.invoke({ input: state.messages[0].content });
+                toolResults[toolName] = result;
+            } catch (error) {
+                loggingService.warn(`Tool execution failed: ${toolName}`, { error });
+                toolResults[toolName] = { error: error instanceof Error ? error.message : String(error) };
+            }
+        }
+        
+        return {
+            ...state,
+            toolResults
+        };
+    }
+
+    /**
+     * Synthesize final response with Langchain
+     */
+    private async synthesizeWithLangchain(state: any): Promise<any> {
+        const agent = this.langchainAgents.get('optimization_specialist');
+        if (!agent) return state;
+        
+        const synthesisPrompt = new HumanMessage(`
+            Query: ${state.messages[0].content}
+            Tool Results: ${JSON.stringify(state.toolResults, null, 2)}
+            
+            Synthesize a comprehensive response using the tool results.
+        `);
+        
+        const response = await agent.invoke([synthesisPrompt]);
+        
+        return {
+            ...state,
+            finalResponse: response.content as string
+        };
+    }
+
+    /**
+     * Extract tool recommendations from analysis
+     */
+    private extractToolRecommendations(analysis: string): string[] {
+        const tools: string[] = [];
+        const availableTools = Array.from(this.toolFactories.keys());
+        
+        // Simple extraction - check which tools are mentioned
+        for (const toolName of availableTools) {
+            if (analysis.toLowerCase().includes(toolName.replace('_', ' '))) {
+                tools.push(toolName);
+            }
+        }
+        
+        // Default to knowledge base if no specific tools identified
+        if (tools.length === 0) {
+            tools.push('knowledge_base_search');
+        }
+        
+        return tools;
     }
 
     /**
@@ -376,6 +536,12 @@ export class AgentService {
                 await this.initialize();
             }
 
+            // Use Langchain integration if enabled and query is complex
+            if (this.isLangchainEnabled && this.shouldUseLangchainIntegration(queryData)) {
+                loggingService.info('🔗 Using Langchain integration for enhanced processing');
+                return await this.queryWithLangchain(queryData);
+            }
+
             if (!this.agentExecutor) {
                 throw new Error('Agent not properly initialized');
             }
@@ -514,6 +680,77 @@ export class AgentService {
                     errorType: errorMessage.includes('max iterations') ? 'max_iterations' : 'general_error'
                 }
             };
+        }
+    }
+
+    /**
+     * Determine if Langchain integration should be used
+     */
+    private shouldUseLangchainIntegration(queryData: AgentQuery): boolean {
+        const query = queryData.query.toLowerCase();
+        
+        // Use Langchain for complex multi-tool scenarios
+        const complexIndicators = [
+            'analyze and optimize',
+            'comprehensive report',
+            'multiple services',
+            'cross-platform',
+            'integrate with',
+            'coordinate between'
+        ];
+        
+        return complexIndicators.some(indicator => query.includes(indicator)) ||
+               queryData.context?.useMultiAgent === true;
+    }
+
+    /**
+     * Process query using Langchain integration
+     */
+    private async queryWithLangchain(queryData: AgentQuery): Promise<AgentResponse> {
+        const startTime = Date.now();
+        
+        try {
+            if (!this.langchainGraph) {
+                throw new Error('Langchain graph not initialized');
+            }
+            
+            const initialState = {
+                messages: [new HumanMessage(queryData.query)],
+                toolCalls: [],
+                toolResults: {},
+                finalResponse: ''
+            };
+            
+            const result = await (this.langchainGraph as any).invoke(initialState);
+            
+            const executionTime = Date.now() - startTime;
+            
+            return {
+                success: true,
+                response: result.finalResponse || 'Query processed successfully',
+                metadata: {
+                    executionTime,
+                    sources: Object.keys(result.toolResults),
+                    fromCache: false,
+                    langchainEnhanced: true
+                },
+                thinking: {
+                    title: 'Langchain-Enhanced Processing',
+                    steps: result.toolCalls.map((tool: string, idx: number) => ({
+                        step: idx + 1,
+                        description: `Execute ${tool}`,
+                        reasoning: 'Selected by Langchain analysis',
+                        outcome: result.toolResults[tool] ? 'Success' : 'Failed'
+                    }))
+                }
+            };
+        } catch (error) {
+            loggingService.error('Langchain query processing failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to standard processing
+            return this.query({ ...queryData, context: { ...queryData.context, useMultiAgent: false } });
         }
     }
 
