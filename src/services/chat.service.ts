@@ -106,7 +106,7 @@ type LangchainChatStateType = typeof LangchainChatState.State;
 // Enhanced Agent Configuration Interface
 export interface LangchainAgentConfig {
     name: string;
-    type: 'coordinator' | 'specialist' | 'integration' | 'autonomous' | 'strategy' | 'gan_discriminator' | 'gan_generator';
+    type: 'coordinator' | 'specialist' | 'integration' | 'autonomous' | 'strategy';
     model: 'claude' | 'gpt4' | 'bedrock';
     specialization: string;
     tools: Tool[];
@@ -313,11 +313,6 @@ export class ChatService {
     private static langchainAgents: Map<string, AgentExecutor> = new Map();
     private static langchainModels: Map<string, any> = new Map();
     private static initialized = false;
-    private static ganSystem: {
-        discriminator: ChatBedrockConverse;
-        generator: ChatBedrockConverse;
-        currentEpoch: number;
-    };
 
     // Dynamic User Input Collection System
     private static userInputSessions: Map<string, any> = new Map();
@@ -366,9 +361,6 @@ export class ChatService {
             
             // Create specialized agents
             this.createLangchainAgents();
-            
-            // Build GAN-inspired system
-            this.initializeGANSystem();
             
             // Build the state graph
             this.buildLangchainGraph();
@@ -629,38 +621,6 @@ export class ChatService {
     }
 
     /**
-     * Initialize GAN-inspired system for advanced agent coordination
-     */
-    private static initializeGANSystem(): void {
-        this.ganSystem = {
-            discriminator: new ChatBedrockConverse({
-                model: 'us.anthropic.claude-opus-4-1-20250805-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.3,
-                maxTokens: 4000,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            }),
-            // Generator - Nova Pro on Bedrock for generation
-            generator: new ChatBedrockConverse({
-                model: 'us.amazon.nova-pro-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.8,
-                maxTokens: 4000,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            }),
-            currentEpoch: 0
-        };
-
-        loggingService.info('🎭 GAN-inspired system initialized with AWS Bedrock models');
-    }
-
-    /**
      * Build Langchain State Graph for multi-agent coordination
      */
     private static buildLangchainGraph(): void {
@@ -672,7 +632,6 @@ export class ChatService {
             .addNode('google_integration', this.googleIntegrationAgent.bind(this))
             .addNode('github_integration', this.githubIntegrationAgent.bind(this))
             .addNode('autonomous_decision', this.autonomousDecisionAgent.bind(this))
-            .addNode('gan_coordination', this.ganCoordinationAgent.bind(this))
             .addNode('response_synthesis', this.responseSynthesisAgent.bind(this))
             
             // Enhanced routing with world-class capabilities
@@ -683,8 +642,7 @@ export class ChatService {
                 'aws_integration',
                 'google_integration',
                 'github_integration',
-                'autonomous_decision',
-                'gan_coordination'
+                'autonomous_decision'
             ])
             .addConditionalEdges('strategy_formation', this.routeFromStrategy.bind(this), [
                 'user_input_collection',
@@ -701,29 +659,22 @@ export class ChatService {
             .addConditionalEdges('aws_integration', this.routeFromIntegration.bind(this), [
                 'google_integration',
                 'github_integration',
-                'gan_coordination',
                 'response_synthesis'
             ])
             .addConditionalEdges('google_integration', this.routeFromIntegration.bind(this), [
                 'aws_integration',
                 'github_integration',
-                'gan_coordination',
                 'response_synthesis'
             ])
             .addConditionalEdges('github_integration', this.routeFromIntegration.bind(this), [
                 'aws_integration',
                 'google_integration',
-                'gan_coordination',
                 'response_synthesis'
             ])
             .addConditionalEdges('autonomous_decision', this.routeFromAutonomous.bind(this), [
                 'aws_integration',
                 'google_integration',
                 'github_integration',
-                'gan_coordination',
-                'response_synthesis'
-            ])
-            .addConditionalEdges('gan_coordination', this.routeFromGAN.bind(this), [
                 'response_synthesis'
             ])
             .addEdge('response_synthesis', '__end__');
@@ -1263,50 +1214,6 @@ export class ChatService {
     }
 
     /**
-     * GAN Coordination Agent - Advanced multi-agent coordination
-     */
-    private static async ganCoordinationAgent(state: LangchainChatStateType): Promise<Partial<LangchainChatStateType>> {
-        try {
-            loggingService.info('🎭 GAN Coordination Agent optimizing agent interactions');
-            
-            // Use GAN-inspired discriminator to evaluate agent coordination quality
-            const discriminatorPrompt = new SystemMessage(`Evaluate the quality of multi-agent coordination:
-            
-            Agent States: ${JSON.stringify({
-                integrations: state.integrationContext,
-                decisions: state.autonomousDecisions,
-                strategy: state.strategyFormation
-            }, null, 2)}
-            
-            Rate coordination quality (1-10) and suggest improvements.`);
-
-            const discriminatorResponse = await this.ganSystem.discriminator.invoke([discriminatorPrompt]);
-            
-            // Use generator to improve coordination
-            const generatorPrompt = new SystemMessage(`Generate improved coordination strategy:
-            
-            Current Coordination Quality: ${discriminatorResponse.content}
-            
-            Generate enhanced coordination plan for optimal agent collaboration.`);
-
-            const generatorResponse = await this.ganSystem.generator.invoke([generatorPrompt]);
-            
-            this.ganSystem.currentEpoch++;
-
-            return {
-                currentAgent: 'gan_coordination',
-                autonomousDecisions: [
-                    ...(state.autonomousDecisions || []),
-                    `GAN coordination epoch ${this.ganSystem.currentEpoch}: ${generatorResponse.content}`
-                ]
-            };
-        } catch (error) {
-            loggingService.error('❌ GAN coordination agent failed', { error });
-            return { currentAgent: 'gan_error' };
-        }
-    }
-
-    /**
      * Response Synthesis Agent - World-class response generation
      */
     private static async responseSynthesisAgent(state: LangchainChatStateType): Promise<Partial<LangchainChatStateType>> {
@@ -1431,11 +1338,6 @@ export class ChatService {
         if (needs.includes('google') && !integrations?.google) return 'google_integration';  
         if (needs.includes('github') && !integrations?.github) return 'github_integration';
         
-        // Use GAN coordination for multi-integration optimization
-        if (Object.keys(integrations || {}).length > 1) {
-            return 'gan_coordination';
-        }
-        
         return 'response_synthesis';
     }
 
@@ -1446,12 +1348,7 @@ export class ChatService {
         if (decisions.some(d => d.includes('aws'))) return 'aws_integration';
         if (decisions.some(d => d.includes('google'))) return 'google_integration';
         if (decisions.some(d => d.includes('github'))) return 'github_integration';
-        if (decisions.length > 3) return 'gan_coordination';
         
-        return 'response_synthesis';
-    }
-
-    private static routeFromGAN(state: LangchainChatStateType): string {
         return 'response_synthesis';
     }
 
