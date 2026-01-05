@@ -330,9 +330,9 @@ export class AutomationService {
             'bard': { service: 'google-ai', defaultModel: 'gemini-pro' },
             
             // AWS Bedrock
-            'aws bedrock': { service: 'aws-bedrock', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
-            'bedrock': { service: 'aws-bedrock', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
-            'amazon bedrock': { service: 'aws-bedrock', defaultModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0' },
+            'aws bedrock': { service: 'aws-bedrock', defaultModel: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0' },
+            'bedrock': { service: 'aws-bedrock', defaultModel: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0' },
+            'amazon bedrock': { service: 'aws-bedrock', defaultModel: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0' },
             
             // Cohere
             'cohere': { service: 'cohere', defaultModel: 'command' },

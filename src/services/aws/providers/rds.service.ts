@@ -1,4 +1,4 @@
-import { RDSClient, DescribeDBInstancesCommand, StopDBInstanceCommand, StartDBInstanceCommand, CreateDBSnapshotCommand, DescribeDBSnapshotsCommand, ModifyDBInstanceCommand } from '@aws-sdk/client-rds';
+import { RDSClient, DescribeDBInstancesCommand, StopDBInstanceCommand, StartDBInstanceCommand, CreateDBSnapshotCommand, DescribeDBSnapshotsCommand, ModifyDBInstanceCommand, CreateDBInstanceCommand, DescribeDBSubnetGroupsCommand, CreateDBSubnetGroupCommand, AddTagsToResourceCommand } from '@aws-sdk/client-rds';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';
@@ -334,6 +334,120 @@ class RDSServiceProvider {
       }
     }
     return result;
+  }
+
+  /**
+   * Create RDS database instance with encryption and backups
+   */
+  public async createDBInstance(
+    connection: IAWSConnection,
+    config: {
+      dbInstanceIdentifier: string;
+      engine: 'mysql' | 'postgres' | 'mariadb' | 'oracle' | 'sqlserver';
+      dbInstanceClass?: string;
+      allocatedStorage?: number;
+      masterUsername?: string;
+      masterUserPassword?: string;
+      dbSubnetGroupName?: string;
+      vpcSecurityGroupIds?: string[];
+      region?: string;
+      tags?: Record<string, string>;
+    }
+  ): Promise<{ dbInstanceIdentifier: string; endpoint: string; port: number; masterUsername: string; masterUserPassword?: string }> {
+    const validation = permissionBoundaryService.validateAction(
+      { service: 'rds', action: 'CreateDBInstance', region: config.region },
+      connection
+    );
+
+    if (!validation.allowed) {
+      throw new Error(`Permission denied: ${validation.reason}`);
+    }
+
+    const region = config.region ?? connection.allowedRegions[0] ?? 'us-east-1';
+    const client = await this.getClient(connection, region);
+    const dbInstanceClass = config.dbInstanceClass ?? 'db.t3.micro';
+    const allocatedStorage = config.allocatedStorage ?? 20;
+    const masterUsername = config.masterUsername ?? 'admin';
+    const masterUserPassword = config.masterUserPassword ?? this.generatePassword();
+
+    try {
+      // Create DB instance
+      const createCommand = new CreateDBInstanceCommand({
+        DBInstanceIdentifier: config.dbInstanceIdentifier,
+        Engine: config.engine,
+        DBInstanceClass: dbInstanceClass,
+        AllocatedStorage: allocatedStorage,
+        StorageType: 'gp3',
+        StorageEncrypted: true,
+        MasterUsername: masterUsername,
+        MasterUserPassword: masterUserPassword,
+        DBSubnetGroupName: config.dbSubnetGroupName,
+        VpcSecurityGroupIds: config.vpcSecurityGroupIds,
+        BackupRetentionPeriod: 7,
+        PreferredBackupWindow: '03:00-04:00',
+        PreferredMaintenanceWindow: 'sun:04:00-sun:05:00',
+        EnableCloudwatchLogsExports: ['error', 'general', 'slowquery'],
+        EnableIAMDatabaseAuthentication: true,
+        DeletionProtection: false,
+        Tags: [
+          { Key: 'Name', Value: config.dbInstanceIdentifier },
+          { Key: 'ManagedBy', Value: 'CostKatana' },
+          { Key: 'CreatedBy', Value: connection.userId?.toString() ?? 'unknown' },
+          { Key: 'CreatedAt', Value: new Date().toISOString() },
+          { Key: 'ConnectionId', Value: connection._id.toString() },
+          ...Object.entries(config.tags ?? {}).map(([Key, Value]) => ({ Key, Value })),
+        ],
+      });
+
+      const response = await client.send(createCommand);
+      const instance = response.DBInstance;
+
+      if (!instance?.DBInstanceIdentifier) {
+        throw new Error('Failed to create DB instance');
+      }
+
+      loggingService.info('RDS instance created', {
+        component: 'RDSServiceProvider',
+        operation: 'createDBInstance',
+        dbInstanceIdentifier: instance.DBInstanceIdentifier,
+        engine: config.engine,
+        dbInstanceClass,
+        region,
+        connectionId: connection._id.toString(),
+      });
+
+      return {
+        dbInstanceIdentifier: instance.DBInstanceIdentifier,
+        endpoint: instance.Endpoint?.Address ?? 'pending',
+        port: instance.Endpoint?.Port ?? 5432,
+        masterUsername,
+        masterUserPassword, // Return once for user to save
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      loggingService.error('Failed to create RDS instance', {
+        component: 'RDSServiceProvider',
+        operation: 'createDBInstance',
+        dbInstanceIdentifier: config.dbInstanceIdentifier,
+        engine: config.engine,
+        region,
+        error: errorMessage,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Generate a strong random password
+   */
+  private generatePassword(): string {
+    const length = 16;
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+    let password = '';
+    for (let i = 0; i < length; i++) {
+      password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    return password;
   }
 }
 

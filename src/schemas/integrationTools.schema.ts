@@ -473,10 +473,28 @@ export const awsSchemas = {
     region: z.string().optional().describe('AWS region'),
   }).describe('Find idle/underutilized EC2 instances'),
 
+  create_ec2: z.object({
+    action: z.literal('create_ec2'),
+    instanceName: z.string().min(1).describe('EC2 instance name'),
+    instanceType: z.string().optional().describe('Instance type (e.g., t3.micro, t3.small)'),
+    region: z.string().optional().describe('AWS region'),
+    vpcId: z.string().optional().describe('VPC ID (optional, uses default if not provided)'),
+    subnetId: z.string().optional().describe('Subnet ID (optional, uses default if not provided)'),
+    securityGroupId: z.string().optional().describe('Security group ID (optional, creates default if not provided)'),
+    keyPairName: z.string().optional().describe('Key pair name (optional, creates default if not provided)'),
+    tags: z.record(z.string()).optional().describe('Additional tags for the instance'),
+  }).describe('Create a new EC2 instance'),
+
   // S3
   list_s3: z.object({
     action: z.literal('list_s3'),
   }).describe('List S3 buckets'),
+
+  create_s3: z.object({
+    action: z.literal('create_s3'),
+    bucketName: z.string().min(1).describe('S3 bucket name (must be globally unique)'),
+    region: z.string().optional().describe('AWS region (defaults to us-east-1)'),
+  }).describe('Create a new S3 bucket'),
 
   // RDS
   list_rds: z.object({
@@ -484,11 +502,56 @@ export const awsSchemas = {
     region: z.string().optional().describe('AWS region'),
   }).describe('List RDS database instances'),
 
+  create_rds: z.object({
+    action: z.literal('create_rds'),
+    dbInstanceIdentifier: z.string().min(1).describe('Database instance identifier'),
+    engine: z.enum(['mysql', 'postgres', 'mariadb', 'oracle', 'sqlserver']).describe('Database engine'),
+    dbInstanceClass: z.string().optional().describe('Instance class (e.g., db.t3.micro)'),
+    allocatedStorage: z.number().optional().describe('Allocated storage in GB (default: 20)'),
+    region: z.string().optional().describe('AWS region'),
+    masterUsername: z.string().optional().describe('Master username (default: admin)'),
+    masterUserPassword: z.string().optional().describe('Master password (auto-generated if not provided)'),
+    tags: z.record(z.string()).optional().describe('Additional tags for the database'),
+  }).describe('Create a new RDS database instance'),
+
   // Lambda
   list_lambda: z.object({
     action: z.literal('list_lambda'),
     region: z.string().optional().describe('AWS region'),
   }).describe('List Lambda functions'),
+
+  create_lambda: z.object({
+    action: z.literal('create_lambda'),
+    functionName: z.string().min(1).describe('Lambda function name'),
+    runtime: z.enum(['nodejs18.x', 'nodejs20.x', 'python3.11', 'python3.12', 'java17', 'go1.x']).optional().describe('Runtime environment'),
+    handler: z.string().optional().describe('Handler (e.g., index.handler)'),
+    memorySize: z.number().optional().describe('Memory in MB (default: 128)'),
+    timeout: z.number().optional().describe('Timeout in seconds (default: 3)'),
+    region: z.string().optional().describe('AWS region'),
+    tags: z.record(z.string()).optional().describe('Additional tags for the function'),
+  }).describe('Create a new Lambda function'),
+
+  // DynamoDB
+  create_dynamodb: z.object({
+    action: z.literal('create_dynamodb'),
+    tableName: z.string().min(1).describe('DynamoDB table name'),
+    partitionKeyName: z.string().min(1).describe('Partition key name'),
+    partitionKeyType: z.enum(['S', 'N', 'B']).optional().describe('Partition key type (S=String, N=Number, B=Binary)'),
+    sortKeyName: z.string().optional().describe('Sort key name (optional)'),
+    sortKeyType: z.enum(['S', 'N', 'B']).optional().describe('Sort key type'),
+    billingMode: z.enum(['PAY_PER_REQUEST', 'PROVISIONED']).optional().describe('Billing mode (default: PAY_PER_REQUEST)'),
+    region: z.string().optional().describe('AWS region'),
+    tags: z.record(z.string()).optional().describe('Additional tags for the table'),
+  }).describe('Create a new DynamoDB table'),
+
+  // ECS
+  create_ecs: z.object({
+    action: z.literal('create_ecs'),
+    clusterName: z.string().min(1).describe('ECS cluster name'),
+    region: z.string().optional().describe('AWS region'),
+    enableContainerInsights: z.boolean().optional().describe('Enable Container Insights monitoring'),
+    tags: z.record(z.string()).optional().describe('Additional tags for the cluster'),
+  }).describe('Create a new ECS cluster'),
 
   // General
   optimize: z.object({

@@ -194,7 +194,7 @@ export class MultiAgentFlowService {
         try {
             // Create Langchain Coordinator Agent
             this.langchainCoordinatorAgent = new ChatBedrockConverse({
-                model: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                model: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
                 region: process.env.AWS_REGION || 'us-east-1',
                 temperature: 0.6,
                 maxTokens: 6000,
@@ -335,7 +335,8 @@ export class MultiAgentFlowService {
                 costBudget: options.costBudget || 0.10,
                 metadata: { 
                     startTime: Date.now(),
-                    langSmithRunId: runId
+                    langSmithRunId: runId,
+                    userId
                 }
             };
 
@@ -608,57 +609,65 @@ Would you like me to help you with anything else, or would you prefer to check t
     }
 
     /**
-     * Enhanced master agent with Langchain coordination
+     * Enhanced master agent with Langchain coordination and tool access
      */
     private async masterAgentWithLangchain(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
-            loggingService.info('🔗 Master agent using Langchain coordination');
+            loggingService.info('🔗 Master agent using Langchain coordination with tools');
             
             const lastMessage = state.messages[state.messages.length - 1];
+            const userMessage = lastMessage.content as string;
             
-            // First, use Langchain coordinator to analyze the situation
-            const coordinationPrompt = new HumanMessage(`
-                Analyze this multi-agent coordination state and provide strategic guidance:
-                
-                Current Message: ${lastMessage.content}
-                Agent Path: ${state.agentPath?.join(' -> ') || 'start'}
-                Optimizations: ${state.optimizationsApplied?.join(', ') || 'none'}
-                
-                Provide:
-                1. Coordination strategy for optimal response
-                2. Integration points across agents
-                3. Autonomous decision opportunities
-                4. User engagement strategy
-            `);
+            // Check if this is an AWS operation request
+            const isAWSRequest = /create|list|stop|start|show.*(?:bucket|s3|ec2|instance|rds|database|lambda|function|dynamodb|table|ecs|cluster|cost)/i.test(userMessage);
             
-            const coordinationResponse = await this.langchainCoordinatorAgent!.invoke([coordinationPrompt]);
-            
-            // Then use the strategy agent to form the final response
-            const strategyPrompt = new HumanMessage(`
-                Based on this coordination analysis:
-                ${coordinationResponse.content}
+            if (isAWSRequest) {
+                loggingService.info('🔧 Detected AWS request, invoking aws_integration tool');
                 
-                And the original request:
-                ${lastMessage.content}
+                // Import and use the AWS integration tool
+                const { AWSIntegrationTool } = await import('../tools/awsIntegrationTool');
+                const awsTool = new AWSIntegrationTool(state.metadata?.userId || 'unknown');
                 
-                Generate a world-class response that:
-                1. Demonstrates advanced multi-agent coordination
-                2. Shows proactive insights and autonomous capabilities
-                3. Provides actionable next steps
-                4. Goes beyond traditional chatbot responses
-            `);
+                // Call the tool with the user's request
+                const toolResult = await awsTool._call(userMessage);
+                
+                // Parse the tool result
+                let parsedResult;
+                try {
+                    parsedResult = JSON.parse(toolResult);
+                } catch {
+                    parsedResult = { success: false, error: 'Failed to parse tool response' };
+                }
+                
+                // Return the tool result directly as the response
+                return {
+                    messages: [new AIMessage(parsedResult.message || toolResult)],
+                    currentAgent: 'master_langchain',
+                    agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                    optimizationsApplied: [...(state.optimizationsApplied || []), 'aws_integration_tool'],
+                    metadata: {
+                        ...state.metadata,
+                        langchainEnhanced: true,
+                        toolUsed: 'aws_integration',
+                        toolSuccess: parsedResult.success,
+                        requiresApproval: parsedResult.requiresApproval,
+                        approvalToken: parsedResult.approvalToken,
+                    }
+                };
+            }
             
-            const strategyResponse = await this.langchainStrategyAgent!.invoke([strategyPrompt]);
+            // For non-AWS requests, use simple direct response
+            const simplePrompt = new HumanMessage(`${userMessage}\n\nProvide a direct, concise, and helpful response. Do not add fluff or overly formal language.`);
+            const response = await this.langchainCoordinatorAgent!.invoke([simplePrompt]);
             
             return {
-                messages: [new AIMessage(strategyResponse.content as string)],
+                messages: [new AIMessage(response.content as string)],
                 currentAgent: 'master_langchain',
                 agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
                 optimizationsApplied: [...(state.optimizationsApplied || []), 'langchain_coordination'],
                 metadata: {
                     ...state.metadata,
                     langchainEnhanced: true,
-                    coordinationAnalysis: coordinationResponse.content
                 }
             };
             

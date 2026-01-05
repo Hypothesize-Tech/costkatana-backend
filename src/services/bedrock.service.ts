@@ -842,7 +842,7 @@ Format your response as JSON:
         prompt: string,
         imageUrl: string,
         userId: string,
-        modelId: string = 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+        modelId: string = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
     ): Promise<{ response: string; inputTokens: number; outputTokens: number; cost: number }> {
         // ABSOLUTE FIRST THING: Log that this function was called
         console.log('='.repeat(80));

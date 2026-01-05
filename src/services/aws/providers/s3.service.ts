@@ -1,4 +1,4 @@
-import { S3Client, ListBucketsCommand, GetBucketLocationCommand, GetBucketTaggingCommand, PutBucketLifecycleConfigurationCommand, GetBucketLifecycleConfigurationCommand, PutBucketIntelligentTieringConfigurationCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, ListBucketsCommand, GetBucketLocationCommand, GetBucketTaggingCommand, PutBucketLifecycleConfigurationCommand, GetBucketLifecycleConfigurationCommand, PutBucketIntelligentTieringConfigurationCommand, ListObjectsV2Command, CreateBucketCommand, PutBucketEncryptionCommand, PutBucketTaggingCommand, PutBucketVersioningCommand, PutPublicAccessBlockCommand } from '@aws-sdk/client-s3';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';
@@ -59,6 +59,162 @@ class S3ServiceProvider {
     });
   }
   
+  /**
+   * Create S3 bucket with encryption, versioning, and tagging
+   */
+  public async createBucket(
+    connection: IAWSConnection,
+    bucketName: string,
+    region?: string,
+    tags?: Record<string, string>
+  ): Promise<S3Bucket> {
+    const validation = permissionBoundaryService.validateAction(
+      { service: 's3', action: 'CreateBucket', resources: [bucketName] },
+      connection
+    );
+    
+    if (!validation.allowed) {
+      throw new Error(`Permission denied: ${validation.reason}`);
+    }
+    
+    const targetRegion = region || connection.allowedRegions[0] || 'us-east-1';
+    const client = await this.getClient(connection, targetRegion);
+    
+    // Normalize bucket name: lowercase, replace spaces/underscores with hyphens, remove invalid chars
+    let normalizedName = bucketName
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-')  // Replace spaces and underscores with hyphens
+      .replace(/[^a-z0-9-]/g, '')  // Remove any other invalid characters
+      .replace(/^-+|-+$/g, '');  // Remove leading/trailing hyphens
+    
+    // Ensure minimum length
+    if (normalizedName.length < 3) {
+      normalizedName = `ck-${normalizedName}`;
+    }
+    
+    // Ensure maximum length
+    if (normalizedName.length > 63) {
+      normalizedName = normalizedName.substring(0, 63);
+    }
+    
+    // Validate bucket name
+    if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(normalizedName) || normalizedName.length < 3 || normalizedName.length > 63) {
+      throw new Error(`Invalid bucket name after normalization: '${normalizedName}'. Bucket name must be 3-63 characters, lowercase alphanumeric with hyphens, and start/end with alphanumeric`);
+    }
+    
+    // Check if bucket already exists
+    try {
+      const headCommand = new GetBucketLocationCommand({ Bucket: normalizedName });
+      await client.send(headCommand);
+      throw new Error(`Bucket '${normalizedName}' already exists`);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('already exists')) {
+        throw error;
+      }
+      // Bucket doesn't exist, continue with creation
+    }
+    
+    try {
+      // Step 1: Create bucket
+      const createCommand = new CreateBucketCommand({
+        Bucket: normalizedName,
+        ...(targetRegion !== 'us-east-1' ? { CreateBucketConfiguration: { LocationConstraint: targetRegion as any } } : {}),
+      });
+      
+      await client.send(createCommand);
+      
+      // Step 2: Enable encryption (AES256 by default)
+      const encryptionCommand = new PutBucketEncryptionCommand({
+        Bucket: normalizedName,
+        ServerSideEncryptionConfiguration: {
+          Rules: [
+            {
+              ApplyServerSideEncryptionByDefault: {
+                SSEAlgorithm: 'AES256',
+              },
+            },
+          ],
+        },
+      });
+      
+      await client.send(encryptionCommand);
+      
+      // Step 3: Enable versioning
+      const versioningCommand = new PutBucketVersioningCommand({
+        Bucket: normalizedName,
+        VersioningConfiguration: {
+          Status: 'Enabled',
+        },
+      });
+      
+      await client.send(versioningCommand);
+      
+      // Step 4: Block public access
+      const blockPublicCommand = new PutPublicAccessBlockCommand({
+        Bucket: normalizedName,
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+      });
+      
+      await client.send(blockPublicCommand);
+      
+      // Step 5: Apply tags (including CostKatana metadata)
+      const defaultTags: Record<string, string> = {
+        'ManagedBy': 'CostKatana',
+        'CreatedBy': connection.userId?.toString() || 'unknown',
+        'CreatedAt': new Date().toISOString(),
+        'ConnectionId': connection._id.toString(),
+        'Environment': connection.environment || 'development',
+        'OriginalName': bucketName,  // Store original name for reference
+        ...tags,
+      };
+      
+      const taggingCommand = new PutBucketTaggingCommand({
+        Bucket: normalizedName,
+        Tagging: {
+          TagSet: Object.entries(defaultTags).map(([Key, Value]) => ({ Key, Value })),
+        },
+      });
+      
+      await client.send(taggingCommand);
+      
+      loggingService.info('S3 bucket created successfully', {
+        component: 'S3ServiceProvider',
+        operation: 'createBucket',
+        connectionId: connection._id.toString(),
+        bucketName: normalizedName,
+        originalName: bucketName,
+        region: targetRegion,
+        encryption: 'AES256',
+        versioning: 'Enabled',
+        publicAccessBlocked: true,
+        tagCount: Object.keys(defaultTags).length,
+      });
+      
+      return {
+        name: normalizedName,
+        region: targetRegion,
+        creationDate: new Date(),
+        tags: defaultTags,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      loggingService.error('Failed to create S3 bucket', {
+        component: 'S3ServiceProvider',
+        operation: 'createBucket',
+        bucketName: normalizedName,
+        originalName: bucketName,
+        region: targetRegion,
+        error: errorMessage,
+      });
+      throw error;
+    }
+  }
+
   /**
    * List S3 buckets
    */

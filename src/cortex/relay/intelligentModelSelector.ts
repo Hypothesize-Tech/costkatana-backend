@@ -25,7 +25,7 @@ export class IntelligentModelSelector {
     'anthropic.claude-opus-4-20250514-v1:0',       // Claude Opus 4
     'anthropic.claude-3-opus-20240229-v1:0',       // Claude 3 Opus
     'anthropic.claude-3-7-sonnet-20250219-v1:0',   // Claude 3.7 Sonnet
-    'anthropic.claude-3-5-sonnet-20241022-v2:0',   // Claude 3.5 Sonnet v2
+    'us.anthropic.claude-3-5-sonnet-20241022-v2:0',   // Claude 3.5 Sonnet v2
     'anthropic.claude-3-5-sonnet-20240620-v1:0',   // Claude 3.5 Sonnet (older)
     'amazon.nova-pro-v1:0',                        // Nova Pro (fallback)
     'anthropic.claude-3-sonnet-20240229-v1:0',     // Claude 3 Sonnet (fallback)

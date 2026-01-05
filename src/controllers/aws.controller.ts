@@ -109,35 +109,63 @@ export class AWSController {
         });
       }
 
-      // Create connection
-      const connection = new AWSConnection({
-        userId: new Types.ObjectId(userId),
-        connectionName,
-        description,
+      // Check if connection already exists for this AWS account and environment
+      const existingConnection = await AWSConnection.findOne({
+        awsAccountId,
         environment: environment || 'development',
-        roleArn,
-        awsAccountId, // Extract from roleArn
-        externalId: externalIdResult.externalIdEncrypted,
-        externalIdHash: externalIdResult.externalIdHash,
-        permissionMode: permissionMode || 'read-only',
-        allowedRegions: allowedRegions || ['us-east-1'],
-        allowedServices, // Store granular permissions
-        createdBy: new Types.ObjectId(userId),
+        userId: new Types.ObjectId(userId),
       });
 
-      await connection.save();
+      let connection;
+      let isUpdate = false;
+
+      if (existingConnection) {
+        // Update existing connection
+        isUpdate = true;
+        existingConnection.connectionName = connectionName;
+        existingConnection.description = description;
+        existingConnection.roleArn = roleArn;
+        existingConnection.externalId = externalIdResult.externalIdEncrypted;
+        existingConnection.externalIdHash = externalIdResult.externalIdHash;
+        existingConnection.permissionMode = permissionMode || 'read-only';
+        existingConnection.allowedRegions = allowedRegions || ['us-east-1'];
+        existingConnection.allowedServices = allowedServices; // Update granular permissions
+        existingConnection.lastModifiedBy = new Types.ObjectId(userId);
+        existingConnection.status = 'pending_verification'; // Reset status for re-verification
+        await existingConnection.save();
+        connection = existingConnection;
+      } else {
+        // Create new connection
+        connection = new AWSConnection({
+          userId: new Types.ObjectId(userId),
+          connectionName,
+          description,
+          environment: environment || 'development',
+          roleArn,
+          awsAccountId, // Extract from roleArn
+          externalId: externalIdResult.externalIdEncrypted,
+          externalIdHash: externalIdResult.externalIdHash,
+          permissionMode: permissionMode || 'read-only',
+          allowedRegions: allowedRegions || ['us-east-1'],
+          allowedServices, // Store granular permissions
+          createdBy: new Types.ObjectId(userId),
+        });
+
+        await connection.save();
+      }
 
       // Log audit event with permission details
-      await auditLoggerService.logSuccess('connection_created', {
+      await auditLoggerService.logSuccess(isUpdate ? 'connection_updated' : 'connection_created', {
         userId: new Types.ObjectId(userId),
         connectionId: connection._id,
       }, {
         service: 'aws',
-        operation: 'createConnection',
+        operation: isUpdate ? 'updateConnection' : 'createConnection',
       });
 
-      return res.status(201).json({
+      return res.status(isUpdate ? 200 : 201).json({
         success: true,
+        message: isUpdate ? 'Connection updated successfully' : 'Connection created successfully',
         connection: {
           id: connection._id,
           connectionName: connection.connectionName,
@@ -148,6 +176,7 @@ export class AWSController {
           allowedServices: connection.allowedServices, // Return granular permissions
           status: connection.status,
           createdAt: connection.createdAt,
+          updatedAt: connection.updatedAt,
         },
       });
     } catch (error) {

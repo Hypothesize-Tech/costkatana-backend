@@ -1,4 +1,5 @@
-import { LambdaClient, ListFunctionsCommand, GetFunctionCommand, GetFunctionConfigurationCommand, UpdateFunctionConfigurationCommand, ListTagsCommand } from '@aws-sdk/client-lambda';
+import { LambdaClient, ListFunctionsCommand, GetFunctionCommand, GetFunctionConfigurationCommand, UpdateFunctionConfigurationCommand, ListTagsCommand, CreateFunctionCommand, TagResourceCommand } from '@aws-sdk/client-lambda';
+import { IAMClient, GetRoleCommand, CreateRoleCommand, AttachRolePolicyCommand } from '@aws-sdk/client-iam';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';
@@ -321,6 +322,216 @@ class LambdaServiceProvider {
   ): Promise<LambdaFunction[]> {
     const functions = await this.listFunctions(connection, region);
     return functions.filter(fn => fn.timeout > thresholdSeconds);
+  }
+
+  /**
+   * Create Lambda function with IAM role and default code
+   */
+  public async createFunction(
+    connection: IAWSConnection,
+    config: {
+      functionName: string;
+      runtime?: string;
+      handler?: string;
+      memorySize?: number;
+      timeout?: number;
+      region?: string;
+      tags?: Record<string, string>;
+    }
+  ): Promise<{ functionName: string; functionArn: string; handler: string; runtime: string }> {
+    const validation = permissionBoundaryService.validateAction(
+      { service: 'lambda', action: 'CreateFunction', region: config.region },
+      connection
+    );
+
+    if (!validation.allowed) {
+      throw new Error(`Permission denied: ${validation.reason}`);
+    }
+
+    const region = config.region ?? connection.allowedRegions[0] ?? 'us-east-1';
+    const lambdaClient = await this.getClient(connection, region);
+    const runtime = config.runtime ?? 'nodejs20.x';
+    const handler = config.handler ?? 'index.handler';
+    const memorySize = config.memorySize ?? 128;
+    const timeout = config.timeout ?? 3;
+
+    try {
+      // Get or create Lambda execution role
+      const roleArn = await this.getOrCreateLambdaExecutionRole(connection);
+
+      // Create default "Hello World" code
+      const code = this.createDefaultLambdaCode(runtime);
+
+      // Create function
+      const createCommand = new CreateFunctionCommand({
+        FunctionName: config.functionName,
+        Runtime: runtime as any,
+        Role: roleArn,
+        Handler: handler,
+        Code: {
+          ZipFile: code,
+        },
+        MemorySize: memorySize,
+        Timeout: timeout,
+        Architectures: ['arm64'],
+        EphemeralStorage: { Size: 512 },
+        TracingConfig: { Mode: 'PassThrough' },
+        Tags: {
+          'Name': config.functionName,
+          'ManagedBy': 'CostKatana',
+          'CreatedBy': connection.userId?.toString() ?? 'unknown',
+          'CreatedAt': new Date().toISOString(),
+          'ConnectionId': connection._id.toString(),
+          ...config.tags,
+        },
+      });
+
+      const response = await lambdaClient.send(createCommand);
+
+      if (!response.FunctionArn) {
+        throw new Error('Failed to create Lambda function');
+      }
+
+      loggingService.info('Lambda function created', {
+        component: 'LambdaServiceProvider',
+        operation: 'createFunction',
+        functionName: config.functionName,
+        runtime,
+        memorySize,
+        region,
+        connectionId: connection._id.toString(),
+      });
+
+      return {
+        functionName: config.functionName,
+        functionArn: response.FunctionArn,
+        handler,
+        runtime,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      loggingService.error('Failed to create Lambda function', {
+        component: 'LambdaServiceProvider',
+        operation: 'createFunction',
+        functionName: config.functionName,
+        runtime,
+        region,
+        error: errorMessage,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Get or create Lambda execution IAM role
+   */
+  private async getOrCreateLambdaExecutionRole(connection: IAWSConnection): Promise<string> {
+    const credentials = await stsCredentialService.assumeRole(connection);
+    const iamClient = new IAMClient({
+      credentials: {
+        accessKeyId: credentials.credentials.accessKeyId,
+        secretAccessKey: credentials.credentials.secretAccessKey,
+        sessionToken: credentials.credentials.sessionToken,
+      },
+    });
+
+    const roleName = 'CostKatanaLambdaExecutionRole';
+
+    try {
+      // Check if role exists
+      const getCommand = new GetRoleCommand({ RoleName: roleName });
+      const getResponse = await iamClient.send(getCommand);
+      if (getResponse.Role?.Arn) {
+        return getResponse.Role.Arn;
+      }
+    } catch (error) {
+      // Role doesn't exist, create it
+    }
+
+    try {
+      // Create role
+      const createCommand = new CreateRoleCommand({
+        RoleName: roleName,
+        AssumeRolePolicyDocument: JSON.stringify({
+          Version: '2012-10-17',
+          Statement: [
+            {
+              Effect: 'Allow',
+              Principal: { Service: 'lambda.amazonaws.com' },
+              Action: 'sts:AssumeRole',
+            },
+          ],
+        }),
+      });
+
+      const createResponse = await iamClient.send(createCommand);
+
+      if (!createResponse.Role?.Arn) {
+        throw new Error('Failed to create Lambda execution role');
+      }
+
+      // Attach basic execution policy
+      const attachCommand = new AttachRolePolicyCommand({
+        RoleName: roleName,
+        PolicyArn: 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole',
+      });
+
+      await iamClient.send(attachCommand);
+
+      return createResponse.Role.Arn;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      loggingService.error('Failed to get/create Lambda execution role', {
+        component: 'LambdaServiceProvider',
+        error: errorMessage,
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Create default Lambda code for different runtimes
+   */
+  private createDefaultLambdaCode(runtime: string): Buffer {
+    let code = '';
+
+    if (runtime.startsWith('nodejs')) {
+      code = `
+exports.handler = async (event) => {
+  console.log('Event:', JSON.stringify(event, null, 2));
+  return {
+    statusCode: 200,
+    body: JSON.stringify({
+      message: 'Hello from CostKatana Lambda!',
+      timestamp: new Date().toISOString(),
+    }),
+  };
+};
+`;
+    } else if (runtime.startsWith('python')) {
+      code = `
+import json
+import logging
+from datetime import datetime
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event, context):
+    logger.info(f'Event: {json.dumps(event)}')
+    return {
+        'statusCode': 200,
+        'body': json.dumps({
+            'message': 'Hello from CostKatana Lambda!',
+            'timestamp': datetime.now().isoformat(),
+        }),
+    }
+`;
+    } else {
+      code = '// Default handler for ' + runtime;
+    }
+
+    return Buffer.from(code);
   }
 }
 

@@ -307,6 +307,10 @@ export class AgentService {
         this.toolFactories.set('analytics_manager', () => new AnalyticsManagerTool());
         this.toolFactories.set('optimization_manager', () => new OptimizationManagerTool());
         this.toolFactories.set('web_search', () => new WebSearchTool());
+        this.toolFactories.set('aws_integration', () => {
+            const { AWSIntegrationTool } = require('../tools/awsIntegrationTool');
+            return new AWSIntegrationTool();
+        });
         
         loggingService.info('🔧 Tool factories initialized for lazy loading');
     }

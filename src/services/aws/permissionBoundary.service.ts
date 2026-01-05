@@ -168,6 +168,7 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
     'ModifyInstanceAttribute',
     'CreateTags',
     'DeleteTags',
+    'RunInstances',
   ])],
   ['s3', new Set([
     'ListBuckets',
@@ -181,6 +182,7 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
     'GetBucketMetricsConfiguration',
     'GetObject',
     'GetObjectTagging',
+    'CreateBucket',
     'PutBucketLifecycleConfiguration',
     'PutBucketTagging',
     'PutObjectTagging',
@@ -199,6 +201,7 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
     'StartDBCluster',
     'ModifyDBInstance',
     'CreateDBSnapshot',
+    'CreateDBInstance',
     'AddTagsToResource',
     'RemoveTagsFromResource',
   ])],
@@ -211,6 +214,7 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
     'ListVersionsByFunction',
     'ListAliases',
     'UpdateFunctionConfiguration',
+    'CreateFunction',
     'TagResource',
     'UntagResource',
   ])],
@@ -230,11 +234,25 @@ const ALLOWED_ACTIONS: Map<string, Set<string>> = new Map([
     'ListTagsOfResource',
     'DescribeTimeToLive',
     'DescribeContinuousBackups',
+    'CreateTable',
+    'TagResource',
   ])],
   ['elasticache', new Set([
     'DescribeCacheClusters',
     'DescribeReplicationGroups',
     'ListTagsForResource',
+  ])],
+  ['ecs', new Set([
+    'DescribeClusters',
+    'ListClusters',
+    'DescribeServices',
+    'ListServices',
+    'DescribeTaskDefinition',
+    'ListTaskDefinitions',
+    'DescribeTasks',
+    'ListTasks',
+    'CreateCluster',
+    'TagResource',
   ])],
   ['sts', new Set([
     'GetCallerIdentity',
@@ -282,6 +300,14 @@ const ACTION_RISK_LEVELS: Map<string, RiskLevel> = new Map([
   ['rds:ModifyDBInstance', 'high'],
   ['lambda:UpdateFunctionConfiguration', 'high'],
   ['s3:PutBucketLifecycleConfiguration', 'high'],
+  
+  // Create operations - High risk
+  ['ec2:RunInstances', 'high'],
+  ['rds:CreateDBInstance', 'high'],
+  ['lambda:CreateFunction', 'high'],
+  ['dynamodb:CreateTable', 'high'],
+  ['ecs:CreateCluster', 'high'],
+  ['s3:CreateBucket', 'medium'],
 ]);
 
 class PermissionBoundaryService {

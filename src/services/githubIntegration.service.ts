@@ -973,7 +973,7 @@ CRITICAL REQUIREMENTS:
             const aiResponse = await AIRouterService.invokeModel(
                 integration.userId,
                 prompt,
-                'anthropic.claude-3-5-sonnet-20241022-v2:0'
+                'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
             );
 
             // Parse AI response
