@@ -258,7 +258,7 @@ export class CortexGatewayMiddleware {
       'high-quality': {
         encoderModel: 'amazon.nova-pro-v1:0',
         decoderModel: 'amazon.nova-pro-v1:0',
-        coreModel: 'anthropic.claude-3-5-sonnet-20241022-v2:0'
+        coreModel: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
       },
       'maximum-power': {
         encoderModel: 'amazon.nova-pro-v1:0',

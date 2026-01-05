@@ -5,7 +5,10 @@ import {
   StartInstancesCommand, 
   DescribeVolumesCommand, 
   DescribeSecurityGroupsCommand,
-  RebootInstancesCommand
+  RebootInstancesCommand,
+  RunInstancesCommand,
+  DescribeImagesCommand,
+  CreateTagsCommand,
 } from '@aws-sdk/client-ec2';
 import { 
   CloudWatchClient, 
@@ -750,6 +753,135 @@ class EC2ServiceProvider {
       }
     }
     return result;
+  }
+
+  /**
+   * Create EC2 instance with comprehensive configuration
+   */
+  public async createInstance(
+    connection: IAWSConnection,
+    config: {
+      instanceName: string;
+      instanceType?: string;
+      vpcId?: string;
+      subnetId?: string;
+      securityGroupId?: string;
+      keyPairName?: string;
+      region?: string;
+      tags?: Record<string, string>;
+    }
+  ): Promise<{ instanceId: string; state: string; privateIpAddress?: string; publicIpAddress?: string; keyPairName?: string }> {
+    const validation = permissionBoundaryService.validateAction(
+      { service: 'ec2', action: 'RunInstances', region: config.region },
+      connection
+    );
+
+    if (!validation.allowed) {
+      throw new Error(`Permission denied: ${validation.reason}`);
+    }
+
+    const region = config.region ?? connection.allowedRegions[0] ?? 'us-east-1';
+    const client = await this.getEC2Client(connection, region);
+    const instanceType = config.instanceType ?? 't3.micro';
+
+    try {
+      // Get latest Amazon Linux 2023 AMI
+      const amiCommand = new DescribeImagesCommand({
+        Filters: [
+          { Name: 'name', Values: ['al2023-ami-*'] },
+          { Name: 'state', Values: ['available'] },
+          { Name: 'root-device-type', Values: ['ebs'] },
+          { Name: 'virtualization-type', Values: ['hvm'] },
+        ],
+        Owners: ['amazon'],
+        MaxResults: 1,
+      });
+
+      const amiResponse = await client.send(amiCommand);
+      const imageId = amiResponse.Images?.[0]?.ImageId;
+
+      if (!imageId) {
+        throw new Error('No suitable AMI found for region');
+      }
+
+      // Create instance
+      const runCommand = new RunInstancesCommand({
+        ImageId: imageId,
+        InstanceType: instanceType as any,
+        MinCount: 1,
+        MaxCount: 1,
+        KeyName: config.keyPairName,
+        SubnetId: config.subnetId,
+        SecurityGroupIds: config.securityGroupId ? [config.securityGroupId] : undefined,
+        BlockDeviceMappings: [
+          {
+            DeviceName: '/dev/xvda',
+            Ebs: {
+              VolumeSize: 8,
+              VolumeType: 'gp3',
+              Encrypted: true,
+              DeleteOnTermination: true,
+            },
+          },
+        ],
+        Monitoring: { Enabled: false },
+        TagSpecifications: [
+          {
+            ResourceType: 'instance',
+            Tags: [
+              { Key: 'Name', Value: config.instanceName },
+              { Key: 'ManagedBy', Value: 'CostKatana' },
+              { Key: 'CreatedBy', Value: connection.userId?.toString() ?? 'unknown' },
+              { Key: 'CreatedAt', Value: new Date().toISOString() },
+              { Key: 'ConnectionId', Value: connection._id.toString() },
+              ...Object.entries(config.tags ?? {}).map(([Key, Value]) => ({ Key, Value })),
+            ],
+          },
+          {
+            ResourceType: 'volume',
+            Tags: [
+              { Key: 'Name', Value: `${config.instanceName}-root` },
+              { Key: 'ManagedBy', Value: 'CostKatana' },
+            ],
+          },
+        ],
+      });
+
+      const response = await client.send(runCommand);
+      const instance = response.Instances?.[0];
+
+      if (!instance?.InstanceId) {
+        throw new Error('Failed to create instance');
+      }
+
+      loggingService.info('EC2 instance created', {
+        component: 'EC2ServiceProvider',
+        operation: 'createInstance',
+        instanceId: instance.InstanceId,
+        instanceType,
+        region,
+        connectionId: connection._id.toString(),
+      });
+
+      return {
+        instanceId: instance.InstanceId,
+        state: instance.State?.Name ?? 'pending',
+        privateIpAddress: instance.PrivateIpAddress,
+        publicIpAddress: instance.PublicIpAddress,
+        keyPairName: config.keyPairName,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      loggingService.error('Failed to create EC2 instance', {
+        component: 'EC2ServiceProvider',
+        operation: 'createInstance',
+        instanceName: config.instanceName,
+        instanceType,
+        region,
+        error: errorMessage,
+      });
+      throw error;
+    }
   }
 }
 

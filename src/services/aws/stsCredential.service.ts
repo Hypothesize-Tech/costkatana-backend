@@ -55,23 +55,37 @@ export interface CircuitBreakerState {
 
 // Scoped policy to further restrict assumed role permissions
 const getScopedPolicy = (connection: IAWSConnection): string => {
-  const allowedActions: string[] = [];
+  const wildcardServices: string[] = [];
+  const individualActions: string[] = [];
   
   // Build allowed actions from connection config
   for (const service of connection.allowedServices) {
-    for (const action of service.actions) {
-      // Check if action already has service prefix to avoid duplication
-      if (action.includes(':')) {
-        allowedActions.push(action);
-      } else {
-        allowedActions.push(`${service.service}:${action}`);
+    // Check if service has wildcard access (e.g., "s3:*")
+    const hasWildcard = service.actions.some(action => 
+      action === `${service.service}:*` || action === '*'
+    );
+    
+    if (hasWildcard) {
+      // Use wildcard for full access services
+      wildcardServices.push(`${service.service}:*`);
+    } else {
+      // Use individual actions for granular permissions
+      for (const action of service.actions) {
+        if (action.includes(':')) {
+          individualActions.push(action);
+        } else {
+          individualActions.push(`${service.service}:${action}`);
+        }
       }
     }
   }
   
+  // Combine wildcards and individual actions
+  const allActions = [...wildcardServices, ...individualActions];
+  
   // If no specific actions, allow read-only by default
-  if (allowedActions.length === 0) {
-    allowedActions.push(
+  if (allActions.length === 0) {
+    allActions.push(
       'ec2:Describe*',
       's3:Get*',
       's3:List*',
@@ -84,26 +98,37 @@ const getScopedPolicy = (connection: IAWSConnection): string => {
     );
   }
   
-  return JSON.stringify({
+  // Build compact policy
+  const policy: any = {
     Version: '2012-10-17',
     Statement: [
       {
         Effect: 'Allow',
-        Action: allowedActions,
-        Resource: '*',
-        Condition: {
-          StringEquals: {
-            'aws:RequestedRegion': connection.allowedRegions,
-          },
-        },
-      },
-      {
-        Effect: 'Deny',
-        Action: connection.deniedActions,
+        Action: allActions,
         Resource: '*',
       },
     ],
-  });
+  };
+  
+  // Add region condition if specified
+  if (connection.allowedRegions && connection.allowedRegions.length > 0 && connection.allowedRegions[0] !== '*') {
+    policy.Statement[0].Condition = {
+      StringEquals: {
+        'aws:RequestedRegion': connection.allowedRegions,
+      },
+    };
+  }
+  
+  // Add deny statement if there are denied actions
+  if (connection.deniedActions && connection.deniedActions.length > 0) {
+    policy.Statement.push({
+      Effect: 'Deny',
+      Action: connection.deniedActions,
+      Resource: '*',
+    });
+  }
+  
+  return JSON.stringify(policy);
 };
 
 class STSCredentialService {
@@ -204,17 +229,44 @@ class STSCredentialService {
       // Get decrypted external ID
       const externalId = connection.getDecryptedExternalId();
       
-      // Get scoped policy for additional restrictions
-      const scopedPolicy = getScopedPolicy(connection);
+      // Check if connection has full access services (wildcards)
+      // If so, skip scoped policy since role already has all permissions
+      const hasFullAccess = connection.allowedServices.some(service => 
+        service.actions.some(action => action === `${service.service}:*` || action === '*')
+      );
       
-      // Assume the role
-      const command = new AssumeRoleCommand({
+      // Build assume role parameters
+      const assumeRoleParams: {
+        RoleArn: string;
+        RoleSessionName: string;
+        ExternalId: string;
+        DurationSeconds: number;
+        Policy?: string;
+      } = {
         RoleArn: connection.roleArn,
         RoleSessionName: sessionName,
         ExternalId: externalId,
         DurationSeconds: connection.sessionConfig.maxDurationSeconds,
-        Policy: scopedPolicy,
-      });
+      };
+      
+      // Only add scoped policy if:
+      // 1. No full access services (need to restrict permissions)
+      // 2. Policy is small enough (under 3KB to leave room for role policy combination)
+      if (!hasFullAccess) {
+        const scopedPolicy = getScopedPolicy(connection);
+        const policySize = Buffer.from(scopedPolicy, 'utf8').length;
+        
+        // AWS policy size limit is 6,144 characters when combined with role policy
+        // Use conservative 3KB limit to ensure we don't exceed
+        if (policySize < 3000) {
+          assumeRoleParams.Policy = scopedPolicy;
+        }
+        // If policy is too large, skip it and rely on role's existing policy
+      }
+      // If has full access, skip scoped policy entirely - role already has all permissions
+      
+      // Assume the role
+      const command = new AssumeRoleCommand(assumeRoleParams);
       
       const response = await this.stsClient.send(command);
       

@@ -823,7 +823,7 @@ export class CortexModelRouterService {
      */
     public getCircuitBreakerState(provider: string, model?: string): 'closed' | 'open' | 'half-open' {
         // Use a default model if not provided
-        const modelToCheck = model || 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+        const modelToCheck = model || 'us.anthropic.claude-3-5-sonnet-20241022-v2:0';
         const state = latencyRouterService.getCircuitBreakerState(provider, modelToCheck);
         
         // Convert uppercase to lowercase to match expected format

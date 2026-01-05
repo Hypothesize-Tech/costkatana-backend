@@ -61,7 +61,7 @@ export class ModelRouter {
         specializations: ['analysis', 'comparison', 'moderate-reasoning']
       },
       {
-        modelId: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+        modelId: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
         provider: 'bedrock',
         tier: 'premium',
         capabilities: {

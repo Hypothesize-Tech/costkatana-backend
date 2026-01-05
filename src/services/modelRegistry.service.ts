@@ -243,7 +243,7 @@ export class ModelRegistryService {
             // === AWS Bedrock - Claude Models ===
             {
                 id: 'bedrock:claude-3-5-sonnet-v2',
-                name: 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+                name: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
                 displayName: 'Claude 3.5 Sonnet v2',
                 provider: AIProviderType.Bedrock,
                 status: 'active',

@@ -49,7 +49,7 @@ export class DynamicModelSelector {
       contextWindow: 200000
     },
     // Claude 3.5 Sonnet v2 - Excellent reasoning (requires special access)
-    'anthropic.claude-3-5-sonnet-20241022-v2:0': {
+    'us.anthropic.claude-3-5-sonnet-20241022-v2:0': {
       reasoning: 0.95,
       speed: 0.6,
       cost: 0.3,
@@ -394,7 +394,7 @@ export class DynamicModelSelector {
   }): Promise<string> {
     await this.refreshAvailableModels();
     
-    let bestModel = 'anthropic.claude-3-5-sonnet-20241022-v2:0'; // Default
+    let bestModel = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'; // Default
     let bestScore = 0;
     
     for (const [modelId, capabilities] of Object.entries(this.modelCapabilities)) {

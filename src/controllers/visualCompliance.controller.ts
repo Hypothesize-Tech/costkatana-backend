@@ -151,7 +151,7 @@ export class VisualComplianceController {
           costSaved: Math.max(0, actualCostSaved),
           improvementPercentage: Math.max(0, actualImprovementPercentage),
           service: 'visual-compliance',
-          model: mode === 'optimized' ? 'amazon.nova-pro-v1:0' : 'anthropic.claude-3-5-sonnet-20241022-v2:0',
+          model: mode === 'optimized' ? 'amazon.nova-pro-v1:0' : 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
           category: 'response_formatting',
           optimizationType: mode === 'optimized' ? 'visual_compliance' : 'visual_compliance_standard',
           visualComplianceData: {

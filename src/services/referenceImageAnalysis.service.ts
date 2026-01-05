@@ -93,7 +93,7 @@ interface ValidationResult {
 }
 
 export class ReferenceImageAnalysisService {
-    private static readonly MODEL_ID = 'anthropic.claude-3-5-sonnet-20241022-v2:0';
+    private static readonly MODEL_ID = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0';
     private static extractionEmitter = new EventEmitter();
 
     /**
