@@ -125,6 +125,24 @@ const MultiAgentStateAnnotation = Annotation.Root({
             isComplete: false
         }),
     }),
+    // IntegrationSelector fields
+    requiresIntegrationSelector: Annotation<boolean | undefined>({
+        reducer: (x: boolean | undefined, y: boolean | undefined) => y ?? x,
+        default: () => undefined,
+    }),
+    integrationSelectorData: Annotation<any>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => undefined,
+    }),
+    // MongoDB integration data
+    mongodbIntegrationData: Annotation<any>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => undefined,
+    }),
+    formattedResult: Annotation<any>({
+        reducer: (x: any, y: any) => y ?? x,
+        default: () => undefined,
+    }),
 });
 
 type MultiAgentState = typeof MultiAgentStateAnnotation.State;
@@ -298,6 +316,7 @@ export class MultiAgentFlowService {
             costBudget?: number;
             previousMessages?: BaseMessage[];
             callbacks?: BaseCallbackHandler[]; // Optional callbacks for activity streaming
+            selectionResponse?: any; // Selection response from IntegrationSelector
         } = {}
     ): Promise<{
         response: string;
@@ -307,7 +326,11 @@ export class MultiAgentFlowService {
         cacheHit: boolean;
         riskLevel: string;
         thinking?: any;
+        requiresIntegrationSelector?: boolean;
+        integrationSelectorData?: any;
         metadata: Record<string, any>;
+        mongodbIntegrationData?: any;
+        formattedResult?: any;
     }> {
         // Start LangSmith tracing
         const runId = await langSmithService.createRun(
@@ -327,6 +350,21 @@ export class MultiAgentFlowService {
         );
 
         try {
+            // Setup LangSmith run for tracing
+            const runId = `run_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            loggingService.info(`📊 LangSmith run created: ${runId}`);
+
+            // Debug: Log what options were received
+            loggingService.info('🔍 processMessage called with options', {
+                hasOptions: !!options,
+                hasSelectionResponse: !!options.selectionResponse,
+                selectionResponse: options.selectionResponse,
+                selectionResponseKeys: options.selectionResponse ? Object.keys(options.selectionResponse) : [],
+                selectionResponseIntegration: options.selectionResponse?.integration,
+                optionsKeys: Object.keys(options),
+                message
+            });
+
             const initialState: Partial<MultiAgentState> = {
                 messages: [new HumanMessage(message)],
                 userId,
@@ -336,9 +374,18 @@ export class MultiAgentFlowService {
                 metadata: { 
                     startTime: Date.now(),
                     langSmithRunId: runId,
-                    userId
+                    userId,
+                    ...(options.selectionResponse ? { selectionResponse: options.selectionResponse } : {})
                 }
             };
+
+            // Debug: Log initial state
+            loggingService.info('🔍 Initial state created', {
+                hasMetadata: !!initialState.metadata,
+                hasSelectionResponse: !!(initialState.metadata as any)?.selectionResponse,
+                selectionResponse: (initialState.metadata as any)?.selectionResponse,
+                message
+            });
 
             if (options.previousMessages && options.previousMessages.length > 0) {
                 initialState.messages = [...options.previousMessages, new HumanMessage(message)];
@@ -407,6 +454,21 @@ export class MultiAgentFlowService {
             const cacheHit = result.cacheHit || false;
             const chatMode = result.chatMode || 'balanced';
 
+            let mongodbIntegrationData = result.mongodbIntegrationData;
+            let formattedResult = result.formattedResult;
+            
+            // Debug: Log MongoDB integration data - AGGRESSIVE LOGGING
+            loggingService.info('🔍🔍🔍 FINAL RESULT STATE CHECK 🔍🔍🔍', {
+                hasMongodbIntegrationData: !!mongodbIntegrationData,
+                mongodbIntegrationData: JSON.stringify(mongodbIntegrationData),
+                hasFormattedResult: !!formattedResult,
+                formattedResult: formattedResult ? JSON.stringify(formattedResult).substring(0, 200) : null,
+                resultKeys: Object.keys(result),
+                resultKeysCount: Object.keys(result).length,
+                resultHasMongodbIntegrationData: 'mongodbIntegrationData' in result,
+                resultHasFormattedResult: 'formattedResult' in result
+            });
+
             // Record cost event for predictive analytics
             this.recordCostEvent(cost, chatMode, cacheHit, agentPath);
 
@@ -430,7 +492,7 @@ export class MultiAgentFlowService {
                 });
             }
 
-            return {
+            const finalResult = {
                 response,
                 cost,
                 agentPath,
@@ -438,8 +500,23 @@ export class MultiAgentFlowService {
                 cacheHit,
                 riskLevel: result.riskLevel || 'low',
                 thinking: this.generateThinkingSteps(result),
-                metadata: result.metadata || {}
+                // Pass IntegrationSelector data if present
+                requiresIntegrationSelector: result.requiresIntegrationSelector,
+                integrationSelectorData: result.integrationSelectorData,
+                metadata: result.metadata || {},
+                // ALWAYS include these fields, even if empty
+                mongodbIntegrationData: mongodbIntegrationData || {},
+                formattedResult: formattedResult || {}
             };
+
+            loggingService.info('📤 [FLOW-1] multiAgentFlow.processMessage RETURNING', {
+                hasMongodbIntegrationData: !!finalResult.mongodbIntegrationData && Object.keys(finalResult.mongodbIntegrationData).length > 0,
+                hasFormattedResult: !!finalResult.formattedResult && Object.keys(finalResult.formattedResult).length > 0,
+                mongodbIntegrationDataKeys: finalResult.mongodbIntegrationData ? Object.keys(finalResult.mongodbIntegrationData) : [],
+                formattedResultKeys: finalResult.formattedResult ? Object.keys(finalResult.formattedResult) : []
+            });
+
+            return finalResult;
 
         } catch (error) {
             loggingService.error('❌ Multi-agent flow processing failed:', { error: error instanceof Error ? error.message : String(error) });
@@ -490,13 +567,15 @@ export class MultiAgentFlowService {
                     promptCost: this.estimatePromptCost(refinedPrompt),
                     refinedPrompt,
                     optimizationsApplied: ['prompt_refinement'],
-                    agentPath: ['prompt_refined']
+                    agentPath: ['prompt_refined'],
+                    metadata: { ...state.metadata } // Preserve metadata
                 };
             }
 
             return {
                 promptCost,
-                agentPath: ['prompt_acceptable']
+                agentPath: ['prompt_acceptable'],
+                metadata: { ...state.metadata } // Preserve metadata
             };
         } catch (error) {
             loggingService.error('❌ Prompt analysis failed:', { error: error instanceof Error ? error.message : String(error) });
@@ -508,7 +587,10 @@ export class MultiAgentFlowService {
         try {
             const lastMessage = state.messages[state.messages.length - 1];
             if (!lastMessage || typeof lastMessage.content !== 'string') {
-                return { agentPath: ['cache_miss'] };
+                return { 
+                    agentPath: ['cache_miss'],
+                    metadata: { ...state.metadata } // Preserve metadata
+                };
             }
 
             // Enhanced semantic similarity check
@@ -533,11 +615,16 @@ export class MultiAgentFlowService {
 
             return {
                 cacheHit: false,
-                agentPath: [...(state.agentPath || []), 'cache_miss']
+                agentPath: [...(state.agentPath || []), 'cache_miss'],
+                metadata: { ...state.metadata } // Preserve metadata
             };
         } catch (error) {
             loggingService.error('❌ Semantic cache failed:', { error: error instanceof Error ? error.message : String(error) });
-            return { agentPath: [...(state.agentPath || []), 'cache_error'], failureCount: (state.failureCount || 0) + 1 };
+            return { 
+                agentPath: [...(state.agentPath || []), 'cache_error'], 
+                failureCount: (state.failureCount || 0) + 1,
+                metadata: { ...state.metadata } // Preserve metadata
+            };
         }
     }
 
@@ -613,10 +700,172 @@ Would you like me to help you with anything else, or would you prefer to check t
      */
     private async masterAgentWithLangchain(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
-            loggingService.info('🔗 Master agent using Langchain coordination with tools');
-            
             const lastMessage = state.messages[state.messages.length - 1];
             const userMessage = lastMessage.content as string;
+            
+            // Debug: Log state metadata
+            loggingService.info('🔍 Master agent state check', {
+                hasMetadata: !!state.metadata,
+                hasSelectionResponse: !!state.metadata?.selectionResponse,
+                selectionResponse: state.metadata?.selectionResponse,
+                userMessage,
+                messageStartsWith: userMessage.startsWith('Selected:')
+            });
+            
+            // Check if this is a selection response for MongoDB
+            const selectionResponse = state.metadata?.selectionResponse as any;
+            const isMongoDBSelectionResponse = selectionResponse?.integration === 'mongodb' && 
+                                              userMessage.startsWith('Selected:');
+            
+            loggingService.info('🔍 MongoDB selection check', {
+                isMongoDBSelectionResponse,
+                hasSelectionResponse: !!selectionResponse,
+                integration: selectionResponse?.integration,
+                startsWithSelected: userMessage.startsWith('Selected:')
+            });
+            
+            if (isMongoDBSelectionResponse) {
+                loggingService.info('🔗 Master agent processing MongoDB selection response', {
+                    parameterName: selectionResponse.parameterName,
+                    value: selectionResponse.value,
+                    pendingAction: selectionResponse.pendingAction,
+                    collectedParams: selectionResponse.collectedParams
+                });
+                
+                // Reconstruct the MongoDB command with collected parameters
+                const collectedParams = {
+                    ...selectionResponse.collectedParams,
+                    [selectionResponse.parameterName]: selectionResponse.value
+                };
+                
+                // Import and use the MongoDB integration tool
+                const { MongoDBIntegrationTool } = await import('../tools/mongodbIntegrationTool');
+                const mongodbTool = new MongoDBIntegrationTool(state.metadata?.userId || 'unknown');
+                
+                // Call the tool with the collected parameters
+                const toolInput = JSON.stringify(collectedParams);
+                loggingService.info('🔧 Calling MongoDB tool with collected params', { toolInput });
+                
+                const toolResult = await mongodbTool._call(toolInput);
+                
+                // Parse the tool result
+                let parsedResult;
+                try {
+                    parsedResult = JSON.parse(toolResult);
+                } catch {
+                    parsedResult = { success: false, error: 'Failed to parse tool response' };
+                }
+                
+                // If the tool still requires more parameters, continue the flow
+                if (parsedResult.requiresIntegrationSelector) {
+                    const userFriendlyMessage = parsedResult.integrationSelectorData?.question || 'Please provide additional information to continue.';
+                    
+                    return {
+                        messages: [new AIMessage(userFriendlyMessage)],
+                        currentAgent: 'master_langchain',
+                        agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                        optimizationsApplied: [...(state.optimizationsApplied || []), 'mongodb_integration_tool'],
+                        requiresIntegrationSelector: true,
+                        integrationSelectorData: parsedResult.integrationSelectorData,
+                        metadata: {
+                            ...state.metadata,
+                            langchainEnhanced: true,
+                            toolUsed: 'mongodb_integration',
+                            toolSuccess: false,
+                            requiresIntegrationSelector: true,
+                            integrationSelectorData: parsedResult.integrationSelectorData,
+                        }
+                    };
+                }
+                
+                // Return the successful result
+                return {
+                    messages: [new AIMessage(parsedResult.message || toolResult)],
+                    currentAgent: 'master_langchain',
+                    agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                    optimizationsApplied: [...(state.optimizationsApplied || []), 'mongodb_integration_tool'],
+                    metadata: {
+                        ...state.metadata,
+                        langchainEnhanced: true,
+                        toolUsed: 'mongodb_integration',
+                        toolSuccess: parsedResult.success,
+                    },
+                    mongodbIntegrationData: parsedResult.mongodbIntegrationData,
+                    formattedResult: parsedResult.formattedResult
+                };
+            }
+            
+            // Check if this is a MongoDB operation request
+            const isMongoDBRequest = /@mongodb:|list.*collection|find.*document|insert.*document|update.*document|delete.*document|database.*stat|collection.*stat|create.*collection|drop.*collection|create.*index|aggregate/i.test(userMessage);
+            
+            if (isMongoDBRequest) {
+                loggingService.info('🔧 Detected MongoDB request, invoking mongodb_integration tool');
+                
+                // Import and use the MongoDB integration tool
+                const { MongoDBIntegrationTool } = await import('../tools/mongodbIntegrationTool');
+                const mongodbTool = new MongoDBIntegrationTool(state.metadata?.userId || 'unknown');
+                
+                // Call the tool with the user's request
+                const toolResult = await mongodbTool._call(userMessage);
+                
+                // Parse the tool result
+                let parsedResult;
+                try {
+                    parsedResult = JSON.parse(toolResult);
+                } catch {
+                    parsedResult = { success: false, error: 'Failed to parse tool response' };
+                }
+                
+                // If the tool requires parameter collection, pass this back to frontend
+                if (parsedResult.requiresIntegrationSelector) {
+                    loggingService.info('🔧 MongoDB tool requires parameter collection', {
+                        parameterName: parsedResult.integrationSelectorData?.parameterName,
+                        question: parsedResult.integrationSelectorData?.question,
+                    });
+                    
+                    // Use the question from selectorData as the message, not the error
+                    const userFriendlyMessage = parsedResult.integrationSelectorData?.question || 'Please provide additional information to continue.';
+                    
+                    return {
+                        messages: [new AIMessage(userFriendlyMessage)],
+                        currentAgent: 'master_langchain',
+                        agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                        optimizationsApplied: [...(state.optimizationsApplied || []), 'mongodb_integration_tool'],
+                        // Add at root level for proper propagation
+                        requiresIntegrationSelector: true,
+                        integrationSelectorData: parsedResult.integrationSelectorData,
+                        metadata: {
+                            ...state.metadata,
+                            langchainEnhanced: true,
+                            toolUsed: 'mongodb_integration',
+                            toolSuccess: false,
+                            requiresIntegrationSelector: true,
+                            integrationSelectorData: parsedResult.integrationSelectorData,
+                        }
+                    };
+                }
+                
+                // Return the tool result directly as the response
+                return {
+                    messages: [new AIMessage(parsedResult.message || toolResult)],
+                    currentAgent: 'master_langchain',
+                    agentPath: [...(state.agentPath || []), 'master_langchain_enhanced'],
+                    optimizationsApplied: [...(state.optimizationsApplied || []), 'mongodb_integration_tool'],
+                    // Pass IntegrationSelector data at root level so frontend can access it
+                    requiresIntegrationSelector: parsedResult.requiresIntegrationSelector,
+                    integrationSelectorData: parsedResult.integrationSelectorData,
+                    metadata: {
+                        ...state.metadata,
+                        langchainEnhanced: true,
+                        toolUsed: 'mongodb_integration',
+                        toolSuccess: parsedResult.success,
+                        requiresIntegrationSelector: parsedResult.requiresIntegrationSelector,
+                        integrationSelectorData: parsedResult.integrationSelectorData,
+                    },
+                    mongodbIntegrationData: parsedResult.mongodbIntegrationData,
+                    formattedResult: parsedResult.formattedResult
+                };
+            }
             
             // Check if this is an AWS operation request
             const isAWSRequest = /create|list|stop|start|show.*(?:bucket|s3|ec2|instance|rds|database|lambda|function|dynamodb|table|ecs|cluster|cost)/i.test(userMessage);
@@ -656,7 +905,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 };
             }
             
-            // For non-AWS requests, use simple direct response
+            // For non-AWS/MongoDB requests, use simple direct response
             const simplePrompt = new HumanMessage(`${userMessage}\n\nProvide a direct, concise, and helpful response. Do not add fluff or overly formal language.`);
             const response = await this.langchainCoordinatorAgent!.invoke([simplePrompt]);
             
@@ -679,11 +928,14 @@ Would you like me to help you with anything else, or would you prefer to check t
         }
     }
 
-    private async costOptimizerNode(_state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+    private async costOptimizerNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         // Cost optimization is handled in metadata, no new message needed
         return {
             currentAgent: 'cost_optimizer',
-            agentPath: ['cost_optimizer']
+            agentPath: ['cost_optimizer'],
+            // Preserve MongoDB integration data
+            mongodbIntegrationData: state.mongodbIntegrationData,
+            formattedResult: state.formattedResult
         };
     }
 
@@ -712,13 +964,18 @@ Would you like me to help you with anything else, or would you prefer to check t
                     qualityScore: qualityMetrics.score,
                     qualityRecommendations: qualityMetrics.recommendations
                 },
-                riskLevel: this.assessRiskLevel(qualityMetrics.score, state.optimizationsApplied)
+                riskLevel: this.assessRiskLevel(qualityMetrics.score, state.optimizationsApplied),
+                mongodbIntegrationData: state.mongodbIntegrationData,
+                formattedResult: state.formattedResult
             };
         } catch (error) {
             loggingService.error('❌ Quality analyst failed:', { error: error instanceof Error ? error.message : String(error) });
             return { 
                 agentPath: ['quality_analyst_error'],
-                failureCount: (state.failureCount || 0) + 1
+                failureCount: (state.failureCount || 0) + 1,
+                // Preserve MongoDB integration data even on error
+                mongodbIntegrationData: state.mongodbIntegrationData,
+                formattedResult: state.formattedResult
             };
         }
     }
@@ -1653,7 +1910,9 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                     memoryStored: true,
                     memoryOperations: memoryWriteResult.memoryOperations || [],
                     learningCompleted: true
-                }
+                },
+                mongodbIntegrationData: state.mongodbIntegrationData,
+                formattedResult: state.formattedResult
             };
         } catch (error) {
             loggingService.error('❌ Memory Writer failed:', { error: error instanceof Error ? error.message : String(error) });
@@ -1662,7 +1921,9 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
                 metadata: {
                     ...state.metadata,
                     memoryWriteError: error instanceof Error ? error.message : 'Memory storage failed'
-                }
+                },
+                mongodbIntegrationData: state.mongodbIntegrationData,
+                formattedResult: state.formattedResult
             };
         }
     }

@@ -23,12 +23,15 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
         maxTokens = 8000, 
         documentIds, 
         githubContext,
+        vercelContext,
+        mongodbContext,
         templateId,
         templateVariables,
         useWebSearch,
         chatMode,
         useMultiAgent,
-        attachments
+        attachments,
+        selectionResponse
     } = req.body;
 
     try {
@@ -324,12 +327,15 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             maxTokens,
             documentIds,
             githubContext,
+            vercelContext,
+            mongodbContext,
             templateId,
             templateVariables,
             useWebSearch,
             chatMode,
             useMultiAgent,
             attachments,
+            selectionResponse,
             req
         });
 
@@ -361,9 +367,31 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             }
         });
 
+        // Debug: Log what we received from service
+        loggingService.info('📥 [FLOW-9] CONTROLLER RECEIVED from ChatService.sendMessage', {
+            hasMongodbIntegrationData: !!result.mongodbIntegrationData && Object.keys(result.mongodbIntegrationData || {}).length > 0,
+            hasFormattedResult: !!result.formattedResult && Object.keys(result.formattedResult || {}).length > 0,
+            mongodbIntegrationDataKeys: result.mongodbIntegrationData ? Object.keys(result.mongodbIntegrationData) : [],
+            formattedResultKeys: result.formattedResult ? Object.keys(result.formattedResult) : [],
+            allResultKeys: Object.keys(result)
+        });
+
+        // Ensure fields are included
+        const responseData = {
+            ...result,
+            mongodbIntegrationData: result.mongodbIntegrationData,
+            formattedResult: result.formattedResult
+        };
+
+        loggingService.info('📤 [FLOW-10] CONTROLLER FINAL RESPONSE to frontend', {
+            hasMongodbIntegrationData: !!responseData.mongodbIntegrationData && Object.keys(responseData.mongodbIntegrationData || {}).length > 0,
+            hasFormattedResult: !!responseData.formattedResult && Object.keys(responseData.formattedResult || {}).length > 0,
+            allResponseDataKeys: Object.keys(responseData)
+        });
+
         res.json({
             success: true,
-            data: result
+            data: responseData
         });
 
     } catch (error: any) {
@@ -382,6 +410,96 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
         res.status(500).json({
             success: false,
             message: 'Failed to send message',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Update the selected view type for a MongoDB result message
+ */
+export const updateMessageViewType = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { messageId } = req.params;
+    const { viewType } = req.body;
+
+    try {
+        loggingService.info('MongoDB message view type update request initiated', {
+            userId,
+            messageId,
+            viewType,
+            requestId: req.headers['x-request-id'] as string
+        });
+
+        if (!userId) {
+            loggingService.warn('MongoDB message view type update failed - no user authentication', {
+                requestId: req.headers['x-request-id'] as string
+            });
+            res.status(401).json({ success: false, message: 'Authentication required' });
+            return;
+        }
+
+        if (!messageId) {
+            loggingService.warn('MongoDB message view type update failed - missing messageId', {
+                userId,
+                requestId: req.headers['x-request-id'] as string
+            });
+            res.status(400).json({ success: false, message: 'Message ID is required' });
+            return;
+        }
+
+        const validViewTypes = ['table', 'json', 'schema', 'stats', 'chart', 'text', 'error', 'empty', 'explain'];
+        if (!viewType || !validViewTypes.includes(viewType)) {
+            loggingService.warn('MongoDB message view type update failed - invalid viewType', {
+                userId,
+                messageId,
+                viewType,
+                validViewTypes,
+                requestId: req.headers['x-request-id'] as string
+            });
+            res.status(400).json({ success: false, message: 'Invalid viewType provided' });
+            return;
+        }
+
+        const success = await ChatService.updateChatMessageViewType(messageId, userId, viewType);
+
+        const duration = Date.now() - startTime;
+
+        if (success) {
+            loggingService.info('MongoDB message view type updated successfully', {
+                userId,
+                messageId,
+                viewType,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+            res.json({ success: true, message: 'View type updated successfully' });
+        } else {
+            loggingService.warn('MongoDB message view type update failed - message not found or not a MongoDB result', {
+                userId,
+                messageId,
+                viewType,
+                duration,
+                requestId: req.headers['x-request-id'] as string
+            });
+            res.status(404).json({ success: false, message: 'MongoDB result message not found or not accessible' });
+        }
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        loggingService.error('Failed to update MongoDB message view type', {
+            userId,
+            messageId,
+            viewType,
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            duration,
+            requestId: req.headers['x-request-id'] as string
+        });
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update message view type',
             error: error instanceof Error ? error.message : 'Unknown error'
         });
     }

@@ -15,6 +15,17 @@ export interface IVercelContext {
     projectName?: string;
 }
 
+export interface IMongoDBContext {
+    connectionId?: Types.ObjectId;
+    activeDatabase?: string;
+    activeCollection?: string;
+    recentQueries?: Array<{
+        query: any;
+        collection: string;
+        timestamp: Date;
+    }>;
+}
+
 export interface IConversation extends Document {
     _id: Types.ObjectId;
     userId: string;
@@ -30,6 +41,7 @@ export interface IConversation extends Document {
     deletedAt?: Date;
     githubContext?: IGitHubContext;
     vercelContext?: IVercelContext;
+    mongodbContext?: IMongoDBContext;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -97,6 +109,19 @@ const conversationSchema = new Schema<IConversation>({
             connectionId: Schema.Types.ObjectId,
             projectId: String,
             projectName: String
+        },
+        required: false
+    },
+    mongodbContext: {
+        type: {
+            connectionId: Schema.Types.ObjectId,
+            activeDatabase: String,
+            activeCollection: String,
+            recentQueries: [{
+                query: Schema.Types.Mixed,
+                collection: String,
+                timestamp: Date
+            }]
         },
         required: false
     }
