@@ -32,8 +32,12 @@ export interface IChatMessage extends Document {
         latency?: number;
         tokenCount?: number;
         inputTokens?: number;
-        outputTokens?: number;
-    };
+    outputTokens?: number;
+};
+mongodbSelectedViewType?: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain';
+    integrationSelectorData?: any; // To store the full IntegrationSelector data
+    mongodbIntegrationData?: any; // To store structured MongoDB operation details (action, collection, etc.)
+    mongodbResultData?: any; // To store the actual MongoDB query result data (formattedResult.data)
     createdAt: Date;
     updatedAt: Date;
 }
@@ -140,6 +144,19 @@ const chatMessageSchema = new Schema<IChatMessage>({
             type: Number,
             min: 0
         }
+    },
+    mongodbSelectedViewType: {
+        type: String,
+        enum: ['table', 'json', 'schema', 'stats', 'chart', 'text', 'error', 'empty', 'explain']
+    },
+    integrationSelectorData: {
+        type: Schema.Types.Mixed // Use Mixed type to store any object
+    },
+    mongodbIntegrationData: {
+        type: Schema.Types.Mixed // Use Mixed type to store structured MongoDB operation details
+    },
+    mongodbResultData: {
+        type: Schema.Types.Mixed // Use Mixed type to store the actual MongoDB query result data
     }
 }, {
     timestamps: true,

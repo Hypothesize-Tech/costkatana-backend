@@ -565,6 +565,96 @@ export const awsSchemas = {
 };
 
 // ============================================================================
+// MONGODB SCHEMAS
+// ============================================================================
+
+export const mongodbSchemas = {
+  list_collections: z.object({
+    action: z.literal('list_collections'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+  }).describe('List all collections in the database'),
+
+  list_databases: z.object({
+    action: z.literal('list_databases'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+  }).describe('List all databases'),
+
+  database_stats: z.object({
+    action: z.literal('database_stats'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+  }).describe('Get database statistics and size information'),
+
+  collection_stats: z.object({
+    action: z.literal('collection_stats'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+  }).describe('Get statistics for a specific collection'),
+
+  find: z.object({
+    action: z.literal('find'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    query: z.string().optional().describe('MongoDB query filter (JSON format)'),
+    limit: z.number().optional().describe('Maximum number of documents to return'),
+    skip: z.number().optional().describe('Number of documents to skip'),
+  }).describe('Query documents from a collection'),
+
+  insert: z.object({
+    action: z.literal('insert'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    documents: z.string().min(1).describe('Documents to insert (JSON format)'),
+  }).describe('Insert documents into a collection'),
+
+  update: z.object({
+    action: z.literal('update'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    query: z.string().min(1).describe('Query filter (JSON format)'),
+    update: z.string().min(1).describe('Update operations (JSON format)'),
+  }).describe('Update documents in a collection'),
+
+  delete: z.object({
+    action: z.literal('delete'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    query: z.string().min(1).describe('Query filter (JSON format)'),
+  }).describe('Delete documents from a collection'),
+
+  create_collection: z.object({
+    action: z.literal('create_collection'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    schema: z.string().optional().describe('JSON schema for validation'),
+  }).describe('Create a new collection'),
+
+  drop_collection: z.object({
+    action: z.literal('drop_collection'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+  }).describe('Drop a collection'),
+
+  create_index: z.object({
+    action: z.literal('create_index'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    indexName: z.string().min(1).describe('Index name'),
+    fields: z.string().min(1).describe('Fields to index (JSON format)'),
+  }).describe('Create an index on a collection'),
+
+  aggregate: z.object({
+    action: z.literal('aggregate'),
+    connectionId: z.string().optional().describe('MongoDB connection ID'),
+    collectionName: z.string().min(1).describe('Collection name'),
+    pipeline: z.string().min(1).describe('Aggregation pipeline (JSON format)'),
+  }).describe('Run aggregation pipeline on a collection'),
+
+  help: z.object({
+    action: z.literal('help'),
+  }).describe('Get help with MongoDB commands'),
+};
+
+// ============================================================================
 // SCHEMA REGISTRY
 // ============================================================================
 
@@ -584,6 +674,7 @@ export const integrationSchemas = {
   gdocs: gdocsSchemas,
   calendar: calendarSchemas,
   aws: awsSchemas,
+  mongodb: mongodbSchemas,
   // Aliases
   google: gmailSchemas, // Default to gmail for @google
 } as const;
@@ -742,11 +833,49 @@ export const parameterQuestions: Record<string, { question: string; placeholder:
     placeholder: 'Enter CPU % threshold (default: 5)...',
   },
   
-  // Generic
-  query: {
-    question: 'What would you like to search for?',
-    placeholder: 'Enter search query...',
+  // MongoDB
+  connectionId: {
+    question: 'Which MongoDB connection would you like to use?',
+    placeholder: 'Select a connection...',
   },
+  collectionName: {
+    question: 'Which collection would you like to query?',
+    placeholder: 'Enter collection name...',
+  },
+  query: {
+    question: 'What query would you like to run?',
+    placeholder: 'Enter MongoDB query (JSON format)...',
+  },
+  documents: {
+    question: 'What documents would you like to insert?',
+    placeholder: 'Enter documents (JSON format)...',
+  },
+  update: {
+    question: 'What updates would you like to apply?',
+    placeholder: 'Enter update operations (JSON format)...',
+  },
+  indexName: {
+    question: 'What should the index be named?',
+    placeholder: 'Enter index name...',
+  },
+  fields: {
+    question: 'Which fields should be indexed?',
+    placeholder: 'Enter fields (JSON format)...',
+  },
+  pipeline: {
+    question: 'What aggregation pipeline would you like to run?',
+    placeholder: 'Enter pipeline (JSON format)...',
+  },
+  limit: {
+    question: 'How many documents would you like to retrieve?',
+    placeholder: 'Enter limit (default: 10)...',
+  },
+  skip: {
+    question: 'How many documents should be skipped?',
+    placeholder: 'Enter skip count (default: 0)...',
+  },
+  
+  // Generic
   name: {
     question: 'What name would you like to use?',
     placeholder: 'Enter name...',

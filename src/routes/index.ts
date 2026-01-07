@@ -77,6 +77,7 @@ import proactiveSuggestionsRoutes from './proactiveSuggestions.routes';
 import utilsRoutes from './utils.routes';
 import fileUploadRoutes from './fileUpload.routes';
 import awsRoutes from './aws.routes';
+import mongodbMcpRoutes from './mongodbMcp.routes';
 
 const router = Router();
 
@@ -170,5 +171,6 @@ router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
 router.use('/utils', utilsRoutes);
 router.use('/files', fileUploadRoutes);
 router.use('/aws', awsRoutes);
+router.use('/mcp', mongodbMcpRoutes);
 
 export const apiRouter = router;

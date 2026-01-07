@@ -55,6 +55,7 @@ const LangchainChatState = Annotation.Root({
         google?: any;
         github?: any;
         vercel?: any;
+        mongodb?: any;
     }>(),
     strategyFormation: Annotation<{
         questions: string[];
@@ -153,6 +154,14 @@ export interface ChatMessageResponse {
         latency?: number;
         tokenCount?: number;
     };
+    // MongoDB integration fields
+    mongodbSelectedViewType?: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain';
+    integrationSelectorData?: any;
+    mongodbIntegrationData?: any;
+    formattedResult?: {
+        type: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'error' | 'empty' | 'text' | 'explain';
+        data: any;
+    };
 }
 
 export interface ConversationResponse {
@@ -199,6 +208,11 @@ export interface ChatSendMessageRequest {
         connectionId: string;
         projectId: string;
         projectName: string;
+    };
+    mongodbContext?: {
+        connectionId: string;
+        activeDatabase?: string;
+        activeCollection?: string;
     };
     // Template support
     templateId?: string; // Use a prompt template
@@ -259,6 +273,10 @@ export interface ChatSendMessageResponse {
     };
     // Vercel integration data
     vercelIntegrationData?: any;
+    // MongoDB integration data
+    mongodbIntegrationData?: any;
+    resultType?: string;
+    formattedResult?: any;
     suggestions?: string[];
     // Template metadata
     templateUsed?: {
@@ -302,6 +320,9 @@ export interface ChatSendMessageResponse {
         collectedParams: Record<string, unknown>;
         originalMessage?: string;
     };
+    // IntegrationSelector data (for MongoDB and other integrations)
+    requiresIntegrationSelector?: boolean;
+    integrationSelectorData?: any;
 }
 
 export class ChatService {
@@ -2111,6 +2132,11 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         proactiveInsights?: string[];
         requiresSelection?: boolean;
         selection?: any;
+        requiresIntegrationSelector?: boolean;
+        integrationSelectorData?: any;
+        metadata?: Record<string, any>;
+        mongodbIntegrationData?: any;
+        formattedResult?: any;
     }> {
         // Initialize Langchain system if needed
         if (!this.initialized) {
@@ -2125,6 +2151,13 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
 
             loggingService.info('⚡ Using optimized multi-agent processing');
             
+            // Debug: Log what we're about to pass to multiAgentFlowService
+            loggingService.info('🔍 About to call multiAgentFlowService.processMessage', {
+                hasSelectionResponse: !!request.selectionResponse,
+                selectionResponse: request.selectionResponse,
+                message: request.message
+            });
+            
             // Try to use multiAgentFlowService if available, otherwise fall back to direct Bedrock
             try {
                 const multiAgentResult = await multiAgentFlowService.processMessage(
@@ -2134,18 +2167,39 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                     {
                         chatMode: (request.chatMode as any) || 'balanced',
                         costBudget: 0.10,
-                        previousMessages: recentMessages
+                        previousMessages: recentMessages,
+                        selectionResponse: request.selectionResponse
                     }
                 );
                 
-                return {
+                loggingService.info('📥 [FLOW-2] chat.service.processWithLangchainMultiAgent RECEIVED from multiAgentFlow', {
+                    hasMongodbIntegrationData: !!multiAgentResult.mongodbIntegrationData && Object.keys(multiAgentResult.mongodbIntegrationData).length > 0,
+                    hasFormattedResult: !!multiAgentResult.formattedResult && Object.keys(multiAgentResult.formattedResult).length > 0,
+                    mongodbIntegrationDataKeys: multiAgentResult.mongodbIntegrationData ? Object.keys(multiAgentResult.mongodbIntegrationData) : [],
+                    formattedResultKeys: multiAgentResult.formattedResult ? Object.keys(multiAgentResult.formattedResult) : []
+                });
+
+                const returnData = {
                     response: multiAgentResult.response,
                     agentThinking: multiAgentResult.thinking,
                     agentPath: multiAgentResult.agentPath,
                     optimizationsApplied: multiAgentResult.optimizationsApplied,
                     cacheHit: multiAgentResult.cacheHit,
-                    riskLevel: multiAgentResult.riskLevel
+                    riskLevel: multiAgentResult.riskLevel,
+                    // Pass IntegrationSelector data at root level
+                    requiresIntegrationSelector: multiAgentResult.requiresIntegrationSelector,
+                    integrationSelectorData: multiAgentResult.integrationSelectorData,
+                    metadata: multiAgentResult.metadata,
+                    mongodbIntegrationData: multiAgentResult.mongodbIntegrationData,
+                    formattedResult: multiAgentResult.formattedResult
                 };
+
+                loggingService.info('📤 [FLOW-3] chat.service.processWithLangchainMultiAgent RETURNING', {
+                    hasMongodbIntegrationData: !!returnData.mongodbIntegrationData && Object.keys(returnData.mongodbIntegrationData).length > 0,
+                    hasFormattedResult: !!returnData.formattedResult && Object.keys(returnData.formattedResult).length > 0
+                });
+
+                return returnData;
             } catch (multiAgentError) {
                 loggingService.warn('⚠️ MultiAgentFlowService failed, falling back to direct Bedrock', {
                     error: multiAgentError instanceof Error ? multiAgentError.message : String(multiAgentError)
@@ -2615,7 +2669,7 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
         
         const userId = request.userId;
         const errorKey = `${userId}-processing`;
@@ -2628,7 +2682,16 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         
         try {
             // Try enhanced processing
-            return await this.tryEnhancedProcessing(request, conversation, recentMessages);
+            const processingResult = await this.tryEnhancedProcessing(request, conversation, recentMessages);
+            
+            loggingService.info('📥 [FLOW-6] chat.service.processWithFallback RECEIVED from tryEnhancedProcessing', {
+                hasMongodbIntegrationData: !!processingResult.mongodbIntegrationData && Object.keys(processingResult.mongodbIntegrationData).length > 0,
+                hasFormattedResult: !!processingResult.formattedResult && Object.keys(processingResult.formattedResult).length > 0,
+                mongodbIntegrationDataKeys: processingResult.mongodbIntegrationData ? Object.keys(processingResult.mongodbIntegrationData) : [],
+                formattedResultKeys: processingResult.formattedResult ? Object.keys(processingResult.formattedResult) : []
+            });
+            
+            return processingResult;
         } catch (error) {
             // Increment error count
             this.errorCounts.set(errorKey, (this.errorCounts.get(errorKey) || 0) + 1);
@@ -2654,7 +2717,7 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
         
         // Use Langchain Multi-Agent System if explicitly requested or for complex queries
         const shouldUseLangchain = request.useMultiAgent || 
@@ -2672,15 +2735,33 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                 recentMessages
             );
             
+            loggingService.info('📥 [FLOW-4] chat.service.tryEnhancedProcessing RECEIVED from processWithLangchainMultiAgent', {
+                hasMongodbIntegrationData: !!langchainResult.mongodbIntegrationData && Object.keys(langchainResult.mongodbIntegrationData).length > 0,
+                hasFormattedResult: !!langchainResult.formattedResult && Object.keys(langchainResult.formattedResult).length > 0,
+                mongodbIntegrationDataKeys: langchainResult.mongodbIntegrationData ? Object.keys(langchainResult.mongodbIntegrationData) : [],
+                formattedResultKeys: langchainResult.formattedResult ? Object.keys(langchainResult.formattedResult) : []
+            });
+
             // Convert Langchain result to expected format
-            return {
+            const returnData = {
                 response: langchainResult.response,
                 agentThinking: langchainResult.agentThinking,
                 agentPath: langchainResult.agentPath,
                 optimizationsApplied: langchainResult.optimizationsApplied,
                 cacheHit: langchainResult.cacheHit,
-                riskLevel: langchainResult.riskLevel
+                riskLevel: langchainResult.riskLevel,
+                requiresIntegrationSelector: langchainResult.requiresIntegrationSelector,
+                integrationSelectorData: langchainResult.integrationSelectorData,
+                mongodbIntegrationData: langchainResult.mongodbIntegrationData,
+                formattedResult: langchainResult.formattedResult
             };
+
+            loggingService.info('📤 [FLOW-5] chat.service.tryEnhancedProcessing RETURNING', {
+                hasMongodbIntegrationData: !!returnData.mongodbIntegrationData && Object.keys(returnData.mongodbIntegrationData).length > 0,
+                hasFormattedResult: !!returnData.formattedResult && Object.keys(returnData.formattedResult).length > 0
+            });
+
+            return returnData;
         }
         
         // Build conversation context
@@ -3326,6 +3407,13 @@ Based ONLY on the search results above, provide a factual answer:`;
         try {
             const startTime = Date.now();
             
+            // Debug: Log the incoming request
+            loggingService.info('🔍 sendMessage called with request', {
+                hasSelectionResponse: !!request.selectionResponse,
+                selectionResponse: request.selectionResponse,
+                message: request.message
+            });
+            
             // Generate messageId
             const messageId = new Types.ObjectId().toString();
             
@@ -3756,7 +3844,27 @@ Based ONLY on the search results above, provide a factual answer:`;
             // If mentions found, try to execute integration command
             // Process ALL mentions including Vercel through the new Integration Agent
             // Also handle selection response continuation (multi-turn parameter collection)
-            if (mentions.length > 0 || (request.selectionResponse && request.selectionResponse.integration !== 'strategy')) {
+            // EXCEPT: MongoDB requests should go to multi-agent flow (it has its own tool)
+            const isMongoDBRequest = mentions.some(m => m.integration === 'mongodb') || 
+                                   (request.selectionResponse && request.selectionResponse.integration === 'mongodb');
+            
+            // Handle MongoDB selection responses - preserve selectionResponse for multi-agent flow
+            loggingService.info('🔍 Checking MongoDB request status', {
+                isMongoDBRequest,
+                hasSelectionResponse: !!request.selectionResponse,
+                selectionResponseIntegration: request.selectionResponse?.integration,
+                message: actualMessage
+            });
+            
+            if (isMongoDBRequest && request.selectionResponse && request.selectionResponse.integration === 'mongodb') {
+                loggingService.info('🔍 MongoDB selection response detected, preserving for multi-agent flow', {
+                    parameterName: request.selectionResponse.parameterName,
+                    value: request.selectionResponse.value,
+                    pendingAction: request.selectionResponse.pendingAction
+                });
+            }
+            
+            if ((mentions.length > 0 || (request.selectionResponse && request.selectionResponse.integration !== 'strategy')) && !isMongoDBRequest) {
                 try {
                     // Use the new AI-powered Integration Agent for parameter extraction
                     const { IntegrationAgentService } = await import('./integrationAgent.service');
@@ -4217,6 +4325,121 @@ Based ONLY on the search results above, provide a factual answer:`;
                 }
             }
 
+            // Handle MongoDB context
+            const mongodbContext = request.mongodbContext;
+            if (mongodbContext) {
+                try {
+                    const { MongoDBChatAgentService } = await import('./mongodbChatAgent.service');
+                    const { MongoDBConnection, Conversation: ConversationModel } = await import('../models');
+                    
+                    // Get MongoDB connection
+                    const connectionId = typeof mongodbContext.connectionId === 'string' 
+                        ? mongodbContext.connectionId 
+                        : mongodbContext.connectionId;
+                    const connection = await MongoDBConnection.findById(connectionId);
+                    if (!connection || !connection.isActive) {
+                        throw new Error('MongoDB connection not found or inactive');
+                    }
+
+                    // Get conversation MongoDB context if exists, otherwise create from request
+                    let conversationMongoDBContext = null;
+                    if (conversation!.mongodbContext) {
+                        conversationMongoDBContext = conversation!.mongodbContext;
+                    } else {
+                        // Create MongoDB context from request
+                        conversationMongoDBContext = {
+                            connectionId: connection._id,
+                            activeDatabase: mongodbContext.activeDatabase,
+                            activeCollection: mongodbContext.activeCollection,
+                            recentQueries: []
+                        };
+                        // Save to conversation
+                        await ConversationModel.findByIdAndUpdate(conversation!._id, {
+                            mongodbContext: conversationMongoDBContext
+                        });
+                    }
+
+                    // Process with MongoDB chat agent
+                    const mongodbResponse = await MongoDBChatAgentService.processMessage(
+                        request.userId,
+                        String(connection._id),
+                        request.message || '',
+                        {
+                            conversationId: conversation!._id.toString(),
+                            userId: request.userId,
+                            connectionId: String(connection._id),
+                            activeDatabase: conversationMongoDBContext.activeDatabase,
+                            activeCollection: conversationMongoDBContext.activeCollection,
+                            recentQueries: conversationMongoDBContext.recentQueries || []
+                        }
+                    );
+
+                    // Format response - include integration data for frontend polling
+                    const processingResult = {
+                        response: mongodbResponse.message,
+                        agentPath: ['mongodb_agent'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low' as const,
+                        agentThinking: undefined,
+                        // Include MongoDB integration data if present
+                        mongodbIntegrationData: mongodbResponse.data || undefined,
+                        suggestions: mongodbResponse.suggestions,
+                        resultType: mongodbResponse.resultType,
+                        formattedResult: mongodbResponse.formattedResult,
+                    };
+
+                    // Save assistant response
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: mongodbResponse.message,
+                                modelId: request.modelId
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = mongodbResponse.message.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+
+                    const latency = Date.now() - startTime;
+                    const inputTokens = Math.ceil((request.message || '').length / 4);
+                    const outputTokens = Math.ceil(mongodbResponse.message.length / 4);
+                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+
+                    return {
+                        messageId: new Types.ObjectId().toString(),
+                        conversationId: conversation!._id.toString(),
+                        response: mongodbResponse.message,
+                        cost,
+                        latency,
+                        tokenCount: inputTokens + outputTokens,
+                        model: request.modelId,
+                        agentPath: processingResult.agentPath,
+                        optimizationsApplied: processingResult.optimizationsApplied,
+                        cacheHit: processingResult.cacheHit,
+                        riskLevel: processingResult.riskLevel,
+                        mongodbIntegrationData: processingResult.mongodbIntegrationData,
+                        suggestions: processingResult.suggestions?.map((s: any) => s.command) || [],
+                        resultType: processingResult.resultType,
+                        formattedResult: processingResult.formattedResult
+                    };
+                } catch (error) {
+                    loggingService.warn('MongoDB chat agent failed, falling back to normal processing', {
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                    // Fall through to normal processing
+                }
+            }
+
             if (githubContext) {
                 try {
                     const { GitHubChatAgentService } = await import('./githubChatAgent.service');
@@ -4319,11 +4542,28 @@ Based ONLY on the search results above, provide a factual answer:`;
             // Optimized: Enhanced processing with circuit breaker
             // Add attachments context to the message if present
             const finalMessage = attachmentsContext ? actualMessage + attachmentsContext : actualMessage;
+            
+            // Debug: Log the request before passing to processWithFallback
+            loggingService.info('🔍 Before processWithFallback', {
+                hasSelectionResponse: !!request.selectionResponse,
+                selectionResponse: request.selectionResponse,
+                message: request.message,
+                finalMessage
+            });
+            
             const processingResult = await this.processWithFallback(
                 { ...request, message: finalMessage }, 
                 conversation!, 
                 recentMessages
             );
+            
+            loggingService.info('📥 [FLOW-7] chat.service.sendMessage RECEIVED from processWithFallback', {
+                hasMongodbIntegrationData: !!processingResult.mongodbIntegrationData && Object.keys(processingResult.mongodbIntegrationData || {}).length > 0,
+                hasFormattedResult: !!processingResult.formattedResult && Object.keys(processingResult.formattedResult || {}).length > 0,
+                mongodbIntegrationDataKeys: processingResult.mongodbIntegrationData ? Object.keys(processingResult.mongodbIntegrationData) : [],
+                formattedResultKeys: processingResult.formattedResult ? Object.keys(processingResult.formattedResult) : [],
+                allProcessingResultKeys: Object.keys(processingResult)
+            });
             
             const response = processingResult.response;
             const agentThinking = processingResult.agentThinking;
@@ -4370,7 +4610,11 @@ Based ONLY on the search results above, provide a factual answer:`;
                             tokenCount: outputTokens,
                             inputTokens,
                             outputTokens
-                        }
+                        },
+                        integrationSelectorData: processingResult.integrationSelectorData, // Save IntegrationSelector data
+                        mongodbIntegrationData: processingResult.mongodbIntegrationData, // Save structured MongoDB data
+                        mongodbSelectedViewType: processingResult.formattedResult?.type || 'table', // Set initial view type
+                        mongodbResultData: processingResult.formattedResult?.data, // Save actual MongoDB query result data
                     }], { session: session2 });
 
                     // Optimized: Increment message count instead of counting
@@ -4438,7 +4682,7 @@ Based ONLY on the search results above, provide a factual answer:`;
 
             loggingService.info(`Chat message sent successfully for user ${request.userId} with model ${request.modelId}`);
 
-            return {
+            const finalReturn = {
                 messageId, // Use pre-generated messageId for activity streaming
                 conversationId: conversation!._id.toString(),
                 response,
@@ -4455,12 +4699,62 @@ Based ONLY on the search results above, provide a factual answer:`;
                 templateUsed: templateMetadata,
                 // Web search metadata
                 webSearchUsed: (processingResult as any).webSearchUsed || false,
-                quotaUsed: (processingResult as any).quotaUsed
+                quotaUsed: (processingResult as any).quotaUsed,
+                // IntegrationSelector data
+                requiresIntegrationSelector: processingResult.requiresIntegrationSelector,
+                integrationSelectorData: processingResult.integrationSelectorData,
+                // MongoDB integration data
+                mongodbIntegrationData: processingResult.mongodbIntegrationData,
+                formattedResult: processingResult.formattedResult
             };
+
+            loggingService.info('📤 [FLOW-8] chat.service.sendMessage FINAL RETURN', {
+                hasMongodbIntegrationData: !!finalReturn.mongodbIntegrationData && Object.keys(finalReturn.mongodbIntegrationData || {}).length > 0,
+                hasFormattedResult: !!finalReturn.formattedResult && Object.keys(finalReturn.formattedResult || {}).length > 0,
+                allKeys: Object.keys(finalReturn)
+            });
+
+            return finalReturn;
 
         } catch (error) {
             loggingService.error('Error sending chat message:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Failed to send chat message');
+        }
+    }
+
+    /**
+     * Update the selected view type for a MongoDB result message
+     */
+    static async updateChatMessageViewType(
+        messageId: string,
+        userId: string,
+        viewType: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain'
+    ): Promise<boolean> {
+        try {
+            // Validate ObjectId format
+            if (!Types.ObjectId.isValid(messageId)) {
+                loggingService.error('Invalid message ID format', { messageId, userId });
+                throw new Error('Invalid message ID format');
+            }
+
+            const result = await ChatMessage.updateOne(
+                { _id: messageId, userId, 'mongodbIntegrationData.action': { $exists: true } }, // Ensure it's a MongoDB result message
+                { $set: { mongodbSelectedViewType: viewType } }
+            );
+
+            if (result.matchedCount === 0) {
+                loggingService.warn('MongoDB message not found for view type update', { messageId, userId, viewType });
+                return false;
+            }
+
+            loggingService.info('MongoDB message view type updated successfully', { messageId, userId, viewType });
+            return true;
+        } catch (error) {
+            loggingService.error('Failed to update MongoDB message view type:', {
+                messageId, userId, viewType,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new Error('Failed to update chat message view type');
         }
     }
 
@@ -4881,7 +5175,16 @@ Based ONLY on the search results above, provide a factual answer:`;
                 attachedDocuments: message.attachedDocuments || [],
                 attachments: message.attachments || [],
                 timestamp: message.createdAt || message.timestamp || new Date(),
-                metadata: message.metadata || {}
+                metadata: message.metadata || {},
+                // Include new MongoDB integration fields
+                mongodbSelectedViewType: message.mongodbSelectedViewType,
+                integrationSelectorData: message.integrationSelectorData,
+                mongodbIntegrationData: message.mongodbIntegrationData,
+                // Construct formattedResult from stored data
+                formattedResult: message.mongodbResultData ? {
+                    type: message.mongodbSelectedViewType || 'table',
+                    data: message.mongodbResultData
+                } : undefined
             };
         } catch (error) {
             loggingService.error('Error converting message to response', { 

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "mongodb-costkatana": {
+      "command": "node",
+      "args": [
+        "dist/services/mongodbMcpStdio.service.js"
+      ],
+      "env": {
+        "MONGODB_USER_ID": "your-user-id-here",
+        "MONGODB_CONNECTION_ID": "your-connection-id-here",
+        "MONGODB_URI": "mongodb://localhost:27017/costkatana",
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}

@@ -8,6 +8,7 @@ import { GitHubService } from './github.service';
 import { IIntegration, IntegrationCredentials } from '../models/Integration';
 import { IGitHubConnection } from '../models';
 import { IntegrationIntentRecognitionService } from './integrationIntentRecognition.service';
+import { MongoDBChatAgentService } from './mongodbChatAgent.service';
 
 export interface ParsedMention {
   integration: string;
@@ -18,7 +19,7 @@ export interface ParsedMention {
 }
 
 export interface IntegrationCommand {
-  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add' | 'assign' | 'remove' | 'ban' | 'unban' | 'kick' | 'export';
+  type: 'create' | 'get' | 'list' | 'update' | 'delete' | 'send' | 'add' | 'assign' | 'remove' | 'ban' | 'unban' | 'kick' | 'export' | 'query';
   entity: string;
   mention: ParsedMention;
   params: Record<string, any>;
@@ -3434,6 +3435,119 @@ export class IntegrationChatService {
         success: false,
         message: `❌ Vercel command failed: ${error.message}`,
         error: 'VERCEL_COMMAND_FAILED'
+      };
+    }
+  }
+
+  /**
+   * Detect MongoDB intent from message
+   * Checks for @mongodb mention or MongoDB-related keywords
+   */
+  static detectMongoDBIntent(message: string): boolean {
+    const lowerMessage = message.toLowerCase();
+
+    // Check for @mongodb mention
+    if (/@mongodb/i.test(message)) {
+      return true;
+    }
+
+    // MongoDB-specific keywords
+    const mongoKeywords = [
+      'database',
+      'collection',
+      'mongo',
+      'mongodb',
+      'find documents',
+      'aggregate',
+      'schema',
+      'indexes',
+      'query database'
+    ];
+
+    // Check if message contains MongoDB keywords
+    return mongoKeywords.some(keyword => lowerMessage.includes(keyword));
+  }
+
+  /**
+   * Parse MongoDB command from message
+   */
+  static parseMongoDBCommand(message: string): ParsedMention | null {
+    const { hasMention, cleanMessage } = MongoDBChatAgentService.parseMongoDBMention(message);
+
+    if (!hasMention && !this.detectMongoDBIntent(message)) {
+      return null;
+    }
+
+    return {
+      integration: 'mongodb',
+      entityType: 'query',
+      entityId: cleanMessage,
+    };
+  }
+
+  /**
+   * Execute MongoDB command via MongoDB Chat Agent
+   */
+  static async executeMongoDBCommand(
+    command: IntegrationCommand,
+    userId: string,
+    connectionId?: string
+  ): Promise<IntegrationCommandResult> {
+    try {
+      loggingService.info('Executing MongoDB command', {
+        component: 'IntegrationChatService',
+        operation: 'executeMongoDBCommand',
+        userId,
+        connectionId,
+        commandType: command.type,
+      });
+
+      if (!connectionId) {
+        return {
+          success: false,
+          message: '❌ No MongoDB connection selected. Please connect your MongoDB database first.',
+          error: 'NO_CONNECTION',
+          metadata: {
+            type: 'mongodb',
+            suggestions: ['Connect MongoDB database'],
+          },
+        };
+      }
+
+      // Extract clean message
+      const cleanMessage = command.naturalLanguage || '';
+      const { cleanMessage: parsedMessage } = MongoDBChatAgentService.parseMongoDBMention(cleanMessage);
+
+      // Process via MongoDB Chat Agent
+      const response = await MongoDBChatAgentService.processMessage(
+        userId,
+        connectionId,
+        parsedMessage,
+        command.params.context
+      );
+
+      return {
+        success: !response.formattedResult?.type.includes('error'),
+        message: response.message,
+        data: response.data,
+        metadata: {
+          type: 'mongodb',
+          suggestions: response.suggestions?.map(s => s.command) || [],
+          ...response.formattedResult,
+        },
+      };
+    } catch (error: any) {
+      loggingService.error('MongoDB command failed', {
+        component: 'IntegrationChatService',
+        operation: 'executeMongoDBCommand',
+        error: error.message,
+        stack: error.stack,
+      });
+
+      return {
+        success: false,
+        message: `❌ MongoDB query failed: ${error.message}`,
+        error: 'MONGODB_COMMAND_FAILED',
       };
     }
   }

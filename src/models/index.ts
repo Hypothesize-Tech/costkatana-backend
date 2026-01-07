@@ -8,7 +8,7 @@ export { Activity, IActivity } from './Activity';
 export { Project, IProject } from './Project';
 export { PromptTemplate, IPromptTemplate } from './PromptTemplate';
 export { ApprovalRequest, IApprovalRequest } from './ApprovalRequest';
-export { Conversation, IConversation, IGitHubContext, IVercelContext } from './Conversation';
+export { Conversation, IConversation, IGitHubContext, IVercelContext, IMongoDBContext } from './Conversation';
 export { ChatMessage, IChatMessage } from './ChatMessage';
 export { Experiment, IExperiment } from './Experiment';
 export { WhatIfScenario, IWhatIfScenario } from './WhatIfScenario';
@@ -28,6 +28,7 @@ export { GitHubConnection, IGitHubConnection, IGitHubRepository } from './GitHub
 export { GitHubIntegration, IGitHubIntegration, IGitHubCommit, IAISuggestion, IFeatureConfig } from './GitHubIntegration';
 export { GoogleConnection, IGoogleConnection, IGoogleDriveFile } from './GoogleConnection';
 export { GoogleExportAudit, IGoogleExportAudit } from './GoogleExportAudit';
+export { MongoDBConnection, IMongoDBConnection } from './MongoDBConnection';
 export { RepositoryUserMapping, IRepositoryUserMapping } from './RepositoryUserMapping';
 export { AILog, IAILog } from './AILog';
 export { LogQueryConversation, ILogQueryConversation } from './LogQueryConversation';

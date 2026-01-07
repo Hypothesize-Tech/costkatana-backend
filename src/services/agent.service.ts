@@ -12,6 +12,7 @@ import { ModelSelectorTool } from "../tools/modelSelector.tool";
 import { AnalyticsManagerTool } from "../tools/analyticsManager.tool";
 import { OptimizationManagerTool } from "../tools/optimizationManager.tool";
 import { WebSearchTool } from "../tools/webSearch.tool";
+import { MongoDBIntegrationTool } from "../tools/mongodbIntegrationTool";
 import { vectorStoreService } from "./vectorStore.service";
 import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
 import { loggingService } from "./logging.service";
@@ -311,6 +312,7 @@ export class AgentService {
             const { AWSIntegrationTool } = require('../tools/awsIntegrationTool');
             return new AWSIntegrationTool();
         });
+        this.toolFactories.set('mongodb_integration', () => new MongoDBIntegrationTool());
         
         loggingService.info('🔧 Tool factories initialized for lazy loading');
     }
