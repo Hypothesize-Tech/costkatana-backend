@@ -21,6 +21,8 @@ import { ResponseFormattersService } from "./response-formatters.service";
 import { VercelToolsService } from "./vercelTools.service";
 import { VercelConnection } from "../models/VercelConnection";
 import { multiLlmOrchestratorService } from "./multiLlmOrchestrator.service";
+import { toolRegistryService } from "./toolRegistry.service";
+import { mcpToolSyncerService } from "./mcpToolSyncer.service";
 import crypto from 'crypto';
 
 export interface AgentQuery {
@@ -464,6 +466,17 @@ export class AgentService {
 
         try {
             loggingService.info('🤖 Initializing AIOps Agent...');
+
+            // Initialize tool registry first
+            try {
+                await toolRegistryService.initialize();
+                await mcpToolSyncerService.syncCoreTools();
+                loggingService.info('✅ Tool registry initialized');
+            } catch (registryError) {
+                loggingService.warn('⚠️ Tool registry initialization failed, continuing without it:', {
+                    error: registryError instanceof Error ? registryError.message : String(registryError)
+                });
+            }
 
             // Initialize vector store first with timeout to prevent hanging
             try {

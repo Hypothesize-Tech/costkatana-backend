@@ -339,6 +339,58 @@ export const startServer = async () => {
             step: 'database_connected'
         });
 
+        // Initialize ECS container environment and dynamic context discovery
+        try {
+            loggingService.info('Step 1.5: Initializing ECS container environment', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_container_env'
+            });
+
+            // Initialize ECS container directories first
+            const { ECSContainerInit } = await import('./utils/ecsContainerInit');
+            await ECSContainerInit.initialize();
+
+            // Verify container health
+            const health = await ECSContainerInit.healthCheck();
+            if (!health.healthy) {
+                loggingService.warn('Container health check issues detected', {
+                    issues: health.issues
+                });
+            }
+
+            loggingService.info('Step 1.6: Initializing dynamic context discovery', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_context_discovery'
+            });
+
+            const { toolRegistryService } = await import('./services/toolRegistry.service');
+            const { contextFileManager } = await import('./services/contextFileManager.service');
+            const { mcpToolSyncerService } = await import('./services/mcpToolSyncer.service');
+            
+            await toolRegistryService.initialize();
+            await contextFileManager.initialize();
+            await mcpToolSyncerService.syncCoreTools();
+            
+            loggingService.info('✅ ECS container and dynamic context discovery initialized', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'container_ready',
+                baseDir: '/tmp/costkatana',
+                fileContextEnabled: true
+            });
+        } catch (contextError) {
+            loggingService.warn('⚠️ Container initialization failed, continuing without file context', {
+                component: 'Server',
+                operation: 'startServer',
+                error: contextError instanceof Error ? contextError.message : String(contextError)
+            });
+        }
+
         // Start background telemetry enrichment
         try {
             loggingService.info('Step 2: Starting background telemetry enrichment', {
