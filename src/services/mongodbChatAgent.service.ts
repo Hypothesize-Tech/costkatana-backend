@@ -46,6 +46,7 @@ export interface MongoDBChatResponse {
         type: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'error' | 'empty' | 'text' | 'explain';
         data: any;
     };
+    fileReference?: FileReference;
 }
 
 export interface MongoDBSuggestion {
@@ -163,7 +164,7 @@ export class MongoDBChatAgentService {
                 data: fileReference ? { fileReference } : result,
                 suggestions,
                 resultType: this.detectResultType(result),
-                formattedResult: fileReference ? { fileReference } : formattedResult,
+                formattedResult: formattedResult,
                 fileReference,
             };
         } catch (error) {
