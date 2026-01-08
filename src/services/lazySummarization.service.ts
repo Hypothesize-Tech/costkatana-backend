@@ -131,20 +131,6 @@ export class LazySummarizationService {
       });
 
       return result;
-        originalText,
-        originalTokens,
-        targetTokens,
-        defaultConfig
-      );
-
-      loggingService.info('Lazy summarization completed', {
-        originalTokens: result.originalTokens,
-        summarizedTokens: result.summarizedTokens,
-        reductionPercentage: result.reductionPercentage,
-        technique: result.technique
-      });
-
-      return result;
     } catch (error) {
       loggingService.error('Error in lazy summarization', {
         error: error instanceof Error ? error.message : String(error)

@@ -32,7 +32,7 @@ export class MCPToolSyncerService {
 
         const toolDefinitions: ToolDefinition[] = mcpTools.map(mcpTool => ({
             name: mcpTool.name,
-            description: mcpTool.description,
+            description: mcpTool.description || `MongoDB tool: ${mcpTool.name}`,
             category: 'mongodb',
             inputSchema: mcpTool.inputSchema,
             status: 'active',
@@ -60,7 +60,7 @@ export class MCPToolSyncerService {
 
         const toolDefinitions: ToolDefinition[] = vercelTools.map(tool => ({
             name: tool.name,
-            description: tool.description,
+            description: tool.description || `Vercel tool: ${tool.name}`,
             category: 'vercel',
             inputSchema: tool.inputSchema,
             status: 'active',
@@ -88,7 +88,7 @@ export class MCPToolSyncerService {
 
         const toolDefinitions: ToolDefinition[] = awsTools.map(tool => ({
             name: tool.name,
-            description: tool.description,
+            description: tool.description || `AWS tool: ${tool.name}`,
             category: 'aws',
             inputSchema: tool.inputSchema,
             status: 'active',
