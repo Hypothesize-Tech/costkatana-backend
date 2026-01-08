@@ -9,7 +9,7 @@ import { MongoClient, Db } from 'mongodb';
 import { loggingService } from './logging.service';
 import { MongoDBConnection, IMongoDBConnection } from '../models/MongoDBConnection';
 import { MongoDBMCPPolicyService } from './mongodbMcpPolicy.service';
-import { redisService } from './redis.service';
+import { mcpToolSyncerService } from './mcpToolSyncer.service';
 
 /**
  * MongoDB MCP Core Service
@@ -58,6 +58,27 @@ export class MongoDBMCPService {
 
         this.setupHandlers();
         this.startConnectionPoolCleanup();
+        
+        // Sync tools to file registry
+        this.syncToolsToRegistry();
+    }
+    
+    /**
+     * Sync MongoDB MCP tools to file registry for dynamic discovery
+     */
+    private async syncToolsToRegistry(): Promise<void> {
+        try {
+            const tools = this.getToolDefinitions();
+            await mcpToolSyncerService.syncMongoDBTools(tools);
+            loggingService.info('MongoDB MCP tools synced to registry', {
+                toolCount: tools.length
+            });
+        } catch (error) {
+            loggingService.warn('Failed to sync MongoDB tools to registry', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            // Don't throw - this is non-critical
+        }
     }
 
     /**

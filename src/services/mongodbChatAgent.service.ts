@@ -1,8 +1,10 @@
 import { MongoDBMCPService, MCPToolResult } from './mongodbMcp.service';
-import { MongoDBConnection, IMongoDBConnection } from '../models/MongoDBConnection';
+import { MongoDBConnection } from '../models/MongoDBConnection';
 import { loggingService } from './logging.service';
 import { ChatBedrockConverse } from '@langchain/aws';
-import { redisService } from './redis.service';
+import { contextFileManager } from './contextFileManager.service';
+import { FileReference } from '../types/contextFile.types';
+import crypto from 'crypto';
 
 /**
  * MongoDB Chat Agent Service
@@ -127,15 +129,42 @@ export class MongoDBChatAgentService {
             // Format results for chat
             const formattedResult = await this.formatResults(result, command.action);
 
+            // Check if response should be written to file
+            let fileReference: FileReference | undefined;
+            if (contextFileManager.isEnabled() && contextFileManager.shouldWriteToFile(result)) {
+                try {
+                    const requestId = crypto.randomBytes(16).toString('hex');
+                    fileReference = await contextFileManager.writeResponse(result, {
+                        userId,
+                        requestId,
+                        toolName: `mongodb_${command.action}`
+                    });
+                    
+                    loggingService.info('Large MongoDB response written to file', {
+                        userId,
+                        action: command.action,
+                        filePath: fileReference.path,
+                        size: fileReference.size
+                    });
+                } catch (fileError) {
+                    loggingService.warn('Failed to write response to file, returning inline', {
+                        error: fileError instanceof Error ? fileError.message : String(fileError)
+                    });
+                }
+            }
+
             // Generate follow-up suggestions
             const suggestions = await this.generateContextualSuggestions(command, result, context);
 
             return {
-                message: this.generateResponseMessage(command, result),
-                data: result,
+                message: fileReference 
+                    ? `${this.generateResponseMessage(command, result)}\n\n📁 Large result stored in file for better performance. ${fileReference.summary}\n${fileReference.instructions}`
+                    : this.generateResponseMessage(command, result),
+                data: fileReference ? { fileReference } : result,
                 suggestions,
                 resultType: this.detectResultType(result),
-                formattedResult,
+                formattedResult: fileReference ? { fileReference } : formattedResult,
+                fileReference,
             };
         } catch (error) {
             loggingService.error('MongoDB chat agent error', {

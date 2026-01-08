@@ -6,11 +6,13 @@
  * - Compresses conversation history
  * - Reduces token usage by 40-60%
  * - Maintains semantic quality
+ * - Exports history to files for recovery
  */
 
 import { loggingService } from './logging.service';
 import { estimateTokens } from '../utils/tokenCounter';
 import { AIProvider } from '../types/aiCostTracker.types';
+import { contextFileManager } from './contextFileManager.service';
 
 export interface SummarizationConfig {
   enabled: boolean;
@@ -28,16 +30,22 @@ export interface SummarizationResult {
   reductionPercentage: number;
   technique: string;
   quality: 'high' | 'medium' | 'low';
+  historyFilePath?: string;
 }
 
 export class LazySummarizationService {
   /**
    * Automatically compress context before LLM request
+   * Now includes optional conversation history export for recovery
    */
   static async compressContext(
     context: string | string[],
     targetTokens: number,
-    config: Partial<SummarizationConfig> = {}
+    config: Partial<SummarizationConfig> & {
+      conversationId?: string;
+      userId?: string;
+      exportHistory?: boolean;
+    } = {}
   ): Promise<SummarizationResult> {
     try {
       const defaultConfig: SummarizationConfig = {
@@ -52,6 +60,33 @@ export class LazySummarizationService {
       const originalText = Array.isArray(context) ? context.join('\n\n') : context;
       const originalTokens = estimateTokens(originalText, AIProvider.OpenAI);
 
+      // Export conversation history if requested and enabled
+      let historyFilePath: string | undefined;
+      if (config.exportHistory && config.conversationId && config.userId && 
+          contextFileManager.isEnabled()) {
+        try {
+          // Parse messages from context (assuming markdown-like format)
+          const messages = this.parseMessagesFromContext(originalText);
+          const historyFile = await contextFileManager.exportConversationHistory(
+            config.conversationId,
+            config.userId,
+            messages,
+            'markdown'
+          );
+          historyFilePath = historyFile.filePath;
+          
+          loggingService.info('Conversation history exported before summarization', {
+            conversationId: config.conversationId,
+            messageCount: messages.length,
+            filePath: historyFilePath
+          });
+        } catch (exportError) {
+          loggingService.warn('Failed to export conversation history', {
+            error: exportError instanceof Error ? exportError.message : String(exportError)
+          });
+        }
+      }
+
       // If already under target, no summarization needed
       if (originalTokens <= targetTokens) {
         return {
@@ -61,18 +96,41 @@ export class LazySummarizationService {
           summarizedTokens: originalTokens,
           reductionPercentage: 0,
           technique: 'none',
-          quality: 'high'
+          quality: 'high',
+          historyFilePath
         };
       }
 
       loggingService.info('Applying lazy summarization', {
         originalTokens,
         targetTokens,
-        aggressiveness: defaultConfig.aggressiveness
+        aggressiveness: defaultConfig.aggressiveness,
+        hasHistoryFile: !!historyFilePath
       });
 
       // Apply appropriate compression technique based on content type
       const result = await this.selectAndApplySummarization(
+        originalText,
+        originalTokens,
+        targetTokens,
+        defaultConfig
+      );
+
+      // Add history file reference to instructions if available
+      if (historyFilePath) {
+        result.historyFilePath = historyFilePath;
+        result.summarizedText = `${result.summarizedText}\n\n[Full conversation history available at: ${historyFilePath}]`;
+      }
+
+      loggingService.info('Lazy summarization completed', {
+        originalTokens: result.originalTokens,
+        summarizedTokens: result.summarizedTokens,
+        reductionPercentage: result.reductionPercentage,
+        technique: result.technique,
+        historyFilePath
+      });
+
+      return result;
         originalText,
         originalTokens,
         targetTokens,
@@ -219,6 +277,70 @@ export class LazySummarizationService {
       technique: 'extractive',
       quality: 'high'
     };
+  }
+
+  /**
+   * Parse messages from context text for history export
+   */
+  private static parseMessagesFromContext(context: string): Array<{
+    role: string;
+    content: string;
+    timestamp: Date;
+    metadata?: any;
+  }> {
+    const messages: Array<{
+      role: string;
+      content: string;
+      timestamp: Date;
+      metadata?: any;
+    }> = [];
+
+    // Try to parse structured format (e.g., "User: ...", "Assistant: ...")
+    const lines = context.split('\n');
+    let currentMessage: any = null;
+
+    for (const line of lines) {
+      const userMatch = line.match(/^(User|USER|user):\s*(.+)/);
+      const assistantMatch = line.match(/^(Assistant|ASSISTANT|assistant|AI):\s*(.+)/);
+
+      if (userMatch) {
+        if (currentMessage) {
+          messages.push(currentMessage);
+        }
+        currentMessage = {
+          role: 'user',
+          content: userMatch[2],
+          timestamp: new Date()
+        };
+      } else if (assistantMatch) {
+        if (currentMessage) {
+          messages.push(currentMessage);
+        }
+        currentMessage = {
+          role: 'assistant',
+          content: assistantMatch[2],
+          timestamp: new Date()
+        };
+      } else if (currentMessage && line.trim()) {
+        currentMessage.content += '\n' + line;
+      }
+    }
+
+    if (currentMessage) {
+      messages.push(currentMessage);
+    }
+
+    // If no structured format detected, create a single message
+    if (messages.length === 0) {
+      messages.push({
+        role: 'system',
+        content: context,
+        timestamp: new Date(),
+        metadata: { source: 'context_export' }
+      });
+    }
+
+    return messages;
   }
 
   /**
