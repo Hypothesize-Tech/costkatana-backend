@@ -529,6 +529,79 @@ export class ContextFileManager {
     isEnabled(): boolean {
         return this.enableFileContext;
     }
+
+    /**
+     * Write generic file to context directory
+     * @param relativePath Relative path from context root
+     * @param content File content
+     * @returns Absolute path of written file
+     */
+    async writeFile(relativePath: string, content: string): Promise<string> {
+        if (!this.enableFileContext) throw new Error('File context is disabled');
+        
+        const fullPath = this.resolveSecurePath(relativePath);
+        await fs.mkdir(path.dirname(fullPath), { recursive: true });
+        await fs.writeFile(fullPath, content, 'utf-8');
+        
+        loggingService.info('File written to context storage', { relativePath });
+        return fullPath;
+    }
+
+    /**
+     * List files in context directory
+     * @param relativePath Optional subdirectory
+     */
+    async listFiles(relativePath: string = ''): Promise<string[]> {
+        if (!this.enableFileContext) throw new Error('File context is disabled');
+
+        const fullPath = this.resolveSecurePath(relativePath);
+        try {
+            const files = await fs.readdir(fullPath);
+            // Return relative paths
+            return files; 
+        } catch (error) {
+            loggingService.warn('Failed to list files', { path: relativePath });
+            return [];
+        }
+    }
+
+    /**
+     * Read file from context directory (securely)
+     */
+    async readContextFile(relativePath: string): Promise<string> {
+        const fullPath = this.resolveSecurePath(relativePath);
+        return await this.readFile(fullPath);
+    }
+
+    /**
+     * Search in context file (securely)
+     */
+    async searchInContextFile(relativePath: string, pattern: string): Promise<string[]> {
+        const fullPath = this.resolveSecurePath(relativePath);
+        return await this.searchInFile(fullPath, pattern);
+    }
+
+    /**
+     * Tail context file (securely)
+     */
+    async tailContextFile(relativePath: string, lines: number): Promise<string> {
+        const fullPath = this.resolveSecurePath(relativePath);
+        return await this.getFileTail(fullPath, lines);
+    }
+
+    /**
+     * Resolve and validate path is within context directory
+     */
+    private resolveSecurePath(relativePath: string): string {
+        // Prevent directory traversal
+        const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, '');
+        const fullPath = path.join(this.contextDirectory, normalized);
+        
+        if (!fullPath.startsWith(this.contextDirectory)) {
+            throw new Error('Access denied: Path outside context directory');
+        }
+        return fullPath;
+    }
 }
 
 // Export singleton instance

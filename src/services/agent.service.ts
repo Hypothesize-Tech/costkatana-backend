@@ -13,7 +13,9 @@ import { AnalyticsManagerTool } from "../tools/analyticsManager.tool";
 import { OptimizationManagerTool } from "../tools/optimizationManager.tool";
 import { WebSearchTool } from "../tools/webSearch.tool";
 import { MongoDBIntegrationTool } from "../tools/mongodbIntegrationTool";
+import { FileSystemTool } from "../tools/fileSystem.tool";
 import { vectorStoreService } from "./vectorStore.service";
+import { contextEngineeringService } from "./contextEngineering.service";
 import { RetryWithBackoff, RetryConfigs } from "../utils/retryWithBackoff";
 import { loggingService } from "./logging.service";
 import { buildSystemPrompt, getCompressedPrompt } from "../config/agent-prompt-template";
@@ -315,6 +317,7 @@ export class AgentService {
             return new AWSIntegrationTool();
         });
         this.toolFactories.set('mongodb_integration', () => new MongoDBIntegrationTool());
+        this.toolFactories.set('file_system', () => new FileSystemTool());
         
         loggingService.info('🔧 Tool factories initialized for lazy loading');
     }
@@ -932,23 +935,14 @@ export class AgentService {
      * Build user context for the agent
      */
     private buildUserContext(queryData: AgentQuery): string {
-        let context = `User ID: ${queryData.userId}`;
+        // Prepare history for context engineering
+        const history: Array<{ role: string; content: string }> = [];
         
-        if (queryData.context?.projectId) {
-            context += `\nProject ID: ${queryData.context.projectId}`;
-        }
-        
-        if (queryData.context?.conversationId) {
-            context += `\nConversation ID: ${queryData.context.conversationId}`;
-        }
-
         if (queryData.context?.previousMessages && queryData.context.previousMessages.length > 0) {
-            context += '\nRecent conversation:\n';
-            queryData.context.previousMessages.slice(-3).forEach((msg: any) => {
+            queryData.context.previousMessages.slice(-5).forEach((msg: any) => { // Increased context window slightly
                 let messageContent = msg.content;
                 
                 // Only include document content metadata if the query is document-related
-                // This prevents old document context from polluting new queries about integrations (Vercel, GitHub, etc.)
                 const isDocumentQuery = queryData.query.toLowerCase().includes('document') || 
                                        queryData.query.toLowerCase().includes('file') ||
                                        queryData.query.toLowerCase().includes('pdf') ||
@@ -957,18 +951,28 @@ export class AgentService {
                                        queryData.query.toLowerCase().includes('analyze');
                 
                 if (msg.metadata?.type === 'document_content' && msg.metadata?.content && isDocumentQuery) {
-                    const maxContentLength = 8000; // Limit for agent context
+                    const maxContentLength = 8000;
                     const docContent = msg.metadata.content.length > maxContentLength 
                         ? msg.metadata.content.substring(0, maxContentLength) + '... [truncated]'
                         : msg.metadata.content;
                     messageContent = `${msg.content}\n[Document Content]: ${docContent}`;
                 }
                 
-                context += `${msg.role}: ${messageContent}\n`;
+                history.push({ role: msg.role, content: messageContent });
             });
         }
 
-        return context;
+        // Use Context Engineering Service to build optimized context
+        // This ensures consistent formatting and potential for KV-caching
+        const optimized = contextEngineeringService.buildOptimizedContext(
+            queryData.userId,
+            queryData.context?.projectId || 'default',
+            history,
+            '' // Tools are handled by the agent system prompt separately
+        );
+
+        // Combine static context and dynamic history
+        return `${optimized.staticContext}\n\nCONVERSATION HISTORY:\n${optimized.dynamicHistory}`;
     }
     
     /**
@@ -1875,9 +1879,10 @@ export class AgentService {
             'vercel_list_domains': 'List all domains configured for a Vercel project',
             'vercel_list_env_vars': 'List all environment variables for a Vercel project',
             'vercel_trigger_deployment': 'Trigger a new deployment for a Vercel project',
-            'vercel_rollback_deployment': 'Rollback a Vercel project to a previous deployment'
+            'vercel_rollback_deployment': 'Rollback a Vercel project to a previous deployment',
+            'file_system': 'Access the file system to read, write, and search files (active memory)'
         };
-
+        
         return Object.entries(toolDescriptions).map(([name, description]) => ({
             name,
             description

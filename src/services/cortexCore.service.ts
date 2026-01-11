@@ -379,6 +379,24 @@ export class CortexCoreService {
             // Parse the LISP answer back into a CortexFrame
             const answerFrame = this.parseLispToFrame(answerText);
             
+            // Validate the frame (Constrained Decoding)
+            const validation = this.validateCortexFrame(answerFrame);
+            if (!validation.valid) {
+                loggingService.warn('⚠️ Cortex frame validation failed', { 
+                    error: validation.error,
+                    frame: answerFrame 
+                });
+                
+                // In a robust implementation, we would trigger a retry here with the validation error as feedback
+                // For now, we mark it as error frame
+                return {
+                    frameType: 'answer',
+                    content: 'Generated answer failed validation',
+                    error: true,
+                    reason: validation.error
+                } as unknown as CortexFrame;
+            }
+
             return answerFrame;
             
         } catch (error) {
@@ -394,6 +412,31 @@ export class CortexCoreService {
                 reason: error instanceof Error ? error.message : 'Unknown error'
             } as unknown as CortexFrame;
         }
+    }
+
+    /**
+     * Validate decoded Cortex Frame against schema
+     * Implements "Constrained Decoding" to prevent hallucinations
+     */
+    private validateCortexFrame(frame: CortexFrame): { valid: boolean; error?: string } {
+        if (!frame || typeof frame !== 'object') {
+            return { valid: false, error: 'Frame must be an object' };
+        }
+
+        if (!frame.frameType) {
+            // If it parsed successfully but missing frameType, defaulting to 'answer' in parser might have handled it
+            // But if it's still missing, it's invalid
+            return { valid: false, error: 'Missing frameType' };
+        }
+
+        // Enforce strict schema for code responses
+        const anyFrame = frame as any;
+        if (anyFrame.type === 'code_response') {
+            if (!anyFrame.code) return { valid: false, error: 'Code response missing code content' };
+            if (!anyFrame.language) return { valid: false, error: 'Code response missing language' };
+        }
+
+        return { valid: true };
     }
 
     /**
