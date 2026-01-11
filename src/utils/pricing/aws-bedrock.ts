@@ -244,6 +244,59 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         isLatest: true,
         notes: 'Claude Haiku 4.5 on AWS Bedrock - latest Claude Haiku model with improved performance'
     },
+    // Global Inference Profile versions (same pricing as regional versions)
+    {
+        modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+        modelName: 'Claude Sonnet 4.5 (Global)',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.00,
+        outputPrice: 15.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 1_000_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Sonnet 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+    },
+    {
+        modelId: 'global.anthropic.claude-sonnet-4-20250514-v1:0',
+        modelName: 'Claude Sonnet 4 (Global)',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.00,
+        outputPrice: 15.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Sonnet 4 on AWS Bedrock Global Inference Profile - routes to best available region'
+    },
+    {
+        modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        modelName: 'Claude Haiku 4.5 (Global)',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.00,
+        outputPrice: 5.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Haiku 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+    },
+    {
+        modelId: 'global.anthropic.claude-opus-4-5-20250514-v1:0',
+        modelName: 'Claude Opus 4.5 (Global)',
+        provider: 'AWS Bedrock',
+        inputPrice: 15.00,
+        outputPrice: 75.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Opus 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+    },
     {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
         modelName: 'Claude 4 Opus',

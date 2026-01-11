@@ -615,6 +615,226 @@ export class VercelMCPService {
     }
 
     /**
+     * Create a new Vercel project
+     */
+    static async createProject(
+        connectionId: string,
+        projectName: string,
+        options?: {
+            framework?: string | null;
+            gitRepository?: {
+                type: 'github' | 'gitlab' | 'bitbucket';
+                repo: string; // e.g., "owner/repo"
+            };
+        }
+    ): Promise<any> {
+        try {
+            const { accessToken, teamId } = await this.getConnection(connectionId);
+
+            loggingService.info('Creating Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'createProject',
+                connectionId,
+                projectName,
+                framework: options?.framework,
+                hasGitRepo: !!options?.gitRepository
+            });
+
+            // Vercel API for creating projects
+            // Docs: https://vercel.com/docs/rest-api/endpoints/projects#create-a-project
+            const requestBody: any = {
+                name: projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+            };
+
+            // Add framework if specified
+            // Map common framework names to Vercel's expected values
+            if (options?.framework) {
+                const frameworkMap: Record<string, string> = {
+                    'react': 'create-react-app',
+                    'next': 'nextjs',
+                    'nextjs': 'nextjs',
+                    'vue': 'vue',
+                    'nuxt': 'nuxtjs',
+                    'svelte': 'svelte',
+                    'sveltekit': 'sveltekit',
+                    'gatsby': 'gatsby',
+                    'angular': 'angular',
+                    'vite': 'vite',
+                    'node': 'other',
+                    'express': 'other'
+                };
+                
+                const mappedFramework = frameworkMap[options.framework.toLowerCase()];
+                if (mappedFramework) {
+                    requestBody.framework = mappedFramework;
+                } else if (options.framework !== null) {
+                    // If not in map and not explicitly null, try using as-is
+                    requestBody.framework = options.framework;
+                }
+            }
+
+            // Add git repository link if specified
+            if (options?.gitRepository) {
+                requestBody.gitRepository = {
+                    type: options.gitRepository.type,
+                    repo: options.gitRepository.repo
+                };
+            }
+
+            const project = await this.apiRequest<any>(
+                accessToken,
+                '/v9/projects',
+                teamId,
+                {
+                    method: 'POST',
+                    body: JSON.stringify(requestBody)
+                }
+            );
+
+            loggingService.info('Vercel project created successfully', {
+                component: 'VercelMCPService',
+                operation: 'createProject',
+                connectionId,
+                projectId: project.id,
+                projectName: project.name
+            });
+
+            return project;
+        } catch (error: any) {
+            loggingService.error('Failed to create Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'createProject',
+                connectionId,
+                projectName,
+                error: error.message,
+                statusCode: error.response?.status,
+                responseData: error.response?.data,
+                requestedName: projectName.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+                framework: options?.framework,
+                gitRepo: options?.gitRepository?.repo
+            });
+            
+            // Provide more helpful error message
+            if (error.response?.status === 403) {
+                throw new Error(
+                    `Vercel API returned 403 Forbidden. This usually means:\n` +
+                    `1. Your Vercel access token lacks "Create Projects" permission\n` +
+                    `2. Team permissions issue (if using team account)\n` +
+                    `Please reconnect your Vercel integration with proper permissions.`
+                );
+            }
+            
+            // Check if this is a GitHub App error and preserve the message
+            const responseData = error.response?.data;
+            if (responseData?.error?.message) {
+                const errorMessage = responseData.error.message;
+                // Preserve the original error message so it can be detected upstream
+                const enrichedError = new Error(`Failed to create Vercel project: ${error.message}`);
+                (enrichedError as any).originalMessage = errorMessage;
+                (enrichedError as any).errorCode = responseData.error.code;
+                (enrichedError as any).response = error.response;
+                throw enrichedError;
+            }
+            
+            throw new Error(`Failed to create Vercel project: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get project details using Vercel REST API
+     */
+    static async getProject(
+        connectionId: string,
+        projectId: string
+    ): Promise<any> {
+        const { accessToken, teamId } = await this.getConnection(connectionId);
+        
+        try {
+            loggingService.info('Getting Vercel project details', {
+                component: 'VercelMCPService',
+                operation: 'getProject',
+                connectionId,
+                projectId
+            });
+
+            const project = await this.apiRequest<any>(
+                accessToken,
+                `/v9/projects/${projectId}`,
+                teamId
+            );
+
+            loggingService.info('Vercel project details retrieved', {
+                component: 'VercelMCPService',
+                operation: 'getProject',
+                projectId,
+                projectName: project.name,
+                hasGitConnection: !!project.link,
+                gitType: project.link?.type,
+                gitRepo: project.link?.repo
+            });
+
+            return project;
+        } catch (error: any) {
+            loggingService.error('Failed to get Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'getProject',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete project using Vercel REST API
+     */
+    static async deleteProject(
+        connectionId: string,
+        projectId: string
+    ): Promise<void> {
+        const { accessToken, teamId } = await this.getConnection(connectionId);
+        
+        try {
+            loggingService.info('Deleting Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'deleteProject',
+                connectionId,
+                projectId
+            });
+
+            await this.apiRequest<any>(
+                accessToken,
+                `/v9/projects/${projectId}`,
+                teamId,
+                {
+                    method: 'DELETE'
+                }
+            );
+
+            loggingService.info('Vercel project deleted successfully', {
+                component: 'VercelMCPService',
+                operation: 'deleteProject',
+                connectionId,
+                projectId
+            });
+        } catch (error: any) {
+            loggingService.error('Failed to delete Vercel project', {
+                component: 'VercelMCPService',
+                operation: 'deleteProject',
+                connectionId,
+                projectId,
+                error: error.message
+            });
+            
+            this.handleApiError(error);
+            throw error;
+        }
+    }
+
+    /**
      * Trigger deployment using Vercel REST API
      */
     static async triggerDeployment(
@@ -639,38 +859,99 @@ export class VercelMCPService {
                 `/v9/projects/${projectId}`,
                 teamId
             );
-
-            const deployment = await this.apiRequest<any>(
-                accessToken,
-                '/v13/deployments',
-                teamId,
-                {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        name: project.name,
-                        target
-                    })
-                }
-            );
-
-            loggingService.info('Vercel deployment triggered successfully', {
+            
+            loggingService.info('Vercel project details retrieved', {
                 component: 'VercelMCPService',
                 operation: 'triggerDeployment',
-                connectionId,
                 projectId,
-                deploymentId: deployment.uid,
-                target
+                projectName: project.name,
+                hasGitConnection: !!project.link,
+                gitType: project.link?.type,
+                gitRepo: project.link?.repo
             });
 
-            return deployment;
+            // Check if project has Git connection
+            if (!project.link) {
+                throw new Error(
+                    `Cannot deploy project "${project.name}" - it has no Git repository connected. ` +
+                    `Please either:\n` +
+                    `1. Install the Vercel GitHub App at https://github.com/apps/vercel\n` +
+                    `2. Connect your GitHub repository at https://vercel.com/${teamId ? `${teamId}/` : ''}${project.name}/settings/git\n` +
+                    `3. Or use Vercel CLI for manual deployment`
+                );
+            }
+            
+            // For Git-connected projects, we need to trigger a deployment from Git
+            // The deployment will be triggered automatically by Vercel when it detects changes
+            loggingService.info('Project has Git connection, checking for recent deployments', {
+                component: 'VercelMCPService',
+                operation: 'triggerDeployment',
+                projectId,
+                projectName: project.name,
+                gitRepo: project.link.repo
+            });
+            
+            // Get recent deployments to see if one was triggered by Git
+            const deploymentsResponse = await this.apiRequest<any>(
+                accessToken,
+                `/v6/deployments?projectId=${projectId}&limit=5`,
+                teamId
+            );
+            
+            const recentDeployments = deploymentsResponse.deployments || [];
+            const latestDeployment = recentDeployments[0];
+            
+            if (latestDeployment) {
+                loggingService.info('Found recent deployment', {
+                    component: 'VercelMCPService',
+                    operation: 'triggerDeployment',
+                    deploymentId: latestDeployment.uid,
+                    state: latestDeployment.state,
+                    createdAt: latestDeployment.createdAt
+                });
+                
+                return {
+                    uid: latestDeployment.uid,
+                    url: latestDeployment.url,
+                    state: latestDeployment.state,
+                    createdAt: latestDeployment.createdAt,
+                    message: 'Git-connected project. Deployment will be triggered automatically when changes are pushed to the repository.'
+                };
+            } else {
+                // No recent deployments, provide instructions
+                return {
+                    message: `Project "${project.name}" is connected to Git repository "${project.link.repo}". ` +
+                            `Deployments will be triggered automatically when you push changes to the repository. ` +
+                            `To deploy now, push your code to the GitHub repository.`,
+                    projectId,
+                    gitRepo: project.link.repo,
+                    instructions: [
+                        '1. Push your code to the GitHub repository',
+                        '2. Vercel will automatically detect the changes and start a deployment',
+                        '3. Check the deployment status at https://vercel.com/dashboard'
+                    ]
+                };
+            }
+
         } catch (error: any) {
             loggingService.error('Failed to trigger Vercel deployment', {
                 component: 'VercelMCPService',
                 operation: 'triggerDeployment',
                 connectionId,
                 projectId,
-                error: error.message
+                error: error.message,
+                errorResponse: error.response?.data,
+                statusCode: error.response?.status
             });
+            
+            // Provide more helpful error message
+            if (error.response?.status === 400) {
+                const errorData = error.response?.data;
+                if (errorData?.error?.message) {
+                    throw new Error(`Failed to trigger Vercel deployment: ${errorData.error.message}`);
+                }
+            }
+            
             this.handleApiError(error);
             throw error;
         }

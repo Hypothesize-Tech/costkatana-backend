@@ -796,7 +796,8 @@ Would you like me to help you with anything else, or would you prefer to check t
             }
             
             // Check if this is a MongoDB operation request
-            const isMongoDBRequest = /@mongodb:|list.*collection|find.*document|insert.*document|update.*document|delete.*document|database.*stat|collection.*stat|create.*collection|drop.*collection|create.*index|aggregate/i.test(userMessage);
+            // Only trigger if explicitly mentioned with @mongodb
+            const isMongoDBRequest = /@mongodb[:\s]/i.test(userMessage);
             
             if (isMongoDBRequest) {
                 loggingService.info('🔧 Detected MongoDB request, invoking mongodb_integration tool');

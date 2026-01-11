@@ -501,8 +501,11 @@ export class AgentService {
                 ? getCompressedPrompt() 
                 : buildSystemPrompt(userContext);
             
+            // Create prompt with required variables for createReactAgent
+            // createReactAgent expects: {input}, {tools}, {agent_scratchpad}
             const prompt = ChatPromptTemplate.fromMessages([
                 SystemMessagePromptTemplate.fromTemplate(systemPrompt),
+                ["placeholder", "{agent_scratchpad}"],
                 HumanMessagePromptTemplate.fromTemplate("{input}")
             ]);
 

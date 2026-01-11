@@ -96,21 +96,17 @@ export class GitHubController {
             const timestamp = Date.now();
             const stateData = Buffer.from(JSON.stringify({ userId, nonce, timestamp })).toString('base64');
             
-            // Store state in session for validation
-            if (!req.session) {
-                const error = GitHubErrors.SESSION_NOT_CONFIGURED;
-                loggingService.error(error.message, { code: error.code });
-                res.status(error.httpStatus).json(GitHubErrors.formatError(error));
-                return;
-            }
-            req.session.githubOAuthState = { state: stateData, nonce, timestamp, userId };
+            // Store state in Redis/cache instead of session (for distributed deployments)
+            const { redisService } = await import('../services/redis.service');
+            const stateKey = `github:oauth:state:${stateData}`;
+            await redisService.set(stateKey, { state: stateData, nonce, timestamp, userId }, 600); // 10 min TTL
 
             const scopes = 'repo,read:user,user:email';
             const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&scope=${scopes}&state=${stateData}`;
 
             loggingService.info('GitHub OAuth flow initiated', {
                 userId,
-                hasSession: !!req.session
+                hasRedis: true
             });
 
             res.json({
@@ -336,8 +332,9 @@ export class GitHubController {
             // Initialize GitHub service first
             await GitHubService.initialize();
 
-            // Validate state parameter (CSRF protection) - check session
-            const storedState = req.session?.githubOAuthState;
+            // Validate state parameter (CSRF protection) - check Redis/cache
+            const githubStateKey = `github:oauth:state:${state}`;
+            const storedState = await redisService.get(githubStateKey);
             if (!storedState || storedState.state !== state) {
                 const error = GitHubErrors.OAUTH_STATE_INVALID;
                 loggingService.warn(error.message, {
@@ -378,8 +375,8 @@ export class GitHubController {
                 return;
             }
 
-            // Clear used state
-            delete req.session.githubOAuthState;
+            // Clear used state (one-time use)
+            await redisService.del(githubStateKey);
 
             // Exchange code for token
             const tokenResponse: OAuthTokenResponse = await GitHubService.exchangeCodeForToken(code as string);

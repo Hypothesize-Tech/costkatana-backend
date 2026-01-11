@@ -131,6 +131,10 @@ export interface ChatMessageResponse {
     role: 'user' | 'assistant';
     content: string;
     modelId?: string;
+    // Governed Agent fields
+    messageType?: 'user' | 'assistant' | 'system' | 'governed_plan';
+    governedTaskId?: string;
+    planState?: 'SCOPE' | 'CLARIFY' | 'PLAN' | 'BUILD' | 'VERIFY' | 'DONE';
     attachedDocuments?: Array<{
         documentId: string;
         fileName: string;
@@ -4551,6 +4555,62 @@ Based ONLY on the search results above, provide a factual answer:`;
                 finalMessage
             });
             
+            // Check if this is an autonomous request before processing
+            const isAutonomousRequest = await this.detectAutonomousRequest(finalMessage);
+            
+            if (isAutonomousRequest) {
+                loggingService.info('🤖 Autonomous request detected, initiating governed agent', {
+                    userId: request.userId,
+                    conversationId: conversation!._id.toString(),
+                    message: finalMessage
+                });
+                
+                try {
+                    // Import GovernedAgentService
+                    const { GovernedAgentService } = await import('./governedAgent.service');
+                    
+                    // Initiate governed task
+                    const task = await GovernedAgentService.initiateTask(
+                        finalMessage,
+                        request.userId,
+                        conversation!._id.toString(),
+                        messageId
+                    );
+                    
+                    // Create governed plan message
+                    const planMessage = await this.createGovernedPlanMessage(
+                        conversation!._id.toString(),
+                        task.id,
+                        request.userId
+                    );
+                    
+                    // Return response indicating plan creation
+                    return {
+                        messageId: planMessage._id.toString(),
+                        conversationId: conversation!._id.toString(),
+                        response: planMessage.content,
+                        cost: 0,
+                        latency: Date.now() - startTime,
+                        tokenCount: 0,
+                        model: request.modelId,
+                        agentPath: ['governed_agent'],
+                        optimizationsApplied: ['autonomous_detection'],
+                        cacheHit: false,
+                        riskLevel: 'medium' as const,
+                        governedTaskId: task.id,
+                        messageType: 'governed_plan' as const
+                    } as ChatSendMessageResponse & { governedTaskId: string; messageType: string };
+                    
+                } catch (error) {
+                    loggingService.error('Failed to initiate governed agent', {
+                        error: error instanceof Error ? error.message : String(error),
+                        userId: request.userId,
+                        conversationId: conversation!._id.toString()
+                    });
+                    // Fall through to normal processing
+                }
+            }
+            
             const processingResult = await this.processWithFallback(
                 { ...request, message: finalMessage }, 
                 conversation!, 
@@ -5172,6 +5232,10 @@ Based ONLY on the search results above, provide a factual answer:`;
                 role: message.role || 'user',
                 content: message.content || '',
                 modelId: message.modelId,
+                // Governed Agent fields
+                messageType: message.messageType,
+                governedTaskId: message.governedTaskId ? (typeof message.governedTaskId === 'string' ? message.governedTaskId : message.governedTaskId.toString()) : undefined,
+                planState: message.planState,
                 attachedDocuments: message.attachedDocuments || [],
                 attachments: message.attachments || [],
                 timestamp: message.createdAt || message.timestamp || new Date(),
@@ -5701,5 +5765,155 @@ Based ONLY on the search results above, provide a factual answer:`;
             processedAttachments,
             contextString,
         };
+    }
+
+    /**
+     * Detect if a message requires autonomous agent workflow
+     */
+    static async detectAutonomousRequest(message: string): Promise<boolean> {
+        try {
+            // Keywords that indicate autonomous request
+            const autonomousKeywords = [
+                'create', 'build', 'deploy', 'develop', 'make', 'setup', 'implement',
+                'generate', 'scaffold', 'initialize', 'configure', 'establish',
+                'design', 'architect', 'construct', 'launch', 'ship', 'release',
+                'write', 'code', 'program'
+            ];
+            
+            const projectKeywords = [
+                'app', 'application', 'website', 'api', 'service', 'project',
+                'system', 'platform', 'solution', 'software', 'tool', 'product',
+                'todo', 'list', 'mern', 'react', 'node', 'fullstack', 'backend', 'frontend'
+            ];
+            
+            const messageLower = message.toLowerCase();
+            
+            // Check for autonomous keywords
+            const hasAutonomousKeyword = autonomousKeywords.some(keyword => 
+                messageLower.includes(keyword)
+            );
+            
+            // Check for project keywords
+            const hasProjectKeyword = projectKeywords.some(keyword => 
+                messageLower.includes(keyword)
+            );
+            
+            // More lenient heuristic: if we have an autonomous keyword, that's enough
+            // Or if we have specific patterns
+            if (hasAutonomousKeyword) {
+                loggingService.info('🤖 Autonomous request detected via keywords', {
+                    message: message.substring(0, 100),
+                    hasAutonomousKeyword,
+                    hasProjectKeyword
+                });
+                return true;
+            }
+            
+            // Check for specific patterns that indicate building something
+            const buildPatterns = [
+                /build\s+(?:a|an|the)?\s*\w+/i,
+                /create\s+(?:a|an|the)?\s*\w+/i,
+                /make\s+(?:a|an|me|the)?\s*\w+/i,
+                /develop\s+(?:a|an|the)?\s*\w+/i,
+                /deploy\s+(?:a|an|the|my)?\s*\w+/i,
+                /i\s+(?:want|need)\s+(?:to\s+)?(?:build|create|make)/i,
+                /(?:can|could)\s+you\s+(?:build|create|make)/i
+            ];
+            
+            const matchesPattern = buildPatterns.some(pattern => pattern.test(message));
+            if (matchesPattern) {
+                loggingService.info('🤖 Autonomous request detected via pattern', {
+                    message: message.substring(0, 100)
+                });
+                return true;
+            }
+            
+            // For edge cases, use AI for more sophisticated detection
+            const prompt = `Analyze if this message requires an autonomous agent workflow (creating projects, deploying code, building applications, etc.):
+            
+Message: "${message}"
+
+Respond with ONLY "true" or "false".`;
+            
+            const response = await BedrockService.invokeModel(
+                prompt,
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+                { recentMessages: [{ role: 'user', content: prompt }] }
+            );
+            
+            const result = response.trim().toLowerCase() === 'true';
+            
+            loggingService.info('🤖 Autonomous request detection result', {
+                message: message.substring(0, 100),
+                detected: result,
+                method: 'AI'
+            });
+            
+            return result;
+            
+        } catch (error) {
+            loggingService.error('Failed to detect autonomous request', {
+                error: error instanceof Error ? error.message : String(error),
+                message
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Create a governed plan message in the chat
+     */
+    static async createGovernedPlanMessage(
+        conversationId: string,
+        taskId: string,
+        userId: string
+    ): Promise<any> {
+        try {
+            // Import GovernedTask model
+            const { GovernedTaskModel } = await import('./governedAgent.service');
+            
+            // Get task details
+            const task = await GovernedTaskModel.findById(taskId);
+            if (!task) {
+                throw new Error('Governed task not found');
+            }
+            
+            // Create the plan message
+            const planMessage = await ChatMessage.create({
+                conversationId: new Types.ObjectId(conversationId),
+                userId,
+                role: 'assistant',
+                content: `🤖 **Autonomous Agent Initiated**\n\nI'm creating a plan to: ${task.userRequest}\n\nYou can track the progress and interact with the plan here.`,
+                messageType: 'governed_plan',
+                governedTaskId: new Types.ObjectId(taskId),
+                planState: task.mode,
+                metadata: {
+                    tokenCount: 0,
+                    cost: 0,
+                    latency: 0
+                }
+            });
+            
+            // Update the task with chat context
+            task.chatId = new Types.ObjectId(conversationId);
+            task.parentMessageId = planMessage._id;
+            await task.save();
+            
+            // Update or create ChatTaskLink
+            const { ChatTaskLink } = await import('../models/ChatTaskLink');
+            const link = await (ChatTaskLink as any).findOrCreateByChatId(new Types.ObjectId(conversationId));
+            await link.addTask(new Types.ObjectId(taskId));
+            
+            return planMessage;
+            
+        } catch (error) {
+            loggingService.error('Failed to create governed plan message', {
+                error: error instanceof Error ? error.message : String(error),
+                conversationId,
+                taskId,
+                userId
+            });
+            throw error;
+        }
     }
 }
