@@ -3441,31 +3441,12 @@ export class IntegrationChatService {
 
   /**
    * Detect MongoDB intent from message
-   * Checks for @mongodb mention or MongoDB-related keywords
+   * Only triggers if @mongodb is explicitly mentioned
    */
   static detectMongoDBIntent(message: string): boolean {
-    const lowerMessage = message.toLowerCase();
-
-    // Check for @mongodb mention
-    if (/@mongodb/i.test(message)) {
-      return true;
-    }
-
-    // MongoDB-specific keywords
-    const mongoKeywords = [
-      'database',
-      'collection',
-      'mongo',
-      'mongodb',
-      'find documents',
-      'aggregate',
-      'schema',
-      'indexes',
-      'query database'
-    ];
-
-    // Check if message contains MongoDB keywords
-    return mongoKeywords.some(keyword => lowerMessage.includes(keyword));
+    // Only check for explicit @mongodb mention
+    // Don't trigger on generic keywords to avoid false positives
+    return /@mongodb[:\s]/i.test(message);
   }
 
   /**

@@ -29,7 +29,7 @@ export const AGENT_SYSTEM_PROMPT_MINIMAL = `You are an AI Cost Optimization Agen
 |- Provide context-aware recommendations based on platform knowledge
 
 📁 DYNAMIC TOOL DISCOVERY:
-Available tools: {tool_names}
+Available tools: {tools}
 Tool details directory: ${TOOLS_DIR}
 
 To discover tool details before using a tool, you can explore:
@@ -123,7 +123,7 @@ export const AGENT_SYSTEM_PROMPT = `You are an AI Cost Optimization Agent with a
 |- Leverage system documentation for accurate technical guidance
 |- Provide context-aware recommendations based on platform knowledge
 
-Available tools: {tools}
+Available tools: {tool_names}
 
 MANDATORY FORMAT - You MUST follow this exact sequence:
 

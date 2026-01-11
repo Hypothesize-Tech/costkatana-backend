@@ -2,6 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { loggingService } from '../services/logging.service';
 import { MongoDBConnection } from '../models/MongoDBConnection';
 import { MongoDBMCPPolicyService } from '../services/mongodbMcpPolicy.service';
+import { createMongoDBMCPAuditLog } from '../models/MongoDBMCPAuditLog';
+import mongoose from 'mongoose';
 
 /**
  * MongoDB MCP Middleware
@@ -236,6 +238,54 @@ export const auditMongoDBMCPOperation = async (
             // Extract tool name and arguments from request
             const toolName = req.body?.method || req.body?.params?.name;
             const toolArgs = req.body?.params?.arguments;
+            const operation = req.body?.params?.operation || req.body?.method;
+            const collection = req.body?.params?.collection || req.body?.params?.arguments?.collection;
+            const database = req.body?.params?.database || req.body?.params?.arguments?.database;
+
+            // Determine result
+            const isSuccess = res.statusCode >= 200 && res.statusCode < 400;
+            const result = res.statusCode === 429 ? 'throttled' as const 
+                        : res.statusCode === 403 ? 'blocked' as const
+                        : isSuccess ? 'success' as const 
+                        : 'failure' as const;
+
+            // Determine event type
+            let eventType: 'tool_executed' | 'query_executed' | 'write_executed' | 'schema_accessed' | 'data_exported' | 'operation_denied' = 'tool_executed';
+            if (operation) {
+                if (['find', 'findOne', 'count', 'aggregate'].includes(operation)) {
+                    eventType = 'query_executed';
+                } else if (['insert', 'update', 'delete', 'insertMany', 'updateMany', 'deleteMany'].includes(operation)) {
+                    eventType = 'write_executed';
+                } else if (operation === 'listCollections' || operation === 'getSchema') {
+                    eventType = 'schema_accessed';
+                } else if (operation === 'export') {
+                    eventType = 'data_exported';
+                }
+            }
+            if (res.statusCode === 403) {
+                eventType = 'operation_denied';
+            }
+
+            // Parse response for impact metrics
+            let impact: any = {
+                executionTime: duration,
+            };
+            try {
+                const responseData = typeof data === 'string' ? JSON.parse(data) : data;
+                if (responseData?.result) {
+                    if (Array.isArray(responseData.result)) {
+                        impact.documentsRead = responseData.result.length;
+                    } else if (responseData.result.n !== undefined) {
+                        // Write operation result
+                        impact.documentsWritten = responseData.result.n;
+                        impact.documentsModified = responseData.result.nModified;
+                    } else if (responseData.result.deletedCount !== undefined) {
+                        impact.documentsDeleted = responseData.result.deletedCount;
+                    }
+                }
+            } catch (parseError) {
+                // Ignore parse errors
+            }
 
             // Log audit trail
             loggingService.info('MongoDB MCP operation audit', {
@@ -248,11 +298,44 @@ export const auditMongoDBMCPOperation = async (
                 toolArgsHash: toolArgs ? JSON.stringify(toolArgs).substring(0, 100) : undefined,
                 duration,
                 statusCode: res.statusCode,
-                success: res.statusCode < 400,
+                success: isSuccess,
             });
 
-            // TODO: Store audit log in database for compliance
-            // await AuditLog.create({ ... });
+            // Store audit log in database for compliance (fire and forget)
+            createMongoDBMCPAuditLog({
+                eventType,
+                context: {
+                    userId: new mongoose.Types.ObjectId(context.userId),
+                    connectionId: new mongoose.Types.ObjectId(context.connectionId),
+                    sessionId: (req as any).sessionID || undefined,
+                    ipAddress: req.ip || req.socket.remoteAddress,
+                    userAgent: req.get('user-agent'),
+                },
+                action: {
+                    toolName,
+                    method: operation,
+                    collection,
+                    database,
+                    operation,
+                    parameters: toolArgs,
+                },
+                result,
+                error: !isSuccess ? (data as any)?.error?.message : undefined,
+                errorCode: !isSuccess ? (data as any)?.error?.code : undefined,
+                impact,
+                metadata: {
+                    path: req.path,
+                    method: req.method,
+                    statusCode: res.statusCode,
+                },
+            }).catch((error) => {
+                // Log but don't fail the request
+                loggingService.error('Failed to create MongoDB MCP audit log', {
+                    component: 'mongodbMcpMiddleware',
+                    operation: 'auditMongoDBMCPOperation',
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
         }
 
         return originalSend.call(this, data);

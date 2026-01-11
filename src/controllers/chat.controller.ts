@@ -1317,4 +1317,440 @@ export const getAvailableModels = async (_req: AuthenticatedRequest, res: Respon
             error: error instanceof Error ? error.message : 'Unknown error'
         });
     }
+};
+
+/**
+ * Modify a governed plan within a chat
+ */
+export const modifyPlan = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { chatId } = req.params;
+    const { taskId, modifications } = req.body;
+
+    try {
+        loggingService.info('Plan modification request', {
+            userId,
+            chatId,
+            taskId,
+            modifications
+        });
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        const { GovernedAgentService } = await import('../services/governedAgent.service');
+        
+        const updatedTask = await GovernedAgentService.modifyPlan(
+            taskId,
+            userId,
+            modifications
+        );
+
+        const duration = Date.now() - startTime;
+        
+        loggingService.logBusiness({
+            event: 'plan_modified',
+            category: 'governed_agent',
+            value: duration,
+            metadata: {
+                chatId,
+                taskId,
+                userId,
+                modificationType: Object.keys(modifications)
+            }
+        });
+
+        res.json({
+            success: true,
+            data: updatedTask
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Plan modification failed', {
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            userId,
+            chatId,
+            taskId,
+            duration
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to modify plan',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Ask a question about a governed plan
+ */
+export const askAboutPlan = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { chatId } = req.params;
+    const { taskId, question } = req.body;
+
+    try {
+        loggingService.info('Plan question request', {
+            userId,
+            chatId,
+            taskId,
+            question
+        });
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        const { GovernedAgentService } = await import('../services/governedAgent.service');
+        
+        const answer = await GovernedAgentService.askAboutPlan(
+            taskId,
+            userId,
+            question
+        );
+
+        const duration = Date.now() - startTime;
+        
+        loggingService.logBusiness({
+            event: 'plan_question_answered',
+            category: 'governed_agent',
+            value: duration,
+            metadata: {
+                chatId,
+                taskId,
+                userId,
+                questionLength: question.length
+            }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                question,
+                answer
+            }
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Plan question failed', {
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            userId,
+            chatId,
+            taskId,
+            duration
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to answer question',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Request code changes for a completed task
+ */
+export const requestCodeChanges = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { chatId, taskId } = req.params;
+    const { changeRequest } = req.body;
+
+    try {
+        loggingService.info('Code change request', {
+            userId,
+            chatId,
+            taskId,
+            changeRequest
+        });
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        const { GovernedAgentService } = await import('../services/governedAgent.service');
+        
+        const newTask = await GovernedAgentService.requestCodeChanges(
+            taskId,
+            userId,
+            changeRequest
+        );
+
+        const duration = Date.now() - startTime;
+        
+        loggingService.logBusiness({
+            event: 'code_changes_requested',
+            category: 'governed_agent',
+            value: duration,
+            metadata: {
+                chatId,
+                userId,
+                originalTaskId: taskId,
+                newTaskId: newTask.id
+            }
+        });
+
+        res.json({
+            success: true,
+            data: newTask
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Code change request failed', {
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            userId,
+            chatId,
+            taskId,
+            duration
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to request code changes',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Get all plans in a chat
+ */
+export const getChatPlans = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    const { chatId } = req.params;
+
+    try {
+        loggingService.info('Get chat plans request', {
+            userId,
+            chatId
+        });
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        const { ChatTaskLink } = await import('../models/ChatTaskLink');
+        const { GovernedTaskModel } = await import('../services/governedAgent.service');
+        
+        // Get task links for this chat
+        const taskLink = await ChatTaskLink.findOne({ chatId });
+        
+        if (!taskLink || taskLink.taskIds.length === 0) {
+            res.json({
+                success: true,
+                data: []
+            });
+            return;
+        }
+
+        // Get all tasks
+        const tasks = await GovernedTaskModel.find({
+            _id: { $in: taskLink.taskIds },
+            userId
+        }).sort({ createdAt: -1 });
+
+        const duration = Date.now() - startTime;
+        
+        loggingService.logBusiness({
+            event: 'chat_plans_retrieved',
+            category: 'governed_agent',
+            value: duration,
+            metadata: {
+                chatId,
+                userId,
+                plansCount: tasks.length
+            }
+        });
+
+        res.json({
+            success: true,
+            data: tasks
+        });
+
+    } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        loggingService.error('Get chat plans failed', {
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            userId,
+            chatId,
+            duration
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get chat plans',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
+ * Stream chat-wide updates including governed tasks
+ */
+export const streamChatUpdates = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const userId = req.userId;
+    const { chatId } = req.params;
+
+    try {
+        if (!userId) {
+            res.status(401).json({ success: false, message: 'Authentication required' });
+            return;
+        }
+
+        // Set SSE headers
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache, no-transform');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+        res.flushHeaders();
+
+        loggingService.info('Started SSE stream for chat', { 
+            chatId, 
+            userId, 
+            component: 'ChatController', 
+            operation: 'streamChatUpdates' 
+        });
+
+        // Send initial connection event
+        res.write(`event: connected\ndata: ${JSON.stringify({ 
+            type: 'connected', 
+            chatId, 
+            timestamp: new Date().toISOString() 
+        })}\n\n`);
+
+        let pollInterval: NodeJS.Timeout | null = null;
+        let heartbeatInterval: NodeJS.Timeout | null = null;
+        const maxDuration = 30 * 60 * 1000; // 30 minutes max
+        const startTime = Date.now();
+
+        const cleanupIntervals = () => {
+            if (pollInterval) clearInterval(pollInterval);
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+        };
+
+        // Poll for updates to tasks in this chat
+        const sendUpdate = async () => {
+            try {
+                // Check if connection is still open
+                if (res.writableEnded || res.destroyed) {
+                    cleanupIntervals();
+                    return;
+                }
+
+                // Check max duration
+                if (Date.now() - startTime > maxDuration) {
+                    res.write(`event: timeout\ndata: ${JSON.stringify({ 
+                        message: 'Stream timeout after 30 minutes' 
+                    })}\n\n`);
+                    res.end();
+                    cleanupIntervals();
+                    return;
+                }
+
+                // Get all tasks for this chat
+                const { ChatTaskLink } = await import('../models/ChatTaskLink');
+                const { GovernedTaskModel } = await import('../services/governedAgent.service');
+                
+                const taskLink = await ChatTaskLink.findOne({ chatId });
+                if (taskLink && taskLink.taskIds.length > 0) {
+                    // Get all tasks
+                    const tasks = await GovernedTaskModel.find({
+                        _id: { $in: taskLink.taskIds },
+                        userId
+                    });
+
+                    // Send updates for each task
+                    for (const task of tasks) {
+                        res.write(`event: governed_task_update\ndata: ${JSON.stringify({
+                            taskId: task.id,
+                            mode: task.mode,
+                            status: task.status,
+                            classification: task.classification,
+                            scopeAnalysis: task.scopeAnalysis,
+                            plan: task.plan,
+                            executionProgress: task.executionProgress,
+                            verification: task.verification,
+                            error: task.error,
+                            timestamp: new Date().toISOString()
+                        })}\n\n`);
+                    }
+                }
+
+            } catch (error) {
+                loggingService.error('Error sending chat SSE update', {
+                    error: error instanceof Error ? error.message : String(error),
+                    chatId,
+                    userId
+                });
+            }
+        };
+
+        // Set up polling interval
+        pollInterval = setInterval(sendUpdate, 2000); // Poll every 2 seconds
+
+        // Set up heartbeat
+        heartbeatInterval = setInterval(() => {
+            if (!res.writableEnded && !res.destroyed) {
+                res.write(`event: heartbeat\ndata: ${JSON.stringify({ 
+                    timestamp: new Date().toISOString() 
+                })}\n\n`);
+            }
+        }, 30000); // Every 30 seconds
+
+        // Handle client disconnect
+        req.on('close', () => {
+            loggingService.info('SSE client disconnected for chat', { chatId, userId });
+            cleanupIntervals();
+        });
+
+        // Send initial update
+        await sendUpdate();
+
+    } catch (error: any) {
+        loggingService.error('Failed to start chat SSE stream', {
+            error: error.message || 'Unknown error',
+            stack: error.stack,
+            userId,
+            chatId
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to start chat stream',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
 }; 

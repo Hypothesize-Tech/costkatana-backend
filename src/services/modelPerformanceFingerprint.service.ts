@@ -91,16 +91,56 @@ export class ModelPerformanceFingerprintService {
         fingerprint.nextScheduledUpdate = new Date(now.getTime() + 3600000);
       }
 
-      await fingerprint.save();
+      // Use findOneAndUpdate with retry logic to handle version conflicts
+      let retries = 3;
+      let savedFingerprint: IModelPerformanceFingerprint | null = null;
+      
+      while (retries > 0 && !savedFingerprint) {
+        try {
+          savedFingerprint = await ModelPerformanceFingerprint.findOneAndUpdate(
+            { modelId },
+            {
+              $set: {
+                window24h: fingerprint.window24h,
+                window7d: fingerprint.window7d,
+                window30d: fingerprint.window30d,
+                lifetime: fingerprint.lifetime,
+                capabilities: fingerprint.capabilities,
+                trends: fingerprint.trends,
+                routingWeight: fingerprint.routingWeight,
+                confidenceScore: fingerprint.confidenceScore,
+                dataCompleteness: fingerprint.dataCompleteness,
+                lastAggregationRun: fingerprint.lastAggregationRun,
+                nextScheduledUpdate: fingerprint.nextScheduledUpdate
+              }
+            },
+            { upsert: true, new: true, runValidators: true }
+          );
+          
+          if (savedFingerprint) {
+            loggingService.info('✅ Updated model performance fingerprint', {
+              modelId,
+              routingWeight: savedFingerprint.routingWeight.toFixed(3),
+              requests24h: window24h.totalRequests,
+              failureRate: (window24h.failureRate * 100).toFixed(1) + '%'
+            });
+          }
+          break;
+        } catch (saveError: any) {
+          retries--;
+          if (retries === 0) {
+            loggingService.error('❌ Failed to update model fingerprint after retries', {
+              modelId,
+              error: saveError.message || String(saveError)
+            });
+            throw saveError;
+          }
+          // Wait a bit before retrying (exponential backoff)
+          await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries)));
+        }
+      }
 
-      loggingService.info('✅ Updated model performance fingerprint', {
-        modelId,
-        routingWeight: fingerprint.routingWeight.toFixed(3),
-        requests24h: window24h.totalRequests,
-        failureRate: (window24h.failureRate * 100).toFixed(1) + '%'
-      });
-
-      return fingerprint;
+      return savedFingerprint || fingerprint;
     } catch (error) {
       loggingService.error('❌ Failed to update model fingerprint', {
         modelId,

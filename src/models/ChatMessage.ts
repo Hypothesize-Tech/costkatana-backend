@@ -7,6 +7,9 @@ export interface IChatMessage extends Document {
     role: 'user' | 'assistant';
     content: string;
     modelId?: string;
+    messageType?: 'user' | 'assistant' | 'system' | 'governed_plan';
+    governedTaskId?: Types.ObjectId;
+    planState?: 'SCOPE' | 'CLARIFY' | 'PLAN' | 'BUILD' | 'VERIFY' | 'DONE';
     attachedDocuments?: Array<{
         documentId: string;
         fileName: string;
@@ -64,6 +67,21 @@ const chatMessageSchema = new Schema<IChatMessage>({
     },
     modelId: {
         type: String
+    },
+    messageType: {
+        type: String,
+        enum: ['user', 'assistant', 'system', 'governed_plan'],
+        default: 'user'
+    },
+    governedTaskId: {
+        type: Schema.Types.ObjectId,
+        ref: 'GovernedTask',
+        required: false
+    },
+    planState: {
+        type: String,
+        enum: ['SCOPE', 'CLARIFY', 'PLAN', 'BUILD', 'VERIFY', 'DONE'],
+        required: false
     },
     attachedDocuments: [{
         documentId: {

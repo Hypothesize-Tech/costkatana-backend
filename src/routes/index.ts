@@ -78,6 +78,7 @@ import utilsRoutes from './utils.routes';
 import fileUploadRoutes from './fileUpload.routes';
 import awsRoutes from './aws.routes';
 import mongodbMcpRoutes from './mongodbMcp.routes';
+import governedAgentRoutes from './governedAgent.routes';
 
 const router = Router();
 
@@ -172,5 +173,6 @@ router.use('/utils', utilsRoutes);
 router.use('/files', fileUploadRoutes);
 router.use('/aws', awsRoutes);
 router.use('/mcp', mongodbMcpRoutes);
+router.use('/governed-agent', governedAgentRoutes);
 
 export const apiRouter = router;

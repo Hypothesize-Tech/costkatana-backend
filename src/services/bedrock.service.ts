@@ -1,4 +1,4 @@
-import { InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
+import { InvokeModelCommand, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { recordGenAIUsage } from '../utils/genaiTelemetry';
@@ -49,6 +49,97 @@ interface UsageAnalysisResponse {
 }
 
 export class BedrockService {
+    
+    /**
+     * Check if model should use Converse API (newer Claude 4.x and Sonnet 4.5 models)
+     */
+    private static shouldUseConverseAPI(model: string): boolean {
+        // Global inference profile models MUST use Converse API
+        if (model.startsWith('global.')) {
+            return true;
+        }
+        
+        // Claude 4.5, Opus 4, and newer models should use Converse API for better support
+        const converseModels = [
+            'claude-sonnet-4-5',
+            'claude-opus-4-5',
+            'claude-haiku-4-5',
+            'claude-opus-4'
+        ];
+        
+        return converseModels.some(name => model.includes(name));
+    }
+
+    /**
+     * Invoke model using Converse API (for newer Claude models)
+     */
+    private static async invokeWithConverseAPI(
+        model: string,
+        prompt: string,
+        context?: { 
+            recentMessages?: Array<{ role: string; content: string; metadata?: any }>;
+            useSystemPrompt?: boolean;
+        }
+    ): Promise<{result: string, inputTokens: number, outputTokens: number}> {
+        const messages: Array<{role: 'user' | 'assistant', content: Array<{text: string}>}> = [];
+        
+        // Build messages array if context provided
+        if (context?.recentMessages && context.recentMessages.length > 0) {
+            const msgArray = this.buildMessagesArray(context.recentMessages, prompt);
+            msgArray.forEach(msg => {
+                messages.push({
+                    role: msg.role,
+                    content: [{ text: msg.content }]
+                });
+            });
+        } else {
+            // Single user message
+            messages.push({
+                role: 'user',
+                content: [{ text: prompt }]
+            });
+        }
+
+        // Build system prompts
+        const systemPrompts: Array<{text: string}> = [];
+        if (context?.useSystemPrompt !== false) {
+            systemPrompts.push({
+                text: 'You are a helpful AI assistant specializing in AI cost optimization and cloud infrastructure. Remember context from previous messages and provide actionable, cost-effective recommendations.'
+            });
+        }
+
+        const command = new ConverseCommand({
+            modelId: model,
+            messages,
+            system: systemPrompts.length > 0 ? systemPrompts : undefined,
+            inferenceConfig: {
+                maxTokens: this.getMaxTokensForModel(model),
+                temperature: 0.7
+            }
+        });
+
+        const response = await retryBedrockOperation(
+            () => bedrockClient.send(command),
+            {
+                maxRetries: 4,
+                baseDelay: 2000,
+                maxDelay: 30000,
+                backoffMultiplier: 2,
+                jitterFactor: 0.25
+            },
+            {
+                modelId: model,
+                operation: 'converse'
+            }
+        );
+
+        // Extract text from response
+        const result = response.output?.message?.content?.[0]?.text || '';
+        const inputTokens = response.usage?.inputTokens || Math.ceil(prompt.length / 4);
+        const outputTokens = response.usage?.outputTokens || Math.ceil(result.length / 4);
+
+        return { result, inputTokens, outputTokens };
+    }
     
     /**
      * Build messages array from recent conversation history (ChatGPT-style)
@@ -106,17 +197,22 @@ export class BedrockService {
      * Get appropriate max tokens based on model capability
      */
     private static getMaxTokensForModel(modelId: string): number {
-        // Higher token limits for more capable models to ensure complete code generation
-        if (modelId.includes('claude-opus-4')) {
-            return 16384; // Claude Opus 4.1 - maximum capability for large code responses
+        // AWS Bedrock output token limits per model
+        // Reference: https://docs.anthropic.com/en/docs/about-claude/models
+        if (modelId.includes('claude-sonnet-4-5') || modelId.includes('claude-opus-4-5')) {
+            return 32768; // Claude Sonnet 4.5 / Opus 4.5 - supports up to 64K, using 32K for safety
+        } else if (modelId.includes('claude-opus-4')) {
+            return 16384; // Claude Opus 4 - increased for large outputs
+        } else if (modelId.includes('claude-haiku-4-5') || modelId.includes('claude-haiku-4')) {
+            return 16384; // Claude Haiku 4.5 - supports large outputs
         } else if (modelId.includes('claude-3-5-sonnet')) {
-            return 12288; // Claude 3.5 Sonnet - enhanced for large outputs
+            return 8192; // Claude 3.5 Sonnet - standard limit
         } else if (modelId.includes('claude-3-5-haiku')) {
-            return 8192; // Claude 3.5 Haiku - increased for better performance
+            return 8192; // Claude 3.5 Haiku - standard limit
         } else if (modelId.includes('nova-pro')) {
-            return 8000; // Nova Pro can handle larger outputs
+            return 5000; // Nova Pro actual limit
         } else if (modelId.includes('nova')) {
-            return 6000; // Other Nova models - increased limit
+            return 5000; // Other Nova models actual limit
         } else {
             return AWS_CONFIG.bedrock.maxTokens; // Default fallback
         }
@@ -351,6 +447,38 @@ export class BedrockService {
         let outputTokens = 0;
         let result: string = '';
 
+        // Check if we should use Converse API (for newer Claude models and global profiles)
+        if (this.shouldUseConverseAPI(model)) {
+            try {
+                loggingService.info(`Using Converse API for model: ${model}`);
+                const converseResult = await this.invokeWithConverseAPI(model, prompt, context);
+                result = converseResult.result;
+                inputTokens = converseResult.inputTokens;
+                outputTokens = converseResult.outputTokens;
+                
+                // Track cost and usage
+                const costUSD = calculateCost(inputTokens, outputTokens, AIProvider.AWSBedrock, model);
+                await recordGenAIUsage({
+                    provider: AIProvider.AWSBedrock,
+                    operationName: 'converse',
+                    model: model,
+                    promptTokens: inputTokens,
+                    completionTokens: outputTokens,
+                    costUSD,
+                    latencyMs: Date.now() - startTime
+                });
+
+                return result;
+            } catch (error: any) {
+                loggingService.error('Converse API failed', {
+                    error: error.message,
+                    model
+                });
+                throw error;
+            }
+        }
+
+        // Fallback to InvokeModel API for older models
         // Enhanced: Use messages array format for Claude/Nova if context provided
         const useMessagesFormat = context?.recentMessages && context.recentMessages.length > 0 &&
             (model.includes('claude-3') || model.includes('claude-4') || model.includes('nova'));

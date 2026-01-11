@@ -55,7 +55,7 @@ export interface CreateBranchOptions {
 export interface CreateFileOptions {
     owner: string;
     repo: string;
-    branch: string;
+    branch?: string;
     path: string;
     content: string;
     message: string;
@@ -778,20 +778,22 @@ export class GitHubService {
             const octokit = await this.getOctokitFromConnection(connection);
             const { owner, repo, branch, path, content, message } = options;
 
-            // Check if file exists
+            // Check if file exists (only if branch is provided)
             let sha: string | undefined;
-            try {
-                const { data } = await octokit.rest.repos.getContent({
-                    owner,
-                    repo,
-                    path,
-                    ref: branch
-                }) as { data: RepositoryContent };
-                sha = data.sha;
-            } catch (error: any) {
-                // File doesn't exist, that's okay
-                if (error.status !== 404) {
-                    throw error;
+            if (branch) {
+                try {
+                    const { data } = await octokit.rest.repos.getContent({
+                        owner,
+                        repo,
+                        path,
+                        ref: branch
+                    }) as { data: RepositoryContent };
+                    sha = data.sha;
+                } catch (error: any) {
+                    // File doesn't exist, that's okay
+                    if (error.status !== 404) {
+                        throw error;
+                    }
                 }
             }
 
@@ -802,14 +804,14 @@ export class GitHubService {
                 path,
                 message,
                 content: Buffer.from(content).toString('base64'),
-                branch,
-                sha
+                ...(branch && { branch }),  // Only include branch if provided
+                ...(sha && { sha })  // Only include sha if we found the file
             });
 
             loggingService.info('Created/updated file in repository', {
                 repository: `${owner}/${repo}`,
                 path,
-                branch,
+                branch: branch || 'default',
                 sha: data.content?.sha
             });
 

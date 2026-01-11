@@ -12,9 +12,15 @@ import {
     updateConversationGitHubContext,
     renameConversation,
     archiveConversation,
-    pinConversation
+    pinConversation,
+    getChatPlans,
+    modifyPlan,
+    askAboutPlan,
+    requestCodeChanges,
+    streamChatUpdates
 } from '../controllers/chat.controller';
 import { IntegrationChatController } from '../controllers/integrationChat.controller';
+import { ChatGovernedAgentController } from '../controllers/chatGovernedAgent.controller';
 
 const router = Router();
 
@@ -112,5 +118,157 @@ router.get('/integrations/:type/entities', authenticate, IntegrationChatControll
 
 // Get sub-entities for a parent entity
 router.get('/integrations/:type/:entityId/subentities', authenticate, IntegrationChatController.getSubEntities);
+
+/**
+ * Governed Agent Integration Routes
+ */
+
+// Classify a chat message to determine if governed agent should be used
+router.post(
+    '/classify',
+    [
+        body('message').notEmpty().isString().withMessage('Message is required')
+    ],
+    validateRequest,
+    authenticate,
+    ChatGovernedAgentController.classifyMessage
+);
+
+// Initiate governed agent task from chat
+router.post(
+    '/governed/initiate',
+    [
+        body('message').notEmpty().isString().withMessage('Message is required'),
+        body('conversationId').optional().isMongoId().withMessage('Invalid conversationId')
+    ],
+    validateRequest,
+    authenticate,
+    ChatGovernedAgentController.initiateFromChat
+);
+
+// Stream governed agent task progress via SSE
+router.get(
+    '/governed/:taskId/stream',
+    authenticate,
+    ChatGovernedAgentController.streamTaskProgress
+);
+
+// Request plan generation (user manually triggers after reviewing scope)
+router.post(
+    '/governed/:taskId/request-plan',
+    authenticate,
+    ChatGovernedAgentController.requestPlan
+);
+
+// Submit clarifying answers
+router.post(
+    '/governed/:taskId/submit-answers',
+    [
+        param('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('answers').isObject().withMessage('Answers must be an object')
+    ],
+    validateRequest,
+    authenticate,
+    ChatGovernedAgentController.submitClarifyingAnswers
+);
+
+// Approve plan and start execution
+router.post(
+    '/governed/:taskId/approve',
+    authenticate,
+    ChatGovernedAgentController.approvePlan
+);
+
+// Request changes to the plan
+router.post(
+    '/governed/:taskId/request-changes',
+    [
+        param('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('feedback').notEmpty().isString().withMessage('Feedback is required')
+    ],
+    validateRequest,
+    authenticate,
+    ChatGovernedAgentController.requestPlanChanges
+);
+
+// Go back to previous mode
+router.post(
+    '/governed/:taskId/go-back',
+    authenticate,
+    ChatGovernedAgentController.goBack
+);
+
+// Navigate to a specific mode
+router.post(
+    '/governed/:taskId/navigate',
+    [
+        param('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('mode').notEmpty().isString().withMessage('Mode is required')
+    ],
+    validateRequest,
+    authenticate,
+    ChatGovernedAgentController.navigateToMode
+);
+
+// Plan modification endpoints
+router.post(
+    '/:chatId/plan/modify',
+    [
+        param('chatId').isMongoId().withMessage('Invalid chatId'),
+        body('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('modifications').isObject().withMessage('Modifications object is required')
+    ],
+    validateRequest,
+    authenticate,
+    modifyPlan
+);
+
+// Ask question about plan
+router.post(
+    '/:chatId/plan/question',
+    [
+        param('chatId').isMongoId().withMessage('Invalid chatId'),
+        body('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('question').notEmpty().isString().withMessage('Question is required')
+    ],
+    validateRequest,
+    authenticate,
+    askAboutPlan
+);
+
+// Request code changes
+router.post(
+    '/:chatId/plan/:taskId/redeploy',
+    [
+        param('chatId').isMongoId().withMessage('Invalid chatId'),
+        param('taskId').isMongoId().withMessage('Invalid taskId'),
+        body('changeRequest').notEmpty().isString().withMessage('Change request is required')
+    ],
+    validateRequest,
+    authenticate,
+    requestCodeChanges
+);
+
+// Get all plans in a chat
+router.get(
+    '/:chatId/plans',
+    [
+        param('chatId').isMongoId().withMessage('Invalid chatId')
+    ],
+    validateRequest,
+    authenticate,
+    getChatPlans
+);
+
+// Stream chat-wide updates
+router.get(
+    '/:chatId/stream',
+    [
+        param('chatId').isMongoId().withMessage('Invalid chatId')
+    ],
+    validateRequest,
+    authenticate,
+    streamChatUpdates
+);
 
 export default router; 
