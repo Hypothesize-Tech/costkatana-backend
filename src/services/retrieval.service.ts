@@ -1,5 +1,7 @@
 import { Document } from '@langchain/core/documents';
 import { vectorStoreService } from './vectorStore.service';
+import { MongoDBVectorStore } from './langchainVectorStore.service';
+import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
 import { DocumentModel } from '../models/Document';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
@@ -51,6 +53,34 @@ interface ScoredDocument {
 export class RetrievalService {
     private cachePrefix = 'retrieval:';
     private cacheTTL = 3600; // 1 hour
+    private vectorStore?: MongoDBVectorStore;
+    private embeddings?: BedrockEmbeddings;
+
+    /**
+     * Initialize with LangChain VectorStore
+     */
+    async initializeVectorStore(): Promise<void> {
+        if (process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
+            this.embeddings = new BedrockEmbeddings({
+                region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
+                model: 'amazon.titan-embed-text-v2:0',
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+                },
+                maxRetries: 3,
+            });
+
+            this.vectorStore = new MongoDBVectorStore(this.embeddings, {
+                indexName: process.env.MONGODB_VECTOR_INDEX_NAME || 'document_vector_index'
+            });
+
+            loggingService.info('✅ RetrievalService initialized with LangChain VectorStore', {
+                component: 'RetrievalService',
+                operation: 'initializeVectorStore'
+            });
+        }
+    }
 
     /**
      * Main retrieval method with hybrid search
@@ -90,7 +120,12 @@ export class RetrievalService {
             }
 
             // Stage 1: Initial vector search
-            const initialResults = await this.vectorSearch(query, limit * 4, options); // Get more for reranking
+            let initialResults: Document[];
+            if (this.vectorStore && process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
+                initialResults = await this.vectorSearchWithLangChain(query, limit * 4, options);
+            } else {
+                initialResults = await this.vectorSearch(query, limit * 4, options); // Get more for reranking
+            }
 
             if (initialResults.length === 0) {
                 return {
@@ -172,6 +207,72 @@ export class RetrievalService {
                     retrievalTime: Date.now() - startTime
                 }
             };
+        }
+    }
+
+    /**
+     * Vector search using LangChain VectorStore
+     */
+    private async vectorSearchWithLangChain(query: string, limit: number, options: RetrievalOptions): Promise<Document[]> {
+        if (!this.vectorStore) {
+            // Fallback to original method
+            return this.vectorSearch(query, limit, options);
+        }
+
+        try {
+            // Build filter
+            const filter: any = {};
+
+            if (options.userId) {
+                filter['metadata.userId'] = options.userId;
+            }
+
+            if (options.filters?.source && options.filters.source.length > 0) {
+                filter['metadata.source'] = { $in: options.filters.source };
+            }
+
+            if (options.filters?.projectId) {
+                filter['metadata.projectId'] = options.filters.projectId;
+            }
+
+            if (options.filters?.conversationId) {
+                filter['metadata.conversationId'] = options.filters.conversationId;
+            }
+
+            if (options.filters?.tags && options.filters.tags.length > 0) {
+                filter['metadata.tags'] = { $in: options.filters.tags };
+            }
+
+            if (options.filters?.documentIds && options.filters.documentIds.length > 0) {
+                filter['metadata.documentId'] = { $in: options.filters.documentIds };
+            }
+
+            if (options.filters?.dateRange) {
+                filter.createdAt = {
+                    $gte: options.filters.dateRange.from,
+                    $lte: options.filters.dateRange.to
+                };
+            }
+
+            // Use LangChain VectorStore for search
+            const results = await this.vectorStore.similaritySearch(query, limit, filter);
+
+            loggingService.info('LangChain vector search completed', {
+                component: 'RetrievalService',
+                operation: 'vectorSearchWithLangChain',
+                resultsFound: results.length
+            });
+
+            return results;
+        } catch (error) {
+            loggingService.error('LangChain vector search failed, falling back', {
+                component: 'RetrievalService',
+                operation: 'vectorSearchWithLangChain',
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // Fallback to original method
+            return this.vectorSearch(query, limit, options);
         }
     }
 

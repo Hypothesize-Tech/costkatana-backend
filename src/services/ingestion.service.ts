@@ -1,6 +1,8 @@
 import { DocumentModel } from '../models/Document';
 import { documentProcessorService, ProcessedDocument } from './documentProcessor.service';
 import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { MongoDBVectorStore } from './langchainVectorStore.service';
+import { Document as LangchainDocument } from '@langchain/core/documents';
 import { loggingService } from './logging.service';
 import { Conversation } from '../models/Conversation';
 import { ChatMessage } from '../models/ChatMessage';
@@ -30,7 +32,7 @@ export interface IngestionJob {
 
 export interface UploadProgress {
     uploadId: string;
-    stage: 'preparing' | 'extracting' | 'chunking' | 'processing' | 'embedding' | 'storing' | 'complete' | 'error';
+    stage: 'preparing' | 'extracting' | 'ocr' | 'chunking' | 'processing' | 'embedding' | 'storing' | 'complete' | 'error';
     progress: number;
     message: string;
     currentBatch?: number;
@@ -42,6 +44,7 @@ export interface UploadProgress {
 
 export class IngestionService {
     private embeddings: BedrockEmbeddings;
+    private vectorStore?: MongoDBVectorStore;
     private initialized = false;
     private activeJobs: Map<string, IngestionJob> = new Map();
     private progressEmitter: EventEmitter = new EventEmitter();
@@ -93,6 +96,17 @@ export class IngestionService {
 
             // Test embeddings
             await this.embeddings.embedQuery('test');
+
+            // Initialize MongoDB Vector Store wrapper (optional)
+            if (process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
+                this.vectorStore = new MongoDBVectorStore(this.embeddings, {
+                    indexName: process.env.MONGODB_VECTOR_INDEX_NAME || 'document_vector_index'
+                });
+                loggingService.info('✅ MongoDB VectorStore wrapper initialized', {
+                    component: 'IngestionService',
+                    operation: 'initialize'
+                });
+            }
 
             this.initialized = true;
             loggingService.info('✅ Ingestion Service initialized successfully', {
@@ -496,6 +510,83 @@ export class IngestionService {
     }
 
     /**
+     * Ingest chunks using LangChain VectorStore wrapper
+     */
+    private async ingestChunksWithLangChain(
+        chunks: ProcessedDocument[],
+        uploadId?: string,
+        userId?: string
+    ): Promise<void> {
+        if (!this.vectorStore) {
+            throw new Error('VectorStore not initialized');
+        }
+
+        try {
+            const totalChunks = chunks.length;
+            
+            // Emit initial progress
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'processing',
+                    progress: 35,
+                    message: `Processing ${totalChunks} chunks using LangChain`,
+                    totalChunks,
+                    processedChunks: 0
+                });
+            }
+
+            // Convert ProcessedDocument to LangChain Document format
+            const langchainDocs = chunks.map(chunk => new LangchainDocument({
+                pageContent: chunk.content,
+                metadata: {
+                    ...chunk.metadata,
+                    chunkIndex: chunk.chunkIndex,
+                    totalChunks: chunk.totalChunks,
+                    contentHash: chunk.contentHash
+                }
+            }));
+
+            // Add documents to vector store
+            await this.vectorStore.addDocuments(langchainDocs, {
+                userId,
+                projectId: chunks[0]?.metadata?.projectId,
+                documentId: chunks[0]?.metadata?.documentId
+            });
+
+            // Emit completion progress
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'complete',
+                    progress: 100,
+                    message: `Successfully processed ${totalChunks} chunks`,
+                    totalChunks,
+                    processedChunks: totalChunks
+                });
+            }
+
+            loggingService.info('Chunks ingested with LangChain VectorStore', {
+                component: 'IngestionService',
+                operation: 'ingestChunksWithLangChain',
+                totalChunks,
+                userId
+            });
+        } catch (error) {
+            if (uploadId) {
+                this.emitProgress({
+                    uploadId,
+                    stage: 'error',
+                    progress: 0,
+                    message: 'Failed to ingest chunks: ' + (error instanceof Error ? error.message : 'Unknown error'),
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+            throw error;
+        }
+    }
+
+    /**
      * Ingest custom document chunks with rate limiting
      */
     private async ingestChunks(chunks: ProcessedDocument[], uploadId?: string): Promise<void> {
@@ -781,8 +872,14 @@ export class IngestionService {
                 });
             }
 
-            // Ingest chunks with progress tracking (all progress emitted from ingestChunks)
-            await this.ingestChunks(chunks, uploadId);
+            // Ingest chunks with progress tracking
+            if (this.vectorStore && process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
+                // Use LangChain VectorStore wrapper
+                await this.ingestChunksWithLangChain(chunks, uploadId, userId);
+            } else {
+                // Use original ingestion method
+                await this.ingestChunks(chunks, uploadId);
+            }
 
             const duration = Date.now() - startTime;
 

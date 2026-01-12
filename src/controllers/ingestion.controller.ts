@@ -6,15 +6,53 @@ import { S3Service } from '../services/s3.service';
 
 
 // Allowed file types for document upload
-const ALLOWED_FILE_EXTENSIONS = ['.md', '.txt', '.pdf', '.json', '.csv', '.ts', '.js', '.py', '.java', '.cpp', '.go', '.rs', '.rb', '.doc', '.docx'];
+const ALLOWED_FILE_EXTENSIONS = [
+    // Documents
+    '.md', '.txt', '.pdf', '.doc', '.docx', '.rtf',
+    // Data
+    '.json', '.csv', '.xlsx', '.xls', '.xml',
+    // Code
+    '.ts', '.js', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.r', '.sql', '.sh', '.bash',
+    // Config
+    '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+    // Web
+    '.html', '.htm',
+    // Images (for OCR)
+    '.png', '.jpg', '.jpeg', '.webp',
+    // Presentations
+    '.pptx', '.ppt',
+    // Logs
+    '.log'
+];
 const ALLOWED_MIME_TYPES = [
     'text/plain',
     'text/markdown',
+    'text/html',
+    'text/csv',
+    'text/xml',
+    'text/x-python',
+    'text/x-java',
+    'text/x-c',
+    'text/x-cpp',
+    'text/x-ruby',
+    'text/x-php',
+    'text/x-sql',
+    'text/x-shellscript',
+    'text/x-yaml',
     'application/json',
     'application/pdf',
-    'text/csv',
+    'application/xml',
     'application/msword',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/rtf',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/webp',
     'application/octet-stream' // For files without specific mime type
 ];
 
@@ -22,22 +60,24 @@ const ALLOWED_MIME_TYPES = [
  * Validate file upload
  */
 function validateFileUpload(fileName: string, fileSize: number, mimeType: string): { valid: boolean; error?: string } {
-    const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB ?? '10') * 1024 * 1024;
-
-    // Check file size
-    if (fileSize > maxSize) {
-        return {
-            valid: false,
-            error: `File size exceeds maximum allowed size of ${process.env.MAX_DOCUMENT_SIZE_MB ?? '10'}MB`
-        };
-    }
-
     // Check file extension
     const ext = fileName.toLowerCase().match(/\.[^.]*$/)?.[0];
     if (!ext || !ALLOWED_FILE_EXTENSIONS.includes(ext)) {
         return {
             valid: false,
-            error: `File type not supported. Allowed types: ${ALLOWED_FILE_EXTENSIONS.join(', ')}`
+            error: `File type not supported. Allowed types: documents (pdf, docx, txt, md, rtf), data (csv, json, xlsx), code (js, ts, py, java, etc.), web (html), images (png, jpg, jpeg, webp)`
+        };
+    }
+
+    // Different max sizes for images vs documents
+    const isImage = ['.png', '.jpg', '.jpeg', '.webp'].includes(ext);
+    const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB ?? (isImage ? '25' : '10')) * 1024 * 1024;
+
+    // Check file size
+    if (fileSize > maxSize) {
+        return {
+            valid: false,
+            error: `File size exceeds maximum allowed size of ${isImage ? 25 : 10}MB`
         };
     }
 

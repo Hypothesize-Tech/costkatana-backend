@@ -1470,7 +1470,6 @@ export class AgentService {
         // Return undefined for very basic queries that don't need thinking process
         return undefined;
     }
-
     /**
      * Extract sources from agent execution result
      */
