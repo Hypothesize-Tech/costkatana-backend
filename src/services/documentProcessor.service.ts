@@ -1,8 +1,16 @@
 import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter';
+import { Document as LangchainDocument } from '@langchain/core/documents';
+import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
+import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
+import { CSVLoader } from '@langchain/community/document_loaders/fs/csv';
+import { TextLoader } from 'langchain/document_loaders/fs/text';
+import { JSONLoader } from 'langchain/document_loaders/fs/json';
 import { loggingService } from './logging.service';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
+import Tesseract from 'tesseract.js';
 
 export interface ProcessedDocument {
     content: string;
@@ -29,13 +37,15 @@ export interface ProcessedDocument {
 export interface ChunkingOptions {
     chunkSize?: number;
     chunkOverlap?: number;
-    strategy?: 'text' | 'code' | 'conversation';
+    strategy?: 'text' | 'code' | 'conversation' | 'html' | 'csv';
 }
 
 export class DocumentProcessorService {
     private textSplitter: RecursiveCharacterTextSplitter;
     private codeSplitter: RecursiveCharacterTextSplitter;
     private conversationSplitter: RecursiveCharacterTextSplitter;
+    private htmlSplitter: RecursiveCharacterTextSplitter;
+    private csvSplitter: RecursiveCharacterTextSplitter;
 
     constructor() {
         // Standard text splitter
@@ -56,6 +66,20 @@ export class DocumentProcessorService {
             chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
             chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
             separators: ['\n\nUser:', '\n\nAssistant:', '\n\n', '\n']
+        });
+
+        // HTML splitter (preserves DOM structure)
+        this.htmlSplitter = new RecursiveCharacterTextSplitter({
+            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
+            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
+            separators: ['</section>', '</article>', '</div>', '</p>', '\n\n', '\n', ' ', '']
+        });
+
+        // CSV splitter (preserves rows and column context)
+        this.csvSplitter = new RecursiveCharacterTextSplitter({
+            chunkSize: parseInt(process.env.RAG_CHUNK_SIZE ?? '1000'),
+            chunkOverlap: parseInt(process.env.RAG_CHUNK_OVERLAP ?? '200'),
+            separators: ['\n\n', '\n', ',', ' ', '']
         });
     }
 
@@ -142,7 +166,7 @@ export class DocumentProcessorService {
                 contentHash: this.generateContentHash(doc.pageContent + baseHash), // Unique hash per chunk
                 metadata: {
                     source: metadata.source || 'user-upload',
-                    sourceType: metadata.sourceType || 'text',
+                    sourceType: metadata.sourceType ?? 'text',
                     userId: metadata.userId,
                     projectId: metadata.projectId,
                     conversationId: metadata.conversationId,
@@ -150,7 +174,7 @@ export class DocumentProcessorService {
                     fileName: metadata.fileName,
                     filePath: metadata.filePath,
                     fileSize: metadata.fileSize,
-                    tags: metadata.tags || [],
+                    tags: metadata.tags ?? [],
                     language: metadata.language,
                     customMetadata: metadata.customMetadata
                 },
@@ -262,7 +286,7 @@ export class DocumentProcessorService {
     /**
      * Extract meaningful content from telemetry
      */
-    private extractTelemetryContent(telemetryData: any): string {
+    private extractTelemetryContent(telemetryData: Record<string, any>): string {
         const parts: string[] = [];
 
         if (telemetryData.operation_name) {
@@ -283,7 +307,7 @@ export class DocumentProcessorService {
 
         if (telemetryData.cost_analysis?.optimization_recommendations) {
             const recs = telemetryData.cost_analysis.optimization_recommendations
-                .map((r: any) => `- ${r.description}`)
+                .map((r: { description: string }) => `- ${r.description}`)
                 .join('\n');
             parts.push(`Optimization Recommendations:\n${recs}`);
         }
@@ -300,6 +324,10 @@ export class DocumentProcessorService {
                 return this.codeSplitter;
             case 'conversation':
                 return this.conversationSplitter;
+            case 'html':
+                return this.htmlSplitter;
+            case 'csv':
+                return this.csvSplitter;
             default:
                 return this.textSplitter;
         }
@@ -308,11 +336,21 @@ export class DocumentProcessorService {
     /**
      * Determine chunking strategy based on file type
      */
-    private determineChunkingStrategy(fileType: string): 'text' | 'code' | 'conversation' {
-        const codeExtensions = ['ts', 'js', 'tsx', 'jsx', 'py', 'java', 'cpp', 'c', 'go', 'rs', 'rb'];
+    private determineChunkingStrategy(fileType: string): 'text' | 'code' | 'conversation' | 'html' | 'csv' {
+        const codeExtensions = ['ts', 'js', 'tsx', 'jsx', 'py', 'java', 'cpp', 'c', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'scala', 'r', 'sql'];
+        const htmlExtensions = ['html', 'htm'];
+        const csvExtensions = ['csv'];
         
         if (codeExtensions.includes(fileType)) {
             return 'code';
+        }
+
+        if (htmlExtensions.includes(fileType)) {
+            return 'html';
+        }
+
+        if (csvExtensions.includes(fileType)) {
+            return 'csv';
         }
 
         if (fileType === 'chat' || fileType === 'conversation') {
@@ -343,12 +381,12 @@ export class DocumentProcessorService {
     validateFile(filePath: string): { valid: boolean; error?: string } {
         try {
             const stats = fs.statSync(filePath);
-            const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB || '10') * 1024 * 1024; // Convert MB to bytes
+            const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB ?? '10') * 1024 * 1024; // Convert MB to bytes
 
             if (stats.size > maxSize) {
                 return {
                     valid: false,
-                    error: `File size exceeds maximum allowed size of ${process.env.MAX_DOCUMENT_SIZE_MB || '10'}MB`
+                    error: `File size exceeds maximum allowed size of ${process.env.MAX_DOCUMENT_SIZE_MB ?? '10'}MB`
                 };
             }
 
@@ -374,111 +412,49 @@ export class DocumentProcessorService {
      * Validate uploaded file buffer
      */
     validateFileBuffer(buffer: Buffer, fileName: string): { valid: boolean; error?: string } {
-        const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB || '10') * 1024 * 1024;
+        // Increase max size for images
+        const fileExt = path.extname(fileName).toLowerCase();
+        const isImage = ['.png', '.jpg', '.jpeg', '.webp'].includes(fileExt);
+        const maxSize = parseInt(process.env.MAX_DOCUMENT_SIZE_MB ?? (isImage ? '25' : '10')) * 1024 * 1024;
 
         if (buffer.length > maxSize) {
             return {
                 valid: false,
-                error: `File size exceeds maximum allowed size of ${process.env.MAX_DOCUMENT_SIZE_MB || '10'}MB`
+                error: `File size exceeds maximum allowed size of ${isImage ? 25 : 10}MB`
             };
         }
 
-        // Check allowed file types
-        const allowedExtensions = ['.md', '.txt', '.pdf', '.json', '.csv', '.ts', '.js', '.py', '.java', '.cpp', '.go', '.rs', '.rb', '.doc', '.docx'];
+        // Extended allowed file types
+        const allowedExtensions = [
+            // Documents
+            '.md', '.txt', '.pdf', '.doc', '.docx', '.rtf',
+            // Data
+            '.json', '.csv', '.xlsx', '.xls', '.xml',
+            // Code
+            '.ts', '.js', '.jsx', '.tsx', '.py', '.java', '.cpp', '.c', '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala', '.r', '.sql', '.sh', '.bash',
+            // Config
+            '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+            // Web
+            '.html', '.htm',
+            // Images (for OCR)
+            '.png', '.jpg', '.jpeg', '.webp',
+            // Presentations
+            '.pptx', '.ppt',
+            // Logs
+            '.log'
+        ];
         const ext = path.extname(fileName).toLowerCase();
 
         if (!allowedExtensions.includes(ext)) {
             return {
                 valid: false,
-                error: `File type ${ext} is not supported. Allowed types: ${allowedExtensions.join(', ')}`
+                error: `File type ${ext} is not supported. Allowed types: documents (pdf, docx, txt, md, rtf), data (csv, json, xlsx), code (js, ts, py, java, etc.), web (html), images (png, jpg, jpeg, webp)`
             };
         }
 
         return { valid: true };
     }
 
-    /**
-     * Extract text from DOCX buffer
-     */
-    private async extractDocxText(buffer: Buffer): Promise<string> {
-        try {
-            // Try to use mammoth if available
-            try {
-                const mammoth = await import('mammoth');
-                const result = await mammoth.extractRawText({ buffer });
-                return result.value;
-            } catch (mammothError) {
-                loggingService.warn('Mammoth not available, trying alternative extraction', {
-                    component: 'DocumentProcessorService',
-                    operation: 'extractDocxText',
-                    error: mammothError instanceof Error ? mammothError.message : String(mammothError)
-                });
-            }
-
-            // Fallback: Try manual ZIP extraction
-            try {
-                const AdmZip = await import('adm-zip');
-                const zip = new AdmZip.default(buffer);
-                const zipEntries = zip.getEntries();
-                
-                // Find document.xml file in the DOCX
-                const documentXml = zipEntries.find(entry => entry.entryName === 'word/document.xml');
-                if (documentXml) {
-                    const xmlContent = documentXml.getData().toString('utf8');
-                    // Extract text from XML (simple regex-based extraction)
-                    const textMatches = xmlContent.match(/<w:t[^>]*>([^<]+)<\/w:t>/g);
-                    if (textMatches) {
-                        return textMatches
-                            .map(match => match.replace(/<w:t[^>]*>([^<]+)<\/w:t>/, '$1'))
-                            .join(' ');
-                    }
-                }
-            } catch (zipError) {
-                loggingService.warn('ZIP extraction failed', {
-                    component: 'DocumentProcessorService',
-                    operation: 'extractDocxText',
-                    error: zipError instanceof Error ? zipError.message : String(zipError)
-                });
-            }
-
-            throw new Error('Failed to extract text from DOCX file. Please install mammoth: npm install mammoth');
-        } catch (error) {
-            loggingService.error('DOCX text extraction failed', {
-                component: 'DocumentProcessorService',
-                operation: 'extractDocxText',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            throw error;
-        }
-    }
-
-    /**
-     * Extract text from PDF buffer
-     */
-    private async extractPdfText(buffer: Buffer): Promise<string> {
-        try {
-            // Try to use pdf-parse if available
-            try {
-                const pdfParse = await import('pdf-parse');
-                const data = await pdfParse.default(buffer);
-                return data.text;
-            } catch (pdfError) {
-                loggingService.error('PDF parsing failed', {
-                    component: 'DocumentProcessorService',
-                    operation: 'extractPdfText',
-                    error: pdfError instanceof Error ? pdfError.message : String(pdfError)
-                });
-                throw new Error('Failed to extract text from PDF file. Please install pdf-parse: npm install pdf-parse');
-            }
-        } catch (error) {
-            loggingService.error('PDF text extraction failed', {
-                component: 'DocumentProcessorService',
-                operation: 'extractPdfText',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            throw error;
-        }
-    }
 
     /**
      * Extract text from Excel buffer (xlsx, xls)
@@ -563,7 +539,7 @@ export class DocumentProcessorService {
     /**
      * Extract text from RTF buffer using regex-based extraction
      */
-    private async extractRtfText(buffer: Buffer): Promise<string> {
+    private extractRtfText(buffer: Buffer): string {
         try {
             const rtfContent = buffer.toString('utf-8');
             
@@ -618,74 +594,215 @@ export class DocumentProcessorService {
     }
 
     /**
-     * Extract text from various file formats
+     * Extract text using LangChain loaders
      */
-    private async extractTextFromBuffer(buffer: Buffer, fileExtension: string): Promise<string> {
-        loggingService.info('Starting text extraction', {
-            component: 'DocumentProcessorService',
-            operation: 'extractTextFromBuffer',
-            fileExtension,
-            bufferSize: buffer.length
-        });
+    private async extractWithLangChainLoader(buffer: Buffer, fileExtension: string, fileName: string): Promise<LangchainDocument[]> {
+        // Create temp file for loaders that need file paths
+        const tempDir = os.tmpdir();
+        const tempFilePath = path.join(tempDir, `temp_${Date.now()}_${fileName}`);
+        
+        try {
+            // Write buffer to temp file
+            fs.writeFileSync(tempFilePath, buffer);
 
-        let content: string;
+            let loader: PDFLoader | DocxLoader | CSVLoader | TextLoader | JSONLoader | undefined;
+            let documents: LangchainDocument[] = [];
 
-        switch (fileExtension) {
-            case 'docx':
-                content = await this.extractDocxText(buffer);
-                break;
+            switch (fileExtension.toLowerCase()) {
+                case 'pdf':
+                    loader = new PDFLoader(tempFilePath, {
+                        splitPages: true
+                    });
+                    documents = await loader.load();
+                    break;
 
-            case 'pdf':
-                content = await this.extractPdfText(buffer);
-                break;
+                case 'docx':
+                case 'doc':
+                    loader = new DocxLoader(tempFilePath);
+                    documents = await loader.load();
+                    break;
 
-            case 'xlsx':
-            case 'xls':
-                content = await this.extractExcelText(buffer);
-                break;
+                case 'csv':
+                    loader = new CSVLoader(tempFilePath, {
+                        column: undefined, // Load all columns
+                        separator: ','
+                    });
+                    documents = await loader.load();
+                    break;
 
-            case 'pptx':
-                content = await this.extractPptxText(buffer);
-                break;
+                case 'json':
+                    loader = new JSONLoader(tempFilePath);
+                    documents = await loader.load();
+                    break;
 
-            case 'rtf':
-                content = await this.extractRtfText(buffer);
-                break;
+                case 'html':
+                case 'htm': {
+                    // Read HTML content and use CheerioWebBaseLoader
+                    const htmlContent = fs.readFileSync(tempFilePath, 'utf-8');
+                    // CheerioWebBaseLoader expects URLs, so we'll use TextLoader and parse HTML manually
+                    const cheerio = await import('cheerio');
+                    const $ = cheerio.load(htmlContent);
+                    
+                    // Remove script and style elements
+                    $('script, style').remove();
+                    
+                    // Extract text content
+                    const textContent = $('body').text() || $.root().text();
+                    
+                    documents = [new LangchainDocument({
+                        pageContent: textContent.replace(/\s+/g, ' ').trim(),
+                        metadata: {
+                            source: fileName,
+                            fileType: 'html'
+                        }
+                    })];
+                    break;
+                }
 
-            case 'txt':
-            case 'md':
-            case 'markdown':
-            case 'csv':
-            case 'json':
-            case 'xml':
-            case 'html':
-            case 'htm':
-            case 'log':
-                // Plain text files - safe to use UTF-8
-                content = buffer.toString('utf-8');
-                break;
+                case 'txt':
+                case 'md':
+                case 'markdown':
+                case 'log':
+                case 'js':
+                case 'ts':
+                case 'jsx':
+                case 'tsx':
+                case 'py':
+                case 'java':
+                case 'cpp':
+                case 'c':
+                case 'go':
+                case 'rs':
+                case 'rb':
+                case 'php':
+                case 'swift':
+                case 'kt':
+                case 'scala':
+                case 'r':
+                case 'sql':
+                case 'sh':
+                case 'bash':
+                case 'yaml':
+                case 'yml':
+                case 'toml':
+                case 'ini':
+                case 'cfg':
+                case 'conf':
+                    loader = new TextLoader(tempFilePath);
+                    documents = await loader.load();
+                    // Add language metadata for code files
+                    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'cpp', 'c', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'scala', 'r', 'sql', 'sh', 'bash'].includes(fileExtension)) {
+                        documents.forEach(doc => {
+                            doc.metadata.language = fileExtension;
+                            doc.metadata.fileType = 'code';
+                        });
+                    }
+                    break;
 
-            case 'doc':
-                throw new Error('Legacy .doc format not supported. Please convert to .docx first.');
+                case 'png':
+                case 'jpg':
+                case 'jpeg':
+                case 'webp': {
+                    // Use Tesseract.js for OCR
+                    const { data: { text } } = await Tesseract.recognize(
+                        tempFilePath,
+                        'eng',
+                        {
+                            logger: (m) => {
+                                if (m.status === 'recognizing text') {
+                                    loggingService.info(`OCR Progress: ${Math.round(m.progress * 100)}%`, {
+                                        component: 'DocumentProcessorService',
+                                        operation: 'OCR'
+                                    });
+                                }
+                            }
+                        }
+                    );
+                    
+                    documents = [new LangchainDocument({
+                        pageContent: text,
+                        metadata: {
+                            source: fileName,
+                            fileType: 'image',
+                            extractionMethod: 'OCR'
+                        }
+                    })];
+                    break;
+                }
 
-            case 'ppt':
-                throw new Error('Legacy .ppt format not supported. Please convert to .pptx first.');
+                case 'xlsx':
+                case 'xls': {
+                    // Use existing XLSX extraction but convert to LangChain format
+                    const xlsxContent = await this.extractExcelText(buffer);
+                    documents = [new LangchainDocument({
+                        pageContent: xlsxContent,
+                        metadata: {
+                            source: fileName,
+                            fileType: 'spreadsheet'
+                        }
+                    })];
+                    break;
+                }
 
-            default:
-                // Try UTF-8 as last resort with validation
-                loggingService.warn('Unknown file extension, attempting UTF-8 extraction', {
-                    component: 'DocumentProcessorService',
-                    operation: 'extractTextFromBuffer',
-                    fileExtension
-                });
-                content = buffer.toString('utf-8');
-        } 
+                case 'pptx':
+                case 'ppt': {
+                    // Use existing PowerPoint extraction but convert to LangChain format
+                    const pptxContent = await this.extractPptxText(buffer);
+                    documents = [new LangchainDocument({
+                        pageContent: pptxContent,
+                        metadata: {
+                            source: fileName,
+                            fileType: 'presentation'
+                        }
+                    })];
+                    break;
+                }
 
-        return content;
+                case 'rtf': {
+                    // Use existing RTF extraction but convert to LangChain format
+                    const rtfContent = this.extractRtfText(buffer);
+                    documents = [new LangchainDocument({
+                        pageContent: rtfContent,
+                        metadata: {
+                            source: fileName,
+                            fileType: 'rtf'
+                        }
+                    })];
+                    break;
+                }
+
+                case 'xml': {
+                    // Parse XML and extract text content
+                    const xmlContent = buffer.toString('utf-8');
+                    const textFromXml = xmlContent.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                    documents = [new LangchainDocument({
+                        pageContent: textFromXml,
+                        metadata: {
+                            source: fileName,
+                            fileType: 'xml'
+                        }
+                    })];
+                    break;
+                }
+
+                default:
+                    // Fallback to text loader
+                    loader = new TextLoader(tempFilePath);
+                    documents = await loader.load();
+            }
+
+            return documents;
+        } finally {
+            // Clean up temp file
+            if (fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath);
+            }
+        }
     }
 
+
     /**
-     * Process file buffer (for uploads)
+     * Process file buffer (for uploads) using LangChain loaders
      */
     async processFileBuffer(
         buffer: Buffer,
@@ -702,7 +819,7 @@ export class DocumentProcessorService {
             const sourceType = this.detectFileType(fileName);
             const fileExtension = fileName.split('.').pop()?.toLowerCase() || '';
             
-            loggingService.info('Processing file buffer', {
+            loggingService.info('Processing file buffer with LangChain loaders', {
                 component: 'DocumentProcessorService',
                 operation: 'processFileBuffer',
                 fileName,
@@ -711,29 +828,32 @@ export class DocumentProcessorService {
                 bufferSize: buffer.length
             });
 
-            // Extract text using centralized method
-            const content = await this.extractTextFromBuffer(buffer, fileExtension);
+            // Extract documents using LangChain loaders
+            const documents = await this.extractWithLangChainLoader(buffer, fileExtension, fileName);
+
+            // Combine all document content
+            const combinedContent = documents.map(doc => doc.pageContent).join('\n\n');
 
             // Validate extracted content
-            if (!content || content.trim().length === 0) {
+            if (!combinedContent || combinedContent.trim().length === 0) {
                 throw new Error('No text content could be extracted from the file');
             }
 
-            if (content.length < 10) {
-                throw new Error(`Extracted content too short (${content.length} characters). File may be corrupted or empty.`);
+            if (combinedContent.length < 10) {
+                throw new Error(`Extracted content too short (${combinedContent.length} characters). File may be corrupted or empty.`);
             }
 
             // Check for binary corruption (contains lots of null bytes or non-printable chars)
-            const nullBytes = (content.match(/\u0000/g) || []).length;
-            const nullPercentage = (nullBytes / content.length) * 100;
+            const nullBytes = (combinedContent.match(/\0/g) ?? []).length;
+            const nullPercentage = (nullBytes / combinedContent.length) * 100;
             
             if (nullPercentage > 10) {
                 throw new Error(`File appears corrupted (${nullPercentage.toFixed(1)}% null bytes). Please check the file and try again.`);
             }
 
             // Check for readable text (at least 50% printable ASCII/Unicode characters)
-            const printableChars = (content.match(/[\x20-\x7E\u00A0-\uFFFF]/g) || []).length;
-            const printablePercentage = (printableChars / content.length) * 100;
+            const printableChars = (combinedContent.match(/[\x20-\x7E\u00A0-\uFFFF]/g) ?? []).length;
+            const printablePercentage = (printableChars / combinedContent.length) * 100;
             
             if (printablePercentage < 50) {
                 throw new Error(`File appears to contain binary data (only ${printablePercentage.toFixed(1)}% readable text). Please ensure you're uploading a text document.`);
@@ -742,33 +862,41 @@ export class DocumentProcessorService {
             loggingService.info('Content extracted and validated successfully', {
                 component: 'DocumentProcessorService',
                 operation: 'processFileBuffer',
-                contentLength: content.length,
+                documentsExtracted: documents.length,
+                contentLength: combinedContent.length,
                 nullPercentage: nullPercentage.toFixed(2),
                 printablePercentage: printablePercentage.toFixed(2),
-                contentPreview: content.substring(0, 100).replace(/\s+/g, ' ')
+                contentPreview: combinedContent.substring(0, 100).replace(/\s+/g, ' ')
             });
 
-            // Determine chunking strategy
+            // Determine chunking strategy based on file type
             const strategy = this.determineChunkingStrategy(sourceType);
 
-            // Process content
-            const chunks = await this.processContent(content, {
-                ...metadata,
-                fileName,
-                fileSize: buffer.length,
-                sourceType
-            }, { strategy });
+            // Process each document and create chunks
+            const allChunks: ProcessedDocument[] = [];
+            
+            for (const doc of documents) {
+                const chunks = await this.processContent(doc.pageContent, {
+                    ...metadata,
+                    ...doc.metadata,
+                    fileName,
+                    fileSize: buffer.length,
+                    sourceType
+                }, { strategy });
+                
+                allChunks.push(...chunks);
+            }
 
             loggingService.info('File buffer processing completed', {
                 component: 'DocumentProcessorService',
                 operation: 'processFileBuffer',
                 fileName,
-                chunksCreated: chunks.length,
+                chunksCreated: allChunks.length,
                 fileSize: buffer.length,
-                avgChunkSize: Math.round(content.length / chunks.length)
+                avgChunkSize: Math.round(combinedContent.length / allChunks.length)
             });
 
-            return chunks;
+            return allChunks;
         } catch (error) {
             loggingService.error('File buffer processing failed', {
                 component: 'DocumentProcessorService',
