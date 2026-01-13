@@ -2172,7 +2172,8 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                         chatMode: (request.chatMode as any) || 'balanced',
                         costBudget: 0.10,
                         previousMessages: recentMessages,
-                        selectionResponse: request.selectionResponse
+                        selectionResponse: request.selectionResponse,
+                        documentIds: request.documentIds // Pass document IDs for RAG context
                     }
                 );
                 

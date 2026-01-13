@@ -1,10 +1,11 @@
 import { Document } from '@langchain/core/documents';
 import { vectorStoreService } from './vectorStore.service';
 import { MongoDBVectorStore } from './langchainVectorStore.service';
-import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { DocumentModel } from '../models/Document';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
+import { vectorStrategyService } from './vectorization/vectorStrategy.service';
 
 export interface RetrievalOptions {
     userId?: string;
@@ -54,21 +55,27 @@ export class RetrievalService {
     private cachePrefix = 'retrieval:';
     private cacheTTL = 3600; // 1 hour
     private vectorStore?: MongoDBVectorStore;
-    private embeddings?: BedrockEmbeddings;
+    private embeddings?: SafeBedrockEmbeddings;
 
     /**
      * Initialize with LangChain VectorStore
      */
     async initializeVectorStore(): Promise<void> {
-        if (process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
-            this.embeddings = new BedrockEmbeddings({
-                region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
-                model: 'amazon.titan-embed-text-v2:0',
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-                },
-                maxRetries: 3,
+        // Initialize vector strategy service if any FAISS features are enabled
+        if (process.env.ENABLE_FAISS_DUAL_WRITE === 'true' || 
+            process.env.ENABLE_FAISS_SHADOW_READ === 'true' || 
+            process.env.ENABLE_FAISS_PRIMARY === 'true') {
+            await vectorStrategyService.initialize();
+            
+            loggingService.info('✅ RetrievalService initialized with Vector Strategy Service', {
+                component: 'RetrievalService',
+                operation: 'initializeVectorStore',
+                flags: vectorStrategyService.getFeatureFlags()
+            });
+        } else if (process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
+            // Fallback to direct MongoDB vector store (legacy)
+            this.embeddings = createSafeBedrockEmbeddings({
+                model: 'amazon.titan-embed-text-v2:0'
             });
 
             this.vectorStore = new MongoDBVectorStore(this.embeddings, {
@@ -96,6 +103,55 @@ export class RetrievalService {
                 query: query.substring(0, 100),
                 options
             });
+
+            // PRIORITY: If specific documentIds are provided, search directly by IDs first
+            // This is more reliable than vector search for user-uploaded documents
+            if (options.filters?.documentIds && options.filters.documentIds.length > 0) {
+                loggingService.info('📄 Direct document lookup by IDs (priority path)', {
+                    component: 'RetrievalService',
+                    operation: 'retrieve',
+                    documentIds: options.filters.documentIds,
+                    userId: options.userId
+                });
+                
+                const directResults = await this.searchDocumentsByIds(
+                    options.filters.documentIds, 
+                    options.userId, 
+                    limit * 4
+                );
+                
+                if (directResults.length > 0) {
+                    loggingService.info('✅ Found documents via direct ID lookup', {
+                        component: 'RetrievalService',
+                        operation: 'retrieve',
+                        found: directResults.length,
+                        documentIds: options.filters.documentIds
+                    });
+                    
+                    // Apply reranking and return
+                    const rerankedResults = await this.rerankResults(query, directResults, limit);
+                    const sources = this.extractSources(rerankedResults);
+                    
+                    return {
+                        documents: rerankedResults,
+                        sources,
+                        totalResults: rerankedResults.length,
+                        cacheHit: false,
+                        retrievalTime: Date.now() - startTime,
+                        stats: {
+                            sources,
+                            cacheHit: false,
+                            retrievalTime: Date.now() - startTime
+                        }
+                    };
+                } else {
+                    loggingService.warn('⚠️ No documents found via direct ID lookup, falling back to vector search', {
+                        component: 'RetrievalService',
+                        operation: 'retrieve',
+                        documentIds: options.filters.documentIds
+                    });
+                }
+            }
 
             // Check cache first
             if (options.useCache !== false) {
@@ -214,11 +270,19 @@ export class RetrievalService {
      * Vector search using LangChain VectorStore
      */
     private async vectorSearchWithLangChain(query: string, limit: number, options: RetrievalOptions): Promise<Document[]> {
-        if (!this.vectorStore) {
-            // Fallback to original method
-            return this.vectorSearch(query, limit, options);
+        // When specific documentIds are provided, use direct MongoDB query for reliability
+        // This bypasses FAISS since MongoDB is the source of truth and supports complex filters
+        if (options.filters?.documentIds && options.filters.documentIds.length > 0) {
+            loggingService.info('Using direct MongoDB search for documentIds filter', {
+                component: 'RetrievalService',
+                operation: 'vectorSearchWithLangChain',
+                documentIds: options.filters.documentIds,
+                userId: options.userId
+            });
+            return this.searchDocumentsByIds(options.filters.documentIds, options.userId, limit);
         }
 
+        // Use vector strategy service for all other vector searches
         try {
             // Build filter
             const filter: any = {};
@@ -243,10 +307,6 @@ export class RetrievalService {
                 filter['metadata.tags'] = { $in: options.filters.tags };
             }
 
-            if (options.filters?.documentIds && options.filters.documentIds.length > 0) {
-                filter['metadata.documentId'] = { $in: options.filters.documentIds };
-            }
-
             if (options.filters?.dateRange) {
                 filter.createdAt = {
                     $gte: options.filters.dateRange.from,
@@ -254,18 +314,27 @@ export class RetrievalService {
                 };
             }
 
-            // Use LangChain VectorStore for search
-            const results = await this.vectorStore.similaritySearch(query, limit, filter);
+            // Use vector strategy service (handles FAISS/MongoDB routing based on config)
+            const results = await vectorStrategyService.search(
+                query,
+                limit,
+                options.userId,
+                filter
+            );
 
-            loggingService.info('LangChain vector search completed', {
+            // Convert VectorSearchResult to Document[]
+            const documents = results.map(result => result.document);
+
+            loggingService.info('Vector strategy search completed', {
                 component: 'RetrievalService',
                 operation: 'vectorSearchWithLangChain',
-                resultsFound: results.length
+                resultsFound: documents.length,
+                strategy: vectorStrategyService.getFeatureFlags()
             });
 
-            return results;
+            return documents;
         } catch (error) {
-            loggingService.error('LangChain vector search failed, falling back', {
+            loggingService.error('Vector strategy search failed, falling back', {
                 component: 'RetrievalService',
                 operation: 'vectorSearchWithLangChain',
                 error: error instanceof Error ? error.message : String(error)
@@ -273,6 +342,80 @@ export class RetrievalService {
             
             // Fallback to original method
             return this.vectorSearch(query, limit, options);
+        }
+    }
+
+    /**
+     * Search documents directly by IDs from MongoDB (source of truth)
+     * This is more reliable than vector search when specific documentIds are known
+     */
+    private async searchDocumentsByIds(documentIds: string[], userId?: string, limit: number = 20): Promise<Document[]> {
+        try {
+            const { DocumentModel } = await import('../models/Document');
+            
+            const query: any = {
+                'metadata.documentId': { $in: documentIds },
+                status: 'active'
+            };
+            
+            if (userId) {
+                query['metadata.userId'] = userId;
+            }
+            
+            loggingService.info('📄 Searching documents by IDs (direct lookup)', {
+                component: 'RetrievalService',
+                operation: 'searchDocumentsByIds',
+                documentIds,
+                userId,
+                query: JSON.stringify(query)
+            });
+            
+            const docs = await DocumentModel.find(query)
+                .select('content metadata')
+                .limit(limit)
+                .lean();
+            
+            loggingService.info('📄 Documents found by direct ID lookup', {
+                component: 'RetrievalService',
+                operation: 'searchDocumentsByIds',
+                found: docs.length,
+                documentIds,
+                docMetadataPreview: docs.length > 0 ? JSON.stringify(docs[0]?.metadata).substring(0, 200) : 'none'
+            });
+            
+            if (docs.length === 0) {
+                // Debug: Check if ANY documents exist with these documentIds (ignoring userId)
+                const anyDocs = await DocumentModel.find({
+                    'metadata.documentId': { $in: documentIds },
+                    status: 'active'
+                }).select('metadata.documentId metadata.userId').limit(5).lean();
+                
+                loggingService.warn('⚠️ No documents found for provided IDs - debugging', {
+                    component: 'RetrievalService',
+                    operation: 'searchDocumentsByIds',
+                    documentIds,
+                    userId,
+                    docsWithoutUserFilter: anyDocs.length,
+                    sampleDocs: anyDocs.map((d: any) => ({
+                        docId: d.metadata?.documentId,
+                        userId: d.metadata?.userId
+                    }))
+                });
+            }
+            
+            // Convert to LangChain Document format
+            return docs.map((doc: any) => new Document({
+                pageContent: doc.content,
+                metadata: doc.metadata
+            }));
+        } catch (error) {
+            loggingService.error('❌ Failed to search documents by IDs', {
+                component: 'RetrievalService',
+                operation: 'searchDocumentsByIds',
+                error: error instanceof Error ? error.message : String(error),
+                documentIds
+            });
+            return [];
         }
     }
 

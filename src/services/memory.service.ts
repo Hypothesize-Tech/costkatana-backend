@@ -570,23 +570,64 @@ export class MemoryService {
      */
     private parseAIResponse(content: string): any {
         try {
+            // Clean the content - trim whitespace
+            const cleanContent = content.trim();
+            
             // First try to parse as-is
-            return JSON.parse(content);
-        } catch (error) {
+            return JSON.parse(cleanContent);
+        } catch {
             // If that fails, try to extract JSON from markdown code blocks
             const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
             if (jsonMatch) {
-                return JSON.parse(jsonMatch[1]);
+                try {
+                    return JSON.parse(jsonMatch[1]);
+                } catch {
+                    // Continue to next method
+                }
             }
             
-            // Try to find JSON object without code blocks
-            const objectMatch = content.match(/\{[\s\S]*\}/);
+            // Try to find and extract just the JSON object (handles trailing text after JSON)
+            const objectMatch = content.match(/(\{[\s\S]*?\})(?:\s*[^{}\[\]]*)?$/);
             if (objectMatch) {
-                return JSON.parse(objectMatch[0]);
+                try {
+                    return JSON.parse(objectMatch[1]);
+                } catch {
+                    // Continue to next method
+                }
             }
             
-            // If all else fails, throw the original error
-            throw error;
+            // Try to find the first complete JSON object using bracket matching
+            const jsonStart = content.indexOf('{');
+            if (jsonStart !== -1) {
+                let braceCount = 0;
+                let jsonEnd = -1;
+                for (let i = jsonStart; i < content.length; i++) {
+                    if (content[i] === '{') braceCount++;
+                    if (content[i] === '}') braceCount--;
+                    if (braceCount === 0) {
+                        jsonEnd = i + 1;
+                        break;
+                    }
+                }
+                if (jsonEnd !== -1) {
+                    try {
+                        return JSON.parse(content.substring(jsonStart, jsonEnd));
+                    } catch {
+                        // Continue to fallback
+                    }
+                }
+            }
+            
+            // Return default safe response if all parsing fails
+            loggingService.warn('Failed to parse AI response, returning safe default', {
+                contentPreview: content.substring(0, 200)
+            });
+            return {
+                suspicious: false,
+                confidence: 0,
+                pattern: 'Unable to analyze',
+                risk_level: 'low'
+            };
         }
     }
 
@@ -969,21 +1010,57 @@ export class MemoryService {
      */
     private parseAIResponseHelper(content: string): any {
         try {
-            return JSON.parse(content);
-        } catch (error) {
+            // Clean the content - trim whitespace
+            const cleanContent = content.trim();
+            return JSON.parse(cleanContent);
+        } catch {
+            // Try markdown code blocks
             const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```/);
-            if (jsonMatch) return JSON.parse(jsonMatch[1]);
+            if (jsonMatch) {
+                try {
+                    return JSON.parse(jsonMatch[1]);
+                } catch {
+                    // Continue to next method
+                }
+            }
             
-            const objectMatch = content.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-            if (objectMatch) return JSON.parse(objectMatch[0]);
+            // Try to find and extract just the JSON object/array using bracket matching
+            const objectStart = content.indexOf('{');
+            const arrayStart = content.indexOf('[');
+            const jsonStart = objectStart === -1 ? arrayStart : (arrayStart === -1 ? objectStart : Math.min(objectStart, arrayStart));
             
-            throw error;
+            if (jsonStart !== -1) {
+                const isArray = content[jsonStart] === '[';
+                const openBracket = isArray ? '[' : '{';
+                const closeBracket = isArray ? ']' : '}';
+                let bracketCount = 0;
+                let jsonEnd = -1;
+                
+                for (let i = jsonStart; i < content.length; i++) {
+                    if (content[i] === openBracket) bracketCount++;
+                    if (content[i] === closeBracket) bracketCount--;
+                    if (bracketCount === 0) {
+                        jsonEnd = i + 1;
+                        break;
+                    }
+                }
+                
+                if (jsonEnd !== -1) {
+                    try {
+                        return JSON.parse(content.substring(jsonStart, jsonEnd));
+                    } catch {
+                        // Continue to fallback
+                    }
+                }
+            }
+            
+            // Return default safe response if all parsing fails
+            loggingService.warn('Failed to parse AI response helper, returning empty object', {
+                contentPreview: content.substring(0, 200)
+            });
+            return {};
         }
     }
-
-    // ============================================================================
-    // ENHANCED VECTOR-POWERED METHODS (Internal Use - Not Exposed via API)
-    // ============================================================================
 
     /**
      * Get vectorized memories with enhanced semantic search
@@ -1389,15 +1466,19 @@ Return only the enhanced query, no other text.`;
      */
     private async generateQueryEmbedding(query: string): Promise<number[]> {
         try {
-            // Use the same embedding service as vectorization
-            const { BedrockEmbeddings } = await import("@langchain/aws");
-            const embeddings = new BedrockEmbeddings({
-                region: process.env.AWS_REGION || 'us-east-1',
-                model: 'amazon.titan-embed-text-v2:0',
-                maxRetries: 3,
+            // Validate input - AWS Bedrock requires minLength: 1
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to generateQueryEmbedding, returning zero vector');
+                return new Array(1024).fill(0);
+            }
+
+            // Use SafeBedrockEmbeddings for automatic validation
+            const { createSafeBedrockEmbeddings } = await import("./safeBedrockEmbeddings");
+            const embeddings = createSafeBedrockEmbeddings({
+                model: 'amazon.titan-embed-text-v2:0'
             });
             
-            return await embeddings.embedQuery(query);
+            return await embeddings.embedQuery(query.trim());
         } catch (error) {
             loggingService.error('Failed to generate query embedding:', {
                 error: error instanceof Error ? error.message : String(error)

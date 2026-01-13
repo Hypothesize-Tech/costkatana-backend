@@ -1,12 +1,14 @@
 import { DocumentModel } from '../models/Document';
 import { documentProcessorService, ProcessedDocument } from './documentProcessor.service';
-import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { MongoDBVectorStore } from './langchainVectorStore.service';
 import { Document as LangchainDocument } from '@langchain/core/documents';
 import { loggingService } from './logging.service';
 import { Conversation } from '../models/Conversation';
 import { ChatMessage } from '../models/ChatMessage';
 import { ITelemetry, Telemetry } from '../models/Telemetry';
+import { vectorStrategyService } from './vectorization/vectorStrategy.service';
+import { VectorSource } from './vectorization/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
@@ -43,22 +45,14 @@ export interface UploadProgress {
 }
 
 export class IngestionService {
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
     private vectorStore?: MongoDBVectorStore;
     private initialized = false;
     private activeJobs: Map<string, IngestionJob> = new Map();
     private progressEmitter: EventEmitter = new EventEmitter();
 
     constructor() {
-        this.embeddings = new BedrockEmbeddings({
-            region: process.env.AWS_BEDROCK_REGION || 'us-east-1',
-            model: process.env.RAG_EMBEDDING_MODEL || 'amazon.titan-embed-text-v2:0',
-            credentials: {
-                accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-            },
-            maxRetries: 3,
-        });
+        this.embeddings = createSafeBedrockEmbeddings();
     }
 
     /**
@@ -98,6 +92,18 @@ export class IngestionService {
             await this.embeddings.embedQuery('test');
 
             // Initialize MongoDB Vector Store wrapper (optional)
+            // This is only used for backward compatibility
+            // New code should use vectorStrategyService
+            if (!process.env.ENABLE_FAISS_PRIMARY) {
+                this.vectorStore = new MongoDBVectorStore(this.embeddings);
+            }
+
+            // Initialize vector strategy service if FAISS features are enabled
+            if (process.env.ENABLE_FAISS_DUAL_WRITE === 'true' || 
+                process.env.ENABLE_FAISS_SHADOW_READ === 'true' || 
+                process.env.ENABLE_FAISS_PRIMARY === 'true') {
+                await vectorStrategyService.initialize();
+            }
             if (process.env.USE_LANGCHAIN_VECTORSTORE === 'true') {
                 this.vectorStore = new MongoDBVectorStore(this.embeddings, {
                     indexName: process.env.MONGODB_VECTOR_INDEX_NAME || 'document_vector_index'
@@ -537,8 +543,23 @@ export class IngestionService {
             }
 
             // Convert ProcessedDocument to LangChain Document format
-            const langchainDocs = chunks.map(chunk => new LangchainDocument({
-                pageContent: chunk.content,
+            // Filter out empty chunks to prevent embedding validation errors
+            const validChunks = chunks.filter(chunk => 
+                chunk.content && chunk.content.trim().length > 0
+            );
+
+            if (validChunks.length === 0) {
+                loggingService.warn('No valid chunks to ingest (all chunks were empty)', {
+                    component: 'IngestionService',
+                    operation: 'ingestChunksWithLangChain',
+                    totalChunks: chunks.length,
+                    userId
+                });
+                return;
+            }
+
+            const langchainDocs = validChunks.map(chunk => new LangchainDocument({
+                pageContent: chunk.content.trim(),
                 metadata: {
                     ...chunk.metadata,
                     chunkIndex: chunk.chunkIndex,
@@ -550,8 +571,8 @@ export class IngestionService {
             // Add documents to vector store
             await this.vectorStore.addDocuments(langchainDocs, {
                 userId,
-                projectId: chunks[0]?.metadata?.projectId,
-                documentId: chunks[0]?.metadata?.documentId
+                projectId: validChunks[0]?.metadata?.projectId,
+                documentId: validChunks[0]?.metadata?.documentId
             });
 
             // Emit completion progress
@@ -633,7 +654,22 @@ export class IngestionService {
 
                 try {
                     // Generate embeddings for this batch with retry logic
-                    const contents = batchChunks.map(c => c.content);
+                    // Filter out empty chunks to prevent AWS Bedrock validation errors
+                    const validBatchChunks = batchChunks.filter(c => 
+                        c.content && c.content.trim().length > 0
+                    );
+
+                    if (validBatchChunks.length === 0) {
+                        loggingService.warn(`Batch ${i + 1}/${totalBatches} skipped - all chunks are empty`, {
+                            component: 'IngestionService',
+                            operation: 'ingestChunks',
+                            batch: i + 1,
+                            skippedChunks: batchChunks.length
+                        });
+                        continue;
+                    }
+
+                    const contents = validBatchChunks.map(c => c.content.trim());
                     let embeddings: number[][] | null = null;
                     let retryCount = 0;
                     const maxRetries = 3;
@@ -662,9 +698,9 @@ export class IngestionService {
                         throw new Error(`Failed to generate embeddings after ${maxRetries} retries`);
                     }
 
-                    // Create document records
-                    const documents = batchChunks.map((chunk, index) => ({
-                        content: chunk.content,
+                    // Create document records using validBatchChunks
+                    const documents = validBatchChunks.map((chunk, index) => ({
+                        content: chunk.content.trim(),
                         contentHash: chunk.contentHash,
                         embedding: embeddings![index],
                         metadata: chunk.metadata,
@@ -679,6 +715,52 @@ export class IngestionService {
                     try {
                         const result = await DocumentModel.insertMany(documents, { ordered: false });
                         totalInserted += result.length;
+
+                        // FAISS Dual-Write: If enabled, also write to FAISS
+                        if (process.env.ENABLE_FAISS_DUAL_WRITE === 'true') {
+                            try {
+                                // Convert to LangChain documents for FAISS
+                                const langchainDocs = documents.map(doc => new LangchainDocument({
+                                    pageContent: doc.content,
+                                    metadata: {
+                                        ...doc.metadata,
+                                        documentId: (doc as any)._id?.toString(),
+                                        chunkIndex: doc.chunkIndex,
+                                        totalChunks: doc.totalChunks
+                                    }
+                                }));
+
+                                // Determine source type for routing
+                                const source = (validBatchChunks[0]?.metadata?.source || 'user-upload') as VectorSource;
+                                const userId = validBatchChunks[0]?.metadata?.userId;
+                                const projectId = validBatchChunks[0]?.metadata?.projectId;
+
+                                // Add to vector strategy (will route to FAISS)
+                                await vectorStrategyService.add(langchainDocs, {
+                                    source,
+                                    userId,
+                                    projectId,
+                                    documentId: validBatchChunks[0]?.metadata?.documentId
+                                });
+
+                                loggingService.info('FAISS dual-write completed', {
+                                    component: 'IngestionService',
+                                    operation: 'ingestChunks',
+                                    batch: i + 1,
+                                    documentCount: langchainDocs.length,
+                                    source,
+                                    userId
+                                });
+                            } catch (faissError) {
+                                // Log FAISS error but don't fail the batch (MongoDB is source of truth)
+                                loggingService.error('FAISS dual-write failed (non-blocking)', {
+                                    component: 'IngestionService',
+                                    operation: 'ingestChunks',
+                                    batch: i + 1,
+                                    error: faissError instanceof Error ? faissError.message : String(faissError)
+                                });
+                            }
+                        }
 
                         loggingService.info(`Batch ${i + 1}/${totalBatches} ingested successfully`, {
                             component: 'IngestionService',

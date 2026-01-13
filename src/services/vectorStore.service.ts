@@ -1,4 +1,4 @@
-import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { redisService } from './redis.service';
 import { loggingService } from './logging.service';
 import { fallbackVectorStoreService } from './fallbackVectorStore.service';
@@ -37,9 +37,7 @@ const initializeVectorStore = async () => {
   }
   
   try {
-    const embeddings = new BedrockEmbeddings({
-      region: process.env.AWS_REGION ?? 'us-east-1',
-    });
+    const embeddings = createSafeBedrockEmbeddings();
     vectorStore = await HNSWLib.fromTexts(
       ['initialization'],
       [[]],
@@ -94,7 +92,7 @@ import mongoose from 'mongoose';
 
 export class VectorStoreService {
     private vectorStore?: HNSWLibInterface;
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
     private initialized = false;
     private hnswlibAvailable = false;
 
@@ -117,40 +115,27 @@ export class VectorStoreService {
                 });
             }
             
-            // Initialize AWS Bedrock embeddings with correct model ID
-            this.embeddings = new BedrockEmbeddings({
-                region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',
-                model: 'amazon.titan-embed-text-v2:0',  // Updated to v2 with proper format
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-                },
-                // Additional configuration to ensure proper API calls
-                maxRetries: 3,
+            // Initialize AWS Bedrock embeddings with SafeBedrockEmbeddings wrapper
+            this.embeddings = createSafeBedrockEmbeddings({
+                model: 'amazon.titan-embed-text-v2:0'
             });
-            loggingService.info('✅ BedrockEmbeddings initialized with amazon.titan-embed-text-v2:0');
+            loggingService.info('✅ SafeBedrockEmbeddings initialized with amazon.titan-embed-text-v2:0');
         } catch (error) {
-            loggingService.error('❌ Failed to initialize BedrockEmbeddings v2:', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('❌ Failed to initialize SafeBedrockEmbeddings v2:', { error: error instanceof Error ? error.message : String(error) });
             
             // Fallback to v1 if v2 fails
             try {
                 loggingService.info('🔄 Trying fallback to titan-embed-text-v1:0...');
-                this.embeddings = new BedrockEmbeddings({
-                    region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',
-                    model: 'amazon.titan-embed-text-v1:0',
-                    credentials: {
-                        accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
-                        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-                    },
-                    maxRetries: 3,
+                this.embeddings = createSafeBedrockEmbeddings({
+                    model: 'amazon.titan-embed-text-v1:0'
                 });
-                loggingService.info('✅ BedrockEmbeddings fallback successful with v1:0');
+                loggingService.info('✅ SafeBedrockEmbeddings fallback successful with v1:0');
             } catch (fallbackError) {
-                loggingService.error('❌ All BedrockEmbeddings models failed:', { error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) });
+                loggingService.error('❌ All SafeBedrockEmbeddings models failed:', { error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) });
                 
                 // Final fallback - disable embeddings functionality
                 loggingService.warn('⚠️ Running in degraded mode without embeddings');
-                throw new Error('BedrockEmbeddings initialization completely failed - check AWS credentials and region');
+                throw new Error('SafeBedrockEmbeddings initialization completely failed - check AWS credentials and region');
             }
         }
     }
@@ -500,10 +485,16 @@ export class VectorStoreService {
      */
     async addToMongoDB(content: string, metadata: any, embedding?: number[]): Promise<string> {
         try {
+            // Validate input - AWS Bedrock requires minLength: 1
+            if (!content || content.trim().length === 0) {
+                loggingService.warn('Empty content provided to addToMongoDB, skipping embedding generation');
+                throw new Error('Cannot add empty content to MongoDB');
+            }
+
             const { DocumentModel } = await import('../models/Document');
             
             // Generate embedding if not provided
-            const embeddingVector = embedding || await this.embeddings.embedQuery(content);
+            const embeddingVector = embedding || await this.embeddings.embedQuery(content.trim());
             
             // Generate content hash
             const crypto = await import('crypto');
@@ -556,8 +547,14 @@ export class VectorStoreService {
 
             const { DocumentModel } = await import('../models/Document');
             
+            // Validate query - AWS Bedrock requires minLength: 1
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to searchMongoDB');
+                return [];
+            }
+            
             // Generate query embedding
-            const queryEmbedding = await this.embeddings.embedQuery(query);
+            const queryEmbedding = await this.embeddings.embedQuery(query.trim());
             
             loggingService.info('✅ Query embedding generated', {
                 component: 'VectorStoreService',
@@ -641,8 +638,14 @@ export class VectorStoreService {
             
             // Fallback to manual cosine similarity if vector search fails
             try {
-                const { DocumentModel } = await import('../models/Document');
-                const queryEmbedding = await this.embeddings.embedQuery(query);
+                
+                // Validate query before embedding
+                if (!query || query.trim().length === 0) {
+                    loggingService.warn('Empty query in fallback search');
+                    return [];
+                }
+                
+                const queryEmbedding = await this.embeddings.embedQuery(query.trim());
                 return await this.searchMongoDBFallback(queryEmbedding, k, filters);
             } catch (fallbackError) {
                 loggingService.error('❌ Fallback search also failed', {

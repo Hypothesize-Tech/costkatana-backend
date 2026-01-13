@@ -17,6 +17,17 @@ export interface MongoDBVectorStoreConfig {
 /**
  * Custom MongoDB VectorStore wrapper for LangChain integration
  * Preserves existing Document schema and user isolation
+ * 
+ * @deprecated MongoDB vector search is deprecated in favor of FAISS.
+ * Use VectorStrategyService instead for all vector operations.
+ * This service is maintained only for backward compatibility.
+ * 
+ * Migration path:
+ * 1. Enable FAISS dual-write (ENABLE_FAISS_DUAL_WRITE=true)
+ * 2. Run migration script: npm run migrate:faiss
+ * 3. Enable shadow read for validation (ENABLE_FAISS_SHADOW_READ=true)
+ * 4. Enable FAISS as primary (ENABLE_FAISS_PRIMARY=true)
+ * 5. Drop MongoDB vector indexes after confirming FAISS works
  */
 export class MongoDBVectorStore extends VectorStore {
     private collectionName: string;
@@ -65,8 +76,37 @@ export class MongoDBVectorStore extends VectorStore {
             });
 
             // Generate embeddings for all documents
+            // Filter out empty documents to prevent AWS Bedrock validation errors
             const texts = documents.map(doc => doc.pageContent);
-            const embeddings = await this.embeddings.embedDocuments(texts);
+            const validIndices = texts
+                .map((text, idx) => ({ text, idx }))
+                .filter(({ text }) => text && text.trim().length > 0)
+                .map(({ idx }) => idx);
+
+            if (validIndices.length === 0) {
+                loggingService.warn('No valid documents to embed, all documents are empty');
+                // Return empty embeddings for all documents
+                const ids: string[] = [];
+                documents.forEach((_, idx) => {
+                    ids.push(options?.ids?.[idx] ?? new mongoose.Types.ObjectId().toString());
+                });
+                return ids;
+            }
+
+            // Generate embeddings only for valid documents
+            const validTexts = validIndices.map(idx => texts[idx].trim());
+            const validEmbeddings = await this.embeddings.embedDocuments(validTexts);
+
+            // Map embeddings back to original document positions
+            const embeddings: number[][] = new Array(documents.length);
+            let embeddingIdx = 0;
+            for (let i = 0; i < documents.length; i++) {
+                if (validIndices.includes(i)) {
+                    embeddings[i] = validEmbeddings[embeddingIdx++];
+                } else {
+                    embeddings[i] = []; // Empty embedding for empty documents
+                }
+            }
 
             // Prepare documents for insertion
             const docsToInsert: Partial<IDocument>[] = documents.map((doc, idx) => {
@@ -121,7 +161,12 @@ export class MongoDBVectorStore extends VectorStore {
                 component: 'MongoDBVectorStore',
                 operation: 'addDocuments',
                 documentCount: documents.length,
-                duration
+                duration,
+                sampleMetadata: docsToInsert.length > 0 ? {
+                    documentId: docsToInsert[0]?.metadata?.documentId,
+                    userId: docsToInsert[0]?.metadata?.userId,
+                    source: docsToInsert[0]?.metadata?.source
+                } : 'none'
             });
 
             return ids;
@@ -206,8 +251,14 @@ export class MongoDBVectorStore extends VectorStore {
                 filter
             });
 
+            // Validate query before embedding
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to similaritySearchWithScore, returning empty results');
+                return [];
+            }
+
             // Generate query embedding
-            const queryEmbedding = await this.embeddings.embedQuery(query);
+            const queryEmbedding = await this.embeddings.embedQuery(query.trim());
 
             // Build MongoDB aggregation pipeline
             const pipeline: any[] = [
@@ -477,13 +528,25 @@ export class MongoDBVectorStore extends VectorStore {
                 candidateEmbeddings.push(docRecord.embedding);
             } else {
                 // Fallback: generate embedding if not found
-                const embedding = await this.embeddings.embedQuery(doc.pageContent);
-                candidateEmbeddings.push(embedding);
+                // Validate content before embedding
+                if (doc.pageContent && doc.pageContent.trim().length > 0) {
+                    const embedding = await this.embeddings.embedQuery(doc.pageContent.trim());
+                    candidateEmbeddings.push(embedding);
+                } else {
+                    // Skip empty documents
+                    candidateEmbeddings.push([]);
+                }
             }
         }
 
         // Get query embedding
-        const queryEmbedding = await this.embeddings.embedQuery(query);
+        // Validate query before embedding
+        if (!query || query.trim().length === 0) {
+            loggingService.warn('Empty query provided to maxMarginalRelevanceSearch');
+            return [];
+        }
+        
+        const queryEmbedding = await this.embeddings.embedQuery(query.trim());
         
         // MMR algorithm implementation with proper diversity calculation
         const selected: LangchainDocument[] = [];

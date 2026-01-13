@@ -3,6 +3,7 @@ import { loggingService } from '../services/logging.service';
 import { GuardrailsService } from '../services/guardrails.service';
 
 import { VectorizationJob } from '../jobs/vectorization.job';
+import { vectorMaintenanceJobs } from '../jobs/vectorMaintenance.job';
 
 export const initializeCronJobs = () => {
     loggingService.info('Initializing cron jobs', {
@@ -444,6 +445,23 @@ export const initializeCronJobs = () => {
             });
         }
     });
+
+    // Start FAISS Vector Maintenance Jobs
+    try {
+        vectorMaintenanceJobs.start();
+        loggingService.info('FAISS vector maintenance jobs started', {
+            component: 'cronJobs',
+            operation: 'vectorMaintenanceJobs',
+            step: 'started'
+        });
+    } catch (error) {
+        loggingService.error('Failed to start FAISS vector maintenance jobs', {
+            component: 'cronJobs',
+            operation: 'vectorMaintenanceJobs',
+            step: 'error',
+            error: error instanceof Error ? error.message : String(error)
+        });
+    }
 
     loggingService.info('Cron jobs initialized successfully', {
         component: 'cronJobs',
