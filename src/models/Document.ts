@@ -1,5 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+
+// Stores chunked, embedded text for RAG (Retrieval-Augmented Generation) search
 export interface IDocument extends Document {
     // Content fields
     content: string;
@@ -159,7 +161,7 @@ const DocumentSchema = new Schema<IDocument>({
 // Compound indexes for common queries
 DocumentSchema.index({ 'metadata.userId': 1, 'metadata.source': 1, createdAt: -1 });
 DocumentSchema.index({ 'metadata.userId': 1, status: 1, createdAt: -1 });
-DocumentSchema.index({ contentHash: 1, 'metadata.userId': 1 }, { unique: true }); // Prevent duplicate content per user
+DocumentSchema.index({ contentHash: 1, 'metadata.userId': 1, 'metadata.documentId': 1 }, { unique: true });
 DocumentSchema.index({ parentDocumentId: 1, chunkIndex: 1 });
 DocumentSchema.index({ status: 1, lastAccessedAt: -1 }); // For cleanup jobs
 

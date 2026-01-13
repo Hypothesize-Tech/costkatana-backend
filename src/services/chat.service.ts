@@ -18,6 +18,7 @@ import { loggingService } from './logging.service';
 import { IntegrationChatService, ParsedMention } from './integrationChat.service';
 import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
 import { GoogleService } from './google.service';
+import { TextExtractionService } from './textExtraction.service';
 
 // Conversation Context Types
 export interface ConversationContext {
@@ -5679,9 +5680,85 @@ Based ONLY on the search results above, provide a factual answer:`;
                     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
                 };
 
-                // Try to fetch Google file content
+                // Extract file content based on type
                 let extractedContent = '';
-                if (attachment.type === 'google' && attachment.googleFileId && attachment.connectionId) {
+                
+                // Handle uploaded files (from chat or ingestion)
+                if (attachment.type === 'uploaded' && attachment.fileId) {
+                    try {
+                        const { UploadedFile } = await import('../models/UploadedFile');
+                        const uploadedFile = await UploadedFile.findById(attachment.fileId);
+                        
+                        if (uploadedFile) {
+                            // Check if we already have extracted text
+                            if (uploadedFile.extractedText && uploadedFile.extractedText.trim()) {
+                                extractedContent = uploadedFile.extractedText;
+                                
+                                loggingService.info('Retrieved uploaded file content from database', {
+                                    fileName: attachment.fileName,
+                                    fileId: attachment.fileId,
+                                    contentLength: extractedContent.length,
+                                    userId
+                                });
+                            } else {
+                                // Extract text from S3 file if not already extracted
+                                try {
+                                    const textExtractor = new TextExtractionService();
+                                    const extractionResult = await textExtractor.extractTextFromS3(
+                                        uploadedFile.s3Key,
+                                        uploadedFile.fileType,
+                                        uploadedFile.fileName
+                                    );
+                                    
+                                    if (extractionResult.success && extractionResult.text) {
+                                        extractedContent = extractionResult.text;
+                                        
+                                        // Save extracted text for future use
+                                        uploadedFile.extractedText = extractedContent;
+                                        await uploadedFile.save();
+                                        
+                                        loggingService.info('Extracted and saved uploaded file content', {
+                                            fileName: attachment.fileName,
+                                            fileId: attachment.fileId,
+                                            s3Key: uploadedFile.s3Key,
+                                            contentLength: extractedContent.length,
+                                            userId
+                                        });
+                                    } else {
+                                        loggingService.warn('Failed to extract text from uploaded file', {
+                                            fileName: attachment.fileName,
+                                            fileId: attachment.fileId,
+                                            error: extractionResult.error,
+                                            userId
+                                        });
+                                    }
+                                } catch (extractError) {
+                                    loggingService.error('Error extracting text from uploaded file', {
+                                        fileName: attachment.fileName,
+                                        fileId: attachment.fileId,
+                                        error: extractError instanceof Error ? extractError.message : String(extractError),
+                                        userId
+                                    });
+                                }
+                            }
+                        } else {
+                            loggingService.warn('Uploaded file not found in database', {
+                                fileId: attachment.fileId,
+                                fileName: attachment.fileName,
+                                userId
+                            });
+                        }
+                    } catch (error) {
+                        loggingService.error('Failed to fetch uploaded file', {
+                            fileName: attachment.fileName,
+                            fileId: attachment.fileId,
+                            error: error instanceof Error ? error.message : String(error),
+                            userId
+                        });
+                    }
+                }
+                // Handle Google Drive files
+                else if (attachment.type === 'google' && attachment.googleFileId && attachment.connectionId) {
                     try {
                         const { GoogleConnection } = await import('../models/GoogleConnection');
                         const connection = await GoogleConnection.findById(attachment.connectionId);

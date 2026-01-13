@@ -429,6 +429,111 @@ export const getUserDocuments = async (req: any, res: Response): Promise<void> =
 };
 
 /**
+ * Check document ingestion status by documentId
+ * Returns whether the document exists and how many chunks were created
+ */
+export const checkDocumentStatus = async (req: any, res: Response): Promise<void> => {
+    try {
+        const userId = req.userId;
+        const { documentId } = req.params as { documentId: string };
+
+        if (!userId) {
+            res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            return;
+        }
+
+        loggingService.info('Checking document status', {
+            component: 'IngestionController',
+            operation: 'checkDocumentStatus',
+            userId,
+            documentId
+        });
+
+        // Check for document chunks with any status
+        const activeChunks = await DocumentModel.countDocuments({
+            'metadata.userId': userId,
+            'metadata.documentId': documentId,
+            status: 'active'
+        });
+
+        const archivedChunks = await DocumentModel.countDocuments({
+            'metadata.userId': userId,
+            'metadata.documentId': documentId,
+            status: 'archived'
+        });
+
+        const deletedChunks = await DocumentModel.countDocuments({
+            'metadata.userId': userId,
+            'metadata.documentId': documentId,
+            status: 'deleted'
+        });
+
+        const totalChunks = activeChunks + archivedChunks + deletedChunks;
+
+        if (totalChunks === 0) {
+            res.json({
+                success: true,
+                data: {
+                    documentId,
+                    exists: false,
+                    status: 'not_found',
+                    message: 'Document not found. It may still be processing or the ingestion may have failed.',
+                    activeChunks: 0,
+                    archivedChunks: 0,
+                    deletedChunks: 0
+                }
+            });
+            return;
+        }
+
+        // Get sample chunk for metadata
+        const sampleChunk = await DocumentModel.findOne({
+            'metadata.userId': userId,
+            'metadata.documentId': documentId
+        }).select('metadata status createdAt ingestedAt');
+
+        res.json({
+            success: true,
+            data: {
+                documentId,
+                exists: true,
+                status: activeChunks > 0 ? 'ready' : (archivedChunks > 0 ? 'archived' : 'deleted'),
+                fileName: sampleChunk?.metadata.fileName,
+                fileType: sampleChunk?.metadata.fileType,
+                fileSize: sampleChunk?.metadata.fileSize,
+                source: sampleChunk?.metadata.source,
+                createdAt: sampleChunk?.createdAt,
+                ingestedAt: sampleChunk?.ingestedAt,
+                activeChunks,
+                archivedChunks,
+                deletedChunks,
+                totalChunks,
+                message: activeChunks > 0 
+                    ? `Document is ready with ${activeChunks} chunks available`
+                    : `Document exists but is ${archivedChunks > 0 ? 'archived' : 'deleted'}`
+            }
+        });
+
+    } catch (error) {
+        loggingService.error('Check document status failed', {
+            component: 'IngestionController',
+            operation: 'checkDocumentStatus',
+            userId: req.userId,
+            error: error instanceof Error ? error.message : String(error)
+        });
+
+        res.status(500).json({
+            success: false,
+            message: 'Failed to check document status',
+            error: error instanceof Error ? error.message : 'Unknown error'
+        });
+    }
+};
+
+/**
  * Get document preview
  */
 export const getDocumentPreview = async (req: any, res: Response): Promise<void> => {
@@ -471,9 +576,22 @@ export const getDocumentPreview = async (req: any, res: Response): Promise<void>
                 'metadata.userId': userId,
                 status: 'active'
             })
-            .select('metadata.documentId metadata.fileName')
-            .limit(5)
+            .select('metadata.documentId metadata.fileName createdAt')
+            .limit(10)
             .sort({ createdAt: -1 });
+
+            // Check if document exists with different status
+            const archivedDoc = await DocumentModel.findOne({
+                'metadata.userId': userId,
+                'metadata.documentId': documentId,
+                status: { $ne: 'active' }
+            }).select('status');
+
+            const recentDocList = recentDocs.map(d => ({
+                documentId: d.metadata.documentId,
+                fileName: d.metadata.fileName,
+                createdAt: d.createdAt
+            }));
 
             loggingService.warn('Document not found for preview', {
                 component: 'IngestionController',
@@ -481,19 +599,24 @@ export const getDocumentPreview = async (req: any, res: Response): Promise<void>
                 userId,
                 requestedDocumentId: documentId,
                 totalUserDocs: userDocsCount,
-                recentDocuments: recentDocs.map(d => ({
-                    documentId: d.metadata.documentId,
-                    fileName: d.metadata.fileName
-                }))
+                isArchived: !!archivedDoc,
+                archivedStatus: archivedDoc?.status,
+                recentDocuments: recentDocList
             });
 
             res.status(404).json({
                 success: false,
-                message: 'Document not found. It may still be processing.',
+                message: archivedDoc 
+                    ? `Document found but status is "${archivedDoc.status}". Only active documents can be previewed.`
+                    : 'Document not found. It may still be processing or the upload may have failed.',
                 debug: {
                     requestedDocumentId: documentId,
                     totalDocuments: userDocsCount,
-                    suggestion: 'The document might still be processing. Please wait a moment and try again.'
+                    isArchived: !!archivedDoc,
+                    recentDocuments: recentDocList.slice(0, 5), // Only show 5 in response
+                    suggestion: archivedDoc
+                        ? 'The document exists but is not active. It may have been deleted or archived.'
+                        : 'The document might still be processing. Check the upload progress or try uploading again. Recent document IDs are listed above for reference.'
                 }
             });
             return;
