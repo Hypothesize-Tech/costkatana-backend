@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblapack-dev \
     libopenblas-dev \
     gfortran \
+    patchelf \
   && rm -rf /var/lib/apt/lists/*
 
 # Set environment for native module compilation
