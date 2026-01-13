@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libc6-dev \
     libstdc++6 \
     libgomp1 \
+    libblas-dev \
+    liblapack-dev \
+    libopenblas-dev \
+    gfortran \
+    patchelf \
   && rm -rf /var/lib/apt/lists/*
 
 # Set environment for native module compilation
@@ -101,9 +106,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     lsb-release \
     wget \
     xdg-utils \
-    # Critical runtime dependencies for hnswlib-node
+    # Critical runtime dependencies for hnswlib-node and faiss-node
     libgomp1 \
     libstdc++6 \
+    libopenblas0 \
+    libgfortran5 \
   && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
