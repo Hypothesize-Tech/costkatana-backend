@@ -317,6 +317,7 @@ export class MultiAgentFlowService {
             previousMessages?: BaseMessage[];
             callbacks?: BaseCallbackHandler[]; // Optional callbacks for activity streaming
             selectionResponse?: any; // Selection response from IntegrationSelector
+            documentIds?: string[]; // Document IDs for RAG context
         } = {}
     ): Promise<{
         response: string;
@@ -362,11 +363,52 @@ export class MultiAgentFlowService {
                 selectionResponseKeys: options.selectionResponse ? Object.keys(options.selectionResponse) : [],
                 selectionResponseIntegration: options.selectionResponse?.integration,
                 optionsKeys: Object.keys(options),
+                hasDocumentIds: !!options.documentIds && options.documentIds.length > 0,
+                documentIdsCount: options.documentIds?.length || 0,
                 message
             });
 
+            // If documentIds are provided, retrieve document content and prepend to message
+            let enrichedMessage = message;
+            if (options.documentIds && options.documentIds.length > 0) {
+                try {
+                    const { retrievalService } = await import('./retrieval.service');
+                    const retrievalResult = await retrievalService.retrieve(message, {
+                        userId,
+                        limit: 20,
+                        filters: {
+                            documentIds: options.documentIds
+                        }
+                    });
+
+                    if (retrievalResult.documents.length > 0) {
+                        const documentContext = retrievalResult.documents
+                            .map((doc, idx) => `[Document ${idx + 1}]:\n${doc.pageContent}`)
+                            .join('\n\n');
+                        
+                        enrichedMessage = `The user has uploaded document(s) for analysis. Here is the document content:\n\n${documentContext}\n\n---\n\nUser's question: ${message}`;
+                        
+                        loggingService.info('📄 Document context added to message', {
+                            documentsFound: retrievalResult.documents.length,
+                            documentIds: options.documentIds,
+                            enrichedMessageLength: enrichedMessage.length
+                        });
+                    } else {
+                        loggingService.warn('⚠️ No documents found for provided documentIds', {
+                            documentIds: options.documentIds,
+                            userId
+                        });
+                    }
+                } catch (docError) {
+                    loggingService.error('❌ Failed to retrieve documents for context', {
+                        error: docError instanceof Error ? docError.message : String(docError),
+                        documentIds: options.documentIds
+                    });
+                }
+            }
+
             const initialState: Partial<MultiAgentState> = {
-                messages: [new HumanMessage(message)],
+                messages: [new HumanMessage(enrichedMessage)],
                 userId,
                 conversationId,
                 chatMode: options.chatMode || 'balanced',
@@ -375,6 +417,7 @@ export class MultiAgentFlowService {
                     startTime: Date.now(),
                     langSmithRunId: runId,
                     userId,
+                    documentIds: options.documentIds,
                     ...(options.selectionResponse ? { selectionResponse: options.selectionResponse } : {})
                 }
             };
@@ -1021,6 +1064,30 @@ Would you like me to help you with anything else, or would you prefer to check t
             const lastMessage = state.messages[state.messages.length - 1];
             if (!lastMessage || typeof lastMessage.content !== 'string') {
                 return { agentPath: ['trending_detection_skipped'] };
+            }
+
+            // IMPORTANT: Skip web search when user has provided documents for analysis
+            // The user wants to analyze their uploaded documents, not search the web
+            const hasDocumentContext = state.metadata?.documentIds && 
+                (state.metadata.documentIds as string[]).length > 0;
+            
+            if (hasDocumentContext) {
+                loggingService.info('📄 Skipping web search - user has uploaded documents for analysis', {
+                    documentIds: state.metadata?.documentIds
+                });
+                return { 
+                    needsWebData: false,
+                    webSources: [],
+                    agentPath: ['trending_skipped_document_context'],
+                    metadata: {
+                        ...(state.metadata || {}),
+                        trendingAnalysis: {
+                            confidence: 1.0,
+                            queryType: 'document_analysis',
+                            skipReason: 'user_provided_documents'
+                        }
+                    }
+                };
             }
 
             const query = lastMessage.content;

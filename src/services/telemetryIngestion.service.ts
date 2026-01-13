@@ -1,5 +1,5 @@
 import { Telemetry } from '../models/Telemetry';
-import { BedrockEmbeddings } from '@langchain/aws';
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { DocumentModel } from '../models/Document';
 import { loggingService } from './logging.service';
 import crypto from 'crypto';
@@ -9,13 +9,10 @@ import crypto from 'crypto';
  * Extracts insights from cost narratives and semantic content
  */
 export class TelemetryIngestionService {
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
 
     constructor() {
-        this.embeddings = new BedrockEmbeddings({
-            region: process.env.AWS_REGION || 'us-east-1',
-            model: process.env.RAG_EMBEDDING_MODEL || 'amazon.titan-embed-text-v2:0',
-        });
+        this.embeddings = createSafeBedrockEmbeddings();
     }
 
     /**
@@ -89,8 +86,14 @@ export class TelemetryIngestionService {
                         continue; // Already ingested
                     }
 
+                    // Validate content before embedding
+                    if (!content || content.trim().length === 0) {
+                        loggingService.warn('Empty telemetry content, skipping embedding generation');
+                        continue;
+                    }
+
                     // Generate embedding
-                    const embedding = await this.embeddings.embedQuery(content);
+                    const embedding = await this.embeddings.embedQuery(content.trim());
 
                     // Create document
                     await DocumentModel.create({

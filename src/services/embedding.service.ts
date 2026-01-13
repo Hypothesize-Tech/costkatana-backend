@@ -8,11 +8,19 @@ const bedrockClient = new BedrockRuntimeClient({
 });
 
 export const getEmbedding = async (text: string): Promise<number[]> => {
+  // Validate input - AWS Bedrock requires minLength: 1
+  if (!text || text.trim().length === 0) {
+    loggingService.warn('Empty text provided to getEmbedding, returning zero vector');
+    // Return a zero vector of standard dimensions (1536 for Titan)
+    return new Array(1536).fill(0);
+  }
+
+  const cleanText = text.trim();
   const params = {
     modelId: 'amazon.titan-embed-text-v1',
     contentType: 'application/json',
     accept: '*/*',
-    body: JSON.stringify({ inputText: text }),
+    body: JSON.stringify({ inputText: cleanText }),
   };
 
   try {

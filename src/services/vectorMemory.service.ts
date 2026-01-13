@@ -1,5 +1,5 @@
 import { loggingService } from './logging.service';
-import { BedrockEmbeddings } from "@langchain/aws";
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { LRUCache } from 'lru-cache';
 
 export interface VectorMemoryItem {
@@ -36,7 +36,7 @@ export interface CrossModelSearchOptions {
  * Efficient for moderate-scale applications with improved embedding quality
  */
 export class VectorMemoryService {
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
     
     // In-memory vector storage with LRU limits - organized by data type
     private vectorStore: LRUCache<string, VectorMemoryItem>;
@@ -52,10 +52,8 @@ export class VectorMemoryService {
 
     constructor() {
         // Use Amazon Titan Embed Text v2 for consistency with background vectorization
-        this.embeddings = new BedrockEmbeddings({
-            region: process.env.AWS_REGION || 'us-east-1',
-            model: 'amazon.titan-embed-text-v2:0', // 1024 dimensions
-            maxRetries: 3,
+        this.embeddings = createSafeBedrockEmbeddings({
+            model: 'amazon.titan-embed-text-v2:0'
         });
         
         // Initialize LRU caches with enhanced limits for production usage
@@ -93,6 +91,12 @@ export class VectorMemoryService {
      */
     private async generateEmbedding(text: string): Promise<number[]> {
         try {
+            // Validate input - AWS Bedrock requires minLength: 1
+            if (!text || text.trim().length === 0) {
+                loggingService.warn('Empty text provided to generateEmbedding, returning zero vector');
+                return new Array(this.EMBEDDING_DIMENSIONS).fill(0);
+            }
+
             // Check cache first
             const cacheKey = this.hashText(text);
             if (this.embeddingCache.has(cacheKey)) {
@@ -100,7 +104,7 @@ export class VectorMemoryService {
             }
             
             // Generate embedding using Amazon Titan v2
-            const embedding = await this.embeddings.embedQuery(text);
+            const embedding = await this.embeddings.embedQuery(text.trim());
             
             // Validate embedding dimensions
             if (embedding.length !== this.EMBEDDING_DIMENSIONS) {

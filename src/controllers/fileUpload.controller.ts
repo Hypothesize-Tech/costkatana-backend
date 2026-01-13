@@ -4,6 +4,7 @@ import { S3Service } from '../services/s3.service';
 import { UploadedFile } from '../models/UploadedFile';
 import { loggingService } from '../services/logging.service';
 import { ChatMessage } from '../models/ChatMessage';
+import { ingestionService } from '../services/ingestion.service';
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
@@ -40,6 +41,9 @@ class FileUploadController {
             const { buffer, originalname, mimetype, size } = req.file;
             const fileType = originalname.split('.').pop()?.toLowerCase() || 'unknown';
 
+            // Generate documentId for this upload
+            const documentId = `doc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
             // Upload to S3
             const { s3Key, presignedUrl } = await S3Service.uploadChatFile(
                 userId.toString(),
@@ -48,8 +52,7 @@ class FileUploadController {
                 mimetype
             );
 
-            // No text extraction - let AI handle file processing directly
-            // Save to database
+            // Save to UploadedFile database
             const uploadedFile = new UploadedFile({
                 userId,
                 fileName: originalname,
@@ -63,26 +66,93 @@ class FileUploadController {
 
             await uploadedFile.save();
 
-            loggingService.info('File uploaded successfully', {
+            loggingService.info('File uploaded to S3 and database', {
                 fileId: uploadedFile._id,
                 fileName: originalname,
                 fileType,
                 fileSize: size,
                 userId,
+                documentId,
             });
 
-            return res.status(200).json({
-                success: true,
-                data: {
-                    fileId: uploadedFile._id,
+            // Ingest file into Document collection for RAG search
+            try {
+                loggingService.info('Starting file ingestion for RAG search', {
+                    documentId,
                     fileName: originalname,
-                    fileSize: size,
-                    mimeType: mimetype,
-                    fileType,
-                    url: presignedUrl,
-                    uploadedAt: uploadedFile.uploadedAt,
-                },
-            });
+                    userId,
+                });
+
+                loggingService.info('🔵 BEFORE ingestion - userId check', {
+                    userId,
+                    userIdType: typeof userId,
+                    userIdString: userId.toString(),
+                    documentId,
+                });
+
+                const ingestionResult = await ingestionService.ingestFileBuffer(
+                    buffer,
+                    originalname,
+                    userId.toString(),
+                    {
+                        documentId,
+                        source: 'user-upload',
+                        fileName: originalname,
+                        fileType,
+                        fileSize: size,
+                        conversationId: undefined, // Not attached to conversation yet
+                    }
+                );
+
+                loggingService.info('🟢 File ingested successfully for RAG search', {
+                    documentId,
+                    fileName: originalname,
+                    chunksCreated: ingestionResult.documentsIngested,
+                    duration: ingestionResult.duration,
+                    success: ingestionResult.success,
+                    errors: ingestionResult.errors,
+                });
+
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        fileId: uploadedFile._id,
+                        documentId, // Include documentId for frontend to track
+                        fileName: originalname,
+                        fileSize: size,
+                        mimeType: mimetype,
+                        fileType,
+                        url: presignedUrl,
+                        uploadedAt: uploadedFile.uploadedAt,
+                        ingested: true,
+                        chunksCreated: ingestionResult.documentsIngested,
+                    },
+                });
+            } catch (ingestionError) {
+                loggingService.error('File ingestion failed, but file upload succeeded', {
+                    error: ingestionError,
+                    documentId,
+                    fileName: originalname,
+                    userId,
+                });
+
+                // Return success for upload but indicate ingestion failure
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        fileId: uploadedFile._id,
+                        documentId,
+                        fileName: originalname,
+                        fileSize: size,
+                        mimeType: mimetype,
+                        fileType,
+                        url: presignedUrl,
+                        uploadedAt: uploadedFile.uploadedAt,
+                        ingested: false,
+                        ingestionError: ingestionError instanceof Error ? ingestionError.message : 'Unknown error',
+                    },
+                });
+            }
         } catch (error) {
             loggingService.error('File upload failed', {
                 error,

@@ -151,6 +151,12 @@ export class RetrieveModule extends BaseRAGModule {
   ): 'knowledge_base' | 'user_documents' | 'contextual' | 'general' {
     const lowerQuery = query.toLowerCase();
 
+    // PRIORITY 1: If documentIds are provided, always use user_documents strategy
+    // This ensures uploaded documents are properly retrieved
+    if (config.filters?.documentIds && config.filters.documentIds.length > 0) {
+      return 'user_documents';
+    }
+
     // Check for user-specific queries
     if (
       lowerQuery.includes('my') ||

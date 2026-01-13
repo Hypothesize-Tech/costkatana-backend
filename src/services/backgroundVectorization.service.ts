@@ -1,5 +1,5 @@
 import { loggingService } from './logging.service';
-import { BedrockEmbeddings } from "@langchain/aws";
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { UserMemory, ConversationMemory } from '../models/Memory';
 import { Message } from '../models/Message';
 import { redisService } from './redis.service';
@@ -46,17 +46,15 @@ export interface TimeEstimate {
  */
 export class BackgroundVectorizationService {
     private static instance: BackgroundVectorizationService;
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
     private readonly BATCH_SIZE = 25;
     private readonly MAX_CONTENT_LENGTH = 8192;
     private readonly EMBEDDING_CACHE_TTL = 24 * 60 * 60; // 24 hours
     private readonly PROCESSING_LOCK_TTL = 60 * 60; // 1 hour
     
     private constructor() {
-        this.embeddings = new BedrockEmbeddings({
-            region: process.env.AWS_REGION ?? 'us-east-1',
-            model: 'amazon.titan-embed-text-v2:0', // 1024 dimensions
-            maxRetries: 3,
+        this.embeddings = createSafeBedrockEmbeddings({
+            model: 'amazon.titan-embed-text-v2:0'
         });
     }
 
@@ -664,7 +662,25 @@ export class BackgroundVectorizationService {
      */
     private async generateBatchEmbeddings(contents: string[]): Promise<number[][]> {
         try {
-            return await this.embeddings.embedDocuments(contents);
+            // Filter out empty strings to prevent AWS Bedrock validation errors
+            const validContents = contents.filter(c => c && c.trim().length > 0);
+            
+            if (validContents.length === 0) {
+                loggingService.warn('No valid content to embed in batch, returning empty embeddings');
+                return contents.map(() => []);
+            }
+
+            // Generate embeddings for valid content
+            const embeddings = await this.embeddings.embedDocuments(validContents);
+            
+            // Map embeddings back to original content array (empty strings get empty embeddings)
+            let embeddingIndex = 0;
+            return contents.map(content => {
+                if (content && content.trim().length > 0) {
+                    return embeddings[embeddingIndex++];
+                }
+                return [];
+            });
         } catch (error) {
             loggingService.error('Failed to generate batch embeddings:', {
                 error: error instanceof Error ? error.message : String(error),

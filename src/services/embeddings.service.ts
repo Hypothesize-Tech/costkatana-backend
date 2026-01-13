@@ -33,6 +33,17 @@ export class EmbeddingsService {
    */
   async generateEmbedding(text: string): Promise<EmbeddingResult> {
     try {
+      // Validate input - AWS Bedrock requires minLength: 1
+      if (!text || text.trim().length === 0) {
+        loggingService.warn('Empty text provided to generateEmbedding, returning zero vector');
+        return {
+          embedding: new Array(1536).fill(0),
+          text: '',
+          model: this.EMBEDDING_MODEL,
+          dimensions: 1536
+        };
+      }
+
       // Check cache first
       const cacheKey = `embedding:${Buffer.from(text).toString('base64')}`;
       const cached = await this.getCachedEmbedding(cacheKey);
@@ -42,6 +53,17 @@ export class EmbeddingsService {
 
       // Clean and prepare text
       const cleanText = this.cleanText(text);
+      
+      // Validate cleaned text is not empty
+      if (!cleanText || cleanText.length === 0) {
+        loggingService.warn('Text became empty after cleaning, returning zero vector');
+        return {
+          embedding: new Array(1536).fill(0),
+          text: cleanText,
+          model: this.EMBEDDING_MODEL,
+          dimensions: 1536
+        };
+      }
       
       const command = new InvokeModelCommand({
         modelId: this.EMBEDDING_MODEL,

@@ -40,6 +40,9 @@ import { TelemetryCleanupService } from './services/telemetryCleanup.service';
 import { loggingService } from './services/logging.service';
 import { loggerMiddleware } from './middleware/logger.middleware';
 import { sentryContextMiddleware, sentryPerformanceMiddleware, sentryBusinessErrorMiddleware } from './middleware/sentry.middleware';
+import { healthService } from './services/vectorization/health.service';
+import { recoveryService } from './services/vectorization/recovery.service';
+import { faissVectorService } from './services/vectorization/faiss.service';
 
 // Create Express app
 const app: Application = express();
@@ -532,6 +535,84 @@ export const startServer = async () => {
                 stack: error instanceof Error ? error.stack : undefined
             });
         }
+
+        // Initialize FAISS Vector Service and Health Checks
+        try {
+            loggingService.info('Step 5.6: Initializing FAISS Vector Service', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_faiss'
+            });
+
+            // Initialize FAISS service
+            await faissVectorService.initialize();
+            loggingService.info('✅ FAISS Vector Service initialized', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'faiss_initialized'
+            });
+
+            // Run health check
+            const healthResult = await healthService.validateStartup();
+            
+            if (!healthResult.healthy) {
+                loggingService.warn('⚠️ FAISS indices need recovery', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'faiss_unhealthy',
+                    corruptedIndices: healthResult.corruptedIndices,
+                    recommendations: healthResult.recommendations
+                });
+
+                // Start recovery in background if auto-recovery is enabled
+                if (healthResult.corruptedIndices.length > 0) {
+                    loggingService.info('🔧 Starting FAISS index recovery in background', {
+                        component: 'Server',
+                        operation: 'startServer',
+                        type: 'server_startup',
+                        step: 'faiss_recovery_start'
+                    });
+                    
+                    setImmediate(() => {
+                        recoveryService.rebuildInBackground().catch(err => {
+                            loggingService.error('FAISS recovery failed', {
+                                component: 'Server',
+                                error: err instanceof Error ? err.message : String(err)
+                            });
+                        });
+                    });
+                }
+            } else {
+                loggingService.info('✅ FAISS indices are healthy', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'faiss_healthy'
+                });
+            }
+
+            // Start periodic health monitoring
+            healthService.startMonitoring();
+            loggingService.info('✅ FAISS health monitoring started', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'faiss_monitoring_started'
+            });
+
+        } catch (error) {
+            loggingService.warn('⚠️ FAISS initialization failed (non-critical)', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'faiss_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
         
         // Initialize Webhook Delivery Service
         try {
@@ -775,6 +856,10 @@ process.on('SIGTERM', async () => {
         // Flush Sentry events first (quick operation)
         await flushSentry(2000);
 
+        // Shutdown FAISS services
+        healthService.shutdown();
+        await faissVectorService.shutdown();
+
         // Cleanup services
         await multiAgentFlowService.cleanup();
         await webhookDeliveryService.shutdown();
@@ -810,6 +895,10 @@ process.on('SIGINT', async () => {
 
         // Flush Sentry events first (quick operation)
         await flushSentry(2000);
+
+        // Shutdown FAISS services
+        healthService.shutdown();
+        await faissVectorService.shutdown();
 
         // Cleanup services
         await multiAgentFlowService.cleanup();

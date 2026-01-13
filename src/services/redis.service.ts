@@ -466,8 +466,15 @@ export class RedisService {
      */
     private async generateEmbedding(text: string): Promise<number[]> {
         try {
+            // Validate input - AWS Bedrock requires minLength: 1
+            if (!text || text.trim().length === 0) {
+                loggingService.warn('Empty text provided to generateEmbedding, returning zero vector');
+                return new Array(384).fill(0);
+            }
+
+            const cleanText = text.trim();
             // Check if we have a cached embedding
-            const embeddingKey = `${this.EMBEDDING_PREFIX}${crypto.createHash('md5').update(text).digest('hex')}`;
+            const embeddingKey = `${this.EMBEDDING_PREFIX}${crypto.createHash('md5').update(cleanText).digest('hex')}`;
             const cachedEmbedding = await this.readerClient.get(embeddingKey);
             
             if (cachedEmbedding) {
@@ -480,7 +487,7 @@ export class RedisService {
             try {
                 if (this.embeddingModel && process.env.AWS_ACCESS_KEY_ID) {
                     // Use AWS Bedrock for embeddings (simplified approach)
-                    const response = await this.embeddingModel.invoke(text);
+                    const response = await this.embeddingModel.invoke(cleanText);
                     // For now, create a deterministic embedding from the response
                     const responseText = JSON.stringify(response);
                     const hash = crypto.createHash('sha256').update(responseText).digest();
@@ -495,7 +502,7 @@ export class RedisService {
                 loggingService.warn('AWS Bedrock embedding failed, using fallback:', { error: awsError instanceof Error ? awsError.message : String(awsError) });
                 
                 // Fallback: Using a simple hash-based pseudo-embedding
-                const hash = crypto.createHash('sha256').update(text).digest();
+                const hash = crypto.createHash('sha256').update(cleanText).digest();
                 
                 for (let i = 0; i < 384; i++) {
                     embedding.push(hash[i % hash.length] / 255);

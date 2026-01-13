@@ -17,6 +17,17 @@ export interface MongoDBVectorStoreConfig {
 /**
  * Custom MongoDB VectorStore wrapper for LangChain integration
  * Preserves existing Document schema and user isolation
+ * 
+ * @deprecated MongoDB vector search is deprecated in favor of FAISS.
+ * Use VectorStrategyService instead for all vector operations.
+ * This service is maintained only for backward compatibility.
+ * 
+ * Migration path:
+ * 1. Enable FAISS dual-write (ENABLE_FAISS_DUAL_WRITE=true)
+ * 2. Run migration script: npm run migrate:faiss
+ * 3. Enable shadow read for validation (ENABLE_FAISS_SHADOW_READ=true)
+ * 4. Enable FAISS as primary (ENABLE_FAISS_PRIMARY=true)
+ * 5. Drop MongoDB vector indexes after confirming FAISS works
  */
 export class MongoDBVectorStore extends VectorStore {
     private collectionName: string;
@@ -65,8 +76,37 @@ export class MongoDBVectorStore extends VectorStore {
             });
 
             // Generate embeddings for all documents
+            // Filter out empty documents to prevent AWS Bedrock validation errors
             const texts = documents.map(doc => doc.pageContent);
-            const embeddings = await this.embeddings.embedDocuments(texts);
+            const validIndices = texts
+                .map((text, idx) => ({ text, idx }))
+                .filter(({ text }) => text && text.trim().length > 0)
+                .map(({ idx }) => idx);
+
+            if (validIndices.length === 0) {
+                loggingService.warn('No valid documents to embed, all documents are empty');
+                // Return empty embeddings for all documents
+                const ids: string[] = [];
+                documents.forEach((_, idx) => {
+                    ids.push(options?.ids?.[idx] ?? new mongoose.Types.ObjectId().toString());
+                });
+                return ids;
+            }
+
+            // Generate embeddings only for valid documents
+            const validTexts = validIndices.map(idx => texts[idx].trim());
+            const validEmbeddings = await this.embeddings.embedDocuments(validTexts);
+
+            // Map embeddings back to original document positions
+            const embeddings: number[][] = new Array(documents.length);
+            let embeddingIdx = 0;
+            for (let i = 0; i < documents.length; i++) {
+                if (validIndices.includes(i)) {
+                    embeddings[i] = validEmbeddings[embeddingIdx++];
+                } else {
+                    embeddings[i] = []; // Empty embedding for empty documents
+                }
+            }
 
             // Prepare documents for insertion
             const docsToInsert: Partial<IDocument>[] = documents.map((doc, idx) => {
@@ -75,13 +115,20 @@ export class MongoDBVectorStore extends VectorStore {
                 ids.push(docId);
 
                 // Merge metadata with options
-                const metadata = {
-                    ...doc.metadata,
-                    userId: options?.userId ?? doc.metadata?.userId,
+                // IMPORTANT: Don't spread doc.metadata.source - it contains file path, not enum value
+                const {source: _sourceIgnored, ...restMetadata} = doc.metadata || {};
+                const metadata: IDocument['metadata'] = {
+                    userId: options?.userId ?? doc.metadata?.userId ?? '',
                     projectId: options?.projectId ?? doc.metadata?.projectId,
                     documentId: options?.documentId ?? doc.metadata?.documentId,
-                    source: doc.metadata?.source ?? 'user-upload',
-                    sourceType: doc.metadata?.sourceType ?? 'text'
+                    source: 'user-upload' as const, // Always use enum value, not file path
+                    sourceType: doc.metadata?.sourceType ?? 'text',
+                    fileName: restMetadata.fileName,
+                    fileType: restMetadata.fileType,
+                    fileSize: restMetadata.fileSize,
+                    tags: restMetadata.tags,
+                    language: restMetadata.language,
+                    customMetadata: restMetadata.customMetadata
                 };
 
                 return {
@@ -93,23 +140,183 @@ export class MongoDBVectorStore extends VectorStore {
                     chunkIndex: doc.metadata?.chunkIndex ?? idx,
                     totalChunks: doc.metadata?.totalChunks ?? documents.length,
                     ingestedAt: new Date(),
-                    status: 'active',
+                    status: 'active' as const,
                     accessCount: 0
                 };
             });
 
+            // 🔵 DEBUG: Log what we're about to insert
+            loggingService.info('🔵 [LANGCHAIN] ABOUT TO INSERT DOCUMENTS', {
+                component: 'MongoDBVectorStore',
+                operation: 'addDocuments',
+                documentsCount: docsToInsert.length,
+                firstDocument: docsToInsert[0] ? {
+                    _id: docsToInsert[0]._id?.toString(),
+                    userId: docsToInsert[0].metadata?.userId,
+                    userIdType: typeof docsToInsert[0].metadata?.userId,
+                    documentId: docsToInsert[0].metadata?.documentId,
+                    fileName: docsToInsert[0].metadata?.fileName,
+                    source: docsToInsert[0].metadata?.source,
+                    sourceType: docsToInsert[0].metadata?.sourceType,
+                    embeddingLength: docsToInsert[0].embedding?.length,
+                    status: docsToInsert[0].status,
+                    hasContent: !!docsToInsert[0].content,
+                    contentLength: docsToInsert[0].content?.length,
+                    hasContentHash: !!docsToInsert[0].contentHash,
+                    hasIngestedAt: !!docsToInsert[0].ingestedAt,
+                    chunkIndex: docsToInsert[0].chunkIndex,
+                    totalChunks: docsToInsert[0].totalChunks
+                } : null
+            });
+
             // Insert documents with duplicate handling
             try {
-                await DocumentModel.insertMany(docsToInsert, { ordered: false });
-            } catch (error) {
-                // Handle duplicate key errors gracefully
-                if ((error as any).code === 11000 || (error as any).writeErrors) {
-                    const successfulInserts = docsToInsert.length - ((error as any).writeErrors?.length ?? 0);
-                    loggingService.info('Documents inserted with duplicates skipped', {
+                loggingService.info('🔵 [LANGCHAIN] Calling DocumentModel.insertMany', {
+                    component: 'MongoDBVectorStore',
+                    documentsCount: docsToInsert.length
+                });
+
+                // 🔍 VALIDATE: Try inserting first document alone to see exact error
+                if (docsToInsert.length > 0) {
+                    loggingService.info('🔵 [LANGCHAIN] Testing single document insert first...', {
+                        component: 'MongoDBVectorStore'
+                    });
+                    
+                    try {
+                        const singleResult = await DocumentModel.create(docsToInsert[0]);
+                        loggingService.info('✅ [LANGCHAIN] SINGLE DOCUMENT TEST PASSED!', {
+                            component: 'MongoDBVectorStore',
+                            insertedId: singleResult._id?.toString(),
+                            documentId: singleResult.metadata?.documentId
+                        });
+                        
+                        // If single insert worked, continue with the rest
+                        if (docsToInsert.length > 1) {
+                            const remainingDocs = docsToInsert.slice(1);
+                            const remainingResults = await DocumentModel.insertMany(remainingDocs, { ordered: false });
+                            loggingService.info('✅ [LANGCHAIN] Remaining documents inserted!', {
+                                component: 'MongoDBVectorStore',
+                                insertedCount: remainingResults.length + 1
+                            });
+                            return [singleResult._id?.toString() ?? '', ...remainingResults.map(r => r._id?.toString() ?? '')];
+                        }
+                        
+                        return [singleResult._id?.toString() ?? ''] as string[];
+                        
+                    } catch (singleError) {
+                        const err = singleError as any;
+                        loggingService.error('🔴 [LANGCHAIN] SINGLE DOCUMENT INSERT FAILED!', {
+                            component: 'MongoDBVectorStore',
+                            errorName: err.name,
+                            errorMessage: err.message,
+                            errorCode: err.code,
+                            validationErrors: err.errors ? Object.keys(err.errors).map(k => ({
+                                field: k,
+                                message: err.errors[k].message
+                            })) : null
+                        });
+                        throw singleError;
+                    }
+                }
+
+                // insertMany with ordered:false returns successfully even if some/all docs fail
+                // We need to catch and inspect any returned errors
+                let result: IDocument[] = [];
+                let hadErrors = false;
+                
+                try {
+                    result = await DocumentModel.insertMany(docsToInsert, { ordered: false });
+                } catch (bulkError) {
+                    const err = bulkError as any;
+                    // MongoDB bulk insert can throw with insertedDocs still populated
+                    hadErrors = true;
+                    result = err.insertedDocs || [];
+                    
+                    loggingService.error('🔴 [LANGCHAIN] BULK INSERT ERROR CAUGHT!', {
                         component: 'MongoDBVectorStore',
                         operation: 'addDocuments',
-                        inserted: successfulInserts,
-                        duplicates: (error as any).writeErrors?.length ?? 0
+                        errorName: err.name,
+                        errorCode: err.code,
+                        writeErrorsCount: err.writeErrors?.length || 0,
+                        insertedCount: result.length,
+                        attemptedCount: docsToInsert.length,
+                        firstWriteError: err.writeErrors?.[0] ? {
+                            code: err.writeErrors[0].code,
+                            index: err.writeErrors[0].index,
+                            errmsg: err.writeErrors[0].errmsg?.substring(0, 500)
+                        } : null
+                    });
+                }
+                
+                loggingService.info('🟢 [LANGCHAIN] DOCUMENTS INSERTED SUCCESSFULLY!', {
+                    component: 'MongoDBVectorStore',
+                    operation: 'addDocuments',
+                    inserted: result.length,
+                    hadErrors,
+                    firstDocId: result[0]?._id?.toString()
+                });
+
+                // 🔍 IMMEDIATE VERIFICATION
+                if (result.length > 0 && result[0]?.metadata?.documentId) {
+                    const verifyQuery = {
+                        'metadata.documentId': result[0].metadata.documentId,
+                        'metadata.userId': result[0].metadata.userId,
+                        status: 'active'
+                    };
+                    
+                    const verifyCount = await DocumentModel.countDocuments(verifyQuery);
+                    
+                    if (verifyCount === result.length) {
+                        loggingService.info('🟢 [LANGCHAIN] VERIFICATION SUCCESS - Documents queryable!', {
+                            component: 'MongoDBVectorStore',
+                            expectedCount: result.length,
+                            foundCount: verifyCount,
+                            documentId: result[0]?.metadata?.documentId,
+                            userId: result[0]?.metadata?.userId
+                        });
+                    } else {
+                        loggingService.error('🔴 [LANGCHAIN] VERIFICATION FAILED - Documents NOT queryable!', {
+                            component: 'MongoDBVectorStore',
+                            expectedCount: result.length,
+                            foundCount: verifyCount,
+                            documentId: result[0]?.metadata?.documentId,
+                            userId: result[0]?.metadata?.userId,
+                            query: verifyQuery
+                        });
+                    }
+                } else {
+                    loggingService.error('🔴 [LANGCHAIN] CRITICAL: NO DOCUMENTS INSERTED!', {
+                        component: 'MongoDBVectorStore',
+                        operation: 'addDocuments',
+                        attemptedCount: docsToInsert.length,
+                        insertedCount: result.length,
+                        reason: 'insertMany returned empty array - likely all duplicates or silent failure'
+                    });
+                }
+            } catch (error) {
+                // Handle duplicate key errors gracefully
+                const err = error as any;
+                if (err.code === 11000 || err.writeErrors) {
+                    const writeErrors = err.writeErrors || [];
+                    const successfulInserts = docsToInsert.length - writeErrors.length;
+                    
+                    loggingService.error('🔴 [LANGCHAIN] DUPLICATE KEY ERRORS DURING INSERT!', {
+                        component: 'MongoDBVectorStore',
+                        operation: 'addDocuments',
+                        totalAttempted: docsToInsert.length,
+                        successfulInserts,
+                        duplicates: writeErrors.length,
+                        errorCode: err.code,
+                        firstError: writeErrors[0] ? {
+                            index: writeErrors[0].index,
+                            code: writeErrors[0].code,
+                            errmsg: writeErrors[0].errmsg?.substring(0, 300)
+                        } : null,
+                        sampleDoc: docsToInsert[0] ? {
+                            documentId: docsToInsert[0].metadata?.documentId,
+                            userId: docsToInsert[0].metadata?.userId,
+                            contentHash: docsToInsert[0].contentHash?.substring(0, 20)
+                        } : null
                     });
                 } else {
                     throw error;
@@ -121,7 +328,12 @@ export class MongoDBVectorStore extends VectorStore {
                 component: 'MongoDBVectorStore',
                 operation: 'addDocuments',
                 documentCount: documents.length,
-                duration
+                duration,
+                sampleMetadata: docsToInsert.length > 0 ? {
+                    documentId: docsToInsert[0]?.metadata?.documentId,
+                    userId: docsToInsert[0]?.metadata?.userId,
+                    source: docsToInsert[0]?.metadata?.source
+                } : 'none'
             });
 
             return ids;
@@ -206,8 +418,14 @@ export class MongoDBVectorStore extends VectorStore {
                 filter
             });
 
+            // Validate query before embedding
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to similaritySearchWithScore, returning empty results');
+                return [];
+            }
+
             // Generate query embedding
-            const queryEmbedding = await this.embeddings.embedQuery(query);
+            const queryEmbedding = await this.embeddings.embedQuery(query.trim());
 
             // Build MongoDB aggregation pipeline
             const pipeline: any[] = [
@@ -477,13 +695,25 @@ export class MongoDBVectorStore extends VectorStore {
                 candidateEmbeddings.push(docRecord.embedding);
             } else {
                 // Fallback: generate embedding if not found
-                const embedding = await this.embeddings.embedQuery(doc.pageContent);
-                candidateEmbeddings.push(embedding);
+                // Validate content before embedding
+                if (doc.pageContent && doc.pageContent.trim().length > 0) {
+                    const embedding = await this.embeddings.embedQuery(doc.pageContent.trim());
+                    candidateEmbeddings.push(embedding);
+                } else {
+                    // Skip empty documents
+                    candidateEmbeddings.push([]);
+                }
             }
         }
 
         // Get query embedding
-        const queryEmbedding = await this.embeddings.embedQuery(query);
+        // Validate query before embedding
+        if (!query || query.trim().length === 0) {
+            loggingService.warn('Empty query provided to maxMarginalRelevanceSearch');
+            return [];
+        }
+        
+        const queryEmbedding = await this.embeddings.embedQuery(query.trim());
         
         // MMR algorithm implementation with proper diversity calculation
         const selected: LangchainDocument[] = [];

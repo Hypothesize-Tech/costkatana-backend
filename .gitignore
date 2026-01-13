@@ -71,3 +71,15 @@ ecosystem.config.js
 .pm2/
 # Large binaries
 bin/otelcol-contrib
+
+# FAISS Vector Indices
+# These are derived data that can be rebuilt from MongoDB
+# Never commit FAISS indices to version control
+data/faiss/
+*.faiss
+*.index
+
+# FAISS temporary files
+faiss_temp/
+faiss_backup/
+.faiss_cache/

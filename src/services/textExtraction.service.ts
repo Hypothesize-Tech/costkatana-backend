@@ -9,7 +9,7 @@ interface ExtractionResult {
   error?: string;
 }
 
-class TextExtractionService {
+export class TextExtractionService {
   /**
    * Determine file type from filename
    */

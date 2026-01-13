@@ -1,4 +1,4 @@
-import { BedrockEmbeddings } from '@langchain/community/embeddings/bedrock';
+import { SafeBedrockEmbeddings, createSafeBedrockEmbeddings } from './safeBedrockEmbeddings';
 import { loggingService } from './logging.service';
 
 /**
@@ -6,23 +6,17 @@ import { loggingService } from './logging.service';
  * This is used when hnswlib-node fails to load in Docker environments
  */
 export class FallbackVectorStoreService {
-    private embeddings: BedrockEmbeddings;
+    private embeddings: SafeBedrockEmbeddings;
     private initialized = false;
     private documents: Array<{ content: string; metadata: Record<string, unknown>; embedding?: number[] }> = [];
 
     constructor() {
         try {
-            // Initialize AWS Bedrock embeddings with correct model ID
-            this.embeddings = new BedrockEmbeddings({
-                region: process.env.AWS_BEDROCK_REGION ?? 'us-east-1',
-                model: 'amazon.titan-embed-text-v2:0',
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-                },
-                maxRetries: 3,
+            // Initialize AWS Bedrock embeddings with SafeBedrockEmbeddings wrapper
+            this.embeddings = createSafeBedrockEmbeddings({
+                model: 'amazon.titan-embed-text-v2:0'
             });
-            loggingService.info('✅ Fallback Vector Store initialized with BedrockEmbeddings');
+            loggingService.info('✅ Fallback Vector Store initialized with SafeBedrockEmbeddings');
         } catch (error) {
             loggingService.error('❌ Failed to initialize Fallback Vector Store:', { error: error instanceof Error ? error.message : String(error) });
             throw new Error('Fallback Vector Store initialization failed');
@@ -60,8 +54,14 @@ export class FallbackVectorStoreService {
         }
 
         try {
+            // Validate query before embedding
+            if (!query || query.trim().length === 0) {
+                loggingService.warn('Empty query provided to fallback vector search');
+                return [];
+            }
+
             // Generate embedding for the query
-            const queryEmbedding = await this.embeddings.embedQuery(query);
+            const queryEmbedding = await this.embeddings.embedQuery(query.trim());
             
             // Simple similarity search using cosine similarity
             const results = this.documents
@@ -92,15 +92,22 @@ export class FallbackVectorStoreService {
         }
 
         try {
+            let addedCount = 0;
             for (const doc of documents) {
-                const embedding = await this.embeddings.embedQuery(doc.pageContent);
+                // Validate content before embedding
+                if (!doc.pageContent || doc.pageContent.trim().length === 0) {
+                    loggingService.warn('Empty document content, skipping in fallback vector store');
+                    continue;
+                }
+                const embedding = await this.embeddings.embedQuery(doc.pageContent.trim());
                 this.documents.push({
-                    content: doc.pageContent,
+                    content: doc.pageContent.trim(),
                     metadata: doc.metadata,
                     embedding: embedding
                 });
+                addedCount++;
             }
-            loggingService.info(`📚 Added ${documents.length} documents to fallback vector store`);
+            loggingService.info(`📚 Added ${addedCount} documents to fallback vector store (${documents.length - addedCount} skipped)`);
         } catch (error) {
             loggingService.error('Failed to add documents to fallback vector store:', { error: error instanceof Error ? error.message : String(error) });
         }
