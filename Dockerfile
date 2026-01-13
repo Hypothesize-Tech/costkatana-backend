@@ -2,7 +2,7 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Build deps for native modules including hnswlib-node
+# Build deps for native modules including hnswlib-node and faiss-node
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     make \
     g++ \
     gcc \
+    git \
     libc6-dev \
     libstdc++6 \
     libgomp1 \
