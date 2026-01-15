@@ -438,10 +438,9 @@ export class WorkflowOrchestratorService extends EventEmitter {
                 try {
                     const { SubscriptionService } = await import('./subscription.service');
                     const totalTokens = execution.metadata?.totalTokens || 0;
-                    const totalCost = execution.metadata?.totalCost || 0;
                     
                     // Consume tokens and requests
-                    await SubscriptionService.consumeTokens(execution.userId, totalTokens, totalCost);
+                    await SubscriptionService.consumeTokens(execution.userId, totalTokens);
                     await SubscriptionService.consumeRequest(execution.userId);
                     
                     // Increment workflow usage

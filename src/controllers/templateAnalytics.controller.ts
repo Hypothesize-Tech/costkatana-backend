@@ -12,7 +12,7 @@ export interface AuthenticatedRequest extends Request {
 export const getTemplateUsageOverview = async (
     req: AuthenticatedRequest,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
@@ -72,7 +72,7 @@ export const getTemplateUsageOverview = async (
 export const getTemplateBreakdown = async (
     req: AuthenticatedRequest,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
@@ -145,7 +145,7 @@ export const getTemplateBreakdown = async (
 export const getTopTemplates = async (
     req: AuthenticatedRequest,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
@@ -203,7 +203,7 @@ export const getTopTemplates = async (
 export const getCostSavingsReport = async (
     req: AuthenticatedRequest,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;
@@ -259,7 +259,7 @@ export const getCostSavingsReport = async (
 export const getTemplatesByContext = async (
     req: AuthenticatedRequest,
     res: Response,
-    next: NextFunction
+    _next: NextFunction
 ): Promise<void> => {
     const startTime = Date.now();
     const userId = req.userId;

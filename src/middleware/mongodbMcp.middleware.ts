@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { loggingService } from '../services/logging.service';
 import { MongoDBConnection } from '../models/MongoDBConnection';
-import { MongoDBMCPPolicyService } from '../services/mongodbMcpPolicy.service';
-import { createMongoDBMCPAuditLog } from '../models/MongoDBMCPAuditLog';
+import { MongoDBMCPAuditLog } from '../models/MongoDBMCPAuditLog';
 import mongoose from 'mongoose';
 
 /**
@@ -302,33 +301,19 @@ export const auditMongoDBMCPOperation = async (
             });
 
             // Store audit log in database for compliance (fire and forget)
-            createMongoDBMCPAuditLog({
-                eventType,
-                context: {
-                    userId: new mongoose.Types.ObjectId(context.userId),
-                    connectionId: new mongoose.Types.ObjectId(context.connectionId),
-                    sessionId: (req as any).sessionID || undefined,
-                    ipAddress: req.ip || req.socket.remoteAddress,
-                    userAgent: req.get('user-agent'),
-                },
-                action: {
-                    toolName,
-                    method: operation,
-                    collection,
-                    database,
-                    operation,
-                    parameters: toolArgs,
-                },
-                result,
-                error: !isSuccess ? (data as any)?.error?.message : undefined,
-                errorCode: !isSuccess ? (data as any)?.error?.code : undefined,
-                impact,
-                metadata: {
-                    path: req.path,
-                    method: req.method,
-                    statusCode: res.statusCode,
-                },
-            }).catch((error) => {
+            new MongoDBMCPAuditLog({
+                userId: new mongoose.Types.ObjectId(context.userId),
+                integration: 'mongodb' as const,
+                toolName,
+                operationType: operation === 'find' || operation === 'aggregate' ? 'read' : 
+                              operation === 'delete' ? 'delete' : 'write',
+                collectionName: collection,
+                query: toolArgs,
+                update: operation === 'update' ? toolArgs : undefined,
+                result: isSuccess ? 'success' : 'failure',
+                errorMessage: !isSuccess ? (data as any)?.error?.message : undefined,
+                timestamp: new Date(),
+            }).save().catch((error: any) => {
                 // Log but don't fail the request
                 loggingService.error('Failed to create MongoDB MCP audit log', {
                     component: 'mongodbMcpMiddleware',

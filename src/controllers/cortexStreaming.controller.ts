@@ -20,8 +20,7 @@ import {
     CortexStreamingConfig,
     DEFAULT_STREAMING_CONFIG,
     CortexStreamingExecution,
-    CortexProgressUpdate,
-    CortexStreamingEvent
+    CortexProgressUpdate
 } from '../services/cortexStreamingOrchestrator.service';
 
 export interface StreamingRequest {
@@ -570,7 +569,7 @@ export class CortexStreamingController {
     /**
      * Get streaming statistics
      */
-    public async getStreamingStats(req: Request, res: Response): Promise<void> {
+    public async getStreamingStats(_req: Request, res: Response): Promise<void> {
         try {
             const orchestratorStats = this.streamingOrchestrator.getExecutionStats();
             const loggerStats = this.loggerService.getLogStats();
@@ -786,7 +785,7 @@ export class CortexStreamingController {
     /**
      * Health check endpoint
      */
-    public async healthCheck(req: Request, res: Response): Promise<void> {
+    public async healthCheck(_req: Request, res: Response): Promise<void> {
         try {
             const stats = this.streamingOrchestrator.getExecutionStats();
             const activeConnections = this.activeConnections.size;
@@ -822,7 +821,7 @@ export class CortexStreamingController {
     /**
      * Reset streaming system (admin only)
      */
-    public async resetSystem(req: Request, res: Response): Promise<void> {
+    public async resetSystem(_req: Request, res: Response): Promise<void> {
         try {
             // This would reset all active executions and clear caches
             // Implementation would depend on admin authorization

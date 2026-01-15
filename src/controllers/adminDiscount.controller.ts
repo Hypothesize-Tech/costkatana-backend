@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { Discount, IDiscount } from '../models/Discount';
+import { Discount } from '../models/Discount';
 import { loggingService } from '../services/logging.service';
 import { AppError } from '../middleware/error.middleware';
 import { DiscountUsageService } from '../services/discountUsage.service';

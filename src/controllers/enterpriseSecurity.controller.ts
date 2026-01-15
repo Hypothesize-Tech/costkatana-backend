@@ -805,7 +805,7 @@ export class EnterpriseSecurityController {
     }
 
     // Helper methods
-    private static async getComplianceAlerts(limit: number): Promise<any[]> {
+    private static async getComplianceAlerts(_limit: number): Promise<any[]> {
         try {
             // This would get actual compliance alerts
             // For now, return empty array as compliance alerts are handled via events

@@ -70,7 +70,7 @@ router.get('/stream', (req: Request, res: Response) => {
  * Get streaming statistics
  * GET /api/cost-streaming/stats
  */
-router.get('/stats', (req: Request, res: Response) => {
+router.get("/stats", (_req: Request, res: Response) => {
   try {
     const stats = costStreamingService.getStats();
     

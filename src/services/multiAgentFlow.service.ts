@@ -156,8 +156,6 @@ export class MultiAgentFlowService {
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
     private webSearchTool: WebSearchTool;
     private trendingDetector: TrendingDetectorService;
-    private retryService: RetryWithBackoff;
-    private trendingDetectorService: TrendingDetectorService;
     
     // Semantic cache with LRU limits
     private semanticCache: LRUCache<string, { response: string; embedding: number[]; timestamp: number; hits: number }>;
@@ -180,10 +178,8 @@ export class MultiAgentFlowService {
             allowStale: false
         });
         
-        this.retryService = new RetryWithBackoff();
         this.webSearchTool = new WebSearchTool();
-        this.trendingDetectorService = new TrendingDetectorService();
-        this.trendingDetector = this.trendingDetectorService;
+        this.trendingDetector = new TrendingDetectorService();
         
         this.initializeAgents();
         this.initializeGraph();
@@ -213,7 +209,7 @@ export class MultiAgentFlowService {
             // Create Langchain Coordinator Agent
             this.langchainCoordinatorAgent = new ChatBedrockConverse({
                 model: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
-                region: process.env.AWS_REGION || 'us-east-1',
+                region: process.env.AWS_REGION ?? 'us-east-1',
                 temperature: 0.6,
                 maxTokens: 6000,
                 credentials: {
@@ -222,10 +218,10 @@ export class MultiAgentFlowService {
                 },
             });
             
-            // Create Langchain Strategy Agent
+            // Create Langchain Strategy Agent for strategic planning and coordination
             this.langchainStrategyAgent = new ChatBedrockConverse({
                 model: 'amazon.nova-pro-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
+                region: process.env.AWS_REGION ?? 'us-east-1',
                 temperature: 0.7,
                 maxTokens: 4000,
                 credentials: {
@@ -332,6 +328,14 @@ export class MultiAgentFlowService {
         metadata: Record<string, any>;
         mongodbIntegrationData?: any;
         formattedResult?: any;
+        githubIntegrationData?: any;
+        vercelIntegrationData?: any;
+        googleIntegrationData?: any;
+        slackIntegrationData?: any;
+        discordIntegrationData?: any;
+        jiraIntegrationData?: any;
+        linearIntegrationData?: any;
+        awsIntegrationData?: any;
     }> {
         // Start LangSmith tracing
         const runId = await langSmithService.createRun(
@@ -367,6 +371,99 @@ export class MultiAgentFlowService {
                 documentIdsCount: options.documentIds?.length || 0,
                 message
             });
+            
+            // Check if message needs MCP routing
+            const { ChatService } = await import('./chat.service');
+            const integrationIntent = await (ChatService as any).detectIntegrationIntent(message, userId);
+            
+            if (integrationIntent.needsIntegration) {
+                loggingService.info('MCP routing detected in MultiAgentFlow', {
+                    integrations: integrationIntent.integrations,
+                    suggestedTools: integrationIntent.suggestedTools,
+                    confidence: integrationIntent.confidence
+                });
+                
+                // Route through MCP instead of specialist agents
+                const { MCPClientService } = await import('./mcp-client.service');
+                
+                const initialized = await MCPClientService.initialize(userId);
+                if (!initialized) {
+                    loggingService.error('Failed to initialize MCP in MultiAgentFlow');
+                    // Fall through to normal multi-agent processing
+                } else {
+                    // Find relevant tools
+                    const tools = await MCPClientService.findToolsForIntent(
+                        userId,
+                        message,
+                        integrationIntent.integrations
+                    );
+                    
+                    if (tools.length > 0) {
+                        // Execute via MCP
+                        const mcpResult = await MCPClientService.executeWithAI(
+                            userId,
+                            tools[0].name,
+                            message,
+                            { 
+                                previousMessages: options.previousMessages,
+                                conversationId,
+                            }
+                        );
+                        
+                        if (mcpResult.success) {
+                            // Format integration-specific data
+                            const integrationData: any = {};
+                            const integration = mcpResult.metadata.integration;
+                            
+                            switch (integration) {
+                                case 'mongodb':
+                                    integrationData.mongodbIntegrationData = mcpResult.data;
+                                    const { MCPResultFormatterService } = await import('./mcp-result-formatter.service');
+                                    integrationData.formattedResult = MCPResultFormatterService.formatMongoDBResult(mcpResult);
+                                    break;
+                                case 'github':
+                                    integrationData.githubIntegrationData = mcpResult.data;
+                                    break;
+                                case 'vercel':
+                                    integrationData.vercelIntegrationData = mcpResult.data;
+                                    break;
+                                case 'google':
+                                    integrationData.googleIntegrationData = mcpResult.data;
+                                    break;
+                                case 'slack':
+                                    integrationData.slackIntegrationData = mcpResult.data;
+                                    break;
+                                case 'discord':
+                                    integrationData.discordIntegrationData = mcpResult.data;
+                                    break;
+                                case 'jira':
+                                    integrationData.jiraIntegrationData = mcpResult.data;
+                                    break;
+                                case 'linear':
+                                    integrationData.linearIntegrationData = mcpResult.data;
+                                    break;
+                                case 'aws':
+                                    integrationData.awsIntegrationData = mcpResult.data;
+                                    break;
+                            }
+                            
+                            return {
+                                response: mcpResult.data?.message || 'Action completed successfully',
+                                cost: 0, // MCP handles its own cost tracking
+                                agentPath: ['mcp', integration],
+                                optimizationsApplied: ['mcp_integration'],
+                                cacheHit: mcpResult.metadata.cached || false,
+                                riskLevel: mcpResult.metadata.dangerousOperation ? 'high' : 'low',
+                                metadata: {
+                                    mcpToolUsed: tools[0].name,
+                                    mcpExecutionTime: mcpResult.metadata.latency,
+                                },
+                                ...integrationData,
+                            };
+                        }
+                    }
+                }
+            }
 
             // If documentIds are provided, retrieve document content and prepend to message
             let enrichedMessage = message;

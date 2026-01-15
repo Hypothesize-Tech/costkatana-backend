@@ -484,10 +484,10 @@ export class ExperimentationService {
         const modelMap: Record<string, string> = {
             // Claude models (use older stable versions that support on-demand)
             'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-            'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
+            'claude-3-5-haiku': 'global.anthropic.claude-haiku-4-5-20251001-v1:0', // Upgraded to 3.5
             'claude-3-opus': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5 Sonnet
             'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0', // Upgraded to 3.5  
-            'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0', // Upgraded to 3.5
+            'claude-3-haiku': 'global.anthropic.claude-haiku-4-5-20251001-v1:0', // Upgraded to 3.5
             'claude-4': 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 support
             
             // Amazon models (most reliable access)
@@ -554,7 +554,7 @@ export class ExperimentationService {
             // Try with Claude 3.5 Haiku first (lower rate limits) as per user memory
             try {
                 loggingService.info('Attempting evaluation with Claude 3.5 Haiku...');
-                modelUsed = 'anthropic.claude-3-5-haiku-20241022-v1:0';
+                modelUsed = 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
                 evaluationResponse = await this.invokeWithExponentialBackoff(
                     evaluationPrompt,
                     modelUsed
@@ -741,7 +741,7 @@ export class ExperimentationService {
                 loggingService.info('Attempting analysis with Claude 3.5 Haiku...');
                 analysisResponse = await this.invokeWithExponentialBackoff(
                     analysisPrompt,
-                    'anthropic.claude-3-5-haiku-20241022-v1:0'
+                    'global.anthropic.claude-haiku-4-5-20251001-v1:0'
                 );
             } catch (haikuError) {
                 loggingService.warn('Claude 3.5 Haiku failed for analysis, trying Sonnet...', { error: haikuError instanceof Error ? haikuError.message : String(haikuError) });

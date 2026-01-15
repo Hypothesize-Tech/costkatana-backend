@@ -386,7 +386,7 @@ const modelPricingData: ModelPricing[] = [
     features: ['text-generation', 'vision', 'multimodal', 'reasoning', 'multilingual']
   },
   {
-    model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+    model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
     provider: 'aws',
     inputCostPer1K: 0.0008,
     outputCostPer1K: 0.004,

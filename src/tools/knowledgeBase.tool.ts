@@ -1,9 +1,6 @@
 import { Tool } from "@langchain/core/tools";
 import { vectorStoreService } from "../services/vectorStore.service";
-import { retrievalService } from "../services/retrieval.service";
-import { loggingService } from '../services/logging.service';
-import { ChatBedrockConverse } from "@langchain/aws";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { loggingService } from "../services/logging.service";
 
 export class KnowledgeBaseTool extends Tool {
     name = "knowledge_base_search";
@@ -158,7 +155,7 @@ Suggestions:
             });
 
             // Add contextual recommendations
-            response += this.generateRecommendations(query, results);
+            response += this.generateRecommendations(query);
 
             const duration = Date.now() - startTime;
             
@@ -292,7 +289,7 @@ Please try:
     /**
      * Generate contextual recommendations based on query and results
      */
-    private generateRecommendations(query: string, results: any[]): string {
+    private generateRecommendations(query: string): string {
         const recommendations: string[] = [];
         
         // Analyze query for specific recommendations
@@ -618,7 +615,7 @@ Suggestions:
         });
 
         // Add contextual recommendations
-        response += this.generateRecommendations(query, results);
+        response += this.generateRecommendations(query);
 
         const duration = Date.now() - startTime;
 

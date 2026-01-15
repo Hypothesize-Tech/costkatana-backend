@@ -6,14 +6,6 @@ import { loggingService } from '../services/logging.service';
 export class NotebookController {
   // Background processing queue for non-critical operations
   private static backgroundQueue: Array<() => Promise<void>> = [];
-  private static backgroundQueueProcessor: NodeJS.Timeout | null = null;
-
-  /**
-   * Initialize background processor
-   */
-  static {
-    this.startBackgroundProcessor();
-  }
 
   /**
    * Get all notebooks
@@ -949,51 +941,6 @@ export class NotebookController {
    */
   private static queueBackgroundOperation(operation: () => Promise<void>): void {
     this.backgroundQueue.push(operation);
-  }
-
-  /**
-   * Start background processor
-   */
-  private static startBackgroundProcessor(): void {
-    this.backgroundQueueProcessor = setInterval(async () => {
-      if (this.backgroundQueue.length > 0) {
-        const operation = this.backgroundQueue.shift();
-        if (operation) {
-          try {
-            await operation();
-          } catch (error) {
-            loggingService.error('Background operation failed:', { 
-              error: error instanceof Error ? error.message : String(error) 
-            });
-          }
-        }
-      }
-    }, 1000); // Process queue every second
-  }
-
-  /**
-   * Execute with timeout protection
-   */
-  private static async executeWithTimeout<T>(
-    operation: Promise<T>, 
-    timeoutMs: number = 15000,
-    fallback?: T
-  ): Promise<T> {
-    const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Operation timeout')), timeoutMs)
-    );
-
-    try {
-      return await Promise.race([operation, timeoutPromise]);
-    } catch (error) {
-      if (fallback !== undefined) {
-        loggingService.warn('Operation failed, using fallback', { 
-          error: error instanceof Error ? error.message : String(error) 
-        });
-        return fallback;
-      }
-      throw error;
-    }
   }
 }
 

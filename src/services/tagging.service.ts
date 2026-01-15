@@ -470,16 +470,6 @@ export class TaggingService {
     }
 
     /**
-     * Process service breakdown efficiently (legacy method for compatibility)
-     */
-    private static processServiceBreakdown(
-        usagesByService: Array<{ service: string; cost: number }>,
-        totalCost: number
-    ): Array<{ service: string; cost: number; percentage: number }> {
-        return this.processServiceBreakdownOptimized(usagesByService, totalCost);
-    }
-
-    /**
      * Process model breakdown efficiently (optimized version)
      */
     private static processModelBreakdownOptimized(
@@ -502,16 +492,6 @@ export class TaggingService {
             }))
             .sort((a, b) => b.cost - a.cost)
             .slice(0, 5);
-    }
-
-    /**
-     * Process model breakdown efficiently (legacy method for compatibility)
-     */
-    private static processModelBreakdown(
-        usagesByModel: Array<{ model: string; cost: number }>,
-        totalCost: number
-    ): Array<{ model: string; cost: number; percentage: number }> {
-        return this.processModelBreakdownOptimized(usagesByModel, totalCost);
     }
 
     /**
@@ -544,15 +524,6 @@ export class TaggingService {
             }))
             .sort((a, b) => a.date.localeCompare(b.date))
             .slice(-30); // Only return last 30 days
-    }
-
-    /**
-     * Process time series data efficiently (legacy method for compatibility)
-     */
-    private static processTimeSeriesData(
-        timeSeriesData: Array<{ date: string; cost: number; tokens: number }>
-    ): Array<{ date: string; cost: number; calls: number; tokens: number }> {
-        return this.processTimeSeriesDataOptimized(timeSeriesData);
     }
 
     /**

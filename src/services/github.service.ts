@@ -94,8 +94,8 @@ export class GitHubService {
     private static initializationPromise: Promise<void> | null = null;
     
     // Rate limit tracking
-    private static rateLimitRemaining: number = 5000;
-    private static rateLimitReset: number = Date.now();
+    private static _rateLimitRemaining: number = 5000;
+    private static _rateLimitReset: number = Date.now();
 
     /**
      * Initialize GitHub service modules

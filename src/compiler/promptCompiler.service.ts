@@ -168,7 +168,6 @@ export class PromptCompilerService {
   private static async parse(prompt: string): Promise<ProgramNode> {
     const body: StatementNode[] = [];
     let currentPos = 0;
-    const dependencies: string[] = [];
     const variableMap = new Map<string, string>(); // Track variables for dependency resolution
 
     // Step 1: Pre-process - normalize and segment
@@ -282,7 +281,7 @@ export class PromptCompilerService {
     }
 
     // Step 5: Build dependency graph
-    const extractedDependencies = this.extractDependencies(body, variableMap);
+    const extractedDependencies = this.extractDependencies(body);
 
     loggingService.debug('Prompt parsed to AST', {
       nodeCount: body.length,
@@ -532,7 +531,7 @@ export class PromptCompilerService {
   /**
    * Extract dependencies between nodes
    */
-  private static extractDependencies(body: StatementNode[], variableMap: Map<string, string>): string[] {
+  private static extractDependencies(body: StatementNode[]): string[] {
     const dependencies: string[] = [];
     
     for (let i = 0; i < body.length; i++) {
@@ -715,7 +714,7 @@ export class PromptCompilerService {
    * Extract implicit variables from instruction text
    * Pattern: "generate a summary of X" -> X might be a variable
    */
-  private static extractImplicitVariables(text: string, directive: string): Array<{ name: string; type: string }> {
+  private static extractImplicitVariables(text: string): Array<{ name: string; type: string }> {
     const implicitVars: Array<{ name: string; type: string }> = [];
     
     // Pattern: "of X", "about X", "for X", "from X"
@@ -815,7 +814,7 @@ export class PromptCompilerService {
     
     // Step 3: Extract implicit variable assignments from instruction patterns
     // Pattern: "generate a summary of X" -> X might be a variable reference
-    const implicitVariables = this.extractImplicitVariables(subjectValue, match.directive);
+    const implicitVariables = this.extractImplicitVariables(subjectValue);
     for (const implicitVar of implicitVariables) {
       if (!variableMap.has(implicitVar.name)) {
         // Try to find the value in previous context

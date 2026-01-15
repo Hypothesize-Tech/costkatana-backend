@@ -1,6 +1,5 @@
 import { cacheService } from './cache.service';
 import { loggingService } from './logging.service';
-import { redisService } from './redis.service';
 import * as os from 'os';
 
 /**

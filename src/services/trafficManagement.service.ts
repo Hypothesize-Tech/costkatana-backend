@@ -2,10 +2,10 @@ import { loggingService } from './logging.service';
 import { cacheService } from './cache.service';
 import { adaptiveRateLimitService } from './adaptiveRateLimit.service';
 import { requestPrioritizationService } from './requestPrioritization.service';
-import { gracefulDegradationService, DegradationLevel } from './gracefulDegradation.service';
-import { preemptiveThrottlingService, ThrottlingPhase } from './preemptiveThrottling.service';
+import { gracefulDegradationService } from './gracefulDegradation.service';
+import { preemptiveThrottlingService } from './preemptiveThrottling.service';
 import { trafficPredictionService } from './trafficPrediction.service';
-import { servicePrioritizationService, OverloadLevel } from './servicePrioritization.service';
+import { servicePrioritizationService } from './servicePrioritization.service';
 import { EventEmitter } from 'events';
 
 /**

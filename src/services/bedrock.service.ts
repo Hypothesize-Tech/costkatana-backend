@@ -228,7 +228,7 @@ export class BedrockService {
         // Map of model IDs that need inference profile conversion
         const modelMappings: Record<string, string> = {
             // Anthropic Claude 3.5 models require inference profiles
-            'anthropic.claude-3-5-haiku-20241022-v1:0': `${regionPrefix}.anthropic.claude-3-5-haiku-20241022-v1:0`,
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': `${regionPrefix}.global.anthropic.claude-haiku-4-5-20251001-v1:0`,
             'anthropic.claude-3-5-sonnet-20240620-v1:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20240620-v1:0`,
             'anthropic.claude-3-5-sonnet-20241022-v2:0': `${regionPrefix}.anthropic.claude-3-5-sonnet-20241022-v2:0`,
             

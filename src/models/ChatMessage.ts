@@ -41,6 +41,23 @@ mongodbSelectedViewType?: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'tex
     integrationSelectorData?: any; // To store the full IntegrationSelector data
     mongodbIntegrationData?: any; // To store structured MongoDB operation details (action, collection, etc.)
     mongodbResultData?: any; // To store the actual MongoDB query result data (formattedResult.data)
+    // Generic integration data for all integrations
+    githubIntegrationData?: any;
+    vercelIntegrationData?: any;
+    slackIntegrationData?: any;
+    discordIntegrationData?: any;
+    jiraIntegrationData?: any;
+    linearIntegrationData?: any;
+    googleIntegrationData?: any;
+    awsIntegrationData?: any;
+    formattedResult?: {
+        type: 'table' | 'json' | 'list' | 'text';
+        data: any;
+    };
+    agentPath?: string[];
+    optimizationsApplied?: string[];
+    cacheHit?: boolean;
+    riskLevel?: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -175,7 +192,43 @@ const chatMessageSchema = new Schema<IChatMessage>({
     },
     mongodbResultData: {
         type: Schema.Types.Mixed // Use Mixed type to store the actual MongoDB query result data
-    }
+    },
+    // Generic integration data fields
+    githubIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    vercelIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    slackIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    discordIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    jiraIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    linearIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    googleIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    awsIntegrationData: {
+        type: Schema.Types.Mixed
+    },
+    formattedResult: {
+        type: {
+            type: String,
+            enum: ['table', 'json', 'list', 'text']
+        },
+        data: Schema.Types.Mixed
+    },
+    agentPath: [String],
+    optimizationsApplied: [String],
+    cacheHit: Boolean,
+    riskLevel: String
 }, {
     timestamps: true,
     collection: 'chatMessages'

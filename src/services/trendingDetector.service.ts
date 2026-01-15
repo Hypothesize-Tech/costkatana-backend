@@ -424,7 +424,7 @@ Respond with JSON:
             AICostTrackingService.trackCall({
                 service: 'trending_detection',
                 operation: 'classify_query',
-                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 inputTokens: estimatedInputTokens,
                 outputTokens: estimatedOutputTokens,
                 estimatedCost: (estimatedInputTokens * 0.0000008 + estimatedOutputTokens * 0.000004), // Claude Haiku pricing
@@ -454,7 +454,7 @@ Respond with JSON:
             AICostTrackingService.trackCall({
                 service: 'trending_detection',
                 operation: 'classify_query',
-                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 inputTokens: estimatedInputTokens,
                 outputTokens: 0,
                 estimatedCost: 0,

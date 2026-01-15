@@ -472,61 +472,6 @@ Connection: ${connection.alias}`,
   }
 
   /**
-   * Fetch common query pattern suggestions
-   */
-  private getQuerySuggestions(): Array<{
-    id: string;
-    label: string;
-    value: string;
-    description?: string;
-  }> {
-    return [
-      {
-        id: 'all',
-        label: 'All documents',
-        value: '{}',
-        description: 'No filter - returns all documents'
-      },
-      {
-        id: 'equality',
-        label: 'Equals',
-        value: '{"fieldName": "value"}',
-        description: 'Match exact field value'
-      },
-      {
-        id: 'greater',
-        label: 'Greater than',
-        value: '{"age": {"$gt": 18}}',
-        description: 'Field greater than value'
-      },
-      {
-        id: 'in',
-        label: 'In array',
-        value: '{"status": {"$in": ["active", "pending"]}}',
-        description: 'Field value in array'
-      },
-      {
-        id: 'exists',
-        label: 'Field exists',
-        value: '{"email": {"$exists": true}}',
-        description: 'Check if field exists'
-      },
-      {
-        id: 'regex',
-        label: 'Regex match',
-        value: '{"name": {"$regex": "^John", "$options": "i"}}',
-        description: 'Pattern matching (case insensitive)'
-      },
-      {
-        id: 'custom',
-        label: 'Custom query',
-        value: '',
-        description: 'Type your own MongoDB query'
-      }
-    ];
-  }
-
-  /**
    * Check if all required parameters are present for the given action
    * If not, return IntegrationSelector data to ask the user
    */

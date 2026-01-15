@@ -76,6 +76,26 @@ export class IntegrationService {
                 type: dto.type
             });
 
+            // Auto-grant MCP permissions for supported integrations
+            if (['slack_oauth', 'discord_oauth', 'jira_oauth', 'linear_oauth'].includes(dto.type)) {
+                const integrationMap: Record<string, 'slack' | 'discord' | 'jira' | 'linear'> = {
+                    'slack_oauth': 'slack',
+                    'discord_oauth': 'discord',
+                    'jira_oauth': 'jira',
+                    'linear_oauth': 'linear',
+                };
+                
+                const mcpIntegrationType = integrationMap[dto.type];
+                if (mcpIntegrationType) {
+                    const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+                    await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+                        dto.userId,
+                        mcpIntegrationType,
+                        (integration._id as any).toString()
+                    );
+                }
+            }
+
             return integration;
         } catch (error: any) {
             loggingService.error('Failed to create integration', {
@@ -106,9 +126,6 @@ export class IntegrationService {
 
             const integrations = await Integration.find(query)
                 .sort({ createdAt: -1 });
-
-            // Also check total integrations for this user without filters
-            const totalCount = await Integration.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
 
             return integrations;
         } catch (error: any) {

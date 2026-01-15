@@ -42,10 +42,10 @@ export class AIQueryRouterService {
     private static instance: AIQueryRouterService;
 
     private constructor() {
-        // Use Claude 3.5 Haiku for fast, accurate routing decisions
+        // Use global Haiku inference profile for fast, accurate routing decisions
         this.routerLlm = new ChatBedrockConverse({
             region: process.env.AWS_REGION ?? 'us-east-1',
-            model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+            model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
             credentials: {
                 accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
                 secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,

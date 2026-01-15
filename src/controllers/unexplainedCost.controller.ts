@@ -312,7 +312,6 @@ export class UnexplainedCostController {
       const traceData = await UnexplainedCostController.service.getTraceCostAttribution(
         userId,
         traceId,
-        workspaceId as string
       );
       const duration = Date.now() - startTime;
 

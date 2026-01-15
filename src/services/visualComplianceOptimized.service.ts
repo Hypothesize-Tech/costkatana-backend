@@ -7,7 +7,6 @@
  */
 
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import sharp from 'sharp';
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
 import { AICostTrackingService } from './aiCostTracking.service';
@@ -25,16 +24,6 @@ interface VisualComplianceRequest {
   metaPrompt?: string;
   metaPromptPresetId?: string;
   templateId?: string; // For checking cached reference features
-}
-
-interface ImageFeatures {
-  histogram: number[];
-  edges: number[];
-  brightness: number;
-  contrast: number;
-  dominant_colors: string[];
-  objects_detected: string[];
-  spatial_layout: number[];
 }
 
 interface ComplianceResponse {
@@ -287,7 +276,7 @@ export class VisualComplianceOptimizedService {
             pass_fail: false,
             overall_confidence: 0.99,
             feedback_message: errorMessage,
-            criteria: request.complianceCriteria.map((criterion, index) => ({
+            criteria: request.complianceCriteria.map((_, index) => ({
               criterion_number: index + 1,
               compliant: false,
               confidence: 0.99,
@@ -709,7 +698,7 @@ YOUR RESPONSE (TOON ONLY, NO OTHER TEXT):`;
 
     // Use Claude 3.5 Haiku for standard mode (cost-effective with vision support)
     // 3x cheaper than Sonnet: $1.00 input, $5.00 output per 1M tokens
-    const modelId = process.env.CLAUDE_HAIKU_MODEL_ID ?? 'us.anthropic.claude-3-5-haiku-20241022-v1:0';
+    const modelId = process.env.CLAUDE_HAIKU_MODEL_ID ?? 'us.global.anthropic.claude-haiku-4-5-20251001-v1:0';
 
     const requestBody = {
       messages: [
@@ -807,220 +796,6 @@ YOUR RESPONSE (TOON ONLY, NO OTHER TEXT):`;
         technique: 'standard_full_images'
       }
     };
-  }
-
-  /**
-   * Extract visual features from image
-   * Reduces image representation from 1600+ tokens → ~50 tokens
-   */
-  private static async extractImageFeatures(
-    imageInput: string | Buffer,
-    imageType: string,
-    industry: string = 'retail'
-  ): Promise<ImageFeatures> {
-    try {
-      // Convert to buffer
-      let imageBuffer: Buffer;
-      if (typeof imageInput === 'string') {
-        const base64Data = imageInput.includes(',') ? imageInput.split(',')[1] : imageInput;
-        imageBuffer = Buffer.from(base64Data, 'base64');
-      } else {
-        imageBuffer = imageInput;
-      }
-
-      // Resize to small size for fast analysis
-      const smallImage = await sharp(imageBuffer)
-        .resize(256, 256, { fit: 'inside' })
-        .toBuffer();
-
-      const stats = await sharp(smallImage).stats();
-
-      // Extract color histogram (12 bins: simplified RGB stats)
-      const channels = stats.channels || [];
-      const histogram: number[] = [];
-      
-      if (channels.length >= 3) {
-        // RGB channels
-        for (let i = 0; i < 3; i++) {
-          const channel = channels[i];
-          histogram.push(Math.round(channel.min || 0));
-          histogram.push(Math.round(channel.mean || 0));
-          histogram.push(Math.round(channel.max || 0));
-          histogram.push(Math.round(channel.stdev || 0));
-        }
-      } else if (channels.length > 0) {
-        // Grayscale
-        const channel = channels[0];
-        histogram.push(Math.round(channel.min || 0));
-        histogram.push(Math.round(channel.mean || 0));
-        histogram.push(Math.round(channel.max || 0));
-        histogram.push(Math.round(channel.stdev || 0));
-        // Pad to 12
-        while (histogram.length < 12) histogram.push(0);
-      } else {
-        // Fallback: zeros
-        while (histogram.length < 12) histogram.push(0);
-      }
-
-      // Calculate edge density in 3x3 grid (simplified)
-      const edgeDensity: number[] = [];
-      for (let i = 0; i < 9; i++) {
-        // Simplified: use random sampling based on image variance
-        const variance = channels[0]?.stdev || 0;
-        edgeDensity.push(Math.round(variance / 10));
-      }
-
-      // Calculate brightness and contrast
-      const brightness = Math.round(channels[0]?.mean || 128);
-      const contrast = Math.round(channels[0]?.stdev || 50);
-
-      // Extract dominant colors (simplified - use channel means)
-      const dominantColors = [
-        this.rgbToHex(
-          Math.round(channels[0]?.mean || 128),
-          Math.round(channels[1]?.mean || 128),
-          Math.round(channels[2]?.mean || 128)
-        ),
-        this.rgbToHex(
-          Math.round((channels[0]?.mean || 128) - 20),
-          Math.round((channels[1]?.mean || 128) - 20),
-          Math.round((channels[2]?.mean || 128) - 20)
-        ),
-        this.rgbToHex(
-          Math.round((channels[0]?.mean || 128) + 20),
-          Math.round((channels[1]?.mean || 128) + 20),
-          Math.round((channels[2]?.mean || 128) + 20)
-        )
-      ];
-
-      // Infer objects from histogram
-      const objectsDetected = this.inferObjectsFromHistogram(histogram, industry);
-
-      // Spatial layout (use edge density)
-      const spatialLayout = edgeDensity;
-
-      const features: ImageFeatures = {
-        histogram,
-        edges: edgeDensity,
-        brightness,
-        contrast,
-        dominant_colors: dominantColors,
-        objects_detected: objectsDetected,
-        spatial_layout: spatialLayout
-      };
-
-      loggingService.debug(`Extracted features from ${imageType}`, {
-        histogramSize: histogram.length,
-        edgeRegions: edgeDensity.length,
-        brightness,
-        contrast
-      });
-
-      return features;
-
-    } catch (error) {
-      loggingService.error('Failed to extract image features', {
-        error: error instanceof Error ? error.message : String(error),
-        imageType
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Infer objects from histogram
-   * Uses color distribution and brightness patterns to detect industry-specific objects
-   */
-  private static inferObjectsFromHistogram(histogram: number[], industry: string): string[] {
-    // Calculate histogram metrics
-    const avgBrightness = histogram.reduce((a, b) => a + b, 0) / histogram.length;
-    const maxValue = Math.max(...histogram);
-    const minValue = Math.min(...histogram);
-    const contrast = maxValue - minValue;
-    
-    // Calculate color variance (indicates color diversity)
-    const mean = avgBrightness;
-    const variance = histogram.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / histogram.length;
-    const colorDiversity = Math.sqrt(variance);
-    
-    // Base objects for each industry
-    const baseObjects: Record<string, string[]> = {
-      retail: ['shelf', 'products'],
-      jewelry: ['display_case', 'jewelry_items'],
-      grooming: ['salon_chair', 'equipment'],
-      fmcg: ['packaging', 'products'],
-      documents: ['paper', 'text']
-    };
-    
-    const detectedObjects = [...(baseObjects[industry] || ['generic_objects'])];
-    
-    // Add conditional objects based on histogram analysis
-    
-    // High brightness suggests good lighting or light-colored objects
-    if (avgBrightness > 180) {
-      if (industry === 'jewelry') detectedObjects.push('spotlight', 'reflective_surfaces');
-      if (industry === 'grooming') detectedObjects.push('mirrors', 'white_surfaces');
-      if (industry === 'documents') detectedObjects.push('white_background');
-      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('bright_lighting');
-    }
-    
-    // Low brightness suggests poor lighting or dark objects
-    if (avgBrightness < 100) {
-      if (industry === 'jewelry') detectedObjects.push('dark_velvet_backing');
-      if (industry === 'documents') detectedObjects.push('text_content', 'printed_material');
-    }
-    
-    // High contrast suggests clear edges and defined objects
-    if (contrast > 150) {
-      detectedObjects.push('clear_edges', 'well_defined_objects');
-      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('labels', 'brand_logos');
-      if (industry === 'documents') detectedObjects.push('formatted_content');
-    }
-    
-    // High color diversity suggests multiple products or colorful scene
-    if (colorDiversity > 50) {
-      if (industry === 'retail' || industry === 'fmcg') detectedObjects.push('multiple_products', 'varied_packaging');
-      if (industry === 'jewelry') detectedObjects.push('gemstones', 'colored_items');
-      if (industry === 'grooming') detectedObjects.push('product_bottles', 'colorful_equipment');
-    }
-    
-    // Low color diversity suggests uniform or monochrome scene
-    if (colorDiversity < 30) {
-      if (industry === 'documents') detectedObjects.push('uniform_format');
-      if (industry === 'jewelry') detectedObjects.push('monochrome_display');
-    }
-    
-    // Analyze RGB distribution patterns (histogram bins represent R, G, B statistics)
-    if (histogram.length >= 12) {
-      // Extract R, G, B mean values (indices 1, 5, 9 based on our histogram structure)
-      const rMean = histogram[1] || 128;
-      const gMean = histogram[5] || 128;
-      const bMean = histogram[9] || 128;
-      
-      // Detect dominant color tones
-      if (rMean > gMean + 20 && rMean > bMean + 20) {
-        detectedObjects.push('red_tones'); // Warm colors, possibly sale tags or branding
-      }
-      if (bMean > rMean + 20 && bMean > gMean + 20) {
-        detectedObjects.push('blue_tones'); // Cool colors, possibly professional setting
-      }
-      if (Math.abs(rMean - gMean) < 15 && Math.abs(gMean - bMean) < 15) {
-        detectedObjects.push('neutral_tones'); // Grayscale or neutral colors
-      }
-    }
-    
-    return detectedObjects;
-  }
-
-  /**
-   * Convert RGB to hex
-   */
-  private static rgbToHex(r: number, g: number, b: number): string {
-    const toHex = (n: number) => {
-      const clamped = Math.max(0, Math.min(255, Math.round(n)));
-      return clamped.toString(16).padStart(2, '0');
-    };
-    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
   }
 
   /**

@@ -17,7 +17,6 @@ import {
     CortexStreamingExecution,
     CortexToken,
     CortexProgressUpdate,
-    CortexStreamingEvent,
     CortexStreamingPhase
 } from './cortexStreamingOrchestrator.service';
 

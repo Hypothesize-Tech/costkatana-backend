@@ -75,7 +75,7 @@ export interface ControlFlowError {
 // CONTROL FLOW PRIMITIVES
 // ============================================================================
 
-const CONTROL_PRIMITIVES: Record<string, CortexPrimitive> = {
+export const CONTROL_PRIMITIVES: Record<string, CortexPrimitive> = {
     // Conditional primitives
     'if': 'control_if',
     'then': 'control_then',
@@ -130,7 +130,7 @@ const CONTROL_PRIMITIVES: Record<string, CortexPrimitive> = {
 export class CortexControlFlowService {
     private static instance: CortexControlFlowService;
     private variables: Map<string, CortexValue> = new Map();
-    private customEvaluators: Map<string, Function> = new Map();
+    private customEvaluators: Map<string, (left: any, right: any, condition: CortexCondition) => boolean> = new Map();
 
     private constructor() {
         this.initializeCustomEvaluators();
@@ -163,23 +163,23 @@ export class CortexControlFlowService {
             // Execute based on frame type
             switch (controlFrame.frameType) {
                 case 'control':
-                    result = await this.executeGenericControl(controlFrame as CortexControlFrame, executedSteps, errors);
+                    result = await this.executeGenericControl(controlFrame, executedSteps, errors);
                     break;
                 
                 case 'conditional':
-                    result = await this.executeConditional(controlFrame as CortexConditionalFrame, executedSteps, errors);
+                    result = await this.executeConditional(controlFrame, executedSteps, errors);
                     break;
                 
                 case 'loop':
-                    result = await this.executeLoop(controlFrame as CortexLoopFrame, executedSteps, errors);
+                    result = await this.executeLoop(controlFrame, executedSteps, errors);
                     break;
                 
                 case 'sequence':
-                    result = await this.executeSequence(controlFrame as CortexSequenceFrame, executedSteps, errors);
+                    result = await this.executeSequence(controlFrame, executedSteps, errors);
                     break;
                 
                 default:
-                    throw new Error(`Unsupported control frame type: ${(controlFrame as any).frameType}`);
+                    throw new Error(`Unsupported control frame type: ${(controlFrame as any).frameType || 'unknown'}`);
             }
 
             loggingService.info('🔄 Control flow execution completed', {
@@ -264,7 +264,7 @@ export class CortexControlFlowService {
             frameType: 'loop',
             loopType,
             body,
-            maxIterations: options.maxIterations || 100,
+            maxIterations: options.maxIterations ?? 100,
             condition: options.condition,
             iterationVariable: options.iterationVariable,
             iterationSource: options.iterationSource,
@@ -303,7 +303,7 @@ export class CortexControlFlowService {
         return {
             type: this.getConditionType(operator),
             left,
-            operator: operator as any,
+            operator: operator as 'eq' | 'neq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'matches' | 'and' | 'or' | 'not' | 'exists',
             right
         };
     }
@@ -321,12 +321,12 @@ export class CortexControlFlowService {
 
         for (const step of controlFrame.steps) {
             try {
-                executedSteps.push(step.id);
+                executedSteps.push(step.id as string);
                 
                 switch (step.type) {
                     case 'action':
                         if (step.frame) {
-                            const result = await this.executeFrame(step.frame);
+                            const result = await this.executeFrame();
                             results.push(result);
                         }
                         break;
@@ -521,7 +521,7 @@ export class CortexControlFlowService {
         for (let i = 0; i < sequenceFrame.steps.length; i++) {
             try {
                 executedSteps.push(`sequence_step_${i}`);
-                const stepResult = await this.executeFrame(sequenceFrame.steps[i]);
+                const stepResult = await this.executeFrame();
                 
                 if (sequenceFrame.collectResults) {
                     results.push(stepResult);
@@ -601,7 +601,7 @@ export class CortexControlFlowService {
         this.variables.set(name, value);
     }
 
-    private async executeFrame(frame: CortexFrame): Promise<any> {
+    private async executeFrame(): Promise<any> {
         // This would delegate to appropriate frame processors
         throw new Error('Frame execution not implemented - requires integration with actual frame processors');
     }
@@ -609,7 +609,7 @@ export class CortexControlFlowService {
     private async executeFrameSequence(frames: CortexFrame[]): Promise<any[]> {
         const results = [];
         for (const frame of frames) {
-            const result = await this.executeFrame(frame);
+            const result = await this.executeFrame();
             results.push(result);
         }
         return results;

@@ -348,9 +348,6 @@ export class GoogleIntegrationService {
                 { $limit: 100 }
             ]);
 
-            // Format data for Gemini analysis
-            const dataContext = JSON.stringify(usageData, null, 2);
-            const prompt = `Analyze the following AI cost data and provide insights:\n\n${dataContext}\n\nProvide:\n1. A summary analysis of cost trends\n2. Key insights (3-5 bullet points)\n3. Specific recommendations for cost optimization`;
 
             // Use Gemini via AWS Bedrock or direct API
             // For now, generate mock analysis based on data patterns

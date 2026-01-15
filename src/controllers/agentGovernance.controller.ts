@@ -606,10 +606,8 @@ export class AgentGovernanceController {
   /**
    * Get governance status
    */
-  static async getGovernanceStatus(req: Request, res: Response): Promise<void> {
+  static async getGovernanceStatus(_req: Request, res: Response): Promise<void> {
     try {
-      const userId = (req as any).user?.id;
-      const { workspaceId, organizationId } = req.query;
 
       // Get basic governance status
       const status = agentGovernanceService.getGovernanceStatus();

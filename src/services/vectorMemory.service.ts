@@ -128,24 +128,6 @@ export class VectorMemoryService {
         }
     }
 
-    /**
-     * Parse embedding from AI response
-     */
-    private parseEmbedding(embeddingText: string): number[] {
-        try {
-            // Extract numbers from the response
-            const numbers = embeddingText.match(/-?\d+\.?\d*/g);
-            if (numbers && numbers.length >= 100) {
-                const embedding = numbers.slice(0, 384).map(n => parseFloat(n));
-                return this.normalizeVector(embedding);
-            } else {
-                throw new Error('Invalid embedding format');
-            }
-        } catch (error) {
-            loggingService.warn('⚠️ Failed to parse AI embedding, using fallback');
-            return this.generateHashBasedEmbedding(embeddingText);
-        }
-    }
 
     /**
      * Generate hash-based embedding as fallback

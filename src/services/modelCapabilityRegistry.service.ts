@@ -35,14 +35,6 @@ export class ModelCapabilityRegistry extends EventEmitter {
     private providerAdapters: Map<AIProviderType, IProviderAdapter> = new Map();
     private modelToProvider: Map<string, AIProviderType> = new Map();
     
-    // Performance tracking
-    private modelPerformanceHistory: Map<string, {
-        latencies: number[];
-        successCount: number;
-        failureCount: number;
-        lastUpdated: Date;
-    }> = new Map();
-    
     // Caching for fast lookups
     private capabilityIndex: Map<ModelCapability, Set<string>> = new Map();
     private providerIndex: Map<string, Set<string>> = new Map();

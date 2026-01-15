@@ -10,8 +10,7 @@ import {
     reindexAll,
     getUserDocuments,
     getDocumentPreview,
-    getUploadProgress,
-    checkDocumentStatus
+    getUploadProgress
 } from '../controllers/ingestion.controller';
 
 const router = Router();

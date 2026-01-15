@@ -182,11 +182,10 @@ export class GatewayCortexService {
                     sessionId
                 );
 
-                if (contextUpdateResult.entities.length > 0 || contextUpdateResult.intentions.length > 0) {
+                if (contextUpdateResult.intentions.length > 0) {
                     loggingService.info('🔄 Context extracted from current turn', {
                         requestId: context.requestId,
                         sessionId,
-                        entitiesExtracted: contextUpdateResult.entities.length,
                         intentionsExtracted: contextUpdateResult.intentions.length,
                         preferencesExtracted: contextUpdateResult.preferences.length
                     });
@@ -788,7 +787,6 @@ export class GatewayCortexService {
                     compressionApplied: true,
                     contextTokensSaved: 0, // Calculated separately
                     contextCompressionRatio: 1.0, // Calculated separately 
-                    entitiesExtracted: contextUpdateResult?.entities.length || 0,
                     intentionsExtracted: contextUpdateResult?.intentions.length || 0,
                     preferencesExtracted: contextUpdateResult?.preferences.length || 0
                 } : {

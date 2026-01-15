@@ -500,13 +500,6 @@ export class RequestScoringService {
         this.lastDbFailureTime = Date.now();
     }
 
-    /**
-     * Background processing utilities
-     */
-    private static queueBackgroundOperation(operation: () => Promise<void>): void {
-        this.backgroundQueue.push(operation);
-    }
-
     private static startBackgroundProcessor(): void {
         this.backgroundProcessor = setInterval(async () => {
             if (this.backgroundQueue.length > 0) {

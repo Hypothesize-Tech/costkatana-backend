@@ -435,6 +435,14 @@ export class GitHubController {
                     hasRefreshToken: !!tokenResponse.refresh_token,
                     expiresAt
                 });
+
+                // Auto-grant MCP permissions for new connection
+                const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+                await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+                    userId,
+                    'github',
+                    connection._id.toString()
+                );
             }
 
             // Sync repositories

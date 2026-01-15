@@ -14,7 +14,6 @@ import {
   ResourceCreationPlan,
   ResourceCreationStep,
   ResourceDependency,
-  CostEstimate,
   RollbackStep,
   EC2CreationConfig,
   RDSCreationConfig,

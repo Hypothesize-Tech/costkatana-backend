@@ -7,10 +7,10 @@ const router = Router();
  * Middleware to capture raw body for webhook signature verification
  * Payment gateways require raw body (not parsed JSON) for signature verification
  */
-const rawBodyMiddleware = (req: Request, res: Response, next: NextFunction): void => {
+const rawBodyMiddleware = (req: Request, _res: Response, next: NextFunction): void => {
     if (req.headers['content-type']?.includes('application/json')) {
         let data = '';
-        req.on('data', (chunk) => {
+        req.on('data', (chunk: string) => {
             data += chunk;
         });
         req.on('end', () => {

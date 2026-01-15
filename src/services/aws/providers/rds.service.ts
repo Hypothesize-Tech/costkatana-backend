@@ -1,4 +1,4 @@
-import { RDSClient, DescribeDBInstancesCommand, StopDBInstanceCommand, StartDBInstanceCommand, CreateDBSnapshotCommand, DescribeDBSnapshotsCommand, ModifyDBInstanceCommand, CreateDBInstanceCommand, DescribeDBSubnetGroupsCommand, CreateDBSubnetGroupCommand, AddTagsToResourceCommand } from '@aws-sdk/client-rds';
+import { RDSClient, DescribeDBInstancesCommand, StopDBInstanceCommand, StartDBInstanceCommand, CreateDBSnapshotCommand, DescribeDBSnapshotsCommand, CreateDBInstanceCommand } from '@aws-sdk/client-rds';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';

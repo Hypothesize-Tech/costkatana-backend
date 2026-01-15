@@ -35,7 +35,7 @@ router.get('/status', (_req: Request, res: Response): void => {
  * POST /api/backup/start
  * Start the backup scheduler
  */
-router.post('/start', (req: Request, res: Response): void => {
+router.post('/start', (_req: Request, res: Response): void => {
   try {
     backupScheduler.start();
     
@@ -56,7 +56,7 @@ router.post('/start', (req: Request, res: Response): void => {
  * POST /api/backup/stop
  * Stop the backup scheduler
  */
-router.post('/stop', (req: Request, res: Response): void => {
+router.post('/stop', (_req: Request, res: Response): void => {
   try {
     backupScheduler.stop();
     
@@ -77,7 +77,7 @@ router.post('/stop', (req: Request, res: Response): void => {
  * POST /api/backup/trigger
  * Trigger an immediate backup
  */
-router.post('/trigger', (req: Request, res: Response): void => {
+router.post('/trigger', (_req: Request, res: Response): void => {
   void (async () => {
     try {
       const result = await backupScheduler.performImmediateBackup();
@@ -101,7 +101,7 @@ router.post('/trigger', (req: Request, res: Response): void => {
  * GET /api/backup/stats
  * Get backup statistics
  */
-router.get('/stats', (req: Request, res: Response): void => {
+router.get('/stats', (_req: Request, res: Response): void => {
   void (async () => {
     try {
       const stats = await backupScheduler.getBackupStats();

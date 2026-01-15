@@ -382,7 +382,7 @@ export class ProjectManagerTool extends Tool {
                 settings: {
                     budgetLimit: 100.00,
                     alertThreshold: 80,
-                    preferredModels: ['anthropic.claude-3-5-haiku-20241022-v1:0', 'gpt-3.5-turbo'],
+                    preferredModels: ['global.anthropic.claude-haiku-4-5-20251001-v1:0', 'gpt-3.5-turbo'],
                     optimizationGoals: ['cost', 'reliability']
                 },
                 tags: ['api', 'integration', 'production'],
@@ -441,7 +441,7 @@ export class ProjectManagerTool extends Tool {
                     preferredModels: [
                         'amazon.nova-lite-v1:0', 
                         'amazon.nova-pro-v1:0', 
-                        'anthropic.claude-3-5-haiku-20241022-v1:0',
+                        'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                         'anthropic.claude-3-5-sonnet-20240620-v1:0'
                     ],
                     optimizationGoals: ['cost', 'efficiency', 'performance', 'quality']

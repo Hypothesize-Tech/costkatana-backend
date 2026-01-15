@@ -762,7 +762,7 @@ export class BrainController {
                 }
             };
 
-            const metricsListener = (metrics: any) => {
+            const metricsListener = () => {
                 // Send user-specific metrics
                 const userFlows = costKatanaBrain.getActiveFlowsByUser(userId);
                 const userMetrics = {

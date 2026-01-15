@@ -38,7 +38,7 @@ export class CortexRelayEngine {
     this.decoder = new CortexDecoder();
     this.modelRouter = modelRouter; // Use singleton instance
     
-    this.coreModelId = process.env.CORTEX_CORE_MODEL || 'anthropic.claude-3-5-haiku-20241022-v1:0';
+    this.coreModelId = process.env.CORTEX_CORE_MODEL || 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
   }
 
   

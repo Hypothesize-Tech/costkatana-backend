@@ -1874,7 +1874,6 @@ export class AdminDashboardController {
             // Import services dynamically to avoid circular dependencies
             const { backgroundVectorizationService } = await import('../services/backgroundVectorization.service');
             const { smartSamplingService } = await import('../services/smartSampling.service');
-            const { crossModalIntelligenceService } = await import('../services/crossModalIntelligence.service');
             const { vectorMemoryService } = await import('../services/vectorMemory.service');
 
             // Get comprehensive vectorization statistics

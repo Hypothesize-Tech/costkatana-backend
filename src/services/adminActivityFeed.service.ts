@@ -1,7 +1,4 @@
 import { Usage } from '../models/Usage';
-import { User } from '../models/User';
-import { Project } from '../models/Project';
-import { RealtimeUpdateService } from './realtime-update.service';
 import { loggingService } from './logging.service';
 
 export interface ActivityEvent {

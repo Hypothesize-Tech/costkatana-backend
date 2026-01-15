@@ -376,7 +376,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         notes: 'Claude 3.5 Sonnet on AWS Bedrock - advanced reasoning and analysis capabilities'
     },
     {
-        modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude 3.5 Haiku',
         provider: 'AWS Bedrock',
         inputPrice: 0.80,

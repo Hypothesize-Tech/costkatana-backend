@@ -3,7 +3,6 @@ import { Activity } from '../models/Activity';
 import { Telemetry } from '../models/Telemetry';
 import { Usage } from '../models/Usage';
 import { Conversation } from '../models/Conversation';
-import { ChatMessage } from '../models/ChatMessage';
 import { loggingService } from './logging.service';
 
 export interface UserDataQueryOptions {

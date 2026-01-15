@@ -390,7 +390,7 @@ export class ModelRecommendationService {
      * Generate reasoning for model recommendation
      */
     private static generateReasoning(
-        modelId: string,
+        _modelId: string,
         analysis: TemplateAnalysis,
         model: ExtendedModelPricing
     ): string {

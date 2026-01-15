@@ -345,42 +345,6 @@ export class WebSearchTool extends Tool {
 
         return this.performSearch(request);
     }
-
-    /**
-     * Summarize content using AI
-     */
-    private async summarizeContent(content: string, context: string): Promise<string> {
-        try {
-            // Truncate content if too long
-            const maxLength = 10000;
-            const truncatedContent = content.length > maxLength 
-                ? content.substring(0, maxLength) + '...' 
-                : content;
-
-            const prompt = `Summarize the following web content in the context of: "${context}"
-
-Content:
-${truncatedContent}
-
-Provide a concise, informative summary focusing on key facts and insights relevant to the query context.`;
-
-            const response = await this.summarizer.invoke([
-                { role: 'user', content: prompt }
-            ]);
-
-            const summary = typeof response.content === 'string' 
-                ? response.content 
-                : JSON.stringify(response.content);
-
-            return summary.trim();
-
-        } catch (error) {
-            loggingService.warn('Content summarization failed', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            return 'Summary generation failed';
-        }
-    }
 }
 
 // Helper function to get instance

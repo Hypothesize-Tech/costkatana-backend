@@ -1,5 +1,4 @@
 import { GenerationDecision } from './generationDecision.service';
-import { FeatureScoringService, FeatureScore } from './featureScoring.service';
 import { loggingService } from './logging.service';
 
 export interface QueuedGeneration {
@@ -85,7 +84,7 @@ export class GenerationQueueService {
      */
     private static calculatePriority(
         decision: GenerationDecision,
-        request: string
+        _request: string
     ): number {
         // Base priority factors
         let priority = 0.5; // Default

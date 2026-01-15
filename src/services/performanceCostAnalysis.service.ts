@@ -232,7 +232,6 @@ export class PerformanceCostAnalysisService {
             ]);
 
             const correlationData = aggregationResult.correlationData || [];
-            const summary = aggregationResult.summary[0] || { totalCost: 0, totalRequests: 0, avgCost: 0, avgLatency: 0 };
 
             // Calculate correlations with parallel processing and memoization
             const correlationPromises = correlationData.map(async (data: any) => {
@@ -603,54 +602,6 @@ export class PerformanceCostAnalysisService {
         return Math.min(baseQuality + costInfluence + (Math.random() * 0.1), 1);
     }
 
-    private static calculateCostEfficiencyScore(costPerRequest: number, performance: PerformanceMetrics): number {
-        // Calculate a score from 0-1 based on cost vs performance
-        const latencyScore = Math.max(0, 1 - (performance.latency / 10000)); // Normalize latency
-        const qualityScore = performance.qualityScore;
-        const reliabilityScore = performance.successRate / 100;
-        const costScore = Math.max(0, 1 - (costPerRequest / 0.1)); // Normalize cost
-
-        return (latencyScore + qualityScore + reliabilityScore + costScore) / 4;
-    }
-
-    private static getPerformanceRating(performance: PerformanceMetrics): 'excellent' | 'good' | 'fair' | 'poor' {
-        const score = (performance.qualityScore * 0.4) +
-            ((10000 - performance.latency) / 10000 * 0.3) +
-            (performance.successRate / 100 * 0.3);
-
-        if (score > 0.8) return 'excellent';
-        if (score > 0.6) return 'good';
-        if (score > 0.4) return 'fair';
-        return 'poor';
-    }
-
-    private static generateRecommendation(
-        service: string,
-        model: string,
-        performance: PerformanceMetrics,
-        efficiencyScore: number
-    ): string {
-        if (efficiencyScore > 0.8) {
-            return `Excellent cost-performance ratio for ${service} ${model}. Continue current usage.`;
-        } else if (efficiencyScore > 0.6) {
-            return `Good performance for ${service} ${model} but consider optimizing for better cost efficiency.`;
-        } else if (performance.latency > 5000) {
-            return `High latency detected for ${service} ${model}. Consider switching to a faster model or optimizing requests.`;
-        } else if (performance.errorRate > 5) {
-            return `High error rate detected for ${service} ${model}. Consider switching to a more reliable service.`;
-        } else {
-            return `Poor cost-performance ratio for ${service} ${model}. Consider alternative services or optimization strategies.`;
-        }
-    }
-
-    private static calculateOptimizationPotential(performance: PerformanceMetrics, efficiencyScore: number): number {
-        // Use the performance parameter to calculate potential
-        const performanceScore = performance.latency > 0 ? 100 / performance.latency : 0;
-        const adjustedScore = efficiencyScore * (1 + performanceScore / 1000);
-        return Math.max(0, (1 - adjustedScore) * 100);
-    }
-
-
 
     private static findBestValue(correlations: CostPerformanceCorrelation[]): {
         service: string;
@@ -716,50 +667,6 @@ export class PerformanceCostAnalysisService {
         return recommendations;
     }
 
-    // Additional helper methods would be implemented here for:
-    // - groupByTimePeriod
-    // - calculateAggregatedMetrics
-    // - calculateTrend
-    // - generatePerformanceAlerts
-    // - identifyModelSwitchOpportunities
-    // - identifyParameterTuningOpportunities
-    // - identifyRequestOptimizationOpportunities
-    // - identifyCachingOpportunities
-    // - generateTimeSeries
-    // - calculatePercentiles
-    // - detectPerformanceAnomalies
-
-    private static groupByTimePeriod(
-        usageData: Array<IUsage & { latency?: number; errorRate?: number; qualityScore?: number; }>,
-        granularity: 'hour' | 'day' | 'week'
-    ): Map<string, Array<IUsage & { latency?: number; errorRate?: number; qualityScore?: number; }>> {
-        const groups = new Map();
-
-        usageData.forEach(usage => {
-            let key: string;
-            const date = new Date(usage.createdAt);
-
-            switch (granularity) {
-                case 'hour':
-                    key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}-${date.getHours()}`;
-                    break;
-                case 'day':
-                    key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-                    break;
-                case 'week':
-                    const weekStart = new Date(date.setDate(date.getDate() - date.getDay()));
-                    key = `${weekStart.getFullYear()}-${weekStart.getMonth()}-${weekStart.getDate()}`;
-                    break;
-            }
-
-            if (!groups.has(key)) {
-                groups.set(key, []);
-            }
-            groups.get(key).push(usage);
-        });
-
-        return groups;
-    }
 
     private static calculateAggregatedMetrics(
         usages: Array<IUsage & { latency?: number; errorRate?: number; qualityScore?: number; }>
@@ -779,83 +686,6 @@ export class PerformanceCostAnalysisService {
         };
     }
 
-    private static calculateTrend(
-        period: string,
-        metrics: PerformanceMetrics & { cost: number; volume: number },
-        previousTrends: PerformanceTrend[]
-    ): 'improving' | 'degrading' | 'stable' {
-        if (previousTrends.length === 0) return 'stable';
-
-        // Period affects the trend calculation sensitivity
-        const periodMultiplier = period === 'daily' ? 1 : period === 'weekly' ? 7 : 30;
-        const previousMetrics = previousTrends[previousTrends.length - 1].metrics;
-        const costTrend = (metrics.cost - previousMetrics.cost) / periodMultiplier;
-        const latencyTrend = (metrics.latency - previousMetrics.latency) / periodMultiplier;
-        const qualityTrend = (metrics.qualityScore - previousMetrics.qualityScore) / periodMultiplier;
-
-        const improvingFactors = [
-            costTrend < 0 ? 1 : 0,
-            latencyTrend < 0 ? 1 : 0,
-            qualityTrend > 0 ? 1 : 0
-        ].reduce((a, b) => a + b, 0);
-
-        if (improvingFactors >= 2) return 'improving';
-        if (improvingFactors <= 1) return 'degrading';
-        return 'stable';
-    }
-
-    private static generatePerformanceAlerts(
-        metrics: PerformanceMetrics & { cost: number; volume: number },
-        trend: 'improving' | 'degrading' | 'stable'
-    ): Array<{
-        type: 'performance_degradation' | 'cost_spike' | 'error_increase';
-        severity: 'low' | 'medium' | 'high';
-        message: string;
-        suggestedActions: string[];
-    }> {
-        const alerts = [];
-
-        if (metrics.latency > 5000) {
-            alerts.push({
-                type: 'performance_degradation' as const,
-                severity: trend === 'degrading' ? 'high' as const : 'medium' as const,
-                message: `High latency detected: ${metrics.latency.toFixed(0)}ms (trend: ${trend})`,
-                suggestedActions: [
-                    'Optimize request parameters',
-                    'Consider faster model alternatives',
-                    'Implement request caching'
-                ]
-            });
-        }
-
-        if (metrics.errorRate > 5) {
-            alerts.push({
-                type: 'error_increase' as const,
-                severity: 'high' as const,
-                message: `High error rate detected: ${metrics.errorRate.toFixed(1)}%`,
-                suggestedActions: [
-                    'Review recent API changes',
-                    'Implement better error handling',
-                    'Consider alternative service providers'
-                ]
-            });
-        }
-
-        if (metrics.cost > 50) {
-            alerts.push({
-                type: 'cost_spike' as const,
-                severity: 'medium' as const,
-                message: `Cost spike detected: $${metrics.cost.toFixed(2)}`,
-                suggestedActions: [
-                    'Review recent usage patterns',
-                    'Implement cost controls',
-                    'Optimize high-cost operations'
-                ]
-            });
-        }
-
-        return alerts;
-    }
 
     // Placeholder methods for optimization opportunities
     private static identifyModelSwitchOpportunities(correlations: CostPerformanceCorrelation[]): OptimizationOpportunity[] {
@@ -935,33 +765,6 @@ export class PerformanceCostAnalysisService {
                 mitigation: ['Thorough testing', 'Gradual rollout']
             },
             timeline: '1-2 days',
-            priority: 2
-        }));
-    }
-
-    private static identifyCachingOpportunities(correlations: CostPerformanceCorrelation[]): OptimizationOpportunity[] {
-        // Implementation would identify caching opportunities
-        return correlations.map((correlation, index) => ({
-            id: `caching_${index}`,
-            title: `Caching for ${correlation.service} ${correlation.model}`,
-            type: 'caching' as const,
-            description: `Implement caching for ${correlation.service} ${correlation.model} to reduce repeated requests`,
-            currentCost: correlation.costPerRequest,
-            projectedCost: correlation.costPerRequest * 0.7,
-            savings: correlation.costPerRequest * 0.3,
-            savingsPercentage: 30,
-            performanceImpact: {
-                latency: -20,
-                quality: 0,
-                reliability: 15
-            },
-            implementationComplexity: 'medium' as const,
-            riskAssessment: {
-                level: 'medium' as const,
-                factors: ['Caching strategy implementation', 'Cache invalidation logic'],
-                mitigation: ['Cache warming', 'TTL optimization', 'Cache monitoring']
-            },
-            timeline: '5-7 days',
             priority: 2
         }));
     }
@@ -1075,16 +878,6 @@ export class PerformanceCostAnalysisService {
         });
 
         return anomalies.sort((a, b) => b.deviation - a.deviation).slice(0, 20);
-    }
-
-    /**
-     * Calculate quality score based on latency and error rate
-     */
-    private static calculateQualityScore(latency: number, errorRate: number): number {
-        // Simple quality score calculation (0-100)
-        const latencyScore = Math.max(0, 100 - (latency / 10)); // Penalty for high latency
-        const errorScore = Math.max(0, 100 - (errorRate * 2)); // Penalty for errors
-        return (latencyScore + errorScore) / 2;
     }
 
     /**
@@ -1421,10 +1214,6 @@ export class PerformanceCostAnalysisService {
     private static recordDbFailure(): void {
         this.dbFailureCount++;
         this.lastDbFailureTime = Date.now();
-    }
-
-    private static queueBackgroundOperation(operation: () => Promise<void>): void {
-        this.backgroundQueue.push(operation);
     }
 
     private static startBackgroundProcessor(): void {

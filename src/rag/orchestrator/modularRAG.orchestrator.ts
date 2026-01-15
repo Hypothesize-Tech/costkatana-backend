@@ -163,7 +163,7 @@ export class ModularRAGOrchestrator {
     }
 
     // Analyze query to determine best pattern
-    const analysis = await this.analyzeQuery(input.query, input.context);
+    const analysis = await this.analyzeQuery(input.query);
 
     loggingService.info('RAG Orchestrator: Query analysis completed', {
       component: 'ModularRAGOrchestrator',
@@ -188,7 +188,6 @@ export class ModularRAGOrchestrator {
    */
   private async analyzeQuery(
     query: string,
-    context: RAGContext
   ): Promise<QueryAnalysis> {
     if (!this.llm) {
       // Fallback to heuristic analysis

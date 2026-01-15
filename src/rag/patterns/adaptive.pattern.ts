@@ -156,7 +156,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
       }
 
       // Step 2: Self-reflection on answer quality
-      const reflection = await this.selfReflect(query, answer, documents);
+      const reflection = await this.selfReflect(answer, documents);
 
       loggingService.info('Adaptive RAG: Self-reflection completed', {
         component: 'AdaptiveRAGPattern',
@@ -238,7 +238,7 @@ export class AdaptiveRAGPattern extends BaseRAGPattern {
    */
   private async judgeRetrievalNecessity(
     query: string,
-    context: RAGContext
+    _context: RAGContext
   ): Promise<AdaptiveState> {
     const prompt = `You are a judge deciding whether external information retrieval is needed to answer a question.
 
@@ -371,7 +371,6 @@ Final integrated answer:`;
    * Self-reflect on answer quality
    */
   private async selfReflect(
-    query: string,
     answer: string,
     documents: any[]
   ): Promise<SelfReflectionResult> {

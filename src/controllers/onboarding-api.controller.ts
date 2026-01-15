@@ -155,7 +155,7 @@ export class OnboardingApiController {
                 return;
             }
 
-            const status = await OnboardingService.completeStep(userId, stepId, data);
+            const status = await OnboardingService.completeStep(userId, stepId);
 
             const duration = Date.now() - startTime;
             loggingService.info('Onboarding step completed successfully', {

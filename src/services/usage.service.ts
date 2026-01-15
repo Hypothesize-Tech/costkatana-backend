@@ -518,7 +518,7 @@ Identify any anomalies in cost or token usage patterns. Return a JSON object wit
 
             const response = await AIRouterService.invokeModel(
                 analysisPrompt,
-                'anthropic.claude-3-5-haiku-20241022-v1:0'
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0'
             );
 
             // Parse the response

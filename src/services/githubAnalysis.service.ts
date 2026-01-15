@@ -675,8 +675,29 @@ export class GitHubAnalysisService {
     ): Promise<string[]> {
         const integrations: Set<string> = new Set();
 
+        // Language-specific file extensions to check
+        const languageExtensions: Record<string, string[]> = {
+            'javascript': ['.js', '.jsx', '.ts', '.tsx'],
+            'typescript': ['.ts', '.tsx', '.js', '.jsx'],
+            'python': ['.py', '.pyx', '.pyi'],
+            'java': ['.java'],
+            'go': ['.go'],
+            'rust': ['.rs'],
+            'php': ['.php'],
+            'ruby': ['.rb'],
+            'csharp': ['.cs'],
+            'cpp': ['.cpp', '.cc', '.cxx', '.c++', '.hpp', '.h']
+        };
+
+        const extensions = languageExtensions[language.toLowerCase()] || [];
+
         for (const entryPoint of entryPoints.slice(0, 5)) { // Check first 5 entry points
             try {
+                // Skip files that don't match the language
+                if (extensions.length > 0 && !extensions.some(ext => entryPoint.endsWith(ext))) {
+                    continue;
+                }
+
                 const content = await GitHubService.getFileContent(
                     connection,
                     owner,
@@ -724,6 +745,39 @@ export class GitHubAnalysisService {
         }
         if (fileNames.includes('.env.example') || fileNames.includes('.env.sample')) {
             patterns.push('env-config');
+        }
+
+        // Language-specific patterns
+        const lang = language.toLowerCase();
+        if (lang === 'javascript' || lang === 'typescript') {
+            if (fileNames.includes('package.json')) {
+                patterns.push('npm-package');
+            }
+            if (dirNames.includes('node_modules')) {
+                patterns.push('node-project');
+            }
+        } else if (lang === 'python') {
+            if (fileNames.includes('requirements.txt') || fileNames.includes('pyproject.toml')) {
+                patterns.push('python-package');
+            }
+            if (fileNames.includes('setup.py') || fileNames.includes('setup.cfg')) {
+                patterns.push('python-distribution');
+            }
+        } else if (lang === 'java') {
+            if (fileNames.includes('pom.xml')) {
+                patterns.push('maven-project');
+            }
+            if (fileNames.includes('build.gradle')) {
+                patterns.push('gradle-project');
+            }
+        } else if (lang === 'go') {
+            if (fileNames.includes('go.mod')) {
+                patterns.push('go-module');
+            }
+        } else if (lang === 'rust') {
+            if (fileNames.includes('cargo.toml')) {
+                patterns.push('cargo-project');
+            }
         }
 
         return patterns;

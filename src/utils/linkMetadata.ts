@@ -117,8 +117,6 @@ async function extractWithWebScraperTool(url: string): Promise<LinkMetadata> {
  * 2. Fallback to WebScraperTool if cheerio fails
  */
 export async function extractLinkMetadata(url: string, useAdvancedScraping: boolean = false): Promise<LinkMetadata> {
-  const urlObj = new URL(url);
-  
   // Try web scraper tool if explicitly requested
   if (useAdvancedScraping) {
     try {

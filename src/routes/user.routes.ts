@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { UserController } from '../controllers/user.controller';
-import { authenticate, requirePermission } from '../middleware/auth.middleware';
+import { authenticate } from '../middleware/auth.middleware';
 import { validate } from '../middleware/validation.middleware';
 import { updateProfileSchema, addSecondaryEmailSchema, setPrimaryEmailSchema, initiateAccountClosureSchema } from '../utils/validators';
 import { asyncHandler } from '../middleware/error.middleware';
@@ -21,11 +21,10 @@ router.get('/stats', asyncHandler(UserController.getUserStats));
 // Get user activities
 router.get('/activities', asyncHandler(UserController.getUserActivities));
 
-// Dashboard API key routes
 router.get('/dashboard-api-keys', asyncHandler(UserController.getDashboardApiKeys));
-router.post('/dashboard-api-keys', requirePermission('write', 'admin'), asyncHandler(UserController.createDashboardApiKey));
-router.put('/dashboard-api-keys/:keyId', requirePermission('write', 'admin'), asyncHandler(UserController.updateDashboardApiKey));
-router.delete('/dashboard-api-keys/:keyId', requirePermission('write', 'admin'), asyncHandler(UserController.deleteDashboardApiKey));
+router.post('/dashboard-api-keys', asyncHandler(UserController.createDashboardApiKey));
+router.put('/dashboard-api-keys/:keyId', asyncHandler(UserController.updateDashboardApiKey));
+router.delete('/dashboard-api-keys/:keyId', asyncHandler(UserController.deleteDashboardApiKey));
 
 // Alert routes
 router.get('/alerts', asyncHandler(UserController.getAlerts));

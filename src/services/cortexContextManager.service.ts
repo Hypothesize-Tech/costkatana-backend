@@ -6,7 +6,7 @@
  * by extracting and maintaining only essential context information.
  */
 
-import { CortexFrame, CortexValue } from '../types/cortex.types';
+import { CortexFrame } from '../types/cortex.types';
 import { loggingService } from './logging.service';
 import * as crypto from 'crypto';
 
@@ -156,7 +156,6 @@ export interface BranchingPoint {
 export type ContextValue = string | number | boolean | Date | string[] | number[];
 
 export interface ContextExtractionResult {
-    entities: ContextEntity[];
     intentions: ContextIntention[];
     preferences: ContextPreference[];
     constraints: ContextConstraint[];
@@ -225,17 +224,17 @@ export class CortexContextManagerService {
     /**
      * Extract context information from a Cortex frame
      */
-    public async extractContext(
+    public extractContext(
         frame: CortexFrame,
         userId: string,
         sessionId: string,
         metadata: any = {}
-    ): Promise<ContextExtractionResult> {
+    ): ContextExtractionResult {
         try {
             const entities = this.extractEntities(frame);
             const intentions = this.extractIntentions(frame, metadata);
-            const preferences = this.extractPreferences(frame, metadata);
-            const constraints = this.extractConstraints(frame, metadata);
+            const preferences = this.extractPreferences(frame);
+            const constraints = this.extractConstraints(frame);
             
             // Detect topic shifts
             const existingContext = this.getOrCreateContext(userId, sessionId);
@@ -248,6 +247,11 @@ export class CortexContextManagerService {
                 semantic: this.createSemanticMemory(frame)
             };
 
+            // Update entities in context
+            entities.forEach(entity => {
+                existingContext.entities.set(entity.id, entity);
+            });
+
             loggingService.info('🧠 Context extraction completed', {
                 userId,
                 sessionId,
@@ -259,7 +263,6 @@ export class CortexContextManagerService {
             });
 
             return {
-                entities,
                 intentions,
                 preferences,
                 constraints,
@@ -275,7 +278,6 @@ export class CortexContextManagerService {
             });
             
             return {
-                entities: [],
                 intentions: [],
                 preferences: [],
                 constraints: [],
@@ -295,10 +297,6 @@ export class CortexContextManagerService {
     ): Promise<ConversationContext> {
         const context = this.getOrCreateContext(userId, sessionId);
         
-        // Update entities
-        extraction.entities.forEach(entity => {
-            context.entities.set(entity.id, entity);
-        });
 
         // Update intentions
         extraction.intentions.forEach(intention => {
@@ -416,7 +414,7 @@ export class CortexContextManagerService {
             request.maxContextSize || 1000
         );
 
-        const contextSummary = this.generateContextSummary(relevantContext, queryContext);
+        const contextSummary = this.generateContextSummary(relevantContext);
 
         loggingService.info('🔍 Context reconstructed', {
             userId: request.userId,
@@ -616,7 +614,7 @@ export class CortexContextManagerService {
         for (const [key, value] of Object.entries(frame)) {
             if (key === 'frameType') continue;
 
-            const entityType = this.determineEntityType(key, value);
+            const entityType = this.determineEntityType(key);
             if (entityType) {
                 const entityId = this.generateEntityId(key, value);
                 
@@ -661,17 +659,17 @@ export class CortexContextManagerService {
         return intentions;
     }
 
-    private extractPreferences(frame: CortexFrame, metadata: any): ContextPreference[] {
+    private extractPreferences(frame: CortexFrame): ContextPreference[] {
         const preferences: ContextPreference[] = [];
         const now = new Date();
 
         // Look for preference indicators in the frame
         for (const [key, value] of Object.entries(frame)) {
-            if (this.isPreferenceIndicator(key, value)) {
+            if (this.isPreferenceIndicator(key)) {
                 preferences.push({
                     key: key,
                     value: value as ContextValue,
-                    category: this.categorizePreference(key, value),
+                    category: this.categorizePreference(key),
                     confidence: 0.6,
                     source: 'inferred',
                     created: now,
@@ -683,21 +681,21 @@ export class CortexContextManagerService {
         return preferences;
     }
 
-    private extractConstraints(frame: CortexFrame, metadata: any): ContextConstraint[] {
+    private extractConstraints(frame: CortexFrame): ContextConstraint[] {
         const constraints: ContextConstraint[] = [];
         const now = new Date();
 
         // Look for constraint indicators
         for (const [key, value] of Object.entries(frame)) {
-            if (this.isConstraintIndicator(key, value)) {
+            if (this.isConstraintIndicator(key)) {
                 const constraintId = this.generateConstraintId(key, value);
                 
                 constraints.push({
                     id: constraintId,
-                    type: this.categorizeConstraint(key, value),
+                    type: this.categorizeConstraint(key),
                     description: `Constraint from ${key}: ${value}`,
                     parameters: new Map([[key, value as ContextValue]]),
-                    priority: this.calculateConstraintPriority(key, value),
+                    priority: this.calculateConstraintPriority(key),
                     active: true,
                     created: now
                 });
@@ -1065,7 +1063,7 @@ export class CortexContextManagerService {
         return crypto.createHash('md5').update(`memory:${JSON.stringify(content)}:${Date.now()}`).digest('hex');
     }
 
-    private determineEntityType(key: string, value: any): ContextEntity['type'] | null {
+    private determineEntityType(key: string): ContextEntity['type'] | null {
         const keyLower = key.toLowerCase();
         if (keyLower.includes('person') || keyLower.includes('user')) return 'person';
         if (keyLower.includes('place') || keyLower.includes('location')) return 'location';
@@ -1105,12 +1103,12 @@ export class CortexContextManagerService {
         return priority;
     }
 
-    private isPreferenceIndicator(key: string, value: any): boolean {
+    private isPreferenceIndicator(key: string): boolean {
         const preferenceKeywords = ['prefer', 'like', 'want', 'style', 'format'];
         return preferenceKeywords.some(keyword => key.toLowerCase().includes(keyword));
     }
 
-    private categorizePreference(key: string, value: any): ContextPreference['category'] {
+    private categorizePreference(key: string): ContextPreference['category'] {
         const keyLower = key.toLowerCase();
         if (keyLower.includes('format')) return 'output_format';
         if (keyLower.includes('style')) return 'communication_style';
@@ -1118,12 +1116,12 @@ export class CortexContextManagerService {
         return 'personalization';
     }
 
-    private isConstraintIndicator(key: string, value: any): boolean {
+    private isConstraintIndicator(key: string): boolean {
         const constraintKeywords = ['limit', 'max', 'min', 'must', 'cannot', 'restrict'];
         return constraintKeywords.some(keyword => key.toLowerCase().includes(keyword));
     }
 
-    private categorizeConstraint(key: string, value: any): ContextConstraint['type'] {
+    private categorizeConstraint(key: string): ContextConstraint['type'] {
         const keyLower = key.toLowerCase();
         if (keyLower.includes('time') || keyLower.includes('deadline')) return 'time';
         if (keyLower.includes('private') || keyLower.includes('confidential')) return 'privacy';
@@ -1132,7 +1130,7 @@ export class CortexContextManagerService {
         return 'resource';
     }
 
-    private calculateConstraintPriority(key: string, value: any): number {
+    private calculateConstraintPriority(key: string): number {
         const keyLower = key.toLowerCase();
         if (keyLower.includes('must') || keyLower.includes('required')) return 9;
         if (keyLower.includes('should') || keyLower.includes('prefer')) return 6;
@@ -1168,11 +1166,11 @@ export class CortexContextManagerService {
         return importance;
     }
 
-    private extractEventDescription(frame: CortexFrame): string {
+    private extractEventDescription(_frame: CortexFrame): string {
         return `Event frame processed`;
     }
 
-    private extractEventContext(frame: CortexFrame, metadata: any): string {
+    private extractEventContext(_frame: CortexFrame, metadata: any): string {
         return `Context: ${JSON.stringify(metadata)}`;
     }
 
@@ -1215,7 +1213,7 @@ export class CortexContextManagerService {
 
     private compressMemory(
         memory: ContextMemoryFrame[], 
-        strategy: string, 
+        _strategy: string, 
         retentionRatio: number
     ): ContextMemoryFrame[] {
         const targetCount = Math.ceil(memory.length * retentionRatio);
@@ -1226,7 +1224,7 @@ export class CortexContextManagerService {
 
     private compressEpisodicMemory(
         memory: EpisodicMemoryEntry[], 
-        strategy: string, 
+        _strategy: string, 
         retentionRatio: number
     ): EpisodicMemoryEntry[] {
         const targetCount = Math.ceil(memory.length * retentionRatio);
@@ -1245,7 +1243,7 @@ export class CortexContextManagerService {
 
     private filterRelevantEntities(
         context: ConversationContext, 
-        queryContext: any, 
+        _queryContext: any, 
         focusAreas?: string[]
     ): ContextEntity[] {
         return Array.from(context.entities.values())
@@ -1253,13 +1251,13 @@ export class CortexContextManagerService {
             .slice(0, 10); // Top 10 most relevant
     }
 
-    private filterActiveIntentions(context: ConversationContext, queryContext: any): ContextIntention[] {
+    private filterActiveIntentions(context: ConversationContext, _queryContext: any): ContextIntention[] {
         return context.intentions.filter(intention => 
             intention.status === 'active' || intention.status === 'pending'
         );
     }
 
-    private filterApplicablePreferences(context: ConversationContext, queryContext: any): ContextPreference[] {
+    private filterApplicablePreferences(context: ConversationContext, _queryContext: any): ContextPreference[] {
         return Array.from(context.preferences.values())
             .filter(pref => pref.confidence > 0.5);
     }
@@ -1278,15 +1276,16 @@ export class CortexContextManagerService {
         relevantContext.intentions = intentions;
         relevantContext.preferences = new Map(preferences.map(p => [p.key, p]));
         
-        // Keep only most important memory
+        // Keep only most important memory, limited by maxSize
+        const memoryLimit = Math.min(maxSize, 5);
         relevantContext.workingMemory = fullContext.workingMemory
             .sort((a, b) => (b.importance + b.recency) - (a.importance + a.recency))
-            .slice(0, 5);
+            .slice(0, memoryLimit);
 
         return relevantContext;
     }
 
-    private generateContextSummary(context: ConversationContext, queryContext: any): string {
+    private generateContextSummary(context: ConversationContext): string {
         const parts = [];
         
         parts.push(`Context for user ${context.userId} in session ${context.sessionId}`);

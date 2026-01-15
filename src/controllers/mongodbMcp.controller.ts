@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import { loggingService } from '../services/logging.service';
 import { MongoDBConnection, IMongoDBConnection } from '../models/MongoDBConnection';
 import { MongoDBMCPService } from '../services/mongodbMcp.service';
-import { MongoDBMCPPolicyService } from '../services/mongodbMcpPolicy.service';
 import { circuitBreaker } from '../middleware/mongodbMcp.middleware';
 
 /**
@@ -155,7 +154,7 @@ export const handleMongoDBMCPToolCall = async (req: Request, res: Response): Pro
  * List available MongoDB MCP tools
  * GET /api/mcp/mongodb/tools
  */
-export const listMongoDBMCPTools = async (req: Request, res: Response): Promise<void> => {
+export const listMongoDBMCPTools = async (_req: Request, res: Response): Promise<void> => {
     try {
         // Create temporary service to get tool definitions
         const service = new MongoDBMCPService({
@@ -476,6 +475,14 @@ export const createMongoDBConnection = async (req: Request, res: Response): Prom
             connectionId: connection._id,
             alias,
         });
+
+        // Auto-grant MCP permissions for new connection
+        const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+        await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+            userId,
+            'mongodb',
+            (connection._id as any).toString()
+        );
 
         res.status(201).json({
             success: true,

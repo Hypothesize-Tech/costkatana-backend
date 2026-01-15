@@ -963,23 +963,6 @@ The Cost Katana Team
                 { $sort: { _id: 1 } }
             ]);
 
-            const previousDailyData = await Usage.aggregate([
-                { $match: previousMatch },
-                {
-                    $group: {
-                        _id: {
-                            $dateToString: {
-                                format: '%Y-%m-%d',
-                                date: '$createdAt'
-                            }
-                        },
-                        cost: { $sum: { $add: ['$cost', { $ifNull: ['$orchestrationCost', 0] }] } },
-                        executions: { $sum: 1 }
-                    }
-                },
-                { $sort: { _id: 1 } }
-            ]);
-
             const previousAvgCostPerExecution = previousUsage.length > 0
                 ? previousPeriodCost / previousUsage.length
                 : 0;

@@ -498,7 +498,7 @@ export class GatewayController {
             }
 
             // Parallel response processing and moderation
-            const [processedResponse, moderatedResponse] = await Promise.all([
+            const [_processedResponse, moderatedResponse] = await Promise.all([
                 GatewayController.processResponse(req, response),
                 Promise.resolve(response) // Pre-resolve for moderation
             ]).then(async ([processed]) => {

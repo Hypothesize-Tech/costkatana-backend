@@ -36,7 +36,6 @@ interface DataPoint {
 export class SemanticPatternAnalyzerService {
   private static readonly DEFAULT_NUM_CLUSTERS = 20;
   private static readonly MIN_CLUSTER_SIZE = 10;
-  private static readonly SIMILARITY_THRESHOLD = 0.75;
   private static readonly MAX_EXAMPLES_PER_CLUSTER = 10;
 
   /**

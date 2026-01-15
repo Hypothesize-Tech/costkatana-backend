@@ -17,7 +17,6 @@ import { loggingService } from './logging.service';
 
 // Import types
 import { CortexStreamingExecution, CortexToken } from './cortexStreamingOrchestrator.service';
-import { CortexFrame } from '../types/cortex.types';
 
 export enum ContinuityEventType {
     CUTOFF_DETECTED = 'cutoff_detected',
@@ -93,14 +92,12 @@ export class CortexContinuityService extends EventEmitter {
     private activeContinuityData = new Map<string, ContextPreservationData>();
     private checkpoints = new Map<string, ContinuityCheckpoint>();
     private cutoffDetectors = new Map<string, CutoffDetectionResult>();
-    private recoveryStrategies = new Map<string, string>();
 
     // Configuration
     private checkpointInterval = 5000; // 5 seconds
     private maxContextAge = 3600000; // 1 hour
     private maxCheckpointsPerExecution = 10;
     private enableAutoRecovery = true;
-    private enableContextCompression = true;
 
     private constructor() {
         super();
@@ -136,7 +133,7 @@ export class CortexContinuityService extends EventEmitter {
             });
 
             // Analyze the output for cutoff indicators
-            const analysis = await this.analyzeOutputForCutoff(currentOutput, expectedFormat, contextTokens);
+            const analysis = this.analyzeOutputForCutoff(currentOutput, expectedFormat);
 
             if (analysis.detected) {
                 loggingService.warn('⚠️ Cutoff detected in streaming output', {
@@ -183,11 +180,10 @@ export class CortexContinuityService extends EventEmitter {
     /**
      * Analyze output for cutoff patterns
      */
-    private async analyzeOutputForCutoff(
+    private analyzeOutputForCutoff(
         output: string,
         expectedFormat?: string,
-        contextTokens?: CortexToken[]
-    ): Promise<CutoffDetectionResult> {
+    ): CutoffDetectionResult {
         // Check for incomplete sentences
         if (this.isIncompleteSentence(output)) {
             return {
@@ -359,7 +355,7 @@ export class CortexContinuityService extends EventEmitter {
             });
 
             // Analyze semantic context
-            const semanticContext = await this.extractSemanticContext(tokens);
+            const semanticContext = this.extractSemanticContext(tokens);
 
             // Analyze technical context
             const technicalContext = this.extractTechnicalContext(execution, tokens);
@@ -415,7 +411,7 @@ export class CortexContinuityService extends EventEmitter {
     /**
      * Extract semantic context from tokens
      */
-    private async extractSemanticContext(tokens: CortexToken[]): Promise<ContextPreservationData['semanticContext']> {
+    private extractSemanticContext(tokens: CortexToken[]): ContextPreservationData['semanticContext'] {
         const topics: string[] = [];
         const entities: string[] = [];
         const intentions: string[] = [];
@@ -901,9 +897,21 @@ Continue seamlessly without repeating what was already said.`;
 
             // Create automatic checkpoints for active executions
             for (const [executionId, contextData] of this.activeContinuityData.entries()) {
-                // Only create checkpoints for executions that are actively running
-                // This would need to check the execution status
-                // await this.createCheckpoint(execution, 'auto');
+                try {
+                    // Only create checkpoints for executions that are actively running
+                    // Check if context is recent enough to warrant a checkpoint
+                    const contextAge = Date.now() - contextData.preservedAt.getTime();
+                    if (contextAge < this.maxContextAge) {
+                        // Note: createCheckpoint requires full CortexStreamingExecution object
+                        // which is not available from contextData. Skip automatic checkpoint creation.
+                        loggingService.debug('Skipping automatic checkpoint (execution object not available)', { executionId });
+                    }
+                } catch (error) {
+                    loggingService.warn('Failed to create automatic checkpoint', {
+                        executionId,
+                        error: error instanceof Error ? error.message : String(error)
+                    });
+                }
             }
         }, this.checkpointInterval);
     }

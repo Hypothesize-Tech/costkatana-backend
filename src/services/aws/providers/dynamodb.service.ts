@@ -8,7 +8,7 @@
  * - Configure encryption and tagging
  */
 
-import { DynamoDBClient, ListTablesCommand, DescribeTableCommand, CreateTableCommand, TagResourceCommand } from '@aws-sdk/client-dynamodb';
+import { DynamoDBClient, ListTablesCommand, DescribeTableCommand, CreateTableCommand } from '@aws-sdk/client-dynamodb';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';

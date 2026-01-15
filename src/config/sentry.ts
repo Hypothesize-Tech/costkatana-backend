@@ -80,8 +80,8 @@ export function initializeSentry(): void {
       Sentry.contextLinesIntegration(),
     ],
     // Before sending events, filter and enrich them
-    beforeSend: (event: Sentry.ErrorEvent, hint: Sentry.EventHint): Sentry.ErrorEvent | null => {
-      return beforeSendHook(event, hint) as Sentry.ErrorEvent | null;
+    beforeSend: (event: Sentry.ErrorEvent, _hint: Sentry.EventHint): Sentry.ErrorEvent | null => {
+      return beforeSendHook(event);
     },
 
     // Global context and tags
@@ -153,7 +153,7 @@ export function initializeSentry(): void {
 /**
  * Hook to filter and enrich events before sending to Sentry
  */
-function beforeSendHook(event: Sentry.ErrorEvent, hint: Sentry.EventHint): Sentry.ErrorEvent | null {
+function beforeSendHook(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
   // Skip events in development unless explicitly enabled
   if (SENTRY_ENVIRONMENT === 'development' && !SENTRY_DEBUG) {
     return null;
@@ -198,7 +198,7 @@ function beforeSendHook(event: Sentry.ErrorEvent, hint: Sentry.EventHint): Sentr
  */
 function generateCustomFingerprint(event: Sentry.Event): string[] {
   const exception = event.exception?.values?.[0];
-  const message = exception?.value || '';
+  const message = exception?.value ?? '';
   const stacktrace = exception?.stacktrace;
 
   // Default fingerprint
@@ -248,9 +248,9 @@ export function setUserContext(user: {
   });
 
   // Add user tags for better filtering
-  Sentry.setTag('user.id', user.id || 'anonymous');
-  Sentry.setTag('user.role', user.role || 'unknown');
-  Sentry.setTag('user.organization', user.organization || 'unknown');
+  Sentry.setTag('user.id', user.id ?? 'anonymous');
+  Sentry.setTag('user.role', user.role ?? 'unknown');
+  Sentry.setTag('user.organization', user.organization ?? 'unknown');
 }
 
 /**

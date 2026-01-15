@@ -8,7 +8,6 @@ import { MultiRepoIndex } from '../models/MultiRepoIndex';
  * Handles smart cache invalidation with webhook-based triggers
  */
 export class CacheInvalidationService {
-    private static readonly CACHE_PREFIX = 'codebase_index:';
     private static readonly REDIS_CACHE_PREFIX = 'repo_index:';
     private static readonly INVALIDATION_THROTTLE = 5 * 60 * 1000; // 5 minutes
     private static readonly lastInvalidation = new Map<string, number>();

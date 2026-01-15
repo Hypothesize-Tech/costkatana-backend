@@ -77,9 +77,9 @@ const MODEL_TIERS: Record<string, ModelTier> = {
     fast: {
         name: 'Fast Tier',
         models: {
-             encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+             encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
             core: 'anthropic.claude-opus-4-1-20250805-v1:0', // Claude 4 for core processing
-            decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+            decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
         },
         characteristics: {
             speed: 'very_fast',

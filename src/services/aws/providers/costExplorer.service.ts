@@ -375,7 +375,6 @@ class CostExplorerServiceProvider {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const today = now.toISOString().split('T')[0];
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
     
     // Get cost breakdown by service
     const breakdown = await this.getCostBreakdownByService(connection, startOfMonth, today);

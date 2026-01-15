@@ -16,9 +16,6 @@ export interface TipRecommendation {
 }
 
 export class IntelligenceService {
-    // Optimization: Background processing queue for AI operations
-    private aiScoringQueue: Array<() => Promise<void>> = [];
-    private aiProcessor?: NodeJS.Timeout;
 
     /**
      * Analyze usage and recommend relevant tips with parallel processing

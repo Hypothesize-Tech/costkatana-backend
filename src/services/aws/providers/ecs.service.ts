@@ -8,7 +8,7 @@
  * - Configure CloudWatch Logs
  */
 
-import { ECSClient, ListClustersCommand, DescribeClustersCommand, CreateClusterCommand, TagResourceCommand } from '@aws-sdk/client-ecs';
+import { ECSClient, ListClustersCommand, DescribeClustersCommand, CreateClusterCommand } from '@aws-sdk/client-ecs';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';
 import { permissionBoundaryService } from '../permissionBoundary.service';

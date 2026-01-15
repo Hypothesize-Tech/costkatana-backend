@@ -154,6 +154,16 @@ export class AWSController {
         await connection.save();
       }
 
+      // Auto-grant MCP permissions for new connection (not for updates)
+      if (!isUpdate) {
+        const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+        await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+          userId,
+          'aws',
+          connection._id.toString()
+        );
+      }
+
       // Log audit event with permission details
       await auditLoggerService.logSuccess(isUpdate ? 'connection_updated' : 'connection_created', {
         userId: new Types.ObjectId(userId),
@@ -714,7 +724,7 @@ export class AWSController {
     }
   }
 
-  static getKillSwitchState(req: Request, res: Response): Response {
+  static getKillSwitchState(_req: Request, res: Response): Response {
     try {
       const state = killSwitchService.getState();
       return res.json({ success: true, state });
@@ -748,7 +758,7 @@ export class AWSController {
     }
   }
 
-  static getAuditAnchor(req: Request, res: Response): Response {
+  static getAuditAnchor(_req: Request, res: Response): Response {
     try {
       const anchorData = auditAnchorService.getPublicAnchorData();
       return res.json({ success: true, ...anchorData });
@@ -776,7 +786,7 @@ export class AWSController {
   // Utilities
   // ============================================================================
 
-  static getAllowedActions(req: Request, res: Response): Response {
+  static getAllowedActions(_req: Request, res: Response): Response {
     try {
       const actions = intentParserService.getAvailableActions();
       return res.json({ success: true, actions });
@@ -785,7 +795,7 @@ export class AWSController {
     }
   }
 
-  static getPermissionBoundaries(req: Request, res: Response): Response {
+  static getPermissionBoundaries(_req: Request, res: Response): Response {
     try {
       return res.json({
         success: true,

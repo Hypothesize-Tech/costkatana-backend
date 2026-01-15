@@ -16,8 +16,7 @@ import { redisService } from './redis.service';
 import { loggingService } from './logging.service';
 
 // Import types
-import { CortexStreamingExecution, CortexToken } from './cortexStreamingOrchestrator.service';
-import { CortexFrame } from '../types/cortex.types';
+import { CortexToken } from './cortexStreamingOrchestrator.service';
 
 export enum HandshakePhase {
     INITIALIZING = 'initializing',

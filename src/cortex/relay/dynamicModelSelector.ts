@@ -63,7 +63,7 @@ export class DynamicModelSelector {
       contextWindow: 200000
     },
     // Claude 3.5 Haiku - Fast with decent reasoning
-    'anthropic.claude-3-5-haiku-20241022-v1:0': {
+    'global.anthropic.claude-haiku-4-5-20251001-v1:0': {
       reasoning: 0.7,
       speed: 0.95,
       cost: 0.9,
@@ -337,7 +337,7 @@ export class DynamicModelSelector {
     const priorityModels = [
       'anthropic.claude-3-haiku-20240307-v1:0',    // Best accessible fast model
       'amazon.titan-text-express-v1',              // Amazon fast alternative
-      'anthropic.claude-3-5-haiku-20241022-v1:0',  // Newer Haiku if available
+      'global.anthropic.claude-haiku-4-5-20251001-v1:0',  // Newer Haiku if available
       'amazon.nova-micro-v1:0',                    // Ultra-fast if available
     ];
     

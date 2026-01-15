@@ -1003,7 +1003,7 @@ export class OptimizationManagerTool extends Tool {
     private getModelStrengths(modelId: string): string[] {
         // Simplified strengths mapping
         const strengthsMap: { [key: string]: string[] } = {
-            'anthropic.claude-3-5-haiku-20241022-v1:0': ['Fastest responses', 'Most cost-effective', 'High throughput'],
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': ['Fastest responses', 'Most cost-effective', 'High throughput'],
             'claude-3-sonnet-20240229-v1:0': ['Balanced performance', 'Good reasoning', 'Reliable'],
             'gpt-4': ['Excellent reasoning', 'High accuracy', 'Complex tasks'],
             'gpt-3.5-turbo': ['Fast', 'Affordable', 'General purpose']

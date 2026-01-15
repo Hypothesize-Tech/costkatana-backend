@@ -34,7 +34,6 @@ import { CortexStreamingOrchestratorService, CortexStreamingConfig, DEFAULT_STRE
 import { 
     getStrategicPolicies, 
     getFallbackPricing, 
-    getRoutingStrategy,
     CortexOperationType
 } from '../config/strategicPolicies.config';
 
@@ -151,8 +150,8 @@ interface OptimizationFilters {
 export class OptimizationService {
     // 🚀 NEW CORTEX SERVICES FOR META-LANGUAGE PROCESSING
     private static cortexEncoderService: CortexEncoderService;
-    private static cortexCoreService: CortexCoreService;
     private static cortexDecoderService: CortexDecoderService;
+    private static cortexCoreService: CortexCoreService;
     private static streamingOrchestrator: CortexStreamingOrchestratorService;
     private static cortexInitialized = false;
     
@@ -889,7 +888,7 @@ function optimizedFunction() {
     private static async processLightweightCortexOptimization(
         originalPrompt: string, 
         userId: string,
-        model?: string
+        _model?: string
     ): Promise<{
         optimizedPrompt: string;
         cortexMetadata: any;
@@ -904,9 +903,9 @@ function optimizedFunction() {
             sessionId,
             originalLength: originalPrompt.length,
             models: {
-                encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 core: 'amazon.nova-pro-v1:0',
-                decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+                decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
             }
         });
 
@@ -928,7 +927,7 @@ Return a structured representation that maintains all semantic meaning but is mo
 
             const encodedResult = await AIRouterService.invokeModel(
                 encodingPrompt,
-                'anthropic.claude-3-5-haiku-20241022-v1:0' // Lightweight encoder
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0' // Lightweight encoder
             );
 
             if (!encodedResult || typeof encodedResult !== 'string') {
@@ -974,7 +973,7 @@ Convert to natural language while preserving all meaning and completeness.`;
 
             const decodedResult = await AIRouterService.invokeModel(
                 decodingPrompt,
-                'anthropic.claude-3-5-haiku-20241022-v1:0' // Lightweight decoder
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0' // Lightweight decoder
             );
 
             if (!decodedResult || typeof decodedResult !== 'string') {
@@ -1007,9 +1006,9 @@ Convert to natural language while preserving all meaning and completeness.`;
                 optimizedLength: optimizedPrompt.length,
                 tokenReduction: tokenReduction.reductionPercentage.toFixed(1) + '%',
                 models: {
-                    encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                    encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                     core: 'amazon.nova-pro-v1:0',
-                    decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+                    decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
                 }
             });
 
@@ -1020,9 +1019,9 @@ Convert to natural language while preserving all meaning and completeness.`;
                     lightweightCortex: true,
                     reductionPercentage: tokenReduction.reductionPercentage,
                     cortexModel: {
-                        encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                        encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                         core: 'amazon.nova-pro-v1:0',
-                        decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+                        decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
                     },
                     sessionId,
                     steps: ['encoding', 'core_processing', 'decoding'],
@@ -1265,70 +1264,6 @@ Reply ONLY: {"valid": true/false, "issues": ["specific issue 1", "specific issue
         return cleanedResult;
     }
 
-    /**
-     * Process with retry logic for handling timeouts and failures
-     */
-    private static async processWithRetry(
-        processingRequest: CortexProcessingRequest, 
-        userId: string,
-        maxRetries: number = 2
-    ): Promise<any> {
-        let lastError: any;
-        
-        for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
-            try {
-                loggingService.info(`🔄 Processing attempt ${attempt}/${maxRetries + 1}`, { userId });
-                
-                // Add timeout wrapper for individual processing attempts
-                const processingPromise = this.cortexCoreService.process(processingRequest);
-                const timeoutPromise = new Promise((_, reject) => {
-                    setTimeout(() => reject(new Error('Processing timeout after 45 seconds')), 45000);
-                });
-                
-                const result = await Promise.race([processingPromise, timeoutPromise]);
-                
-                loggingService.info(`✅ Processing succeeded on attempt ${attempt}`, { userId });
-                return result;
-                
-            } catch (error) {
-                lastError = error;
-                const isTimeout = error instanceof Error && error.message.includes('timeout');
-                const isRetryableError = isTimeout || (error instanceof Error && error.message.includes('ThrottlingException'));
-                
-                loggingService.warn(`⚠️ Processing failed on attempt ${attempt}`, {
-                    userId,
-                    error: error instanceof Error ? error.message : String(error),
-                    isTimeout,
-                    isRetryableError,
-                    remainingAttempts: maxRetries + 1 - attempt
-                });
-                
-                // Don't retry on final attempt
-                if (attempt === maxRetries + 1) {
-                    break;
-                }
-                
-                // Only retry on timeout or throttling errors
-                if (isRetryableError) {
-                    // Exponential backoff: 2s, 4s
-                    const delay = Math.pow(2, attempt) * 1000;
-                    loggingService.info(`⏱️ Waiting ${delay}ms before retry ${attempt + 1}`, { userId });
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                } else {
-                    // Don't retry non-retryable errors
-                    break;
-                }
-            }
-        }
-        
-        loggingService.error('❌ All processing attempts failed', {
-            userId,
-            error: lastError instanceof Error ? lastError.message : String(lastError),
-            maxRetries
-        });
-        
-        throw lastError;
-    }
     
     /**
      * Detect terrible AI responses that should trigger intelligent fallback
@@ -1642,9 +1577,9 @@ REPLY FORMAT (JSON only):
                             fallbackUsed: true,
                             processingTime: Date.now() - Date.now(),
                             cortexModel: {
-                                encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                                encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                                 core: 'amazon.nova-pro-v1:0',
-                                decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+                                decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
                             }
                         }
                     };
@@ -1983,7 +1918,7 @@ REPLY FORMAT (JSON only):
                 const totalTokens = totalOriginalTokens + totalOptimizedTokens;
                 const totalCost = unifiedCalc.originalCost + unifiedCalc.optimizedCost;
 
-                await SubscriptionService.consumeTokens(request.userId, totalTokens, totalCost);
+                await SubscriptionService.consumeTokens(request.userId, totalTokens);
                 await SubscriptionService.consumeRequest(request.userId);
 
                 if (cortexResult && !cortexResult.cortexMetadata.error) {

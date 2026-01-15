@@ -276,7 +276,6 @@ class SessionReplayService {
             }
 
             if (input.captureSystemMetrics) {
-                const cpuUsage = process.cpuUsage();
                 const memUsage = process.memoryUsage();
                 const loadAvg = os.loadavg();
 

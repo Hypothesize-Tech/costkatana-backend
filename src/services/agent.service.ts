@@ -160,7 +160,7 @@ export class AgentService {
             
             // Create specialized Langchain agents
             this.langchainAgents.set('tool_coordinator', new ChatBedrockConverse({
-                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 region: process.env.AWS_REGION || 'us-east-1',
                 temperature: 0.5,
                 maxTokens: 4000,

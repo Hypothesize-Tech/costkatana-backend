@@ -79,7 +79,6 @@ export class PreemptiveThrottlingService extends EventEmitter {
     // Metrics tracking
     private metricsHistory: ThrottlingMetrics[] = [];
     private readonly MAX_HISTORY_SIZE = 1000;
-    private predictedMetrics: Partial<ThrottlingMetrics> = {};
     
     // Configuration
     private config: PreemptiveConfig = {

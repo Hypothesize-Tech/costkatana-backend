@@ -133,7 +133,7 @@ export class TrueCostService {
       const loggingCost = await this.calculateLoggingCost(metrics);
       
       // 8. Observability Cost
-      const observabilityCost = await this.calculateObservabilityCost(metrics);
+      const observabilityCost = await this.calculateObservabilityCost();
       
       // Total cost
       const totalCost = 
@@ -408,7 +408,7 @@ export class TrueCostService {
   /**
    * Calculate observability costs (metrics, traces)
    */
-  private static async calculateObservabilityCost(metrics: RequestMetrics): Promise<{
+  private static async calculateObservabilityCost(): Promise<{
     cost: number;
     metricsCount: number;
     tracesCount: number;

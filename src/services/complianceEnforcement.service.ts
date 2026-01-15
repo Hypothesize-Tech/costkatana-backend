@@ -1,7 +1,6 @@
 import { loggingService } from './logging.service';
 import { cacheService } from './cache.service';
 import { dataClassificationService, ComplianceFramework } from './dataClassification.service';
-import { aiProviderAuditService } from './aiProviderAudit.service';
 import { EventEmitter } from 'events';
 import * as crypto from 'crypto';
 
@@ -213,7 +212,6 @@ export class ComplianceEnforcementService extends EventEmitter {
     private complianceChecks: Map<string, ComplianceCheck> = new Map();
     
     private readonly MAX_HISTORY_SIZE = 100000;
-    private readonly MAX_CACHE_SIZE = 10000;
     
     // Statistics
     private stats = {
@@ -1109,7 +1107,7 @@ export class ComplianceEnforcementService extends EventEmitter {
         return frameworkRisk ? frameworkRisk[severity as keyof typeof frameworkRisk] || 0.1 : 0.1;
     }
 
-    private hasSafeguard(safeguard: string, classification: any, context: any): boolean {
+    private hasSafeguard(safeguard: string, classification: any, _context: any): boolean {
         // Check if required safeguard is in place
         switch (safeguard) {
             case 'encryption':
@@ -1267,7 +1265,7 @@ export class ComplianceEnforcementService extends EventEmitter {
         return { score, currentState };
     }
 
-    private generateFrameworkRecommendations(framework: ComplianceFramework, findings: any): any {
+    private generateFrameworkRecommendations(framework: ComplianceFramework, _findings: any): any {
         const baseRecommendations = {
             immediate: ['Review critical violations', 'Implement missing safeguards'],
             shortTerm: ['Update compliance policies', 'Train staff on requirements'],

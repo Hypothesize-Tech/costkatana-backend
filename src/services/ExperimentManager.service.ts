@@ -1,6 +1,5 @@
 import { BaseService, ServiceError } from '../shared/BaseService';
 import { loggingService } from './logging.service';
-import { Experiment } from '../models/Experiment';
 import { EventEmitter } from 'events';
 import mongoose from 'mongoose';
 
