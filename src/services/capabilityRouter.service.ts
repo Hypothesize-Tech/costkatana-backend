@@ -241,7 +241,7 @@ export class CapabilityRouterService {
     private async auditRoutingDecision(
         request: CapabilityRoutingRequest,
         result: CapabilityRoutingResult,
-        latencyMs: number
+        _: number
     ): Promise<string> {
         try {
             const alternativesConsidered = result.alternativeModels.map(alt => ({
@@ -390,53 +390,7 @@ export class CapabilityRouterService {
         if (result.selectedModel.performance.reliabilityScore < 0.9) return 'medium';
         return 'low';
     }
-    
-    /**
-     * Map strategy to tradeoff type
-     */
-    private mapStrategyToTradeoff(strategy: ModelSelectionStrategy): 'cost_vs_latency' | 'cost_vs_quality' | 'latency_vs_quality' | 'all_three' {
-        switch (strategy) {
-            case ModelSelectionStrategy.COST_OPTIMIZED:
-                return 'cost_vs_quality';
-            case ModelSelectionStrategy.SPEED_OPTIMIZED:
-                return 'latency_vs_quality';
-            case ModelSelectionStrategy.QUALITY_OPTIMIZED:
-                return 'cost_vs_quality';
-            default:
-                return 'all_three';
-        }
-    }
-    
-    /**
-     * Get strategy weight
-     */
-    private getStrategyWeight(strategy: ModelSelectionStrategy, metric: 'cost' | 'latency' | 'quality'): number {
-        const weights: Record<ModelSelectionStrategy, Record<string, number>> = {
-            [ModelSelectionStrategy.COST_OPTIMIZED]: { cost: 0.7, latency: 0.1, quality: 0.2 },
-            [ModelSelectionStrategy.SPEED_OPTIMIZED]: { cost: 0.1, latency: 0.7, quality: 0.2 },
-            [ModelSelectionStrategy.QUALITY_OPTIMIZED]: { cost: 0.1, latency: 0.1, quality: 0.8 },
-            [ModelSelectionStrategy.BALANCED]: { cost: 0.33, latency: 0.33, quality: 0.34 },
-            [ModelSelectionStrategy.CUSTOM]: { cost: 0.25, latency: 0.25, quality: 0.5 }
-        };
-        
-        return weights[strategy][metric] || 0.33;
-    }
-    
-    /**
-     * Map strategy to string
-     */
-    private mapStrategyToString(strategy: ModelSelectionStrategy): 'cost_optimized' | 'speed_optimized' | 'quality_optimized' | 'balanced' {
-        switch (strategy) {
-            case ModelSelectionStrategy.COST_OPTIMIZED:
-                return 'cost_optimized';
-            case ModelSelectionStrategy.SPEED_OPTIMIZED:
-                return 'speed_optimized';
-            case ModelSelectionStrategy.QUALITY_OPTIMIZED:
-                return 'quality_optimized';
-            default:
-                return 'balanced';
-        }
-    }
+
     
     /**
      * Get performance statistics for a model

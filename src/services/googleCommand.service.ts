@@ -11,7 +11,7 @@ export class GoogleCommandService {
      * Execute Google command from chat
      * Note: Gmail and Calendar commands disabled
      */
-    static async executeCommand(command: string, params: any, connection: any) {
+    static async executeCommand(command: string, _params: any, _connection: any) {
         try {
             // Only Drive commands are supported now
             if (command.includes('gmail') || command.includes('email')) {

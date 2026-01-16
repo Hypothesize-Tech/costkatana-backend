@@ -6,7 +6,7 @@
 import { loggingService } from './logging.service';
 
 export class GoogleWorkflowExecutorService {
-    static async executeWorkflow(workflow: any, trigger: any) {
+    static async executeWorkflow(_workflow: any, _trigger: any) {
         loggingService.warn('Workflow execution partially disabled - Gmail/Calendar features removed');
         return { success: false, error: 'Gmail/Calendar workflow features disabled' };
     }

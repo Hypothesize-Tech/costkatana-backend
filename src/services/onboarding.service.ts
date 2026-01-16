@@ -164,7 +164,7 @@ export class OnboardingService {
     /**
      * Complete onboarding step
      */
-    static async completeStep(userId: string, stepId: string, data?: any): Promise<OnboardingData> {
+    static async completeStep(userId: string, stepId: string): Promise<OnboardingData> {
         try {
             const user = await User.findById(userId);
             if (!user) throw new Error('User not found');
@@ -243,10 +243,7 @@ export class OnboardingService {
             });
 
             // Complete project creation step
-            await this.completeStep(userId, 'project_creation', {
-                projectId: project._id,
-                projectName: project.name
-            });
+            await this.completeStep(userId, 'project_creation');
 
             loggingService.info('Project created during onboarding:', {
                 userId,
@@ -283,12 +280,7 @@ export class OnboardingService {
             const response = await this.makeLlmCall(queryData);
 
             // Complete LLM query step
-            await this.completeStep(userId, 'llm_query', {
-                query: queryData.query,
-                model: queryData.model,
-                response: response.content,
-                projectId: projectId
-            });
+            await this.completeStep(userId, 'llm_query');
 
             loggingService.info('LLM query executed during onboarding:', {
                 userId,

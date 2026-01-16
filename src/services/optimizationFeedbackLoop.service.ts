@@ -543,7 +543,6 @@ export class OptimizationFeedbackLoopService {
         // Use Cheng's BB algorithm for larger parameters
         const alphaMin = Math.min(alpha, beta);
         const alphaMax = Math.max(alpha, beta);
-        const alphaPlusB = alpha + beta;
         
         let gamma: number;
         

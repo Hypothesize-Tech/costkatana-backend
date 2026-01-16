@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router } from 'express';
 import { validateMCPRequest, mcpResponseTimer } from '../middleware/mcp.middleware';
 import { mongodbMcpMiddleware, validateMongoDBConnectionAccess } from '../middleware/mongodbMcp.middleware';
 import { authenticate } from '../middleware/auth.middleware';

@@ -14,11 +14,8 @@ import {
   switchWorkspaceSchema,
 } from '../utils/validators';
 import {
-  requirePermission,
-  requireRole,
   requireWorkspaceRole,
   requireAdminOrOwner,
-  requireOwner,
   attachWorkspaceContext,
 } from '../middleware/permission.middleware';
 

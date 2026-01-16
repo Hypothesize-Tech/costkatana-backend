@@ -33,7 +33,7 @@ export class ModelRouter {
   private initializeModelProfiles(): ModelProfile[] {
     return [
       {
-        modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         provider: 'bedrock',
         tier: 'economy',
         capabilities: {

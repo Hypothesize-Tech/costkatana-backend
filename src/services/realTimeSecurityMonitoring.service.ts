@@ -1,6 +1,6 @@
 import { loggingService } from './logging.service';
 import { cacheService } from './cache.service';
-import { comprehensiveAuditService, AuditEventType, AuditSeverity } from './comprehensiveAudit.service';
+import { comprehensiveAuditService } from './comprehensiveAudit.service';
 import { complianceEnforcementService } from './complianceEnforcement.service';
 import { aiProviderAuditService } from './aiProviderAudit.service';
 import { preTransmissionFilterService } from './preTransmissionFilter.service';
@@ -771,7 +771,7 @@ export class RealTimeSecurityMonitoringService extends EventEmitter {
      * Analyze flow security
      */
     private async analyzeFlowSecurity(
-        source: DataFlowEvent['flow']['source'],
+        _source: DataFlowEvent['flow']['source'],
         destination: DataFlowEvent['flow']['destination'],
         data: DataFlowEvent['flow']['data']
     ): Promise<DataFlowEvent['security']> {

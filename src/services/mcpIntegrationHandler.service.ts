@@ -540,7 +540,7 @@ export class MCPIntegrationHandler {
     credentials: { accessToken?: string; refreshToken?: string; siteUrl?: string }
   ): Promise<boolean> {
     try {
-      if (!credentials.refreshToken || !credentials.siteUrl) {
+      if (!credentials.refreshToken) {
         return false;
       }
 
@@ -552,8 +552,9 @@ export class MCPIntegrationHandler {
         return false;
       }
 
-      // Jira uses OAuth 2.0 token refresh
-      const tokenUrl = `${credentials.siteUrl}/oauth/token`;
+      // Jira uses Atlassian OAuth 2.0 token refresh endpoint
+      // NOT the site URL - it uses auth.atlassian.com
+      const tokenUrl = 'https://auth.atlassian.com/oauth/token';
       const response = await fetch(tokenUrl, {
         method: 'POST',
         headers: {

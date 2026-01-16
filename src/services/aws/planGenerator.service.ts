@@ -9,7 +9,6 @@ import {
   ExecutionPlan,
   ExecutionStep,
   PlanSummary,
-  StepImpact,
   APICall,
   RiskLevel,
   ALLOWED_ACTIONS,

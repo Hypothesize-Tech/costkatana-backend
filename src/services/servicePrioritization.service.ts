@@ -1,8 +1,7 @@
 import { loggingService } from './logging.service';
 import { cacheService } from './cache.service';
-import { gracefulDegradationService, DegradationLevel } from './gracefulDegradation.service';
-import { preemptiveThrottlingService, ThrottlingPhase } from './preemptiveThrottling.service';
-import { requestPrioritizationService } from './requestPrioritization.service';
+import { gracefulDegradationService} from './gracefulDegradation.service';
+import { preemptiveThrottlingService} from './preemptiveThrottling.service';
 import { EventEmitter } from 'events';
 
 /**
@@ -309,7 +308,7 @@ export class ServicePrioritizationService extends EventEmitter {
             const newAllocations = await this.calculateResourceAllocations(overloadLevel);
             
             // Determine actions needed
-            const actions = this.determineRequiredActions(newAllocations, overloadLevel);
+            const actions = this.determineRequiredActions(newAllocations);
             
             // Execute actions (limited by max_actions_per_cycle)
             const limitedActions = actions.slice(0, this.config.max_actions_per_cycle);
@@ -725,7 +724,6 @@ export class ServicePrioritizationService extends EventEmitter {
      */
     private determineRequiredActions(
         newAllocations: Map<string, ResourceAllocation>, 
-        overloadLevel: OverloadLevel
     ): ServiceAction[] {
         const actions: ServiceAction[] = [];
         
@@ -813,7 +811,7 @@ export class ServicePrioritizationService extends EventEmitter {
                     return await this.extendServiceCaching(service);
                 
                 case 'queue_priority':
-                    return await this.adjustServiceQueuePriority(service, action.severity);
+                    return await this.adjustServiceQueuePriority(service); 
                 
                 default:
                     return false;
@@ -982,7 +980,7 @@ export class ServicePrioritizationService extends EventEmitter {
     /**
      * Adjust service queue priority
      */
-    private async adjustServiceQueuePriority(service: ServiceDefinition, severity: number): Promise<boolean> {
+    private async adjustServiceQueuePriority(service: ServiceDefinition): Promise<boolean> {
         const priorityAdjustment = service.tier === 'critical' ? 'high' : 
                                  service.tier === 'essential' ? 'medium' : 'low';
         
@@ -1150,7 +1148,7 @@ export class ServicePrioritizationService extends EventEmitter {
     private async updateServiceUsageMetrics(): Promise<void> {
         // This would integrate with actual metrics collection
         // For now, we'll simulate usage updates
-        for (const [serviceName, allocation] of this.currentAllocations) {
+        for (const [_, allocation] of this.currentAllocations) {
             // Simulate current usage (would come from real metrics)
             const simulatedUsage = Math.random() * allocation.allocated_percentage;
             allocation.current_usage = simulatedUsage;

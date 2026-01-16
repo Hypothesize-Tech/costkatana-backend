@@ -161,28 +161,6 @@ function getNestingDepth(obj: any, currentDepth: number = 0, maxDepth: number = 
 }
 
 /**
- * Escape special characters in TOON values
- * Handles commas, newlines, quotes, and unicode
- */
-function escapeTOONValue(value: string): string {
-  if (typeof value !== 'string') {
-    return String(value);
-  }
-  
-  // Replace problematic characters
-  return value
-    .replace(/\\/g, '\\\\')  // Escape backslashes first
-    .replace(/,/g, '\\,')    // Escape commas
-    .replace(/\n/g, '\\n')    // Escape newlines
-    .replace(/\r/g, '\\r')    // Escape carriage returns
-    .replace(/"/g, '\\"')     // Escape quotes
-    .replace(/\{/g, '\\{')    // Escape braces
-    .replace(/\}/g, '\\}')    // Escape braces
-    .replace(/\[/g, '\\[')    // Escape brackets
-    .replace(/\]/g, '\\]');    // Escape brackets
-}
-
-/**
  * Unescape special characters in TOON values
  */
 function unescapeTOONValue(value: string): string {
@@ -538,7 +516,7 @@ export async function encodeToTOON(data: any): Promise<string> {
     });
     // Use JSON with a replacer to handle circular refs
     const seen = new WeakSet();
-    return JSON.stringify(data, (key, value) => {
+    return JSON.stringify(data, (_, value) => {
       if (typeof value === 'object' && value !== null) {
         if (seen.has(value)) {
           return '[Circular]';

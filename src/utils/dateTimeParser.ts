@@ -34,7 +34,7 @@ export function parseNaturalDateTime(text: string, userTimezone: string = 'UTC')
 
     // Parse date components
     let startDate = parseDate(lowerText, now);
-    let startTime = parseTime(lowerText, now);
+    let startTime = parseTime(lowerText);
     let duration = parseDuration(lowerText);
     let isAllDay = checkIfAllDay(lowerText);
 
@@ -168,7 +168,7 @@ function parseDate(text: string, now: Date): Date {
 /**
  * Parse time from natural language
  */
-function parseTime(text: string, now: Date): { hours: number; minutes: number } | null {
+function parseTime(text: string): { hours: number; minutes: number } | null {
     // 24-hour format: "14:30", "14h30"
     let match = text.match(/\b(\d{1,2}):(\d{2})\b/);
     if (match) {

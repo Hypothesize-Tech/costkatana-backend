@@ -27,7 +27,7 @@ export class IntegrationIntentRecognitionService {
   private static readonly MODEL_TIERS = {
     simple: 'amazon.nova-micro-v1:0',
     medium: 'amazon.nova-lite-v1:0',
-    complex: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+    complex: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
   };
 
   private static readonly INTEGRATION_COMPLEXITY: Record<string, 'simple' | 'medium' | 'complex'> = {

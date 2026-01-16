@@ -14,7 +14,7 @@ const router = Router();
  * Get current configuration
  * GET /api/cost-intelligence-config
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
     const config = costIntelligenceConfig.getConfig();
 
@@ -172,7 +172,7 @@ router.put('/:layer', async (req: Request, res: Response) => {
  * Reset configuration to defaults
  * POST /api/cost-intelligence-config/reset
  */
-router.post('/reset', async (req: Request, res: Response) => {
+router.post("/reset", async (_req: Request, res: Response) => {
   try {
     costIntelligenceConfig.resetToDefaults();
 
@@ -196,7 +196,7 @@ router.post('/reset', async (req: Request, res: Response) => {
  * Validate current configuration
  * GET /api/cost-intelligence-config/validate
  */
-router.get('/actions/validate', async (req: Request, res: Response) => {
+router.get("/actions/validate", async (_req: Request, res: Response) => {
   try {
     const validation = costIntelligenceConfig.validateConfig();
 
@@ -219,7 +219,7 @@ router.get('/actions/validate', async (req: Request, res: Response) => {
  * Export configuration
  * GET /api/cost-intelligence-config/export
  */
-router.get('/actions/export', async (req: Request, res: Response) => {
+router.get("/actions/export", async (_req: Request, res: Response) => {
   try {
     const exportData = costIntelligenceConfig.exportConfig();
 
@@ -241,7 +241,7 @@ router.get('/actions/export', async (req: Request, res: Response) => {
  * Get performance configuration
  * GET /api/cost-intelligence-config/performance
  */
-router.get('/actions/performance', async (req: Request, res: Response) => {
+router.get('/actions/performance', async (_req: Request, res: Response) => {
   try {
     const perfConfig = costIntelligenceConfig.getPerformanceConfig();
 

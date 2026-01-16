@@ -1,5 +1,4 @@
 import { loggingService } from './logging.service';
-import { GitHubService } from './github.service';
 import { GoogleService } from './google.service';
 import { JiraService } from './jira.service';
 import { VercelMCPService } from './vercelMcp.service';
@@ -417,386 +416,119 @@ export class IntegrationOrchestratorService {
    */
   private static async executeGitHubStep(step: IntegrationStep, userId: string, context?: Record<string, any>): Promise<any> {
     try {
-      loggingService.info('Executing GitHub step', {
+      loggingService.info('Executing GitHub step via MCP', {
         component: 'IntegrationOrchestratorService',
         step: step.id,
         action: step.action,
         userId
       });
 
-      // Import GitHubConnection model
-      const { GitHubConnection } = await import('../models/GitHubConnection');
-
-      // Get GitHub connection for the user (using GitHubConnection model, not Integration)
-      const githubConnection = await GitHubConnection.findOne({
-        userId: userId,
-        isActive: true
-      }).select('+accessToken +refreshToken');
-
-      loggingService.info('GitHub connection query result', {
-        component: 'IntegrationOrchestratorService',
-        userId,
-        found: !!githubConnection,
-        connectionId: githubConnection?._id,
-        isActive: githubConnection?.isActive
-      });
-
-      if (!githubConnection) {
-        // Try to find ANY github connection for debugging
-        const anyGithubConnection = await GitHubConnection.findOne({
-          userId: userId
-        });
-        
-        loggingService.error('GitHub integration not found', {
-          component: 'IntegrationOrchestratorService',
-          userId,
-          hasAnyGithubConnection: !!anyGithubConnection,
-          anyConnectionStatus: anyGithubConnection?.isActive ? 'active' : 'inactive'
-        });
-        
-        throw new Error('GitHub integration not connected for this user');
+      // Use MCP instead of direct GitHub API calls
+      const { MCPClientService } = await import('./mcp-client.service');
+      
+      const initialized = await MCPClientService.initialize(userId);
+      if (!initialized) {
+        throw new Error('Failed to initialize MCP');
       }
-
-      // Use the connection object directly - it has decryptToken() method
-      const connectionWithDecrypt = githubConnection;
-
-      let result: any;
-
+      
+      // Build natural language command from step
+      let naturalCommand = '';
+      const params = (step as any).params || (step as any).parameters || {};
+      
       switch (step.action) {
-        case 'create':
-        case 'createRepository': {
-          // Import GitHubService dynamically to create repository
-          const { GitHubService } = await import('./github.service');
-          const octokit = await (GitHubService as any).createOctokitFromToken(
-            connectionWithDecrypt.decryptToken()
-          );
-          
-          // Get the authenticated user's username first
-          const { data: user } = await octokit.rest.users.getAuthenticated();
-          
-          // Extract repository name from various possible parameter locations
-          const repoName = step.params.repoName || 
-                          step.params.name || 
-                          step.params.repositoryName ||
-                          step.params.repo_name ||
-                          (step.description && step.description.includes('backend') ? 'todo-backend' : 'todo-frontend');
-          
-          if (!repoName || repoName.trim() === '') {
-            throw new Error(
-              `Repository name is missing. Step params: ${JSON.stringify(step.params)}. ` +
-              `Please provide 'repoName' or 'name' in the step parameters.`
-            );
-          }
-          
-          loggingService.info('Creating repository for user', {
-            component: 'IntegrationOrchestratorService',
-            username: user.login,
-            repoName,
-            stepParams: step.params
-          });
-          
-          // GitHub Apps with user OAuth tokens should use createForAuthenticatedUser
-          // But if that fails due to permissions, we'll catch and provide helpful error
-          try {
-            result = await octokit.rest.repos.createForAuthenticatedUser({
-              name: repoName,
-              description: step.params.description || `Repository created by Cost Katana`,
-              private: step.params.isPrivate || step.params.private || false,
-              auto_init: true
-            });
-            
-          loggingService.info('Repository created successfully', {
-            component: 'IntegrationOrchestratorService',
-            repoName,
-            repoUrl: result.data.html_url
-          });
-          
-          // Also store the owner in context for later use
-          if (result.data.owner && result.data.owner.login && context) {
-            context.githubOwner = result.data.owner.login;
-            loggingService.info('GitHub owner stored in context', {
-              component: 'IntegrationOrchestratorService',
-              githubOwner: result.data.owner.login
-            });
-          }
-          } catch (createError: any) {
-            // If user-level creation fails, provide helpful error message
-            loggingService.error('Failed to create repository', {
-              component: 'IntegrationOrchestratorService',
-              repoName,
-              error: createError.message,
-              stepParams: step.params
-            });
-            
-            throw new Error(
-              `Failed to create repository: ${createError.message}.`
-            );
-          }
+        case 'create_issue':
+          naturalCommand = `Create a GitHub issue in repository ${params.repository || context?.repository} with title "${params.title}" and body "${params.body}"`;
           break;
-        }
-
-        case 'list_repos':
-        case 'listRepositories':
-          result = await GitHubService.listUserRepositories(connectionWithDecrypt as any);
+          
+        case 'create_pull_request':
+          naturalCommand = `Create a pull request in repository ${params.repository || context?.repository} from branch "${params.head}" to "${params.base}" with title "${params.title}" and body "${params.body}"`;
           break;
-
-        case 'get_repo':
-        case 'getRepository':
-          result = await GitHubService.getRepository(
-            connectionWithDecrypt as any,
-            step.params.owner,
-            step.params.repo
-          );
+          
+        case 'list_issues':
+          naturalCommand = `List GitHub issues in repository ${params.repository || context?.repository} ${params.state ? `with state ${params.state}` : ''}`;
           break;
-
-        case 'list_files':
-        case 'getAllFiles':
-          result = await GitHubService.getAllRepositoryFiles(
-            connectionWithDecrypt as any,
-            step.params.owner,
-            step.params.repo,
-            step.params.branch || 'main',
-            {
-              maxFiles: step.params.maxFiles,
-              excludePatterns: step.params.excludePatterns
-            }
-          );
+          
+        case 'list_pull_requests':
+          naturalCommand = `List pull requests in repository ${params.repository || context?.repository} ${params.state ? `with state ${params.state}` : ''}`;
           break;
-
-        case 'get_file':
-        case 'getFileContent':
-          result = await GitHubService.getFileContent(
-            connectionWithDecrypt as any,
-            step.params.owner,
-            step.params.repo,
-            step.params.path,
-            step.params.branch || 'main'
-          );
+          
+        case 'get_issue':
+          naturalCommand = `Get GitHub issue #${params.issue_number} from repository ${params.repository || context?.repository}`;
           break;
-
+          
+        case 'update_issue':
+          naturalCommand = `Update GitHub issue #${params.issue_number} in repository ${params.repository || context?.repository} ${params.state ? `to state ${params.state}` : ''} ${params.title ? `with title "${params.title}"` : ''} ${params.body ? `and body "${params.body}"` : ''}`;
+          break;
+          
+        case 'merge_pull_request':
+          naturalCommand = `Merge pull request #${params.pull_number} in repository ${params.repository || context?.repository}`;
+          break;
+          
+        case 'create_repository':
+          naturalCommand = `Create a new GitHub repository named "${params.name}" ${params.description ? `with description "${params.description}"` : ''} ${params.private ? 'as private' : 'as public'}`;
+          break;
+          
+        case 'list_repositories':
+          naturalCommand = `List my GitHub repositories`;
+          break;
+          
+        case 'get_repository':
+          naturalCommand = `Get information about GitHub repository ${params.repository || context?.repository}`;
+          break;
+          
         case 'create_branch':
-          result = await GitHubService.createBranch(
-            connectionWithDecrypt as any,
-            {
-              owner: step.params.owner,
-              repo: step.params.repo,
-              branchName: step.params.branchName,
-              fromBranch: step.params.fromBranch || 'main'
-            }
-          );
+          naturalCommand = `Create a new branch "${params.branch}" in repository ${params.repository || context?.repository}`;
           break;
-
-        case 'create_file':
-        case 'updateFile':
-        case 'update':
-        case 'push':
-        case 'commit': {
-          // Get the authenticated user's username for auto-detection
-          const { GitHubService } = await import('./github.service');
-          const octokit = await (GitHubService as any).createOctokitFromToken(
-            connectionWithDecrypt.decryptToken()
-          );
-          const { data: user } = await octokit.rest.users.getAuthenticated();
           
-          // Auto-detect owner and repo if not provided
-          const owner = step.params.owner || user.login;
-          const repo = step.params.repo || step.params.repoName || step.params.repository;
-          
-          if (!repo) {
-            throw new Error(
-              `Repository name is required for update/push action. ` +
-              `Step params: ${JSON.stringify(step.params)}`
-            );
-          }
-          
-          const branch = step.params.branch || 'main';
-          
-          // Check if repository is empty and initialize it if needed
-          let isRepoInitialized = false;
-          try {
-            await octokit.rest.repos.getBranch({
-              owner,
-              repo,
-              branch
-            });
-            isRepoInitialized = true;
-          } catch (branchError: any) {
-            if (branchError.status === 404) {
-              // Branch doesn't exist - repository is likely empty
-              loggingService.info('Repository is empty, will initialize with first commit', {
-                component: 'IntegrationOrchestratorService',
-                owner,
-                repo,
-                branch
-              });
-              
-              // Initialize repository with README (without specifying branch for empty repos)
-              try {
-                await octokit.rest.repos.createOrUpdateFileContents({
-                  owner,
-                  repo,
-                  path: 'README.md',
-                  message: 'Initial commit',
-                  content: Buffer.from(`# ${repo}\n\nInitialized repository`).toString('base64')
-                  // Don't specify branch for empty repos - GitHub will use the default branch
-                });
-                
-                loggingService.info('Repository initialized successfully', {
-                  component: 'IntegrationOrchestratorService',
-                  owner,
-                  repo,
-                  branch
-                });
-                isRepoInitialized = true;
-              } catch (initError: any) {
-                loggingService.warn('Failed to initialize repository, will retry with first file', {
-                  component: 'IntegrationOrchestratorService',
-                  owner,
-                  repo,
-                  error: initError.message
-                });
-                // Mark as not initialized so we can try again with the first file
-                isRepoInitialized = false;
-              }
-            }
-          }
-          
-          loggingService.info('Updating repository files', {
-            component: 'IntegrationOrchestratorService',
-            owner,
-            repo,
-            filesCount: step.params.files ? step.params.files.length : 1
-          });
-          
-          // Support both single file and multiple files
-          if (step.params.files && Array.isArray(step.params.files)) {
-            // Multiple files - commit them one by one
-            const fileResults = [];
-            for (const file of step.params.files) {
-              const fileResult = await GitHubService.createOrUpdateFile(
-                connectionWithDecrypt as any,
-                {
-                  owner,
-                  repo,
-                  // Only specify branch if repo is already initialized
-                  ...(isRepoInitialized && { branch }),
-                  path: file.path,
-                  content: file.content,
-                  message: step.params.message || `Update ${file.path}`
-                }
-              );
-              fileResults.push(fileResult);
-              // After first file, repo is initialized
-              isRepoInitialized = true;
-            }
-            result = { files: fileResults, message: 'Multiple files committed successfully' };
-          } else if (step.params.path && step.params.content) {
-            // Single file
-            result = await GitHubService.createOrUpdateFile(
-              connectionWithDecrypt as any,
-              {
-                owner,
-                repo,
-                // Only specify branch if repo is already initialized
-                ...(isRepoInitialized && { branch }),
-                path: step.params.path,
-                content: step.params.content,
-                message: step.params.message || 'Update file'
-              }
-            );
-          } else {
-            throw new Error(
-              `Either 'files' array or 'path' and 'content' are required. ` +
-              `Step params: ${JSON.stringify(step.params)}`
-            );
-          }
+        case 'list_branches':
+          naturalCommand = `List branches in repository ${params.repository || context?.repository}`;
           break;
-        }
-
-        case 'create_pr':
-        case 'createPullRequest':
-          result = await GitHubService.createPullRequest(
-            connectionWithDecrypt as any,
-            {
-              owner: step.params.owner,
-              repo: step.params.repo,
-              title: step.params.title,
-              body: step.params.body || '',
-              head: step.params.head,
-              base: step.params.base || 'main',
-              draft: step.params.draft || false
-            }
-          );
+          
+        case 'commit_files':
+          naturalCommand = `Commit files to repository ${params.repository || context?.repository} on branch "${params.branch}" with message "${params.message}"`;
           break;
-
-        case 'update_pr':
-        case 'updatePullRequest':
-          result = await GitHubService.updatePullRequest(
-            connectionWithDecrypt as any,
-            {
-              owner: step.params.owner,
-              repo: step.params.repo,
-              prNumber: step.params.pullNumber,
-              title: step.params.title,
-              body: step.params.body,
-              state: step.params.state
-            }
-          );
-          break;
-
-        case 'add_pr_comment':
-        case 'addPRComment':
-          result = await GitHubService.addPRComment(
-            connectionWithDecrypt as any,
-            step.params.owner,
-            step.params.repo,
-            step.params.pullNumber,
-            step.params.comment
-          );
-          break;
-
+          
         default:
-          throw new Error(`Unsupported GitHub action: ${step.action}`);
+          naturalCommand = `Execute GitHub action: ${step.action} with parameters ${JSON.stringify(params)}`;
       }
-
-      loggingService.info('GitHub step executed successfully', {
+      
+      // Find relevant GitHub tools
+      const tools = await MCPClientService.findToolsForIntent(userId, naturalCommand, ['github']);
+      
+      if (tools.length === 0) {
+        throw new Error(`No GitHub tools available for action: ${step.action}`);
+      }
+      
+      // Execute via MCP
+      const result = await MCPClientService.executeWithAI(
+        userId,
+        tools[0].name,
+        naturalCommand,
+        {
+          step,
+          context,
+          parameters: params
+        }
+      );
+      
+      if (!result.success) {
+        throw new Error(result.error?.message || `Failed to execute GitHub action: ${step.action}`);
+      }
+      
+      loggingService.info('GitHub step executed successfully via MCP', {
         component: 'IntegrationOrchestratorService',
-        step: step.id,
-        action: step.action
-      });
-
-      // Extract important information from the result
-      let extractedData: any = {
-        integration: 'github',
+        stepId: step.id,
         action: step.action,
-        success: true
-      };
-
-      // Extract URLs and important data based on action
-      if (step.action === 'create' && result?.data?.html_url) {
-        extractedData.url = result.data.html_url;
-        extractedData.repoName = result.data.name;
-        extractedData.owner = result.data.owner?.login;
-        extractedData.message = `Repository "${result.data.name}" created successfully`;
-      } else if ((step.action === 'push' || step.action === 'commit') && result?.data) {
-        extractedData.url = result.data.html_url || result.data.url;
-        extractedData.path = result.data.path;
-        extractedData.sha = result.data.sha;
-        extractedData.message = `File "${result.data.path}" ${step.action === 'push' ? 'pushed' : 'committed'} successfully`;
-      } else if (step.action === 'create_pr' && result?.data?.html_url) {
-        extractedData.url = result.data.html_url;
-        extractedData.prNumber = result.data.number;
-        extractedData.message = `Pull request #${result.data.number} created successfully`;
-      }
-
-      // Include the full result for reference
-      extractedData.fullResult = result;
-
-      return extractedData;
+        tool: tools[0].name,
+        resultKeys: Object.keys(result.data || {})
+      });
+      
+      return result.data;
     } catch (error) {
-      loggingService.error('GitHub step failed', {
+      loggingService.error('Failed to execute GitHub step via MCP', {
         component: 'IntegrationOrchestratorService',
-        step: step.id,
+        stepId: step.id,
+        action: step.action,
         error: error instanceof Error ? error.message : String(error)
       });
       throw error;

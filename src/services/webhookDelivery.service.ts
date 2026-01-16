@@ -19,21 +19,11 @@ export class WebhookDeliveryService {
     private redisClient!: Redis;
     private bullConnection!: Redis; // dedicated connection for BullMQ
     
-    // Circuit breaker for Redis operations
-    private static redisFailureCount: number = 0;
-    private static readonly MAX_REDIS_FAILURES = 3;
-    private static readonly REDIS_CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
-    private static lastRedisFailureTime: number = 0;
-    
     // Circuit breaker for database operations
     private static dbFailureCount: number = 0;
     private static readonly MAX_DB_FAILURES = 5;
     private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
     private static lastDbFailureTime: number = 0;
-    
-    // Connection pool optimization
-    private static readonly MAX_RETRY_ATTEMPTS = 3;
-    private static readonly CONNECTION_TIMEOUT = 10000;
     
     private constructor() {
         this.initializeRedis().catch(error => {
@@ -729,28 +719,6 @@ export class WebhookDeliveryService {
     }
 
     /**
-     * Circuit breaker utilities for Redis operations
-     */
-    private static isRedisCircuitBreakerOpen(): boolean {
-        if (this.redisFailureCount >= this.MAX_REDIS_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastRedisFailureTime;
-            if (timeSinceLastFailure < this.REDIS_CIRCUIT_BREAKER_RESET_TIME) {
-                return true;
-            } else {
-                // Reset circuit breaker
-                this.redisFailureCount = 0;
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private static recordRedisFailure(): void {
-        this.redisFailureCount++;
-        this.lastRedisFailureTime = Date.now();
-    }
-
-    /**
      * Circuit breaker utilities for database operations
      */
     private static isDbCircuitBreakerOpen(): boolean {
@@ -777,8 +745,6 @@ export class WebhookDeliveryService {
      */
     static cleanup(): void {
         // Reset circuit breaker state
-        this.redisFailureCount = 0;
-        this.lastRedisFailureTime = 0;
         this.dbFailureCount = 0;
         this.lastDbFailureTime = 0;
     }

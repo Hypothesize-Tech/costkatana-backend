@@ -47,9 +47,6 @@ export class ProjectService {
     
     // ObjectId memoization cache
     private static objectIdCache = new Map<string, mongoose.Types.ObjectId>();
-    
-    // Date range cache for performance
-    private static dateRangeCache = new Map<string, Date>();
 
     /**
      * Initialize background processor

@@ -516,22 +516,6 @@ export class RequestFeedbackController {
         }
     }
 
-    /**
-     * Circuit breaker utilities for database operations
-     */
-    private static isDbCircuitBreakerOpen(): boolean {
-        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
-            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
-                return true;
-            } else {
-                // Reset circuit breaker
-                this.dbFailureCount = 0;
-                return false;
-            }
-        }
-        return false;
-    }
 
     private static recordDbFailure(): void {
         this.dbFailureCount++;

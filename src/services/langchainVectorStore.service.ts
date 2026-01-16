@@ -40,6 +40,10 @@ export class MongoDBVectorStore extends VectorStore {
         return 'mongodb';
     }
 
+    vectorstoreType(): string {
+        return 'mongodb';
+    }
+
     constructor(
         embeddings: Embeddings,
         config: MongoDBVectorStoreConfig = {}

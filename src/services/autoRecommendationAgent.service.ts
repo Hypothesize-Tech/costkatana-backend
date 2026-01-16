@@ -567,7 +567,7 @@ Focus on:
 Return valid JSON array of recommendations.`;
 
             const command = new InvokeModelCommand({
-                modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 contentType: 'application/json',
                 accept: 'application/json',
                 body: JSON.stringify({

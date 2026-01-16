@@ -131,7 +131,7 @@ export class AIRouterService {
         
         try {
             // Consume tokens
-            await SubscriptionService.consumeTokens(userIdStr, tokens, cost);
+            await SubscriptionService.consumeTokens(userIdStr, tokens);
 
             // Consume request
             await SubscriptionService.consumeRequest(userIdStr);
@@ -444,20 +444,20 @@ export class AIRouterService {
     private static mapToBedrockModel(model: string): string {
         const modelLower = model.toLowerCase();
 
-        // Map common OpenAI models to Bedrock Claude equivalents
+        // Map common OpenAI models to Bedrock Claude equivalents (using inference profiles)
         if (modelLower.includes('gpt-4') || modelLower.includes('gpt-5')) {
-            return 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+            return 'us.anthropic.claude-3-5-sonnet-20241022-v2:0';
         }
         if (modelLower.includes('gpt-3.5') || modelLower.includes('gpt-4o-mini')) {
-            return 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            return 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
         }
 
-        // Map Gemini models to Bedrock equivalents
+        // Map Gemini models to Bedrock equivalents (using inference profiles)
         if (modelLower.includes('gemini-pro') || modelLower.includes('gemini-1.5-pro')) {
-            return 'anthropic.claude-3-5-sonnet-20240620-v1:0';
+            return 'us.anthropic.claude-3-5-sonnet-20241022-v2:0';
         }
         if (modelLower.includes('gemini-flash') || modelLower.includes('gemini-2.0')) {
-            return 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            return 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
         }
 
         // Return original model if no mapping found (assume it's already a Bedrock model)

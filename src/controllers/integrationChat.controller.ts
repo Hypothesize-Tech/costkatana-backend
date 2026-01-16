@@ -101,7 +101,6 @@ export class IntegrationChatController {
       const query = typeof queryParams.query === 'string' ? queryParams.query : '';
       const integration = typeof queryParams.integration === 'string' ? queryParams.integration : undefined;
       const entityType = typeof queryParams.entityType === 'string' ? queryParams.entityType : undefined;
-      const entityId = typeof queryParams.entityId === 'string' ? queryParams.entityId : undefined;
 
       // Get user's active integrations
       const integrations = await IntegrationService.getUserIntegrations(userId, {

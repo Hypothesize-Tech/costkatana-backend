@@ -115,7 +115,7 @@ export class CortexAnalyticsService {
             const prompt = `Answer the following query in a comprehensive and detailed manner:\n\n${query}`;
             
             // Always use Claude 3.5 Haiku for baseline generation, regardless of input model
-            const bedrockModel = 'anthropic.claude-3-5-haiku-20241022-v1:0';
+            const bedrockModel = 'global.anthropic.claude-haiku-4-5-20251001-v1:0';
             
             const response = await AIRouterService.invokeModel(prompt, bedrockModel);
             return response || 'Unable to generate baseline answer';
@@ -136,7 +136,7 @@ export class CortexAnalyticsService {
     private static calculateTokenMetrics(
         baselineAnswer: string,
         cortexAnswer: string,
-        naturalLanguageAnswer: string
+        _naturalLanguageAnswer: string
     ): CortexImpactMetrics['tokenReduction'] {
         const withoutCortex = estimateTokens(baselineAnswer, AIProvider.AWSBedrock);
         const cortexTokens = estimateTokens(cortexAnswer, AIProvider.AWSBedrock);
@@ -189,7 +189,7 @@ Return ONLY a JSON object with these exact fields:
 
             const response = await AIRouterService.invokeModel(
                 analysisPrompt,
-                'anthropic.claude-3-5-haiku-20241022-v1:0'
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0'
             );
             
             const analysisJson = await AIRouterService.extractJson(response);

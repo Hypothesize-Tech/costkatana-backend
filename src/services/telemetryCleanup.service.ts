@@ -1,7 +1,6 @@
 import { Telemetry } from '../models/Telemetry';
 import { loggingService } from './logging.service';
 import cron from 'node-cron';
-import mongoose from 'mongoose';
 
 export interface CleanupStats {
     deletedCount: number;

@@ -6,7 +6,7 @@
  * to JSON, similar to Protocol Buffers compression.
  */
 
-import { CortexFrame, CortexFrameType, CortexPrimitive, CortexRole } from '../types/cortex.types';
+import { CortexFrame, CortexFrameType } from '../types/cortex.types';
 import { loggingService } from './logging.service';
 
 // ============================================================================
@@ -636,7 +636,7 @@ class BinaryWriter {
         this.writeByte(value & 0xFF);
     }
 
-    writeString(str: string, context: string): void {
+    writeString(str: string, _context: string): void {
         const strBuffer = Buffer.from(str, 'utf8');
         this.writeVarInt(strBuffer.length);
         this.writeBuffer(strBuffer);

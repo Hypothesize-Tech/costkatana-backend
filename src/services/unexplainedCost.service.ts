@@ -469,7 +469,6 @@ Respond in JSON format:
   async getTraceCostAttribution(
     userId: string,
     traceId: string,
-    workspaceId: string
   ): Promise<{
     trace_id: string;
     cost_attribution: {
@@ -553,7 +552,7 @@ Respond in JSON format:
    * Calculate baseline costs from historical data
    */
   private async calculateBaselineCosts(
-    userId: string,
+    _userId: string,
     workspaceId: string,
     timeframe: string
   ): Promise<{
@@ -671,7 +670,7 @@ Respond in JSON format:
    */
   private async generateCostStory(
     costDrivers: CostDriver[],
-    telemetryData: any,
+    _telemetryData: any,
     baselineCosts: any
   ): Promise<string> {
     try {
@@ -1898,7 +1897,7 @@ Consider the trends, historical volatility, and provide realistic estimates. Hig
    */
   private generateAnalysisFallbackCostStory(
     costDrivers: CostDriver[],
-    telemetryData: any,
+    _telemetryData: any,
     baselineCosts: any
   ): string {
     try {

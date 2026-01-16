@@ -145,7 +145,6 @@ class STSCredentialService {
   
   // Circuit breaker thresholds
   private readonly CIRCUIT_BREAKER_THRESHOLD = 5;
-  private readonly CIRCUIT_BREAKER_RESET_MS = 30000; // 30 seconds
   private readonly BACKOFF_BASE_MS = 1000;
   private readonly BACKOFF_MAX_MS = 30000;
   

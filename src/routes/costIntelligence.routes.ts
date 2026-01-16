@@ -52,7 +52,7 @@ router.get('/insights', async (req: Request, res: Response) => {
  * Get cost intelligence statistics
  * GET /api/cost-intelligence/stats
  */
-router.get('/stats', async (req: Request, res: Response) => {
+router.get("/stats", async (_req: Request, res: Response) => {
   try {
     const stats = costIntelligenceService.getStats();
 
@@ -75,7 +75,7 @@ router.get('/stats', async (req: Request, res: Response) => {
  * Start continuous analysis
  * POST /api/cost-intelligence/analysis/start
  */
-router.post('/analysis/start', async (req: Request, res: Response) => {
+router.post("/analysis/start", async (_req: Request, res: Response) => {
   try {
     costIntelligenceService.startContinuousAnalysis();
 
@@ -98,7 +98,7 @@ router.post('/analysis/start', async (req: Request, res: Response) => {
  * Stop continuous analysis
  * POST /api/cost-intelligence/analysis/stop
  */
-router.post('/analysis/stop', async (req: Request, res: Response) => {
+router.post("/analysis/stop", async (_req: Request, res: Response) => {
   try {
     costIntelligenceService.stopContinuousAnalysis();
 

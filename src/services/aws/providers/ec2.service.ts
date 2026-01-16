@@ -8,7 +8,6 @@ import {
   RebootInstancesCommand,
   RunInstancesCommand,
   DescribeImagesCommand,
-  CreateTagsCommand,
 } from '@aws-sdk/client-ec2';
 import { 
   CloudWatchClient, 

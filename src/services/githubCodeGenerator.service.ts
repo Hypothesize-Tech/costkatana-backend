@@ -148,7 +148,7 @@ export class GitHubCodeGeneratorService {
         let autoFixCount = 0;
 
         // Validate and fix each file
-        integrationCode.files = integrationCode.files.map((file, index) => {
+        integrationCode.files = integrationCode.files.map((file) => {
             const originalPath = file.path;
             let modified = false;
 

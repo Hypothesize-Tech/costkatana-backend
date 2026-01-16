@@ -958,12 +958,6 @@ export class PredictiveIntelligenceController {
         PredictiveIntelligenceController.lastServiceFailureTime = Date.now();
     }
 
-    /**
-     * Background processing utilities
-     */
-    private static queueBackgroundOperation(operation: () => Promise<void>): void {
-        this.backgroundQueue.push(operation);
-    }
 
     private static startBackgroundProcessor(): void {
         this.backgroundProcessor = setInterval(async () => {

@@ -56,6 +56,11 @@ export interface AgentResponse {
         knowledgeContextLength?: number;
         fromCache?: boolean;
         langchainEnhanced?: boolean;
+        webSearchUsed?: boolean;
+        aiWebSearchDecision?: {
+            required: boolean;
+            reason: string;
+        };
     };
     thinking?: {
         title: string;
@@ -160,7 +165,7 @@ export class AgentService {
             
             // Create specialized Langchain agents
             this.langchainAgents.set('tool_coordinator', new ChatBedrockConverse({
-                model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 region: process.env.AWS_REGION || 'us-east-1',
                 temperature: 0.5,
                 maxTokens: 4000,
@@ -1780,9 +1785,39 @@ export class AgentService {
             await this.addVercelToolsIfConnected(queryData.userId);
 
             // Get all available tools with descriptions
-            const availableTools = this.getAllToolsWithDescriptions();
+            let availableTools = this.getAllToolsWithDescriptions();
 
-            // Create tool executor function
+            // 🤖 AUTONOMOUS WEB SEARCH DECISION
+            // Let AI analyze the query first to determine if web search is needed
+            loggingService.info('🔍 AI analyzing query for web search requirement', {
+                query: queryData.query.substring(0, 100)
+            });
+
+            const initialAnalysis = await multiLlmOrchestratorService.analyzeQuery(queryData.query);
+
+            // If AI determines web search is needed, dynamically add web_search tool
+            if (initialAnalysis.requiresWebSearch) {
+                loggingService.info('✅ AI determined web search is required', {
+                    reason: initialAnalysis.searchReason,
+                    confidence: initialAnalysis.confidence
+                });
+
+                // Check if web_search tool already exists in available tools
+                if (!availableTools.find(t => t.name === 'web_search')) {
+                    availableTools.push({
+                        name: 'web_search',
+                        description: `Enterprise-safe web search powered by Google Custom Search API. Use for real-time/external information. Input should be a JSON string with: {"operation": "search", "query": "your search query", "options": {"deepContent": true/false, "maxResults": 10, "costDomains": true/false}}`
+                    });
+
+                    loggingService.info('🌐 Web search tool dynamically added to available tools');
+                }
+            } else {
+                loggingService.info('⏭️  AI determined web search NOT needed', {
+                    reason: 'Query can be handled by knowledge base or internal tools'
+                });
+            }
+
+            // Create tool executor function with web_search support
             const toolExecutor = async (toolName: string, params?: Record<string, any>) => {
                 try {
                     const tool = this.getToolInstance(toolName);
@@ -1818,7 +1853,12 @@ export class AgentService {
                 metadata: {
                     executionTime,
                     sources: orchestrationResult.toolSelection.selectedTools.map(t => t.name),
-                    fromCache: false
+                    fromCache: false,
+                    webSearchUsed: orchestrationResult.toolSelection.selectedTools.some(t => t.name === 'web_search'),
+                    aiWebSearchDecision: {
+                        required: initialAnalysis.requiresWebSearch,
+                        reason: initialAnalysis.searchReason || 'Not needed'
+                    }
                 },
                 thinking: {
                     title: `Query Analysis: ${orchestrationResult.analysis.intent}`,
@@ -1836,7 +1876,8 @@ export class AgentService {
                 userId: queryData.userId,
                 executionTime,
                 toolsUsed: orchestrationResult.toolSelection.selectedTools.length,
-                confidence: orchestrationResult.confidence
+                confidence: orchestrationResult.confidence,
+                webSearchUsed: response.metadata?.webSearchUsed
             });
 
             return response;

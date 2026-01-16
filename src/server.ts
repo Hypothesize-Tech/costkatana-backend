@@ -16,14 +16,6 @@ import { connectDatabase } from './config/database';
 import { errorHandler, notFoundHandler, securityLogger } from './middleware/error.middleware';
 import { sanitizeInput } from './middleware/validation.middleware';
 import { traceInterceptor } from './middleware/trace.middleware';
-import {
-    trackApiRequests,
-    trackAuthEvents,
-    trackAnalyticsEvents,
-    trackProjectEvents,
-    trackUserSession,
-    trackOptimizationEvents
-} from './middleware/mixpanel.middleware';
 import { trackUserSessionActivity } from './middleware/userSession.middleware';
 import { stream } from './utils/logger';
 import { apiRouter } from './routes';
@@ -609,6 +601,35 @@ export const startServer = async () => {
                 operation: 'startServer',
                 type: 'server_startup',
                 step: 'faiss_failed',
+                error: error instanceof Error ? error.message : 'Unknown error',
+                stack: error instanceof Error ? error.stack : undefined
+            });
+        }
+        
+        // Initialize MCP (Model Context Protocol) - Must happen before webhook service
+        try {
+            loggingService.info('Step 5.7: Initializing MCP integration tools', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'init_mcp'
+            });
+
+            const { initializeMCP } = await import('./mcp/init');
+            initializeMCP();
+            
+            loggingService.info('✅ MCP integration tools initialized successfully', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'mcp_initialized'
+            });
+        } catch (error) {
+            loggingService.warn('⚠️ MCP initialization failed', {
+                component: 'Server',
+                operation: 'startServer',
+                type: 'server_startup',
+                step: 'mcp_failed',
                 error: error instanceof Error ? error.message : 'Unknown error',
                 stack: error instanceof Error ? error.stack : undefined
             });

@@ -266,8 +266,8 @@ export class CortexGatewayMiddleware {
         coreModel: 'anthropic.claude-3-opus-20240229-v1:0' // Requires special access
       },
       'cost-optimized': {
-        encoderModel: 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        decoderModel: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        encoderModel: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        decoderModel: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         coreModel: 'amazon.nova-lite-v1:0'
       }
     };

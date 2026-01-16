@@ -636,58 +636,6 @@ export class GovernedAgentService {
   }
 
   /**
-   * Create a fallback plan when AI generation fails
-   */
-  private static createFallbackPlan(task: GovernedTask & Document): ExecutionPlan {
-    const integrations = task.classification?.integrations ?? [];
-    
-    const steps: PlanStep[] = [];
-    let stepId = 1;
-
-    // Add steps based on integrations
-    if (integrations.includes('github')) {
-      steps.push({
-        id: `step_${stepId++}`,
-        tool: 'github',
-        action: 'push',
-        params: {},
-        description: 'Push code to GitHub repository',
-        estimatedDuration: 30,
-        dependencies: []
-      });
-    }
-
-    if (integrations.includes('vercel')) {
-      const deps = integrations.includes('github') ? [`step_${stepId - 1}`] : [];
-      steps.push({
-        id: `step_${stepId++}`,
-        tool: 'vercel',
-        action: 'deploy',
-        params: {},
-        description: 'Deploy frontend to Vercel',
-        estimatedDuration: 120,
-        dependencies: deps
-      });
-    }
-
-    return {
-      phases: [{
-        name: 'Execution',
-        approvalRequired: true,
-        riskLevel: task.classification?.riskLevel ?? 'medium',
-        steps
-      }],
-      estimatedDuration: steps.reduce((sum, step) => sum + step.estimatedDuration, 0),
-      riskAssessment: {
-        level: task.classification?.riskLevel ?? 'medium',
-        reasons: ['Fallback plan - AI generation unavailable'],
-        requiresApproval: true
-      },
-      rollbackPlan: 'Manual rollback required'
-    };
-  }
-
-  /**
    * Select optimal AI model based on task complexity and type
    */
   private static selectModelForTask(task: GovernedTask & Document): string {

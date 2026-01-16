@@ -44,7 +44,6 @@ export interface IntegrationPointRecommendation {
  * Provides cross-repo analysis and recommendations
  */
 export class MultiRepoIntelligenceService {
-    private static readonly SIMILARITY_THRESHOLD = 0.7;
     private static readonly UTILITY_DIRECTORIES = ['utils', 'shared', 'lib', 'common', 'helpers', 'utilities'];
 
     /**

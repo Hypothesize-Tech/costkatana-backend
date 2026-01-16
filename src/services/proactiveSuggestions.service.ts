@@ -12,7 +12,6 @@
 import { loggingService } from './logging.service';
 import { redisService } from './redis.service';
 import { RealtimeUpdateService } from './realtime-update.service';
-import { LearningLoopService } from './learningLoop.service';
 import { OptimizationFeedbackLoopService } from './optimizationFeedbackLoop.service';
 import mongoose from 'mongoose';
 

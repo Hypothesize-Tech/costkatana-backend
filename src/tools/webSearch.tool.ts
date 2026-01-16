@@ -100,7 +100,30 @@ export class WebSearchTool extends Tool {
         const startTime = Date.now();
         
         try {
-            const request: WebSearchRequest = JSON.parse(input);
+            let request: WebSearchRequest;
+            
+            // Try to parse input as JSON
+            try {
+                request = JSON.parse(input);
+            } catch (parseError) {
+                // If parsing fails, treat input as a simple search query
+                loggingService.warn('WebSearchTool received non-JSON input, treating as search query', {
+                    input: input.substring(0, 200)
+                });
+                request = {
+                    operation: 'search',
+                    query: input
+                };
+            }
+            
+            // Validate and set default operation if missing
+            if (!request.operation) {
+                loggingService.warn('WebSearchTool operation missing, defaulting to search', {
+                    input: input.substring(0, 200)
+                });
+                request.operation = 'search';
+                request.query = request.query || input;
+            }
             
             loggingService.info('Web search operation initiated', {
                 operation: request.operation,
@@ -344,42 +367,6 @@ export class WebSearchTool extends Tool {
         };
 
         return this.performSearch(request);
-    }
-
-    /**
-     * Summarize content using AI
-     */
-    private async summarizeContent(content: string, context: string): Promise<string> {
-        try {
-            // Truncate content if too long
-            const maxLength = 10000;
-            const truncatedContent = content.length > maxLength 
-                ? content.substring(0, maxLength) + '...' 
-                : content;
-
-            const prompt = `Summarize the following web content in the context of: "${context}"
-
-Content:
-${truncatedContent}
-
-Provide a concise, informative summary focusing on key facts and insights relevant to the query context.`;
-
-            const response = await this.summarizer.invoke([
-                { role: 'user', content: prompt }
-            ]);
-
-            const summary = typeof response.content === 'string' 
-                ? response.content 
-                : JSON.stringify(response.content);
-
-            return summary.trim();
-
-        } catch (error) {
-            loggingService.warn('Content summarization failed', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            return 'Summary generation failed';
-        }
     }
 }
 

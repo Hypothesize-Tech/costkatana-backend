@@ -92,7 +92,7 @@ export function getModelNameVariations(model: string): string[] {
     const normalized = normalizeModelName(model);
     const variations = [normalized, model.toLowerCase()];
     if (normalized.includes('claude-3-5-haiku')) {
-        variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0', 'us.anthropic.claude-3-5-haiku-20241022-v1:0');
+        variations.push('claude-3-5-haiku', 'claude-3-5-haiku-20241022-v1:0', 'global.anthropic.claude-haiku-4-5-20251001-v1:0', 'us.global.anthropic.claude-haiku-4-5-20251001-v1:0');
     }
     if (normalized.includes('claude-3-5-sonnet')) {
         variations.push('claude-3-5-sonnet', 'claude-3-5-sonnet-20241022-v1:0', 'anthropic.claude-sonnet-4-20250514-v1:0');
@@ -104,7 +104,7 @@ export function getModelNameVariations(model: string): string[] {
         variations.push('claude-3-sonnet', 'claude-3-sonnet-20240229-v1:0', 'anthropic.claude-3-sonnet-20240229-v1:0');
     }
     if (normalized.includes('claude-3-haiku')) {
-        variations.push('claude-3-haiku', 'claude-3-5-haiku-20241022-v1:0', 'anthropic.claude-3-5-haiku-20241022-v1:0');
+        variations.push('claude-3-haiku', 'claude-3-5-haiku-20241022-v1:0', 'global.anthropic.claude-haiku-4-5-20251001-v1:0');
     }
     if (normalized.includes('command-a')) {
         variations.push('command-a', 'command-a-03-2025');

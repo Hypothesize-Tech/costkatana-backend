@@ -130,7 +130,7 @@ export function formatGmailMessagesResponse(messages: any[], action: 'list' | 's
     type: 'email' as const
   }));
 
-  const emailList = messages.map((msg, idx) => {
+  const emailList = messages.map((msg) => {
     const from = msg.from || 'Unknown';
     const subject = msg.subject || msg.snippet?.substring(0, 50) || '(No subject)';
     const date = msg.date ? new Date(msg.date).toLocaleDateString() : '';

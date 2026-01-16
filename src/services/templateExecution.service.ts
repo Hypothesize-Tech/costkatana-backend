@@ -272,7 +272,6 @@ export class TemplateExecutionService {
             promptTokens,
             completionTokens,
             actualCost,
-            execution._id
         );
 
         // Update template statistics
@@ -437,7 +436,6 @@ export class TemplateExecutionService {
         completion: string,
         promptTokens: number,
         completionTokens: number,
-        cost: number,
         templateExecutionId: any
     ): Promise<void> {
         try {

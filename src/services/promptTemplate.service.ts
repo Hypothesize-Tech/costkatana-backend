@@ -79,12 +79,6 @@ export class PromptTemplateService {
     private static userProjectCache = new Map<string, { projects: string[]; timestamp: number }>();
     private static readonly PROJECT_CACHE_TTL = 300000; // 5 minutes
     
-    // Circuit breaker for AI services
-    private static aiFailureCount: number = 0;
-    private static readonly MAX_AI_FAILURES = 5;
-    private static readonly CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
-    private static lastAiFailureTime: number = 0;
-    
     /**
      * Initialize background processor
      */
@@ -1087,14 +1081,6 @@ export class PromptTemplateService {
                 throw new Error('Unauthorized: Cannot edit this template');
             }
 
-            // Store original version history
-            const originalVersion = {
-                content: template.content,
-                metadata: template.metadata,
-                version: template.version,
-                updatedAt: template.updatedAt
-            };
-
             // Update with optimized content
             template.content = optimizedContent;
             template.version = template.version + 1;
@@ -1178,28 +1164,6 @@ export class PromptTemplateService {
         });
 
         return projectIds;
-    }
-
-    /**
-     * Circuit breaker utilities for AI services
-     */
-    private static isAiCircuitBreakerOpen(): boolean {
-        if (this.aiFailureCount >= this.MAX_AI_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastAiFailureTime;
-            if (timeSinceLastFailure < this.CIRCUIT_BREAKER_RESET_TIME) {
-                return true;
-            } else {
-                // Reset circuit breaker
-                this.aiFailureCount = 0;
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private static recordAiFailure(): void {
-        this.aiFailureCount++;
-        this.lastAiFailureTime = Date.now();
     }
 
     /**

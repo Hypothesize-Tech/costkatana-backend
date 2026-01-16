@@ -885,7 +885,7 @@ export class IntegrationChatService {
    */
   private static async executeJiraCommand(
     command: IntegrationCommand,
-    integration: IIntegration,
+    _integration: IIntegration,
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
     const siteUrlOrCloudId = credentials.cloudId || credentials.siteUrl || '';
@@ -1142,7 +1142,7 @@ export class IntegrationChatService {
    */
   private static async executeLinearCommand(
     command: IntegrationCommand,
-    integration: IIntegration,
+    _integration: IIntegration,
     credentials: IntegrationCredentials
   ): Promise<IntegrationCommandResult> {
     const accessToken = credentials.accessToken || '';

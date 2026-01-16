@@ -695,7 +695,7 @@ export class MemoryService {
     /**
      * Async conversation pattern analysis for background processing
      */
-    private async analyzeConversationPatternsAsync(userId: string, conversations: any[]): Promise<string> {
+    private async analyzeConversationPatternsAsync(_userId: string, conversations: any[]): Promise<string> {
         try {
             // Use streaming approach for large conversation sets
             const queries = conversations.map(conv => conv.query).slice(0, 10);
@@ -1426,7 +1426,7 @@ Return only the enhanced query, no other text.`;
     /**
      * Perform vector search on high-value messages
      */
-    private async performVectorMessageSearch(userId: string, query: string, limit: number): Promise<any[]> {
+    private async performVectorMessageSearch(_userId: string, query: string, limit: number): Promise<any[]> {
         try {
             const pipeline = [
                 {

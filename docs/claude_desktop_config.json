@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "cost-katana": {
+      "command": "npx",
+      "args": [
+        "ts-node",
+        "src/cli/mcp-server.ts"
+      ],
+      "env": {
+        "COST_KATANA_API_KEY": "YOUR_API_KEY_HERE",
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}

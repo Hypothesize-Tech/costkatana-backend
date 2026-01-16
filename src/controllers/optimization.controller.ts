@@ -16,8 +16,8 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
     
     const modelMap: Record<string, string> = {
         // Claude 3.5 models (upgraded)
-        'claude-3-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
-        'claude-3-5-haiku': 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        'claude-3-haiku': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        'claude-3-5-haiku': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         'claude-3-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'claude-3-5-sonnet': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         
@@ -31,7 +31,7 @@ const mapToFullModelId = (shortName?: string): string | undefined => {
         'nova-micro': 'amazon.nova-micro-v1:0',
         
         // Full model IDs (pass through)
-        'anthropic.claude-3-5-haiku-20241022-v1:0': 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         'anthropic.claude-3-5-sonnet-20240620-v1:0': 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         'anthropic.claude-opus-4-1-20250805-v1:0': 'anthropic.claude-opus-4-1-20250805-v1:0',
         'amazon.nova-pro-v1:0': 'amazon.nova-pro-v1:0'
@@ -1382,7 +1382,7 @@ export class OptimizationController {
     /**
      * Get Cortex cache statistics
      */
-    static async getCortexCacheStats(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getCortexCacheStats(_req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { CortexCacheService } = await import('../services/cortexCache.service');
             const stats = CortexCacheService.getCacheStats();
@@ -1410,7 +1410,7 @@ export class OptimizationController {
     /**
      * Clear Cortex cache (admin endpoint)
      */
-    static async clearCortexCache(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async clearCortexCache(_req: any, res: Response, next: NextFunction): Promise<void> {
         try {
             const { CortexCacheService } = await import('../services/cortexCache.service');
             CortexCacheService.clearCache();

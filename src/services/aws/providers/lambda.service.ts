@@ -1,4 +1,4 @@
-import { LambdaClient, ListFunctionsCommand, GetFunctionCommand, GetFunctionConfigurationCommand, UpdateFunctionConfigurationCommand, ListTagsCommand, CreateFunctionCommand, TagResourceCommand } from '@aws-sdk/client-lambda';
+import { LambdaClient, ListFunctionsCommand, GetFunctionCommand, UpdateFunctionConfigurationCommand, ListTagsCommand, CreateFunctionCommand } from '@aws-sdk/client-lambda';
 import { IAMClient, GetRoleCommand, CreateRoleCommand, AttachRolePolicyCommand } from '@aws-sdk/client-iam';
 import { loggingService } from '../../logging.service';
 import { stsCredentialService } from '../stsCredential.service';

@@ -4,21 +4,18 @@ import { Conversation, IConversation, ChatMessage } from '../models';
 import { DocumentModel } from '../models/Document';
 import { Types } from 'mongoose';
 import mongoose from 'mongoose';
-// Enhanced Langchain imports for world-class multi-agent system
 import { StateGraph, Annotation } from '@langchain/langgraph';
 import { ChatBedrockConverse } from '@langchain/aws';
 import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages';
 import { Tool } from '@langchain/core/tools';
 import { AgentExecutor } from 'langchain/agents';
-// import { agentService } from './agent.service';
-// import { conversationalFlowService } from './conversationFlow.service';
 import { multiAgentFlowService } from './multiAgentFlow.service';
-// import { TrendingDetectorService } from './trendingDetector.service';
 import { loggingService } from './logging.service';
 import { IntegrationChatService, ParsedMention } from './integrationChat.service';
 import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
 import { GoogleService } from './google.service';
 import { TextExtractionService } from './textExtraction.service';
+import { IntegrationType } from '../mcp/types/permission.types';
 
 // Conversation Context Types
 export interface ConversationContext {
@@ -49,6 +46,8 @@ const LangchainChatState = Annotation.Root({
         reducer: (x, y) => y ?? x,
         default: () => 'coordinator',
     }),
+    userId: Annotation<string>(),
+    userMessage: Annotation<string>(),
     userIntent: Annotation<string>(),
     contextData: Annotation<Record<string, any>>(),
     integrationContext: Annotation<{
@@ -160,13 +159,27 @@ export interface ChatMessageResponse {
         tokenCount?: number;
     };
     // MongoDB integration fields
-    mongodbSelectedViewType?: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain';
+    mongodbSelectedViewType?: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain' | 'list';
     integrationSelectorData?: any;
     mongodbIntegrationData?: any;
+    // All integration data fields
+    githubIntegrationData?: any;
+    vercelIntegrationData?: any;
+    slackIntegrationData?: any;
+    discordIntegrationData?: any;
+    jiraIntegrationData?: any;
+    linearIntegrationData?: any;
+    googleIntegrationData?: any;
+    awsIntegrationData?: any;
     formattedResult?: {
-        type: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'error' | 'empty' | 'text' | 'explain';
+        type: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'error' | 'empty' | 'text' | 'explain' | 'list';
         data: any;
     };
+    // Agent metadata
+    agentPath?: string[];
+    optimizationsApplied?: string[];
+    cacheHit?: boolean;
+    riskLevel?: string;
 }
 
 export interface ConversationResponse {
@@ -275,14 +288,53 @@ export interface ChatSendMessageResponse {
         progress?: number;
         currentStep?: string;
         prUrl?: string;
+        issueUrl?: string;
+        commitSha?: string;
+        branchName?: string;
     };
     // Vercel integration data
-    vercelIntegrationData?: any;
+    vercelIntegrationData?: {
+        deploymentUrl?: string;
+        deploymentId?: string;
+        status?: string;
+    };
     // MongoDB integration data
     mongodbIntegrationData?: any;
     resultType?: string;
     formattedResult?: any;
     suggestions?: string[];
+    // Google integration data
+    googleIntegrationData?: any;
+    // Slack integration data
+    slackIntegrationData?: {
+        channelId?: string;
+        messageTs?: string;
+        permalink?: string;
+    };
+    // Discord integration data
+    discordIntegrationData?: {
+        messageId?: string;
+        channelId?: string;
+    };
+    // Jira integration data
+    jiraIntegrationData?: {
+        issueKey?: string;
+        issueUrl?: string;
+    };
+    // Linear integration data
+    linearIntegrationData?: {
+        issueId?: string;
+        issueUrl?: string;
+    };
+    // MCP metadata
+    mcpToolsUsed?: string[];
+    mcpExecutionTime?: number;
+    // Connection requirement (when integration not connected)
+    requiresConnection?: {
+        integration: string;
+        message: string;
+        connectUrl: string;
+    };
     // Template metadata
     templateUsed?: {
         id: string;
@@ -937,7 +989,7 @@ export class ChatService {
     /**
      * Determine if we should generate options for IntegrationSelector
      */
-    private static shouldGenerateOptions(question: string, context: any): boolean {
+    private static shouldGenerateOptions(question: string, _context: any): boolean {
         const lowerQuestion = question.toLowerCase();
         
         // Questions that benefit from options
@@ -1013,51 +1065,97 @@ export class ChatService {
     }
 
     /**
-     * AWS Integration Agent - Advanced AWS operations
+     * AWS Integration Agent - Advanced AWS operations (using Vercel MCP)
      */
     private static async awsIntegrationAgent(state: LangchainChatStateType): Promise<Partial<LangchainChatStateType>> {
         try {
-            loggingService.info('☁️ AWS Integration Agent executing advanced operations');
+            loggingService.info('☁️ AWS Integration Agent executing via Vercel MCP');
             
-            // Use the AWS specialist model
-            const model = this.langchainModels.get('aws_specialist');
-            if (!model) throw new Error('AWS specialist model not found');
-
-            const awsPrompt = new HumanMessage(`Execute AWS integration operations autonomously:
+            const userId = state.userId;
+            const userMessage = state.userMessage;
             
-            User Intent: ${state.userIntent}
-            Context: ${JSON.stringify(state.contextData, null, 2)}
+            // Import MCP client
+            const { MCPClientService } = await import('./mcp-client.service');
             
-            Perform autonomous AWS operations:
-            1. Cost optimization analysis
-            2. Resource management recommendations
-            3. Security best practices implementation
-            4. Infrastructure automation suggestions
-            5. Integration with other services coordination
+            // Initialize MCP with userId (JWT authentication)
+            const initialized = await MCPClientService.initialize(userId);
+            if (!initialized) {
+                loggingService.warn('Failed to initialize MCP for AWS/Vercel agent', { userId });
+                return {
+                    currentAgent: 'aws_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        aws: {
+                            error: 'Failed to initialize integration system',
+                        }
+                    }
+                };
+            }
             
-            Provide detailed AWS action plan and execute where possible.`);
-
-            const response = await model.invoke([awsPrompt]);
-            const awsActions = response.content as string;
-
+            // Find Vercel tools for deployment operations
+            const tools = await MCPClientService.findToolsForIntent(
+                userId,
+                userMessage,
+                ['vercel'] // Using Vercel as the deployment platform
+            );
+            
+            if (tools.length === 0) {
+                loggingService.warn('No Vercel tools found for deployment intent', { userId, userMessage });
+                return {
+                    currentAgent: 'aws_integration',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        aws: {
+                            summary: 'No deployment tools available for this request',
+                            autonomous: false
+                        }
+                    }
+                };
+            }
+            
+            // Execute the most relevant tool via MCP
+            const result = await MCPClientService.executeWithAI(
+                userId,
+                tools[0].name,
+                userMessage,
+                state.contextData
+            );
+            
+            if (!result.success) {
+                loggingService.error('Vercel MCP tool execution failed', {
+                    error: result.error,
+                    tool: tools[0].name
+                });
+                return {
+                    currentAgent: 'aws_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        aws: {
+                            error: result.error?.message || 'Failed to execute deployment action',
+                        }
+                    }
+                };
+            }
+            
             return {
                 currentAgent: 'aws_integration',
                 integrationContext: {
                     ...state.integrationContext,
                     aws: {
-                        actions: awsActions,
-                        summary: 'Advanced AWS operations executed',
-                        optimizations: ['cost_analysis', 'security_hardening', 'resource_optimization'],
-                        autonomous: true
+                        actions: result.data?.message || 'Deployment action completed',
+                        summary: 'Deployment operations executed via Vercel MCP',
+                        optimizations: ['vercel_deployment'],
+                        autonomous: true,
+                        result: result.data
                     }
                 },
                 autonomousDecisions: [
                     ...(state.autonomousDecisions || []),
-                    'Executed AWS integration operations autonomously'
+                    `Executed Vercel ${tools[0].name} via MCP`
                 ]
             };
         } catch (error) {
-            loggingService.error('❌ AWS integration agent failed', { error });
+            loggingService.error('❌ AWS/Vercel integration agent failed', { error });
             return { currentAgent: 'aws_error' };
         }
     }
@@ -1067,43 +1165,89 @@ export class ChatService {
      */
     private static async googleIntegrationAgent(state: LangchainChatStateType): Promise<Partial<LangchainChatStateType>> {
         try {
-            loggingService.info('🔍 Google Integration Agent executing workspace operations');
+            loggingService.info('🔍 Google Integration Agent executing via MCP');
             
-            // Use the Google specialist model
-            const model = this.langchainModels.get('google_specialist');
-            if (!model) throw new Error('Google specialist model not found');
-
-            const googlePrompt = new HumanMessage(`Execute Google Workspace and Cloud operations:
+            const userId = state.userId;
+            const userMessage = state.userMessage;
             
-            User Intent: ${state.userIntent}
-            Context: ${JSON.stringify(state.contextData, null, 2)}
+            // Import MCP client
+            const { MCPClientService } = await import('./mcp-client.service');
             
-            Autonomous Google operations:
-            1. Workspace automation (Gmail, Drive, Calendar, Docs, Sheets)
-            2. Document processing and collaboration
-            3. Meeting and calendar management
-            4. Cloud services integration
-            5. AI/ML services coordination
+            // Initialize MCP with userId (JWT authentication)
+            const initialized = await MCPClientService.initialize(userId);
+            if (!initialized) {
+                loggingService.warn('Failed to initialize MCP for Google agent', { userId });
+                return {
+                    currentAgent: 'google_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        google: {
+                            error: 'Failed to initialize integration system',
+                        }
+                    }
+                };
+            }
             
-            Execute intelligent Google operations and provide comprehensive integration.`);
-
-            const response = await model.invoke([googlePrompt]);
-            const googleActions = response.content as string;
-
+            // Find Google tools for the intent
+            const tools = await MCPClientService.findToolsForIntent(
+                userId,
+                userMessage,
+                ['google']
+            );
+            
+            if (tools.length === 0) {
+                loggingService.warn('No Google tools found for intent', { userId, userMessage });
+                return {
+                    currentAgent: 'google_integration',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        google: {
+                            summary: 'No Google Workspace tools available for this request',
+                            autonomous: false
+                        }
+                    }
+                };
+            }
+            
+            // Execute the most relevant tool via MCP
+            const result = await MCPClientService.executeWithAI(
+                userId,
+                tools[0].name,
+                userMessage,
+                state.contextData
+            );
+            
+            if (!result.success) {
+                loggingService.error('Google MCP tool execution failed', {
+                    error: result.error,
+                    tool: tools[0].name
+                });
+                return {
+                    currentAgent: 'google_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        google: {
+                            error: result.error?.message || 'Failed to execute Google Workspace action',
+                        }
+                    }
+                };
+            }
+            
             return {
                 currentAgent: 'google_integration',
                 integrationContext: {
                     ...state.integrationContext,
                     google: {
-                        actions: googleActions,
-                        summary: 'Google Workspace operations executed',
-                        services: ['gmail', 'drive', 'calendar', 'docs', 'sheets'],
-                        autonomous: true
+                        actions: result.data?.message || 'Google Workspace action completed',
+                        summary: 'Google Workspace operations executed via MCP',
+                        services: ['mcp_execution'],
+                        autonomous: true,
+                        result: result.data
                     }
                 },
                 autonomousDecisions: [
                     ...(state.autonomousDecisions || []),
-                    'Executed Google integration operations autonomously'
+                    `Executed Google ${tools[0].name} via MCP`
                 ]
             };
         } catch (error) {
@@ -1117,43 +1261,89 @@ export class ChatService {
      */
     private static async githubIntegrationAgent(state: LangchainChatStateType): Promise<Partial<LangchainChatStateType>> {
         try {
-            loggingService.info('🐙 GitHub Integration Agent executing development operations');
+            loggingService.info('🐙 GitHub Integration Agent executing via MCP');
             
-            // Use the GitHub specialist model
-            const model = this.langchainModels.get('github_specialist');
-            if (!model) throw new Error('GitHub specialist model not found');
-
-            const githubPrompt = new HumanMessage(`Execute GitHub and development workflow operations:
+            const userId = state.userId;
+            const userMessage = state.userMessage;
             
-            User Intent: ${state.userIntent}
-            Context: ${JSON.stringify(state.contextData, null, 2)}
+            // Import MCP client
+            const { MCPClientService } = await import('./mcp-client.service');
             
-            Autonomous GitHub operations:
-            1. Repository analysis and code optimization
-            2. CI/CD pipeline management
-            3. Pull request and issue automation
-            4. Code quality assessment
-            5. Development workflow optimization
+            // Initialize MCP with userId (JWT authentication)
+            const initialized = await MCPClientService.initialize(userId);
+            if (!initialized) {
+                loggingService.warn('Failed to initialize MCP for GitHub agent', { userId });
+                return {
+                    currentAgent: 'github_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        github: {
+                            error: 'Failed to initialize integration system',
+                        }
+                    }
+                };
+            }
             
-            Execute intelligent GitHub operations and coordinate with DevOps workflows.`);
-
-            const response = await model.invoke([githubPrompt]);
-            const githubActions = response.content as string;
-
+            // Find GitHub tools for the intent
+            const tools = await MCPClientService.findToolsForIntent(
+                userId,
+                userMessage,
+                ['github']
+            );
+            
+            if (tools.length === 0) {
+                loggingService.warn('No GitHub tools found for intent', { userId, userMessage });
+                return {
+                    currentAgent: 'github_integration',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        github: {
+                            summary: 'No GitHub tools available for this request',
+                            autonomous: false
+                        }
+                    }
+                };
+            }
+            
+            // Execute the most relevant tool via MCP
+            const result = await MCPClientService.executeWithAI(
+                userId,
+                tools[0].name,
+                userMessage,
+                state.contextData
+            );
+            
+            if (!result.success) {
+                loggingService.error('GitHub MCP tool execution failed', {
+                    error: result.error,
+                    tool: tools[0].name
+                });
+                return {
+                    currentAgent: 'github_error',
+                    integrationContext: {
+                        ...state.integrationContext,
+                        github: {
+                            error: result.error?.message || 'Failed to execute GitHub action',
+                        }
+                    }
+                };
+            }
+            
             return {
                 currentAgent: 'github_integration',
                 integrationContext: {
                     ...state.integrationContext,
                     github: {
-                        actions: githubActions,
-                        summary: 'GitHub development operations executed',
-                        workflows: ['code_analysis', 'ci_cd', 'quality_assessment'],
-                        autonomous: true
+                        actions: result.data?.message || 'GitHub action completed',
+                        summary: 'GitHub operations executed via MCP',
+                        workflows: ['mcp_execution'],
+                        autonomous: true,
+                        result: result.data
                     }
                 },
                 autonomousDecisions: [
                     ...(state.autonomousDecisions || []),
-                    'Executed GitHub integration operations autonomously'
+                    `Executed GitHub ${tools[0].name} via MCP`
                 ]
             };
         } catch (error) {
@@ -1380,7 +1570,7 @@ export class ChatService {
 
     // =================== HELPER METHODS ===================
 
-    private static analyzeUserIntent(message: string, analysis: string): string {
+    private static analyzeUserIntent(message: string, _analysis: string): string {
         const lowerMessage = message.toLowerCase();
         
         if (lowerMessage.includes('strategy') || lowerMessage.includes('plan')) {
@@ -1461,7 +1651,7 @@ export class ChatService {
         ];
     }
 
-    private static generateAdaptiveQuestions(message: string, context: any): string[] {
+    private static generateAdaptiveQuestions(message: string, _context: any): string[] {
         return [
             `Based on "${message}", what specific outcomes are you looking for?`,
             'Are there any additional requirements or constraints?',
@@ -2154,17 +2344,64 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                 useMultiAgent: request.useMultiAgent
             });
 
-            loggingService.info('⚡ Using optimized multi-agent processing');
+            loggingService.info('⚡ Using optimized multi-agent processing with autonomous web search');
             
-            // Debug: Log what we're about to pass to multiAgentFlowService
-            loggingService.info('🔍 About to call multiAgentFlowService.processMessage', {
-                hasSelectionResponse: !!request.selectionResponse,
-                selectionResponse: request.selectionResponse,
-                message: request.message
-            });
-            
-            // Try to use multiAgentFlowService if available, otherwise fall back to direct Bedrock
+            // Use NEW AgentService with autonomous web search decision-making
             try {
+                const { AgentService } = await import('./agent.service');
+                
+                loggingService.info('🤖 Creating AgentService instance for autonomous web search');
+                
+                // Create AgentService instance
+                const agentService = new AgentService();
+                
+                const agentResponse = await agentService.queryWithMultiLlm({
+                    query: request.message || '',
+                    userId: request.userId,
+                    context: {
+                        conversationId: conversation._id.toString(),
+                        previousMessages: recentMessages,
+                        documentIds: request.documentIds
+                    }
+                });
+                
+                loggingService.info('✅ AgentService.queryWithMultiLlm completed', {
+                    success: agentResponse.success,
+                    hasMetadata: !!agentResponse.metadata,
+                    webSearchUsed: agentResponse.metadata?.webSearchUsed,
+                    aiWebSearchDecision: agentResponse.metadata?.aiWebSearchDecision
+                });
+                
+                const returnData = {
+                    response: agentResponse.response || 'No response generated',
+                    agentThinking: agentResponse.thinking,
+                    agentPath: [],
+                    optimizationsApplied: [],
+                    cacheHit: agentResponse.metadata?.fromCache || false,
+                    riskLevel: 'low',
+                    requiresIntegrationSelector: false,
+                    integrationSelectorData: undefined,
+                    metadata: agentResponse.metadata,
+                    // Extract web search metadata to top level for easier access
+                    webSearchUsed: agentResponse.metadata?.webSearchUsed || false,
+                    aiWebSearchDecision: agentResponse.metadata?.aiWebSearchDecision,
+                    mongodbIntegrationData: undefined,
+                    formattedResult: undefined
+                };
+                
+                loggingService.info('📤 [FLOW-3] chat.service.processWithLangchainMultiAgent RETURNING with AgentService data', {
+                    webSearchUsed: returnData.metadata?.webSearchUsed,
+                    aiWebSearchDecision: returnData.metadata?.aiWebSearchDecision
+                });
+                
+                return returnData;
+                
+            } catch (agentError) {
+                loggingService.warn('⚠️ AgentService failed, falling back to MultiAgentFlowService', {
+                    error: agentError instanceof Error ? agentError.message : String(agentError)
+                });
+                
+                // Fallback to old LangGraph flow
                 const multiAgentResult = await multiAgentFlowService.processMessage(
                     conversation._id.toString(),
                     request.userId,
@@ -2174,43 +2411,23 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                         costBudget: 0.10,
                         previousMessages: recentMessages,
                         selectionResponse: request.selectionResponse,
-                        documentIds: request.documentIds // Pass document IDs for RAG context
+                        documentIds: request.documentIds
                     }
                 );
                 
-                loggingService.info('📥 [FLOW-2] chat.service.processWithLangchainMultiAgent RECEIVED from multiAgentFlow', {
-                    hasMongodbIntegrationData: !!multiAgentResult.mongodbIntegrationData && Object.keys(multiAgentResult.mongodbIntegrationData).length > 0,
-                    hasFormattedResult: !!multiAgentResult.formattedResult && Object.keys(multiAgentResult.formattedResult).length > 0,
-                    mongodbIntegrationDataKeys: multiAgentResult.mongodbIntegrationData ? Object.keys(multiAgentResult.mongodbIntegrationData) : [],
-                    formattedResultKeys: multiAgentResult.formattedResult ? Object.keys(multiAgentResult.formattedResult) : []
-                });
-
-                const returnData = {
+                return {
                     response: multiAgentResult.response,
                     agentThinking: multiAgentResult.thinking,
                     agentPath: multiAgentResult.agentPath,
                     optimizationsApplied: multiAgentResult.optimizationsApplied,
                     cacheHit: multiAgentResult.cacheHit,
                     riskLevel: multiAgentResult.riskLevel,
-                    // Pass IntegrationSelector data at root level
                     requiresIntegrationSelector: multiAgentResult.requiresIntegrationSelector,
                     integrationSelectorData: multiAgentResult.integrationSelectorData,
                     metadata: multiAgentResult.metadata,
                     mongodbIntegrationData: multiAgentResult.mongodbIntegrationData,
                     formattedResult: multiAgentResult.formattedResult
                 };
-
-                loggingService.info('📤 [FLOW-3] chat.service.processWithLangchainMultiAgent RETURNING', {
-                    hasMongodbIntegrationData: !!returnData.mongodbIntegrationData && Object.keys(returnData.mongodbIntegrationData).length > 0,
-                    hasFormattedResult: !!returnData.formattedResult && Object.keys(returnData.formattedResult).length > 0
-                });
-
-                return returnData;
-            } catch (multiAgentError) {
-                loggingService.warn('⚠️ MultiAgentFlowService failed, falling back to direct Bedrock', {
-                    error: multiAgentError instanceof Error ? multiAgentError.message : String(multiAgentError)
-                });
-                return await this.directBedrockFallback(request, recentMessages);
             }
         } catch (error) {
             loggingService.error('❌ Langchain multi-agent processing failed', {
@@ -2241,7 +2458,7 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
             pricing: { input: 0.06, output: 0.24, unit: 'Per 1M tokens' }
         },
         {
-            id: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+            id: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
             name: 'Claude 3.5 Haiku',
             provider: 'Anthropic',
             description: 'Fast and intelligent for quick responses',
@@ -2453,7 +2670,7 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         if (context.subjectConfidence < 0.6) {
             try {
                 const llm = new (await import('@langchain/aws')).ChatBedrockConverse({
-                    model: "us.anthropic.claude-3-5-haiku-20241022-v1:0",  // Using inference profile
+                    model: "global.anthropic.claude-haiku-4-5-20251001-v1:0",  // Using inference profile
                     region: process.env.AWS_REGION ?? 'us-east-1',
                     temperature: 0.1,
                     maxTokens: 200,
@@ -2669,13 +2886,321 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
     }
 
     /**
+     * Detect if message requires integration tools
+     */
+    private static async detectIntegrationIntent(
+        message: string,
+        userId: string
+    ): Promise<{
+        needsIntegration: boolean;
+        integrations: IntegrationType[];
+        suggestedTools: string[];
+        confidence: number;
+    }> {
+        try {
+            // Use AI to analyze the message
+            const model = new ChatBedrockConverse({
+                model: 'anthropic.claude-3-haiku-20240307-v1:0',
+                region: process.env.AWS_REGION || 'us-east-1',
+                credentials: {
+                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+                },
+            });
+
+            const systemPrompt = `Analyze the user's message to determine if it requires integration tools.
+
+Integration keywords and patterns:
+- Vercel: deploy, deployment, hosting, vercel, build logs, environment variables
+- GitHub: pull request, PR, issue, branch, commit, repository, github, merge
+- Google: drive, docs, sheets, gmail, calendar, google workspace
+- MongoDB: database, collection, query, find, aggregate, insert, update, delete, mongodb
+- Slack: channel, message, slack, notify, send to slack
+- Discord: discord, server, channel, message
+- Jira: ticket, issue, jira, epic, sprint
+- Linear: linear, issue, project, cycle
+
+Return a JSON object with:
+{
+  "needsIntegration": boolean,
+  "integrations": ["vercel", "github", etc.],
+  "suggestedTools": ["vercel_deploy", "github_create_pr", etc.],
+  "confidence": 0.0-1.0
+}
+
+If no integration is needed, return needsIntegration: false with empty arrays.`;
+
+            const response = await model.invoke([
+                new SystemMessage(systemPrompt),
+                new HumanMessage(message),
+            ]);
+
+            try {
+                const result = JSON.parse(response.content.toString());
+                
+                loggingService.info('Integration intent detected', {
+                    userId,
+                    messagePreview: message.substring(0, 100),
+                    result,
+                });
+
+                return result;
+            } catch (parseError) {
+                // Fallback to keyword matching
+                return this.detectIntegrationIntentFallback(message);
+            }
+        } catch (error) {
+            loggingService.error('Failed to detect integration intent', {
+                userId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+
+            // Fallback to keyword matching
+            return this.detectIntegrationIntentFallback(message);
+        }
+    }
+
+    /**
+     * Fallback method for detecting integration intent using keywords
+     */
+    private static detectIntegrationIntentFallback(message: string): {
+        needsIntegration: boolean;
+        integrations: IntegrationType[];
+        suggestedTools: string[];
+        confidence: number;
+    } {
+        const lowerMessage = message.toLowerCase();
+        const integrations: IntegrationType[] = [];
+        const suggestedTools: string[] = [];
+
+        // Check for Vercel keywords
+        if (lowerMessage.match(/\b(deploy|deployment|vercel|hosting|build\s+log)/)) {
+            integrations.push('vercel');
+            if (lowerMessage.includes('deploy')) suggestedTools.push('vercel_deploy_project');
+            if (lowerMessage.includes('log')) suggestedTools.push('vercel_get_deployment_logs');
+        }
+
+        // Check for GitHub keywords
+        if (lowerMessage.match(/\b(github|pull\s+request|pr|issue|branch|commit|repository|merge)/)) {
+            integrations.push('github');
+            if (lowerMessage.match(/\b(create|new)\s+(pull\s+request|pr)/)) suggestedTools.push('github_create_pr');
+            if (lowerMessage.match(/\b(create|new)\s+issue/)) suggestedTools.push('github_create_issue');
+            if (lowerMessage.match(/\blist\s+(pr|pull\s+request)/)) suggestedTools.push('github_list_prs');
+        }
+
+        // Check for Google keywords
+        if (lowerMessage.match(/\b(google|drive|docs|sheets|gmail|calendar|workspace)/)) {
+            integrations.push('google');
+            if (lowerMessage.includes('drive')) suggestedTools.push('google_drive_list_files');
+            if (lowerMessage.includes('sheet')) suggestedTools.push('google_sheets_read');
+            if (lowerMessage.includes('doc')) suggestedTools.push('google_docs_create');
+        }
+
+        // Check for MongoDB keywords
+        if (lowerMessage.match(/\b(mongodb|database|collection|query|find|aggregate|insert|update|delete)\b/)) {
+            integrations.push('mongodb');
+            if (lowerMessage.includes('find') || lowerMessage.includes('query')) suggestedTools.push('mongodb_find');
+            if (lowerMessage.includes('insert')) suggestedTools.push('mongodb_insert');
+            if (lowerMessage.includes('update')) suggestedTools.push('mongodb_update');
+            if (lowerMessage.includes('delete')) suggestedTools.push('mongodb_delete');
+            if (lowerMessage.includes('aggregate')) suggestedTools.push('mongodb_aggregate');
+        }
+
+        // Check for Slack keywords
+        if (lowerMessage.match(/\b(slack|channel|notify)/)) {
+            integrations.push('slack');
+            suggestedTools.push('slack_send_message');
+        }
+
+        // Check for Discord keywords
+        if (lowerMessage.match(/\b(discord|server)/)) {
+            integrations.push('discord');
+            suggestedTools.push('discord_send_message');
+        }
+
+        // Check for Jira keywords
+        if (lowerMessage.match(/\b(jira|ticket|epic|sprint)/)) {
+            integrations.push('jira');
+            if (lowerMessage.match(/\b(create|new)\s+(ticket|issue)/)) suggestedTools.push('jira_create_issue');
+        }
+
+        // Check for Linear keywords
+        if (lowerMessage.match(/\b(linear|cycle)/)) {
+            integrations.push('linear');
+            if (lowerMessage.match(/\b(create|new)\s+issue/)) suggestedTools.push('linear_create_issue');
+        }
+
+        return {
+            needsIntegration: integrations.length > 0,
+            integrations,
+            suggestedTools,
+            confidence: integrations.length > 0 ? 0.8 : 0.0,
+        };
+    }
+
+    /**
+     * Check if user has connected the required integration
+     */
+    private static async checkIntegrationConnection(
+        userId: string,
+        integration: IntegrationType
+    ): Promise<{
+        isConnected: boolean;
+        connectionId?: string;
+        connectionName?: string;
+    }> {
+        try {
+            switch (integration) {
+                case 'vercel': {
+                    const { VercelConnection } = await import('../models/VercelConnection');
+                    const connection = await VercelConnection.findOne({
+                        userId: new Types.ObjectId(userId),
+                        isActive: true,
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.userId?.toString() || 'Vercel',
+                    };
+                }
+
+                case 'github': {
+                    const { GitHubConnection } = await import('../models/GitHubConnection');
+                    const connection = await GitHubConnection.findOne({
+                        userId: new Types.ObjectId(userId),
+                        isActive: true,
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.userId?.toString() || 'GitHub',
+                    };
+                }
+
+                case 'google': {
+                    const { GoogleConnection } = await import('../models/GoogleConnection');
+                    const connection = await GoogleConnection.findOne({
+                        userId: new Types.ObjectId(userId),
+                        isActive: true,
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.userId?.toString() || 'Google',
+                    };
+                }
+
+                case 'mongodb': {
+                    const { MongoDBConnection } = await import('../models/MongoDBConnection');
+                    const connection = await MongoDBConnection.findOne({
+                        userId: new Types.ObjectId(userId),
+                        isActive: true,
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.alias || connection?.userId?.toString() || 'MongoDB',
+                    };
+                }
+
+                case 'slack': {
+                    const { Integration } = await import('../models/Integration');
+                    const connection = await Integration.findOne({
+                        userId: new Types.ObjectId(userId),
+                        type: { $in: ['slack_webhook', 'slack_oauth'] },
+                        status: 'active',
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.name,
+                    };
+                }
+
+                case 'discord': {
+                    const { Integration } = await import('../models/Integration');
+                    const connection = await Integration.findOne({
+                        userId: new Types.ObjectId(userId),
+                        type: { $in: ['discord_webhook', 'discord_oauth'] },
+                        status: 'active',
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.name,
+                    };
+                }
+
+                case 'jira': {
+                    const { Integration } = await import('../models/Integration');
+                    const connection = await Integration.findOne({
+                        userId: new Types.ObjectId(userId),
+                        type: 'jira_oauth',
+                        status: 'active',
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.name,
+                    };
+                }
+
+                case 'linear': {
+                    const { Integration } = await import('../models/Integration');
+                    const connection = await Integration.findOne({
+                        userId: new Types.ObjectId(userId),
+                        type: 'linear_oauth',
+                        status: 'active',
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.name,
+                    };
+                }
+
+                case 'aws': {
+                    const { AWSConnection } = await import('../models/AWSConnection');
+                    const connection = await AWSConnection.findOne({
+                        userId: new Types.ObjectId(userId),
+                    }).lean();
+                    
+                    return {
+                        isConnected: !!connection,
+                        connectionId: connection?._id?.toString(),
+                        connectionName: connection?.connectionName || connection?.awsAccountId || 'AWS',
+                    };
+                }
+
+                default:
+                    return { isConnected: false };
+            }
+        } catch (error) {
+            loggingService.error('Failed to check integration connection', {
+                userId,
+                integration,
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { isConnected: false };
+        }
+    }
+
+    /**
      * Process message with circuit breaker pattern
      */
     private static async processWithFallback(
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any; webSearchUsed?: boolean; aiWebSearchDecision?: any; metadata?: any }> {
         
         const userId = request.userId;
         const errorKey = `${userId}-processing`;
@@ -2723,11 +3248,10 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any; webSearchUsed?: boolean; aiWebSearchDecision?: any; metadata?: any }> {
         
         // Use Langchain Multi-Agent System if explicitly requested or for complex queries
-        const shouldUseLangchain = request.useMultiAgent || 
-                                  this.shouldUseLangchainForQuery(request.message || '');
+        const shouldUseLangchain = request.useMultiAgent || this.shouldUseLangchainForQuery(request.message || '');
         
         if (shouldUseLangchain) {
             loggingService.info('🚀 Routing to Langchain Multi-Agent System', {
@@ -2759,7 +3283,11 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                 requiresIntegrationSelector: langchainResult.requiresIntegrationSelector,
                 integrationSelectorData: langchainResult.integrationSelectorData,
                 mongodbIntegrationData: langchainResult.mongodbIntegrationData,
-                formattedResult: langchainResult.formattedResult
+                formattedResult: langchainResult.formattedResult,
+                // Include web search metadata - extract from metadata if available
+                webSearchUsed: (langchainResult as any).webSearchUsed || langchainResult.metadata?.webSearchUsed || false,
+                aiWebSearchDecision: (langchainResult as any).aiWebSearchDecision || langchainResult.metadata?.aiWebSearchDecision,
+                metadata: langchainResult.metadata
             };
 
             loggingService.info('📤 [FLOW-5] chat.service.tryEnhancedProcessing RETURNING', {
@@ -3407,6 +3935,960 @@ Based ONLY on the search results above, provide a factual answer:`;
     }
 
     /**
+     * Handle MCP route for integration requests
+     */
+    private static async handleMCPRoute(
+        request: ChatSendMessageRequest,
+        context: ConversationContext,
+        recentMessages: any[]
+    ): Promise<{
+        response: string;
+        agentPath: string[];
+        optimizationsApplied: string[];
+        cacheHit: boolean;
+        riskLevel: string;
+        mongodbIntegrationData?: any;
+        formattedResult?: any;
+        githubIntegrationData?: any;
+        vercelIntegrationData?: any;
+        slackIntegrationData?: any;
+        discordIntegrationData?: any;
+        jiraIntegrationData?: any;
+        linearIntegrationData?: any;
+        googleIntegrationData?: any;
+        awsIntegrationData?: any;
+        requiresConnection?: {
+            integration: string;
+            message: string;
+            connectUrl: string;
+        };
+        requiresSelection?: boolean;
+        selection?: {
+            parameterName: string;
+            question: string;
+            options: Array<{
+                id: string;
+                label: string;
+                value: string;
+                description?: string;
+                icon?: string;
+            }>;
+            allowCustom: boolean;
+            customPlaceholder?: string;
+            integration: string;
+            pendingAction: string;
+            collectedParams: Record<string, unknown>;
+            originalMessage?: string;
+        };
+    }> {
+        try {
+            loggingService.info('Starting MCP route handling', {
+                userId: request.userId,
+                message: request.message?.substring(0, 100),
+            });
+
+            // 1. Detect which integrations are needed
+            const integrationIntent = await this.detectIntegrationIntent(
+                request.message || '',
+                request.userId
+            );
+
+            if (!integrationIntent.needsIntegration) {
+                loggingService.info('No integration needed, falling back to direct response');
+                return this.directBedrockFallback(request, recentMessages);
+            }
+
+            // 2. Check if all required integrations are connected
+            for (const integration of integrationIntent.integrations) {
+                const connectionStatus = await this.checkIntegrationConnection(
+                    request.userId,
+                    integration
+                );
+
+                if (!connectionStatus.isConnected) {
+                    loggingService.info('Integration not connected', {
+                        userId: request.userId,
+                        integration,
+                    });
+
+                    const integrationDisplayName = integration.charAt(0).toUpperCase() + integration.slice(1);
+                    
+                    return {
+                        response: `To use ${integrationDisplayName} features, you need to connect your ${integrationDisplayName} account first. Please visit the integrations page to connect.`,
+                        agentPath: ['mcp_connection_required'],
+                        optimizationsApplied: [],
+                        cacheHit: false,
+                        riskLevel: 'low',
+                        requiresConnection: {
+                            integration,
+                            message: `${integrationDisplayName} connection required`,
+                            connectUrl: `/integrations?connect=${integration}`,
+                        },
+                    };
+                }
+            }
+
+            // 3. Initialize MCP for user (using JWT authentication)
+            const { MCPClientService } = await import('./mcp-client.service');
+            const initialized = await MCPClientService.initialize(request.userId);
+            
+            if (!initialized) {
+                loggingService.error('Failed to initialize MCP', { userId: request.userId });
+                return {
+                    response: 'Failed to initialize integration system. Please try again.',
+                    agentPath: ['mcp_init_failed'],
+                    optimizationsApplied: [],
+                    cacheHit: false,
+                    riskLevel: 'low',
+                };
+            }
+
+            // 4. Discover available tools
+            const availableTools = await MCPClientService.discoverTools(request.userId);
+            
+            if (availableTools.length === 0) {
+                loggingService.warn('No MCP tools available', { userId: request.userId });
+                return this.directBedrockFallback(request, recentMessages);
+            }
+
+            // 6. Find relevant tools for the intent
+            const relevantTools = await MCPClientService.findToolsForIntent(
+                request.userId,
+                request.message || '',
+                integrationIntent.integrations
+            );
+
+            if (relevantTools.length === 0) {
+                loggingService.warn('No relevant tools found for intent', {
+                    userId: request.userId,
+                    integrations: integrationIntent.integrations,
+                });
+                return this.directBedrockFallback(request, recentMessages);
+            }
+
+            // 7. Execute the most relevant tool with AI
+            const toolToExecute = relevantTools[0];
+            loggingService.info('Executing MCP tool', {
+                userId: request.userId,
+                tool: toolToExecute.name,
+                integration: integrationIntent.integrations[0],
+            });
+
+            const mcpResult = await MCPClientService.executeWithAI(
+                request.userId,
+                toolToExecute.name,
+                request.message || '',
+                {
+                    conversationId: context.conversationId,
+                    recentMessages: recentMessages.slice(-5),
+                    mongodbContext: request.mongodbContext,
+                    githubContext: request.githubContext,
+                    vercelContext: request.vercelContext,
+                }
+            );
+
+            // 8. Format results appropriately
+            if (!mcpResult.success) {
+                loggingService.error('MCP tool execution failed', {
+                    userId: request.userId,
+                    tool: toolToExecute.name,
+                    error: mcpResult.error,
+                });
+
+                // Check if this is a missing parameter error that should trigger IntegrationSelector
+                // Parse error message to detect missing parameters
+                const errorMessage = mcpResult.error?.message || 'Failed to execute integration action';
+                const missingParamMatch = errorMessage.match(/Missing required parameters?: (.+)/i);
+                
+                if (missingParamMatch) {
+                    // Extract missing parameters from error message
+                    const missingParams = missingParamMatch[1].split(/,?\s+and\s+|,\s+/).map(p => p.trim());
+                    const integration = integrationIntent.integrations[0]; // Get the primary integration
+                    
+                    loggingService.info('MCP detected missing parameters, triggering IntegrationSelector', {
+                        integration,
+                        missingParams,
+                        toolName: toolToExecute.name,
+                    });
+
+                    // Use IntegrationAgent to handle parameter collection
+                    const { IntegrationAgentService } = await import('./integrationAgent.service');
+                    const agentResult = await IntegrationAgentService.processIntegrationCommand({
+                        message: request.message || '',
+                        integration,
+                        userId: request.userId,
+                    });
+
+                    // If agent returns requiresSelection, propagate it
+                    if (agentResult.requiresSelection && agentResult.selection) {
+                        return {
+                            response: agentResult.message || errorMessage,
+                            agentPath: ['mcp', 'integration_agent', 'parameter_collection'],
+                            optimizationsApplied: ['main_mcp_route'],
+                            cacheHit: false,
+                            riskLevel: 'low',
+                            requiresSelection: true,
+                            selection: agentResult.selection,
+                        };
+                    }
+                }
+
+                return {
+                    response: errorMessage,
+                    agentPath: ['mcp_error'],
+                    optimizationsApplied: [],
+                    cacheHit: false,
+                    riskLevel: 'low',
+                };
+            }
+
+            // 9. Format integration-specific data
+            const integrationData: any = {};
+            const integration = mcpResult.metadata.integration;
+
+            // Extract the actual data from the response
+            const actualData = mcpResult.data?.data || mcpResult.data;
+
+            switch (integration) {
+                case 'mongodb':
+                    integrationData.mongodbIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatMongoDBResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'github':
+                    // For GitHub, extract repositories array if it exists
+                    const githubData = actualData?.repositories || actualData;
+                    integrationData.githubIntegrationData = githubData;
+                    integrationData.formattedResult = await this.formatGitHubResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: githubData 
+                    });
+                    break;
+                case 'vercel':
+                    integrationData.vercelIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatVercelResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'google':
+                    integrationData.googleIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatGoogleResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'slack':
+                    integrationData.slackIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatSlackResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'discord':
+                    integrationData.discordIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatDiscordResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'jira':
+                    integrationData.jiraIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatJiraResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'linear':
+                    integrationData.linearIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatLinearResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+                case 'aws':
+                    integrationData.awsIntegrationData = actualData;
+                    integrationData.formattedResult = await this.formatAWSResult({ 
+                        metadata: mcpResult.metadata, 
+                        data: actualData 
+                    });
+                    break;
+            }
+
+            // Generate a readable text summary with clickable links
+            let textSummary = '';
+            if (integration === 'github' && mcpResult.metadata?.operation === 'github_list_repos') {
+                const repos = actualData?.repositories || actualData;
+                if (Array.isArray(repos) && repos.length > 0) {
+                    textSummary = `Found ${repos.length} GitHub repositories:\n\n`;
+                    textSummary += repos.slice(0, 10).map((repo: any) => {
+                        // Ensure we have a proper GitHub web URL
+                        let githubUrl = repo.html_url;
+                        if (!githubUrl && repo.url) {
+                            // Convert API URL to web URL if needed
+                            if (repo.url.includes('api.github.com')) {
+                                githubUrl = repo.url.replace('api.github.com/repos', 'github.com');
+                            } else if (!repo.url.startsWith('http')) {
+                                // If it's a relative URL or just the repo path
+                                githubUrl = `https://github.com/${repo.full_name || repo.name}`;
+                            } else {
+                                githubUrl = repo.url;
+                            }
+                        } else if (!githubUrl) {
+                            // Fallback to constructing URL from repo name
+                            githubUrl = `https://github.com/${repo.full_name || repo.name}`;
+                        }
+                        
+                        return `• **${repo.full_name || repo.name}** ${repo.private ? '🔒' : '🌍'}\n` +
+                            `  ${repo.description || 'No description'}\n` +
+                            `  [View on GitHub](${githubUrl})\n` +
+                            `  Language: ${repo.language || 'N/A'} | Stars: ${repo.stargazers_count || 0}`;
+                    }).join('\n\n');
+                    
+                    if (repos.length > 10) {
+                        textSummary += `\n\n... and ${repos.length - 10} more repositories`;
+                    }
+                }
+            } else if (integration === 'mongodb') {
+                const operation = mcpResult.metadata?.operation;
+                if (operation === 'mongodb_find' && actualData?.documents) {
+                    textSummary = `Found ${actualData.documents.length} documents in MongoDB`;
+                } else if (operation === 'mongodb_insert' && actualData?.insertedCount) {
+                    textSummary = `Successfully inserted ${actualData.insertedCount} document(s) into MongoDB`;
+                } else if (operation === 'mongodb_update' && actualData?.modifiedCount) {
+                    textSummary = `Successfully updated ${actualData.modifiedCount} document(s) in MongoDB`;
+                } else if (operation === 'mongodb_delete' && actualData?.deletedCount) {
+                    textSummary = `Successfully deleted ${actualData.deletedCount} document(s) from MongoDB`;
+                }
+            }
+
+            return {
+                response: textSummary || (mcpResult.data as any)?.message || 'Action completed successfully',
+                agentPath: ['mcp', integration],
+                optimizationsApplied: ['mcp_integration', 'main_mcp_route'],
+                cacheHit: mcpResult.metadata?.cached || false,
+                riskLevel: mcpResult.metadata?.dangerousOperation ? 'high' : 'low',
+                ...integrationData,
+            };
+        } catch (error) {
+            loggingService.error('MCP route handling failed', {
+                userId: request.userId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+
+            // Fallback to direct Bedrock
+            return this.directBedrockFallback(request, recentMessages);
+        }
+    }
+
+    /**
+     * Format MongoDB MCP result
+     */
+    private static async formatMongoDBResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            // Determine format type based on the operation
+            let formatType: 'table' | 'json' | 'schema' | 'stats' | 'text' = 'json';
+            
+            if (mcpResult.metadata?.operation === 'mongodb_find') {
+                formatType = 'table';
+            } else if (mcpResult.metadata?.operation === 'mongodb_analyze_schema') {
+                formatType = 'schema';
+            } else if (mcpResult.metadata?.operation === 'mongodb_get_stats') {
+                formatType = 'stats';
+            }
+
+            return {
+                type: formatType,
+                data: mcpResult.data,
+            };
+        } catch (error) {
+            loggingService.error('Failed to format MongoDB result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format GitHub MCP results for display
+     */
+    private static async formatGitHubResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            // Handle github_list_repos - GitHub API returns array directly
+            if (operation === 'github_list_repos') {
+                const repos = Array.isArray(data) ? data : (data?.repositories || []);
+                if (repos.length > 0) {
+                    return {
+                        type: 'list',
+                        data: {
+                            items: repos.map((repo: any) => {
+                                // Ensure we have a proper GitHub web URL
+                                let githubUrl = repo.html_url;
+                                if (!githubUrl && repo.url) {
+                                    // Convert API URL to web URL if needed
+                                    if (repo.url.includes('api.github.com')) {
+                                        githubUrl = repo.url.replace('api.github.com/repos', 'github.com');
+                                    } else if (!repo.url.startsWith('http')) {
+                                        // If it's a relative URL or just the repo path
+                                        githubUrl = `https://github.com/${repo.full_name || repo.name}`;
+                                    } else {
+                                        githubUrl = repo.url;
+                                    }
+                                } else if (!githubUrl) {
+                                    // Fallback to constructing URL from repo name
+                                    githubUrl = `https://github.com/${repo.full_name || repo.name}`;
+                                }
+                                
+                                return {
+                                    id: repo.id,
+                                    title: repo.full_name || repo.name,
+                                    description: repo.description || 'No description',
+                                    url: githubUrl, // Use the corrected web URL
+                                    html_url: githubUrl, // Also provide as html_url for consistency
+                                    metadata: {
+                                        language: repo.language,
+                                        stars: repo.stargazers_count,
+                                        private: repo.private,
+                                        updated: repo.updated_at,
+                                    },
+                                };
+                            }),
+                            count: repos.length,
+                            title: 'GitHub Repositories',
+                        },
+                    };
+                }
+            }
+
+            // Handle github_list_issues
+            if (operation === 'github_list_issues') {
+                const issues = Array.isArray(data) ? data : (data?.issues || []);
+                if (issues.length > 0) {
+                    return {
+                        type: 'list',
+                        data: {
+                            items: issues.map((issue: any) => ({
+                                id: issue.number,
+                                title: `#${issue.number}: ${issue.title}`,
+                                description: issue.body,
+                                url: issue.html_url,
+                                metadata: {
+                                    state: issue.state,
+                                    assignee: issue.assignee?.login,
+                                    labels: issue.labels?.map((l: any) => l.name).join(', '),
+                                },
+                            })),
+                            count: issues.length,
+                            title: 'GitHub Issues',
+                        },
+                    };
+                }
+            }
+
+            // Handle github_list_prs
+            if (operation === 'github_list_prs') {
+                const prs = Array.isArray(data) ? data : (data?.pullRequests || []);
+                if (prs.length > 0) {
+                    return {
+                        type: 'list',
+                        data: {
+                            items: prs.map((pr: any) => ({
+                                id: pr.number,
+                                title: `#${pr.number}: ${pr.title}`,
+                                description: pr.body,
+                                url: pr.html_url,
+                                metadata: {
+                                    state: pr.state,
+                                    mergeable: pr.mergeable_state,
+                                    head: pr.head?.ref,
+                                    base: pr.base?.ref,
+                                },
+                            })),
+                            count: prs.length,
+                            title: 'Pull Requests',
+                        },
+                    };
+                }
+            }
+
+            // Default format for other operations
+            return {
+                type: 'json',
+                data: mcpResult.data,
+            };
+        } catch (error) {
+            loggingService.error('Failed to format GitHub result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Vercel MCP results for display
+     */
+    private static async formatVercelResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'vercel_list_deployments' && data?.deployments) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.deployments.map((deployment: any) => ({
+                            id: deployment.uid,
+                            title: deployment.name,
+                            description: `${deployment.state} - ${deployment.target || 'production'}`,
+                            url: deployment.url,
+                            metadata: {
+                                state: deployment.state,
+                                created: deployment.created,
+                                creator: deployment.creator?.username,
+                            },
+                        })),
+                        count: data.count || data.deployments.length,
+                        title: 'Vercel Deployments',
+                    },
+                };
+            }
+
+            if (operation === 'vercel_list_projects' && data?.projects) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.projects.map((project: any) => ({
+                            id: project.id,
+                            title: project.name,
+                            description: project.framework || 'No framework',
+                            url: `https://vercel.com/${project.accountId}/${project.name}`,
+                            metadata: {
+                                framework: project.framework,
+                                updated: project.updatedAt,
+                            },
+                        })),
+                        count: data.count || data.projects.length,
+                        title: 'Vercel Projects',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Vercel result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Google MCP results for display
+     */
+    private static async formatGoogleResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'drive_list_files' && data?.files) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.files.map((file: any) => ({
+                            id: file.id,
+                            title: file.name,
+                            description: file.mimeType,
+                            url: file.webViewLink,
+                            metadata: {
+                                size: file.size,
+                                modified: file.modifiedTime,
+                                mimeType: file.mimeType,
+                            },
+                        })),
+                        count: data.count || data.files.length,
+                        title: 'Google Drive Files',
+                    },
+                };
+            }
+
+            if (operation === 'sheets_list_spreadsheets' && data?.spreadsheets) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.spreadsheets.map((sheet: any) => ({
+                            id: sheet.id,
+                            title: sheet.name,
+                            description: 'Google Spreadsheet',
+                            url: sheet.webViewLink,
+                            metadata: {
+                                modified: sheet.modifiedTime,
+                            },
+                        })),
+                        count: data.count || data.spreadsheets.length,
+                        title: 'Google Sheets',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Google result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Slack MCP results for display
+     */
+    private static async formatSlackResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'slack_list_channels' && data?.channels) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.channels.map((channel: any) => ({
+                            id: channel.id,
+                            title: `#${channel.name}`,
+                            description: channel.purpose?.value || 'No description',
+                            metadata: {
+                                members: channel.num_members,
+                                private: channel.is_private,
+                            },
+                        })),
+                        count: data.count || data.channels.length,
+                        title: 'Slack Channels',
+                    },
+                };
+            }
+
+            if (operation === 'slack_list_users' && data?.members) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.members.map((user: any) => ({
+                            id: user.id,
+                            title: user.real_name || user.name,
+                            description: user.profile?.title || 'Team member',
+                            metadata: {
+                                username: user.name,
+                                status: user.profile?.status_text,
+                            },
+                        })),
+                        count: data.count || data.members.length,
+                        title: 'Slack Users',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Slack result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Discord MCP results for display
+     */
+    private static async formatDiscordResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'discord_list_channels' && data?.channels) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.channels.map((channel: any) => ({
+                            id: channel.id,
+                            title: channel.name,
+                            description: channel.topic || 'No topic',
+                            metadata: {
+                                type: channel.type === 0 ? 'Text' : 'Voice',
+                                position: channel.position,
+                            },
+                        })),
+                        count: data.count || data.channels.length,
+                        title: 'Discord Channels',
+                    },
+                };
+            }
+
+            if (operation === 'discord_list_users' && data?.members) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.members.map((member: any) => ({
+                            id: member.user?.id,
+                            title: member.nick || member.user?.username,
+                            description: member.user?.discriminator ? `#${member.user.discriminator}` : 'Member',
+                            metadata: {
+                                roles: member.roles?.length || 0,
+                                joined: member.joined_at,
+                            },
+                        })),
+                        count: data.count || data.members.length,
+                        title: 'Discord Members',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Discord result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Jira MCP results for display
+     */
+    private static async formatJiraResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'jira_list_issues' && data?.issues) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.issues.map((issue: any) => ({
+                            id: issue.key,
+                            title: `${issue.key}: ${issue.fields?.summary}`,
+                            description: issue.fields?.description?.content?.[0]?.content?.[0]?.text || 'No description',
+                            url: issue.self,
+                            metadata: {
+                                status: issue.fields?.status?.name,
+                                priority: issue.fields?.priority?.name,
+                                assignee: issue.fields?.assignee?.displayName,
+                                type: issue.fields?.issuetype?.name,
+                            },
+                        })),
+                        count: data.total || data.issues.length,
+                        title: 'Jira Issues',
+                    },
+                };
+            }
+
+            if (operation === 'jira_list_projects' && data?.projects) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.projects.map((project: any) => ({
+                            id: project.id,
+                            title: `${project.key}: ${project.name}`,
+                            description: project.description || 'No description',
+                            metadata: {
+                                projectType: project.projectTypeKey,
+                                lead: project.lead?.displayName,
+                            },
+                        })),
+                        count: data.count || data.projects.length,
+                        title: 'Jira Projects',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Jira result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format Linear MCP results for display
+     */
+    private static async formatLinearResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'linear_list_issues' && data?.issues) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.issues.map((issue: any) => ({
+                            id: issue.id,
+                            title: issue.title,
+                            description: issue.description || 'No description',
+                            url: issue.url,
+                            metadata: {
+                                state: issue.state?.name,
+                                priority: issue.priority,
+                                assignee: issue.assignee?.name,
+                                team: issue.team?.name,
+                            },
+                        })),
+                        count: data.count || data.issues.length,
+                        title: 'Linear Issues',
+                    },
+                };
+            }
+
+            if (operation === 'linear_list_projects' && data?.projects) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.projects.map((project: any) => ({
+                            id: project.id,
+                            title: project.name,
+                            description: project.description || 'No description',
+                            metadata: {
+                                state: project.state,
+                                progress: project.progress,
+                            },
+                        })),
+                        count: data.count || data.projects.length,
+                        title: 'Linear Projects',
+                    },
+                };
+            }
+
+            if (operation === 'linear_list_teams' && data?.teams) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.teams.map((team: any) => ({
+                            id: team.id,
+                            title: `${team.key}: ${team.name}`,
+                            description: team.description || 'No description',
+                            metadata: {
+                                key: team.key,
+                            },
+                        })),
+                        count: data.count || data.teams.length,
+                        title: 'Linear Teams',
+                    },
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format Linear result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+    /**
+     * Format AWS MCP results for display
+     */
+    private static async formatAWSResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
+        try {
+            const operation = mcpResult.metadata?.operation;
+            const data = mcpResult.data as any;
+
+            if (operation === 'aws_list_ec2' && data?.instances) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.instances.map((instance: any) => ({
+                            id: instance.instanceId,
+                            title: instance.name || instance.instanceId,
+                            description: instance.instanceType,
+                            metadata: {
+                                state: instance.state,
+                                region: instance.region,
+                                publicIp: instance.publicIp,
+                            },
+                        })),
+                        count: data.count || data.instances.length,
+                        title: 'EC2 Instances',
+                    },
+                };
+            }
+
+            if (operation === 'aws_list_s3' && data?.buckets) {
+                return {
+                    type: 'list',
+                    data: {
+                        items: data.buckets.map((bucket: any) => ({
+                            id: bucket.name,
+                            title: bucket.name,
+                            description: `Created: ${bucket.creationDate}`,
+                            metadata: {
+                                region: bucket.region,
+                            },
+                        })),
+                        count: data.count || data.buckets.length,
+                        title: 'S3 Buckets',
+                    },
+                };
+            }
+
+            if (operation === 'aws_get_costs' && data?.costData) {
+                return {
+                    type: 'table',
+                    data: data.costData,
+                };
+            }
+
+            return { type: 'json', data: mcpResult.data };
+        } catch (error) {
+            loggingService.error('Failed to format AWS result', {
+                error: error instanceof Error ? error.message : String(error),
+            });
+            return { type: 'json', data: mcpResult.data };
+        }
+    }
+
+
+
+    /**
+     * Update the selected view type for a MongoDB result message
+     */
+    static async updateChatMessageViewType(
+        messageId: string,
+        userId: string,
+        viewType: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain'
+    ): Promise<boolean> {
+        try {
+            // Validate ObjectId format
+            if (!Types.ObjectId.isValid(messageId)) {
+                loggingService.error('Invalid message ID format', { messageId, userId });
+                throw new Error('Invalid message ID format');
+            }
+
+            const result = await ChatMessage.updateOne(
+                { _id: messageId, userId, 'mongodbIntegrationData.action': { $exists: true } }, // Ensure it's a MongoDB result message
+                { $set: { mongodbSelectedViewType: viewType } }
+            );
+
+            if (result.matchedCount === 0) {
+                loggingService.warn('MongoDB message not found for view type update', { messageId, userId, viewType });
+                return false;
+            }
+
+            loggingService.info('MongoDB message view type updated successfully', { messageId, userId, viewType });
+            return true;
+        } catch (error) {
+            loggingService.error('Failed to update MongoDB message view type:', {
+                messageId, userId, viewType,
+                error: error instanceof Error ? error.message : String(error)
+            });
+            throw new Error('Failed to update chat message view type');
+        }
+    }
+
+    /**
      * Send a message to AWS Bedrock model
      */
     static async sendMessage(request: ChatSendMessageRequest): Promise<ChatSendMessageResponse> {
@@ -3845,6 +5327,113 @@ Based ONLY on the search results above, provide a factual answer:`;
                     });
                     // Fall through to normal processing
                 }
+            }
+
+            // ========================================
+            // EARLY MCP ROUTING CHECK (MAIN INTEGRATION HANDLER)
+            // This ensures ALL integration requests go through MCP FIRST
+            // Before any legacy chat agents (VercelChatAgent, MongoDBChatAgent, GitHubChatAgent)
+            // ========================================
+            try {
+                const integrationIntent = await this.detectIntegrationIntent(
+                    actualMessage,
+                    request.userId
+                );
+                
+                if (integrationIntent.needsIntegration && integrationIntent.confidence > 0.6) {
+                    loggingService.info('🔌 MAIN MCP ROUTING: Integration intent detected in sendMessage', {
+                        integrations: integrationIntent.integrations,
+                        confidence: integrationIntent.confidence,
+                        suggestedTools: integrationIntent.suggestedTools,
+                        bypassing: 'legacy chat agents'
+                    });
+                    
+                    // Build conversation context
+                    const context = this.buildConversationContext(
+                        conversation!._id.toString(),
+                        actualMessage,
+                        recentMessages
+                    );
+                    
+                    // Route through MCP (this is now the MAIN path, not fallback)
+                    const mcpResult = await this.handleMCPRoute(request, context, recentMessages);
+                    
+                    // Save the response
+                    const session2 = await mongoose.startSession();
+                    try {
+                        await session2.withTransaction(async () => {
+                            await ChatMessage.create([{
+                                conversationId: conversation._id,
+                                userId: request.userId,
+                                role: 'assistant',
+                                content: mcpResult.response,
+                                modelId: request.modelId,
+                                messageType: 'assistant', // Explicitly set messageType
+                                metadata: {
+                                    mcpRoute: true,
+                                    integration: integrationIntent.integrations[0],
+                                    confidence: integrationIntent.confidence
+                                },
+                                // Save ALL integration data fields
+                                mongodbIntegrationData: mcpResult.mongodbIntegrationData,
+                                githubIntegrationData: mcpResult.githubIntegrationData,
+                                vercelIntegrationData: mcpResult.vercelIntegrationData,
+                                slackIntegrationData: mcpResult.slackIntegrationData,
+                                discordIntegrationData: mcpResult.discordIntegrationData,
+                                jiraIntegrationData: mcpResult.jiraIntegrationData,
+                                linearIntegrationData: mcpResult.linearIntegrationData,
+                                googleIntegrationData: mcpResult.googleIntegrationData,
+                                awsIntegrationData: mcpResult.awsIntegrationData,
+                                formattedResult: mcpResult.formattedResult,
+                                agentPath: mcpResult.agentPath,
+                                optimizationsApplied: mcpResult.optimizationsApplied,
+                                cacheHit: mcpResult.cacheHit,
+                                riskLevel: mcpResult.riskLevel
+                            }], { session: session2 });
+
+                            conversation!.messageCount = (conversation!.messageCount || 0) + 2;
+                            conversation!.lastMessage = mcpResult.response.substring(0, 100);
+                            conversation!.lastMessageAt = new Date();
+                            await conversation!.save({ session: session2 });
+                        });
+                    } finally {
+                        await session2.endSession();
+                    }
+                    
+                    const latency = Date.now() - startTime;
+                    
+                    // Return MCP result directly
+                    return {
+                        messageId,
+                        conversationId: conversation!._id.toString(),
+                        response: mcpResult.response,
+                        cost: 0,
+                        latency,
+                        tokenCount: 0,
+                        model: request.modelId,
+                        agentPath: mcpResult.agentPath,
+                        optimizationsApplied: [...mcpResult.optimizationsApplied, 'main_mcp_route'],
+                        cacheHit: mcpResult.cacheHit,
+                        riskLevel: mcpResult.riskLevel,
+                        mongodbIntegrationData: mcpResult.mongodbIntegrationData,
+                        formattedResult: mcpResult.formattedResult,
+                        githubIntegrationData: mcpResult.githubIntegrationData,
+                        vercelIntegrationData: mcpResult.vercelIntegrationData,
+                        slackIntegrationData: mcpResult.slackIntegrationData,
+                        discordIntegrationData: mcpResult.discordIntegrationData,
+                        jiraIntegrationData: mcpResult.jiraIntegrationData,
+                        linearIntegrationData: mcpResult.linearIntegrationData,
+                        googleIntegrationData: mcpResult.googleIntegrationData,
+                        requiresConnection: mcpResult.requiresConnection,
+                        requiresSelection: (mcpResult as any).requiresSelection, // Add requiresSelection support
+                        selection: (mcpResult as any).selection, // Add selection support
+                    };
+                }
+            } catch (error) {
+                loggingService.warn('Main MCP routing check failed, continuing with legacy handlers', {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                // Continue with legacy handlers if MCP fails
             }
 
             // If mentions found, try to execute integration command
@@ -4404,7 +5993,18 @@ Based ONLY on the search results above, provide a factual answer:`;
                                 userId: request.userId,
                                 role: 'assistant',
                                 content: mongodbResponse.message,
-                                modelId: request.modelId
+                                modelId: request.modelId,
+                                messageType: 'assistant', // Explicitly set messageType
+                                // Save all MongoDB integration data
+                                mongodbIntegrationData: processingResult.mongodbIntegrationData,
+                                mongodbSelectedViewType: processingResult.formattedResult?.type || 'table',
+                                mongodbResultData: processingResult.formattedResult?.data,
+                                formattedResult: processingResult.formattedResult,
+                                agentPath: processingResult.agentPath,
+                                optimizationsApplied: processingResult.optimizationsApplied,
+                                cacheHit: processingResult.cacheHit,
+                                riskLevel: processingResult.riskLevel
+                                
                             }], { session: session2 });
 
                             conversation!.messageCount = (conversation!.messageCount || 0) + 2;
@@ -4506,7 +6106,14 @@ Based ONLY on the search results above, provide a factual answer:`;
                                 userId: request.userId,
                                 role: 'assistant',
                                 content: githubResponse.message,
-                                modelId: request.modelId
+                                modelId: request.modelId,
+                                messageType: 'assistant', // Explicitly set messageType
+                                // Save GitHub integration data
+                                githubIntegrationData: processingResult.githubIntegrationData,
+                                agentPath: processingResult.agentPath,
+                                optimizationsApplied: processingResult.optimizationsApplied,
+                                cacheHit: processingResult.cacheHit,
+                                riskLevel: processingResult.riskLevel
                             }], { session: session2 });
 
                             conversation!.messageCount = (conversation!.messageCount || 0) + 2;
@@ -4558,7 +6165,9 @@ Based ONLY on the search results above, provide a factual answer:`;
             });
             
             // Check if this is an autonomous request before processing
-            const isAutonomousRequest = await this.detectAutonomousRequest(finalMessage);
+            // BUT skip autonomous detection if useMultiAgent is explicitly true
+            // (to allow autonomous web search feature to work)
+            const isAutonomousRequest = !request.useMultiAgent && await this.detectAutonomousRequest(finalMessage);
             
             if (isAutonomousRequest) {
                 loggingService.info('🤖 Autonomous request detected, initiating governed agent', {
@@ -4673,10 +6282,24 @@ Based ONLY on the search results above, provide a factual answer:`;
                             inputTokens,
                             outputTokens
                         },
-                        integrationSelectorData: processingResult.integrationSelectorData, // Save IntegrationSelector data
-                        mongodbIntegrationData: processingResult.mongodbIntegrationData, // Save structured MongoDB data
-                        mongodbSelectedViewType: processingResult.formattedResult?.type || 'table', // Set initial view type
-                        mongodbResultData: processingResult.formattedResult?.data, // Save actual MongoDB query result data
+                        // Save all integration-related fields
+                        integrationSelectorData: processingResult.integrationSelectorData,
+                        mongodbIntegrationData: processingResult.mongodbIntegrationData,
+                        mongodbSelectedViewType: processingResult.formattedResult?.type || 'table',
+                        mongodbResultData: processingResult.formattedResult?.data,
+                        githubIntegrationData: (processingResult as any).githubIntegrationData,
+                        vercelIntegrationData: (processingResult as any).vercelIntegrationData,
+                        slackIntegrationData: (processingResult as any).slackIntegrationData,
+                        discordIntegrationData: (processingResult as any).discordIntegrationData,
+                        jiraIntegrationData: (processingResult as any).jiraIntegrationData,
+                        linearIntegrationData: (processingResult as any).linearIntegrationData,
+                        googleIntegrationData: (processingResult as any).googleIntegrationData,
+                        awsIntegrationData: (processingResult as any).awsIntegrationData,
+                        formattedResult: processingResult.formattedResult,
+                        agentPath: processingResult.agentPath,
+                        optimizationsApplied: processingResult.optimizationsApplied,
+                        cacheHit: processingResult.cacheHit,
+                        riskLevel: processingResult.riskLevel,
                     }], { session: session2 });
 
                     // Optimized: Increment message count instead of counting
@@ -4760,8 +6383,10 @@ Based ONLY on the search results above, provide a factual answer:`;
                 riskLevel,
                 templateUsed: templateMetadata,
                 // Web search metadata
-                webSearchUsed: (processingResult as any).webSearchUsed || false,
+                webSearchUsed: (processingResult as any).webSearchUsed || (processingResult as any).metadata?.webSearchUsed || false,
                 quotaUsed: (processingResult as any).quotaUsed,
+                // AI autonomous web search decision metadata
+                aiWebSearchDecision: (processingResult as any).aiWebSearchDecision || (processingResult as any).metadata?.aiWebSearchDecision,
                 // IntegrationSelector data
                 requiresIntegrationSelector: processingResult.requiresIntegrationSelector,
                 integrationSelectorData: processingResult.integrationSelectorData,
@@ -4783,43 +6408,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             throw new Error('Failed to send chat message');
         }
     }
-
-    /**
-     * Update the selected view type for a MongoDB result message
-     */
-    static async updateChatMessageViewType(
-        messageId: string,
-        userId: string,
-        viewType: 'table' | 'json' | 'schema' | 'stats' | 'chart' | 'text' | 'error' | 'empty' | 'explain'
-    ): Promise<boolean> {
-        try {
-            // Validate ObjectId format
-            if (!Types.ObjectId.isValid(messageId)) {
-                loggingService.error('Invalid message ID format', { messageId, userId });
-                throw new Error('Invalid message ID format');
-            }
-
-            const result = await ChatMessage.updateOne(
-                { _id: messageId, userId, 'mongodbIntegrationData.action': { $exists: true } }, // Ensure it's a MongoDB result message
-                { $set: { mongodbSelectedViewType: viewType } }
-            );
-
-            if (result.matchedCount === 0) {
-                loggingService.warn('MongoDB message not found for view type update', { messageId, userId, viewType });
-                return false;
-            }
-
-            loggingService.info('MongoDB message view type updated successfully', { messageId, userId, viewType });
-            return true;
-        } catch (error) {
-            loggingService.error('Failed to update MongoDB message view type:', {
-                messageId, userId, viewType,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            throw new Error('Failed to update chat message view type');
-        }
-    }
-
+    
     /**
      * Get conversation history
      */
@@ -4858,6 +6447,17 @@ Based ONLY on the search results above, provide a factual answer:`;
             .skip(offset)
             .limit(limit)
             .lean();
+
+            // Debug logging to see what fields are in the messages
+            if (messages.length > 0) {
+                loggingService.info('Sample message fields from DB:', {
+                    messageId: messages[0]._id,
+                    hasGithubData: !!messages[0].githubIntegrationData,
+                    hasFormattedResult: !!messages[0].formattedResult,
+                    hasAgentPath: !!messages[0].agentPath,
+                    allFields: Object.keys(messages[0])
+                });
+            }
 
             const total = await ChatMessage.countDocuments({
                 conversationId: conversationObjectId
@@ -5228,6 +6828,18 @@ Based ONLY on the search results above, provide a factual answer:`;
      */
     private static convertMessageToResponse(message: any): ChatMessageResponse {
         try {
+            // Debug log for troubleshooting
+            if (message.role === 'assistant') {
+                loggingService.debug('Converting assistant message:', {
+                    id: message._id,
+                    hasGithubData: !!message.githubIntegrationData,
+                    hasFormattedResult: !!message.formattedResult,
+                    hasAgentPath: !!message.agentPath,
+                    agentPathValue: message.agentPath,
+                    formattedResultType: message.formattedResult?.type
+                });
+            }
+            
             return {
                 id: message._id ? (typeof message._id === 'string' ? message._id : message._id.toString()) : '',
                 conversationId: message.conversationId ? (typeof message.conversationId === 'string' ? message.conversationId : message.conversationId.toString()) : '',
@@ -5235,22 +6847,36 @@ Based ONLY on the search results above, provide a factual answer:`;
                 content: message.content || '',
                 modelId: message.modelId,
                 // Governed Agent fields
-                messageType: message.messageType,
+                messageType: message.messageType || message.role, // Default messageType to role if not set
                 governedTaskId: message.governedTaskId ? (typeof message.governedTaskId === 'string' ? message.governedTaskId : message.governedTaskId.toString()) : undefined,
                 planState: message.planState,
                 attachedDocuments: message.attachedDocuments || [],
                 attachments: message.attachments || [],
                 timestamp: message.createdAt || message.timestamp || new Date(),
                 metadata: message.metadata || {},
-                // Include new MongoDB integration fields
+                // Include MongoDB integration fields
                 mongodbSelectedViewType: message.mongodbSelectedViewType,
                 integrationSelectorData: message.integrationSelectorData,
                 mongodbIntegrationData: message.mongodbIntegrationData,
-                // Construct formattedResult from stored data
-                formattedResult: message.mongodbResultData ? {
+                // Include all integration data fields
+                githubIntegrationData: message.githubIntegrationData,
+                vercelIntegrationData: message.vercelIntegrationData,
+                slackIntegrationData: message.slackIntegrationData,
+                discordIntegrationData: message.discordIntegrationData,
+                jiraIntegrationData: message.jiraIntegrationData,
+                linearIntegrationData: message.linearIntegrationData,
+                googleIntegrationData: message.googleIntegrationData,
+                awsIntegrationData: message.awsIntegrationData,
+                // Include formatted result and other metadata
+                formattedResult: message.formattedResult || (message.mongodbResultData ? {
                     type: message.mongodbSelectedViewType || 'table',
                     data: message.mongodbResultData
-                } : undefined
+                } : undefined),
+                // Include agent metadata
+                agentPath: message.agentPath || [],
+                optimizationsApplied: message.optimizationsApplied || [],
+                cacheHit: message.cacheHit,
+                riskLevel: message.riskLevel
             };
         } catch (error) {
             loggingService.error('Error converting message to response', { 
@@ -5280,7 +6906,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             'amazon.nova-micro-v1:0': { input: 0.035, output: 0.14 },
             'amazon.nova-lite-v1:0': { input: 0.06, output: 0.24 },
             'amazon.nova-pro-v1:0': { input: 0.80, output: 3.20 },
-            'anthropic.claude-3-5-haiku-20241022-v1:0': { input: 1.0, output: 5.0 },
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': { input: 1.0, output: 5.0 },
             'anthropic.claude-sonnet-4-20250514-v1:0': { input: 3.0, output: 15.0 },
         };
 
@@ -5314,7 +6940,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             'amazon.nova-lite-v1:0': 'Nova Lite', 
             'amazon.nova-pro-v1:0': 'Nova Pro',
             'amazon.titan-text-lite-v1': 'Titan Text Lite',
-            'anthropic.claude-3-5-haiku-20241022-v1:0': 'Claude 3.5 Haiku',
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Claude 3.5 Haiku',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'Claude Sonnet 4',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Claude 3.5 Sonnet',
             'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude 4 Opus',
@@ -5484,7 +7110,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             'amazon.nova-lite-v1:0': 'Balanced performance and cost for general use',
             'amazon.nova-pro-v1:0': 'High-performance model for complex tasks',
             'amazon.titan-text-lite-v1': 'Lightweight text generation model',
-            'anthropic.claude-3-5-haiku-20241022-v1:0': 'Fast and intelligent for quick responses',
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Fast and intelligent for quick responses',
             'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Advanced reasoning and analysis capabilities',
             'anthropic.claude-sonnet-4-20250514-v1:0': 'High-performance model with exceptional reasoning',
             'anthropic.claude-opus-4-1-20250805-v1:0': 'Most powerful model for complex reasoning',

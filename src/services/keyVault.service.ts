@@ -3,42 +3,6 @@ import mongoose, { Types } from 'mongoose';
 import { ProviderKey, IProviderKey, ProxyKey, IProxyKey } from '../models';
 import { encrypt, decrypt } from '../utils/helpers';
 import { loggingService } from './logging.service';
-
-// ============================================================================
-// OPTIMIZATION UTILITY CLASSES
-// ============================================================================
-
-/**
- * Background processor for non-critical operations
- */
-class KeyVaultBackgroundProcessor {
-    private operationQueue: Array<() => Promise<void>> = [];
-    private processor?: NodeJS.Timeout;
-
-    queueOperation(operation: () => Promise<void>) {
-        this.operationQueue.push(operation);
-        this.startProcessor();
-    }
-
-    private startProcessor() {
-        if (this.processor) return;
-
-        this.processor = setTimeout(async () => {
-            await this.processQueue();
-            this.processor = undefined;
-
-            if (this.operationQueue.length > 0) {
-                this.startProcessor();
-            }
-        }, 100);
-    }
-
-    private async processQueue() {
-        const operations = this.operationQueue.splice(0, 5); // Process 5 at a time
-        await Promise.allSettled(operations.map(op => op()));
-    }
-}
-
 /**
  * Key formatter with memoization
  */
@@ -190,10 +154,6 @@ export interface ProxyKeyUsage {
 }
 
 export class KeyVaultService {
-
-    private static backgroundProcessor = new KeyVaultBackgroundProcessor();
-    private static keyFormatter = new KeyFormatter();
-    private static cryptoWorkerPool = new CryptoWorkerPool();
 
     /**
      * Create a new provider key in the vault

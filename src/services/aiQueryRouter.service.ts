@@ -42,10 +42,10 @@ export class AIQueryRouterService {
     private static instance: AIQueryRouterService;
 
     private constructor() {
-        // Use Claude 3.5 Haiku for fast, accurate routing decisions
+        // Use global Haiku inference profile for fast, accurate routing decisions
         this.routerLlm = new ChatBedrockConverse({
             region: process.env.AWS_REGION ?? 'us-east-1',
-            model: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+            model: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
             credentials: {
                 accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
                 secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
@@ -92,6 +92,12 @@ export class AIQueryRouterService {
                 .replace(/```json\n?/g, '')
                 .replace(/```\n?/g, '')
                 .trim();
+            
+            // Find JSON object in response (handle cases where LLM adds text before/after JSON)
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                responseText = jsonMatch[0];
+            }
 
             const decision = JSON.parse(responseText) as RoutingDecision;
 
@@ -164,9 +170,11 @@ AVAILABLE ROUTES:
    - Triggers: "optimize costs", "reduce spending", "save money", "recommendations"
    - Use for optimization suggestions
 
-7. web_search - For external information, news, current events
-   - Triggers: "search for", "latest news", "current price of", external topics
-   - Use when user needs external/real-time information
+7. web_search - For external information, news, current events, REAL-TIME data
+   - Triggers: "search for", "latest news", "current price", "today's", "recent", external real-time topics
+   - ONLY use when user explicitly asks for external/real-time information
+   - DO NOT use for general questions or questions about AWS/GCP/Azure pricing (use knowledge_base instead)
+   - DO NOT use for user's own data (use analytics instead)
 
 8. multi_agent - For complex multi-step operations
    - Triggers: Complex requests requiring multiple tools or steps
@@ -183,13 +191,17 @@ ROUTING RULES:
 4. If query asks about CostKatana features, documentation, or how-to → knowledge_base
 5. If query asks about user's own costs, usage, or analytics → analytics
 6. If query asks for optimization recommendations → optimization
-7. If query needs external/real-time information → web_search
+7. If query EXPLICITLY asks for external/real-time information (e.g., "search for", "latest news", "current", "today's") → web_search
 8. If query is complex and needs multiple tools → multi_agent
 9. If query is simple greeting or conversation → direct_response
 
 IMPORTANT:
 - DO NOT route to vercel_tools unless user explicitly mentions Vercel
 - DO NOT route to github_tools unless user explicitly mentions GitHub
+- DO NOT route to web_search for general questions - only for explicit real-time/external data requests
+- General questions about AWS/cloud pricing → knowledge_base (NOT web_search)
+- "What is the cost of X?" → knowledge_base (NOT web_search)
+- "Tell me about that" or "What about the other one?" → direct_response (NOT web_search)
 - CostKatana projects are NOT the same as Vercel projects
 - "my projects" without context = analytics (CostKatana projects)
 - "@vercel list projects" = vercel_tools (Vercel projects)
@@ -299,15 +311,32 @@ Respond with JSON only:
             };
         }
 
-        // Web search
+        // Web search - be more conservative, only for explicit requests
         if (lowerQuery.includes('search for') || 
             lowerQuery.includes('latest news') ||
-            lowerQuery.includes('current price')) {
+            lowerQuery.includes('today\'s') ||
+            lowerQuery.includes('current events') ||
+            (lowerQuery.includes('google') && lowerQuery.includes('search'))) {
             return {
                 route: 'web_search',
                 confidence: 0.7,
-                reasoning: 'Fallback: Detected web search keywords',
+                reasoning: 'Fallback: Detected explicit web search request',
                 suggestedTools: ['web_search'],
+                extractedParams: {},
+                requiresIntegration: false
+            };
+        }
+        
+        // Vague/ambiguous queries - route to direct_response for clarification
+        if (lowerQuery.includes('about that') ||
+            lowerQuery.includes('the other one') ||
+            lowerQuery.includes('what about') ||
+            (lowerQuery.length < 20 && !lowerQuery.includes('cost'))) {
+            return {
+                route: 'direct_response',
+                confidence: 0.6,
+                reasoning: 'Fallback: Ambiguous query - needs clarification or direct response',
+                suggestedTools: [],
                 extractedParams: {},
                 requiresIntegration: false
             };

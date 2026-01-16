@@ -641,7 +641,7 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleListCollections(args: any): Promise<MCPToolResult> {
+    private async handleListCollections(_args: any): Promise<MCPToolResult> {
         if (!this.db) {
             throw new Error('Database connection not initialized');
         }
@@ -667,12 +667,12 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleListIndexes(args: any): Promise<MCPToolResult> {
+    private async handleListIndexes(_args: any): Promise<MCPToolResult> {
         if (!this.db || !this.connection) {
             throw new Error('Database connection not initialized');
         }
 
-        const { collection } = args;
+        const { collection } = _args;
 
         // Validate collection access
         const validation = await MongoDBMCPPolicyService.validateCountQuery(
@@ -706,12 +706,12 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleCollectionStats(args: any): Promise<MCPToolResult> {
+    private async handleCollectionStats(_args: any): Promise<MCPToolResult> {
         if (!this.db || !this.connection) {
             throw new Error('Database connection not initialized');
         }
 
-        const { collection } = args;
+        const { collection } = _args;
 
         // Validate collection access
         const validation = await MongoDBMCPPolicyService.validateCountQuery(
@@ -750,12 +750,12 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleAnalyzeSchema(args: any): Promise<MCPToolResult> {
+    private async handleAnalyzeSchema(_args: any): Promise<MCPToolResult> {
         if (!this.db || !this.connection) {
             throw new Error('Database connection not initialized');
         }
 
-        const { collection, sampleSize = 100 } = args;
+        const { collection, sampleSize = 100 } = _args;
 
         // Validate collection access
         const validation = await MongoDBMCPPolicyService.validateFindQuery(
@@ -795,12 +795,12 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleExplainQuery(args: any): Promise<MCPToolResult> {
+    private async handleExplainQuery(_args: any): Promise<MCPToolResult> {
         if (!this.db || !this.connection) {
             throw new Error('Database connection not initialized');
         }
 
-        const { collection, query, verbosity = 'executionStats' } = args;
+        const { collection, query, verbosity = 'executionStats' } = _args;
 
         // Validate query
         const validation = await MongoDBMCPPolicyService.validateFindQuery(
@@ -837,7 +837,7 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleSuggestIndexes(args: any): Promise<MCPToolResult> {
+    private async handleSuggestIndexes(_args: any): Promise<MCPToolResult> {
         // This will be implemented in Phase 3 with AI integration
         return {
             content: [
@@ -849,7 +849,7 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleAnalyzeSlowQueries(args: any): Promise<MCPToolResult> {
+    private async handleAnalyzeSlowQueries(_args: any): Promise<MCPToolResult> {
         // This requires system.profile collection access
         return {
             content: [
@@ -980,7 +980,7 @@ export class MongoDBMCPService {
         };
     }
 
-    private async handleGetDatabaseStats(args: any): Promise<MCPToolResult> {
+    private async handleGetDatabaseStats(_args: any): Promise<MCPToolResult> {
         if (!this.db) {
             throw new Error('Database connection not initialized');
         }

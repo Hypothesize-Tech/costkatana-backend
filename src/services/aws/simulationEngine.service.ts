@@ -3,7 +3,7 @@ import { loggingService } from '../logging.service';
 import { planGeneratorService } from './planGenerator.service';
 import { permissionBoundaryService } from './permissionBoundary.service';
 import { AWSConnection, IAWSConnection } from '../../models/AWSConnection';
-import { ExecutionPlan, ExecutionStep, StepResult } from '../../types/awsDsl.types';
+import { ExecutionPlan, ExecutionStep } from '../../types/awsDsl.types';
 
 /**
  * Simulation Engine Service - Dry-Run Execution
@@ -147,7 +147,7 @@ class SimulationEngineService {
     const permissionValidation = this.validatePermissions(plan, connection);
     
     // Predict costs
-    const costPrediction = this.predictCosts(plan, simulatedSteps);
+    const costPrediction = this.predictCosts(simulatedSteps);
     
     // Assess risks
     const riskAssessment = this.assessRisks(plan, simulatedSteps, connection);
@@ -313,7 +313,6 @@ class SimulationEngineService {
    * Predict costs for a plan
    */
   private predictCosts(
-    plan: ExecutionPlan,
     simulatedSteps: SimulatedStep[]
   ): CostPrediction {
     let totalMonthlyCost = 0;

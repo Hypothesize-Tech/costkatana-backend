@@ -580,7 +580,7 @@ export class SubscriptionService {
     /**
      * Consume tokens after operation
      */
-    static async consumeTokens(userId: string | ObjectId, actualTokens: number, cost: number): Promise<void> {
+    static async consumeTokens(userId: string | ObjectId, actualTokens: number): Promise<void> {
         const subscription = await this.getSubscriptionByUserId(userId);
         if (!subscription) {
             throw new AppError('Subscription not found', 404);

@@ -456,7 +456,6 @@ class S3ServiceProvider {
     
     let objectCount = 0;
     let sizeBytes = 0;
-    let continuationToken: string | undefined;
     
     // Sample first 1000 objects for estimate
     const command = new ListObjectsV2Command({

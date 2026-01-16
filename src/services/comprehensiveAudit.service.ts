@@ -243,7 +243,6 @@ export class ComprehensiveAuditService extends EventEmitter {
     private anomalyBaselines = new Map<string, number>();
     
     private readonly MAX_CACHE_SIZE = 100000;
-    private readonly MAX_BUFFER_SIZE = 1000;
     
     // Configuration
     private config: AuditConfig = {
@@ -505,7 +504,7 @@ export class ComprehensiveAuditService extends EventEmitter {
     private async trackDataLineage(
         dataId: string,
         action: string,
-        actorId: string,
+        _actorId: string,
         context?: any
     ): Promise<DataLineageInfo> {
         let lineage = this.dataLineageMap.get(dataId);
@@ -1112,7 +1111,7 @@ export class ComprehensiveAuditService extends EventEmitter {
         });
     }
 
-    private async analyzeAuditFindings(reportType: string, events: AuditEvent[], parameters: any): Promise<any> {
+    private async analyzeAuditFindings(_reportType: string, events: AuditEvent[], _parameters: any): Promise<any> {
         // Simplified findings analysis - would be more sophisticated in practice
         return {
             securityFindings: [],
@@ -1134,7 +1133,7 @@ export class ComprehensiveAuditService extends EventEmitter {
         };
     }
 
-    private generateAuditRecommendations(reportType: string, findings: any, summary: any): AuditReport['recommendations'] {
+    private generateAuditRecommendations(_reportType: string, findings: any, summary: any): AuditReport['recommendations'] {
         const recommendations = {
             immediate: [] as string[],
             shortTerm: [] as string[],

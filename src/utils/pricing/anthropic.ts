@@ -230,7 +230,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         notes: 'Fast Claude model (July 2024 cutoff, 8k output) - superseded by Haiku 4.5. Cached: $0.08'
     },
     {
-        modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude Haiku 3.5 (Bedrock)',
         provider: 'AWS Bedrock',
         inputPrice: 0.80,
@@ -243,7 +243,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         notes: 'Claude Haiku 3.5 via AWS Bedrock - superseded by Haiku 4.5'
     },
     {
-        modelId: 'us.anthropic.claude-3-5-haiku-20241022-v1:0',
+        modelId: 'us.global.anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude Haiku 3.5 (Bedrock Inference Profile)',
         provider: 'AWS Bedrock',
         inputPrice: 0.80,

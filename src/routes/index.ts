@@ -78,6 +78,7 @@ import utilsRoutes from './utils.routes';
 import fileUploadRoutes from './fileUpload.routes';
 import awsRoutes from './aws.routes';
 import mongodbMcpRoutes from './mongodbMcp.routes';
+import mcpRoutes from './mcp.routes';
 import governedAgentRoutes from './governedAgent.routes';
 
 const router = Router();
@@ -172,7 +173,8 @@ router.use('/proactive-suggestions', proactiveSuggestionsRoutes);
 router.use('/utils', utilsRoutes);
 router.use('/files', fileUploadRoutes);
 router.use('/aws', awsRoutes);
-router.use('/mcp', mongodbMcpRoutes);
+router.use('/mcp', mcpRoutes); // Main MCP routes
+router.use('/mcp/mongodb', mongodbMcpRoutes); // MongoDB-specific MCP routes
 router.use('/governed-agent', governedAgentRoutes);
 
 export const apiRouter = router;

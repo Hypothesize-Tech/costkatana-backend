@@ -7,7 +7,7 @@ const router = express.Router();
 /**
  * Get monthly AI cost summary
  */
-router.get('/summary/monthly', authenticate, authorize('admin'), async (req, res) => {
+router.get('/summary/monthly', authenticate, authorize('admin'), async (_req, res) => {
     try {
         const summary = AICostTrackingService.getMonthlySummary();
         res.json({

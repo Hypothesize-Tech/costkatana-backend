@@ -401,7 +401,51 @@ GOOGLE_REDIRECT_URI=http://localhost:3000/oauth/callback/google
 
 # Google API (for File Picker)
 GOOGLE_API_KEY=your-google-api-key
+
+   # Grounding Confidence Layer (GCL) - Hallucination Prevention
+   # Core Principle: "Generation is a privilege, not a default"
+   
+   # Phase 1: Shadow Mode (Observe only, no blocking)
+   # ENABLE_GCL_SHADOW=true
+   # ENABLE_GCL_BLOCKING=false
+   
+   # Phase 2: Partial Blocking (ASK_CLARIFY enforced, REFUSE still shadow) ← CURRENT
+   ENABLE_GCL_SHADOW=false
+   ENABLE_GCL_BLOCKING=true
+   
+   # Phase 3: Full Enforcement (All decisions enforced)
+   # ENABLE_GCL_STRICT_REFUSAL=false  # Set to true for Phase 3
+   
+   # Always enabled
+   ENABLE_GCL_LOGGING=true             # Always log for metrics
+   ENABLE_GCL_EMERGENCY_BYPASS=false   # Emergency override (use only in incidents)
 ```
+
+### Grounding Confidence Layer (GCL)
+
+The GCL is a pre-generation decision gate that prevents hallucinations by evaluating whether the system has sufficient, fresh, and relevant information before generating responses.
+
+**Core Principle**: "Generation is a privilege, not a default."
+
+**Rollout Phases**:
+- **Phase 1 (Shadow)**: Logs decisions without affecting UX - safe to enable in production
+- **Phase 2 (Partial Blocking)**: Enables clarification requests only
+- **Phase 3 (Full Blocking)**: Enforces all decisions including refusals
+
+**Configuration Flags**:
+- `ENABLE_GCL_SHADOW`: Enable shadow mode (observe without blocking)
+- `ENABLE_GCL_BLOCKING`: Enable decision enforcement
+- `ENABLE_GCL_STRICT_REFUSAL`: Enable REFUSE decision enforcement
+- `ENABLE_GCL_LOGGING`: Enable decision logging for metrics
+- `ENABLE_GCL_EMERGENCY_BYPASS`: Emergency override (page on-call if used)
+
+**Safeguards**:
+- ✅ Loop breakers (max 2 clarifications, max 2 search retries)
+- ✅ Decision stickiness (prevents retry gaming)
+- ✅ Context drift detection (prevents hallucinations on topic shifts)
+- ✅ Domain risk multipliers (stricter thresholds for finance/security/legal)
+- ✅ Memory write gating (prevents poisoning long-term memory)
+- ✅ Redundant safety checks (fail-safe if GCL bypassed)
 
 3. **Configure Authorized Origins** (for Picker):
    - Add `http://localhost:3000` to Authorized JavaScript origins

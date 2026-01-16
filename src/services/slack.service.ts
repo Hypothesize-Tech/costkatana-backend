@@ -16,7 +16,6 @@ export interface SlackMessage {
 
 export class SlackService {
     private static readonly SLACK_API_BASE = 'https://slack.com/api';
-    private static readonly QUICKCHART_API = 'https://quickchart.io/chart';
 
     /**
      * Send a message to Slack via webhook

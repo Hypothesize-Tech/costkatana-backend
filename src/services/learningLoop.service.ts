@@ -758,5 +758,48 @@ export class LearningLoopService {
       });
     }
   }
+
+  /**
+   * Get recent recommendation outcomes
+   */
+  static async getRecentRecommendationOutcomes(params: {
+    userId?: string;
+    startDate: Date;
+    endDate: Date;
+    limit: number;
+  }): Promise<IRecommendationOutcome[]> {
+    try {
+      const query: any = {
+        recommendedAt: {
+          $gte: params.startDate,
+          $lte: params.endDate
+        }
+      };
+
+      if (params.userId) {
+        query.userId = new mongoose.Types.ObjectId(params.userId);
+      }
+
+      const outcomes = await RecommendationOutcome.find(query)
+        .sort({ recommendedAt: -1 })
+        .limit(params.limit)
+        .lean();
+
+      loggingService.info('Retrieved recent recommendation outcomes', {
+        count: outcomes.length,
+        userId: params.userId,
+        startDate: params.startDate.toISOString(),
+        endDate: params.endDate.toISOString()
+      });
+
+      return outcomes as unknown as IRecommendationOutcome[];
+    } catch (error) {
+      loggingService.error('Failed to get recent recommendation outcomes', {
+        error: error instanceof Error ? error.message : String(error),
+        userId: params.userId
+      });
+      throw error;
+    }
+  }
 }
 

@@ -11,6 +11,9 @@ import { memoryService, MemoryContext, MemoryService } from './memory.service';
 import { userPreferenceService } from './userPreference.service';
 import { LRUCache } from 'lru-cache';
 import { EventEmitter } from 'events';
+import { groundingConfidenceService } from './groundingConfidence.service';
+import { CortexContextManagerService } from './cortexContextManager.service';
+import { GroundingContext, QueryType, AgentType } from '../types/grounding.types';
 
 // Multi-Agent State using LangGraph Annotation
 const MultiAgentStateAnnotation = Annotation.Root({
@@ -143,6 +146,39 @@ const MultiAgentStateAnnotation = Annotation.Root({
         reducer: (x: any, y: any) => y ?? x,
         default: () => undefined,
     }),
+    // Grounding Confidence Layer (GCL) state
+    groundingDecision: Annotation<any | undefined>({
+        reducer: (x: any | undefined, y: any | undefined) => y ?? x,
+        default: () => undefined,
+    }),
+    clarificationAttempts: Annotation<number>({
+        reducer: (x: number, y: number) => (y ?? 0) + (x ?? 0),
+        default: () => 0,
+    }),
+    searchAttempts: Annotation<number>({
+        reducer: (x: number, y: number) => (y ?? 0) + (x ?? 0),
+        default: () => 0,
+    }),
+    requiresClarification: Annotation<boolean>({
+        reducer: (x: boolean, y: boolean) => y ?? x,
+        default: () => false,
+    }),
+    refused: Annotation<boolean>({
+        reducer: (x: boolean, y: boolean) => y ?? x,
+        default: () => false,
+    }),
+    queryDomain: Annotation<string | undefined>({
+        reducer: (x: string | undefined, y: string | undefined) => y ?? x,
+        default: () => undefined,
+    }),
+    contextDriftHigh: Annotation<boolean>({
+        reducer: (x: boolean, y: boolean) => y ?? x,
+        default: () => false,
+    }),
+    prohibitMemoryWrite: Annotation<boolean>({
+        reducer: (x: boolean, y: boolean) => y ?? x,
+        default: () => false,
+    }),
 });
 
 type MultiAgentState = typeof MultiAgentStateAnnotation.State;
@@ -156,8 +192,6 @@ export class MultiAgentFlowService {
     private retryExecutor: <T>(fn: () => Promise<T>) => Promise<any>;
     private webSearchTool: WebSearchTool;
     private trendingDetector: TrendingDetectorService;
-    private retryService: RetryWithBackoff;
-    private trendingDetectorService: TrendingDetectorService;
     
     // Semantic cache with LRU limits
     private semanticCache: LRUCache<string, { response: string; embedding: number[]; timestamp: number; hits: number }>;
@@ -180,10 +214,8 @@ export class MultiAgentFlowService {
             allowStale: false
         });
         
-        this.retryService = new RetryWithBackoff();
         this.webSearchTool = new WebSearchTool();
-        this.trendingDetectorService = new TrendingDetectorService();
-        this.trendingDetector = this.trendingDetectorService;
+        this.trendingDetector = new TrendingDetectorService();
         
         this.initializeAgents();
         this.initializeGraph();
@@ -213,7 +245,7 @@ export class MultiAgentFlowService {
             // Create Langchain Coordinator Agent
             this.langchainCoordinatorAgent = new ChatBedrockConverse({
                 model: 'us.anthropic.claude-3-5-sonnet-20241022-v2:0',
-                region: process.env.AWS_REGION || 'us-east-1',
+                region: process.env.AWS_REGION ?? 'us-east-1',
                 temperature: 0.6,
                 maxTokens: 6000,
                 credentials: {
@@ -222,10 +254,10 @@ export class MultiAgentFlowService {
                 },
             });
             
-            // Create Langchain Strategy Agent
+            // Create Langchain Strategy Agent for strategic planning and coordination
             this.langchainStrategyAgent = new ChatBedrockConverse({
                 model: 'amazon.nova-pro-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
+                region: process.env.AWS_REGION ?? 'us-east-1',
                 temperature: 0.7,
                 maxTokens: 4000,
                 credentials: {
@@ -284,6 +316,9 @@ export class MultiAgentFlowService {
             .addNode("content_summarizer", this.contentSummarizerNode.bind(this))
             .addNode("memory_reader", this.memoryReaderNode.bind(this))
             .addNode("memory_writer", this.memoryWriterNode.bind(this))
+            .addNode("grounding_gate", this.groundingGateNode.bind(this))
+            .addNode("clarification_needed", this.clarificationNeededNode.bind(this))
+            .addNode("refuse_safely", this.refuseSafelyNode.bind(this))
             .addNode("master_agent", this.masterAgentNode.bind(this))
             .addNode("cost_optimizer", this.costOptimizerNode.bind(this))
             .addNode("quality_analyst", this.qualityAnalystNode.bind(this))
@@ -292,16 +327,19 @@ export class MultiAgentFlowService {
             // Start with memory reading, then prompt analysis
             .addEdge("__start__", "memory_reader")
             .addEdge("memory_reader", "prompt_analyzer")
-            .addConditionalEdges("prompt_analyzer", this.routeAfterPromptAnalysis.bind(this), ["trending_detector", "semantic_cache", "master_agent"])
-            .addConditionalEdges("trending_detector", this.routeAfterTrendingDetection.bind(this), ["web_scraper", "semantic_cache", "master_agent"])
-            .addConditionalEdges("web_scraper", this.routeAfterWebScraping.bind(this), ["content_summarizer", "master_agent"])
-            .addConditionalEdges("content_summarizer", this.routeAfterContentSummarization.bind(this), ["master_agent", "__end__"])
-            .addConditionalEdges("semantic_cache", this.routeAfterCache.bind(this), ["master_agent", "__end__"])
+            .addConditionalEdges("prompt_analyzer", this.routeAfterPromptAnalysis.bind(this), ["trending_detector", "semantic_cache", "grounding_gate"])
+            .addConditionalEdges("trending_detector", this.routeAfterTrendingDetection.bind(this), ["web_scraper", "semantic_cache", "grounding_gate"])
+            .addConditionalEdges("web_scraper", this.routeAfterWebScraping.bind(this), ["content_summarizer", "grounding_gate"])
+            .addConditionalEdges("content_summarizer", this.routeAfterContentSummarization.bind(this), ["grounding_gate", "__end__"])
+            .addConditionalEdges("semantic_cache", this.routeAfterCache.bind(this), ["grounding_gate", "__end__"])
+            .addConditionalEdges("grounding_gate", this.routeAfterGroundingGate.bind(this), ["master_agent", "clarification_needed", "web_scraper", "refuse_safely"])
             .addConditionalEdges("master_agent", this.routeFromMaster.bind(this), ["cost_optimizer", "quality_analyst", "failure_recovery", "__end__"])
             .addEdge("cost_optimizer", "quality_analyst")
             .addEdge("quality_analyst", "memory_writer")
             .addEdge("memory_writer", "__end__")
-            .addEdge("failure_recovery", "__end__");
+            .addEdge("failure_recovery", "__end__")
+            .addEdge("clarification_needed", "__end__")
+            .addEdge("refuse_safely", "__end__");
 
         this.graph = workflow.compile();
     }
@@ -332,6 +370,14 @@ export class MultiAgentFlowService {
         metadata: Record<string, any>;
         mongodbIntegrationData?: any;
         formattedResult?: any;
+        githubIntegrationData?: any;
+        vercelIntegrationData?: any;
+        googleIntegrationData?: any;
+        slackIntegrationData?: any;
+        discordIntegrationData?: any;
+        jiraIntegrationData?: any;
+        linearIntegrationData?: any;
+        awsIntegrationData?: any;
     }> {
         // Start LangSmith tracing
         const runId = await langSmithService.createRun(
@@ -367,6 +413,99 @@ export class MultiAgentFlowService {
                 documentIdsCount: options.documentIds?.length || 0,
                 message
             });
+            
+            // Check if message needs MCP routing
+            const { ChatService } = await import('./chat.service');
+            const integrationIntent = await (ChatService as any).detectIntegrationIntent(message, userId);
+            
+            if (integrationIntent.needsIntegration) {
+                loggingService.info('MCP routing detected in MultiAgentFlow', {
+                    integrations: integrationIntent.integrations,
+                    suggestedTools: integrationIntent.suggestedTools,
+                    confidence: integrationIntent.confidence
+                });
+                
+                // Route through MCP instead of specialist agents
+                const { MCPClientService } = await import('./mcp-client.service');
+                
+                const initialized = await MCPClientService.initialize(userId);
+                if (!initialized) {
+                    loggingService.error('Failed to initialize MCP in MultiAgentFlow');
+                    // Fall through to normal multi-agent processing
+                } else {
+                    // Find relevant tools
+                    const tools = await MCPClientService.findToolsForIntent(
+                        userId,
+                        message,
+                        integrationIntent.integrations
+                    );
+                    
+                    if (tools.length > 0) {
+                        // Execute via MCP
+                        const mcpResult = await MCPClientService.executeWithAI(
+                            userId,
+                            tools[0].name,
+                            message,
+                            { 
+                                previousMessages: options.previousMessages,
+                                conversationId,
+                            }
+                        );
+                        
+                        if (mcpResult.success) {
+                            // Format integration-specific data
+                            const integrationData: any = {};
+                            const integration = mcpResult.metadata.integration;
+                            
+                            switch (integration) {
+                                case 'mongodb':
+                                    integrationData.mongodbIntegrationData = mcpResult.data;
+                                    const { MCPResultFormatterService } = await import('./mcp-result-formatter.service');
+                                    integrationData.formattedResult = MCPResultFormatterService.formatMongoDBResult(mcpResult);
+                                    break;
+                                case 'github':
+                                    integrationData.githubIntegrationData = mcpResult.data;
+                                    break;
+                                case 'vercel':
+                                    integrationData.vercelIntegrationData = mcpResult.data;
+                                    break;
+                                case 'google':
+                                    integrationData.googleIntegrationData = mcpResult.data;
+                                    break;
+                                case 'slack':
+                                    integrationData.slackIntegrationData = mcpResult.data;
+                                    break;
+                                case 'discord':
+                                    integrationData.discordIntegrationData = mcpResult.data;
+                                    break;
+                                case 'jira':
+                                    integrationData.jiraIntegrationData = mcpResult.data;
+                                    break;
+                                case 'linear':
+                                    integrationData.linearIntegrationData = mcpResult.data;
+                                    break;
+                                case 'aws':
+                                    integrationData.awsIntegrationData = mcpResult.data;
+                                    break;
+                            }
+                            
+                            return {
+                                response: mcpResult.data?.message || 'Action completed successfully',
+                                cost: 0, // MCP handles its own cost tracking
+                                agentPath: ['mcp', integration],
+                                optimizationsApplied: ['mcp_integration'],
+                                cacheHit: mcpResult.metadata.cached || false,
+                                riskLevel: mcpResult.metadata.dangerousOperation ? 'high' : 'low',
+                                metadata: {
+                                    mcpToolUsed: tools[0].name,
+                                    mcpExecutionTime: mcpResult.metadata.latency,
+                                },
+                                ...integrationData,
+                            };
+                        }
+                    }
+                }
+            }
 
             // If documentIds are provided, retrieve document content and prepend to message
             let enrichedMessage = message;
@@ -671,8 +810,211 @@ export class MultiAgentFlowService {
         }
     }
 
+    /**
+     * Grounding Gate Node - THE CRITICAL DECISION POINT
+     * Evaluates grounding confidence before allowing generation
+     */
+    private async groundingGateNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        try {
+            loggingService.info('🔒 Evaluating grounding confidence...');
+            
+            // Build grounding context from state
+            const context: GroundingContext = this.buildGroundingContext(state);
+            
+            // Evaluate grounding
+            const decision = await groundingConfidenceService.evaluate(context);
+            
+            // Store decision in state
+            return {
+                groundingDecision: decision,
+                agentPath: [...(state.agentPath || []), `grounding_${decision.decision.toLowerCase()}`],
+                prohibitMemoryWrite: decision.prohibitMemoryWrite,
+                metadata: {
+                    ...state.metadata,
+                    groundingScore: decision.groundingScore,
+                    groundingDecision: decision.decision,
+                    groundingReasons: decision.reasons,
+                    groundingMetrics: decision.metrics
+                }
+            };
+            
+        } catch (error) {
+            loggingService.error('❌ Grounding gate failed', {
+                error: error instanceof Error ? error.message : String(error)
+            });
+            
+            // FAIL SAFE: If grounding check crashes, ask for clarification
+            return {
+                groundingDecision: {
+                    groundingScore: 0,
+                    decision: 'ASK_CLARIFY',
+                    reasons: ['Grounding evaluation failed', 'Internal error'],
+                    metrics: { 
+                        retrievalScore: 0, 
+                        intentScore: 0, 
+                        freshnessScore: 0, 
+                        sourceDiversityScore: 0, 
+                        finalScore: 0 
+                    },
+                    timestamp: Date.now(),
+                    prohibitMemoryWrite: true
+                },
+                agentPath: [...(state.agentPath || []), 'grounding_error'],
+                failureCount: (state.failureCount || 0) + 1,
+                requiresClarification: true,
+                prohibitMemoryWrite: true
+            };
+        }
+    }
+
+    /**
+     * Clarification Node - Generates clarifying questions
+     */
+    private async clarificationNeededNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        const decision = state.groundingDecision;
+        const lastMessage = state.messages[state.messages.length - 1];
+        const query = lastMessage?.content?.toString() || '';
+        
+        // Build clarification message
+        let clarificationMessage = "I want to make sure I give you an accurate answer. ";
+        
+        if (decision?.reasons.some((r: string) => r.includes('Intent confidence') || r.includes('ambiguous'))) {
+            clarificationMessage += `Could you clarify what you mean by "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"? `;
+            
+            // Offer specific clarification options based on query type
+            const queryType = this.classifyQueryType(query);
+            if (queryType === 'ACTION') {
+                clarificationMessage += "\n\nFor example, are you asking me to:\n";
+                clarificationMessage += "1. Explain how to do something?\n";
+                clarificationMessage += "2. Actually perform an action?\n";
+                clarificationMessage += "3. Provide recommendations?";
+            } else if (queryType === 'FACTUAL') {
+                clarificationMessage += "\n\nCould you provide more context about what specific information you're looking for?";
+            }
+        } else if (decision?.reasons.some((r: string) => r.includes('topic shift') || r.includes('drift'))) {
+            clarificationMessage += "It seems like we may have shifted to a new topic. ";
+            clarificationMessage += "Could you provide some more context about what you're asking?";
+        } else if (decision?.groundingScore && decision.groundingScore < 0.45) {
+            clarificationMessage += "I couldn't find enough reliable information to answer this confidently. ";
+            clarificationMessage += "Could you provide more context or rephrase your question?";
+        } else {
+            clarificationMessage += "Could you provide more details so I can give you the best answer?";
+        }
+        
+        loggingService.info('❓ Clarification requested', {
+            originalQuery: query,
+            groundingScore: decision?.groundingScore,
+            reasons: decision?.reasons,
+            attempts: state.clarificationAttempts || 0
+        });
+        
+        return {
+            messages: [...state.messages, new AIMessage({
+                content: clarificationMessage,
+                additional_kwargs: {
+                    clarification_requested: true,
+                    grounding_reasons: decision?.reasons,
+                    grounding_score: decision?.groundingScore
+                }
+            })],
+            requiresClarification: true,
+            clarificationAttempts: (state.clarificationAttempts || 0) + 1,
+            agentPath: [...(state.agentPath || []), 'clarification_requested']
+        };
+    }
+
+    /**
+     * Refusal Node - Safe rejection with helpful explanation
+     */
+    private async refuseSafelyNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
+        const decision = state.groundingDecision;
+        const lastMessage = state.messages[state.messages.length - 1];
+        const query = lastMessage?.content?.toString() || '';
+        
+        let refusalMessage = "I don't have enough reliable information to answer this question confidently. ";
+        
+        // Check for loop exhaustion
+        if (decision?.reasons.some((r: string) => r.includes('Maximum clarification attempts'))) {
+            refusalMessage = "I've tried to clarify your question, but I'm still not confident I can provide an accurate answer. ";
+            refusalMessage += "This might be outside my current knowledge base. ";
+        } else if (decision?.reasons.some((r: string) => r.includes('Maximum search attempts'))) {
+            refusalMessage = "I've attempted to find current information multiple times, but haven't been successful. ";
+            refusalMessage += "The information might not be available or the sources may be temporarily unavailable. ";
+        } else if (state.metadata?.retrievalResult?.hitCount === 0) {
+            refusalMessage += "I couldn't find any relevant information in my knowledge base. ";
+        } else if (decision?.metrics?.retrievalScore && decision.metrics.retrievalScore < 0.3) {
+            refusalMessage += "The information I found doesn't seem directly relevant to your question. ";
+        }
+        
+        // Add helpful next steps
+        refusalMessage += "\n\nYou might want to:\n";
+        refusalMessage += "- Upload relevant documents if you have them\n";
+        refusalMessage += "- Rephrase your question with more specific details\n";
+        refusalMessage += "- Ask about a different topic I have information about";
+        
+        loggingService.warn('🚫 Safe refusal triggered', {
+            originalQuery: query,
+            groundingScore: decision?.groundingScore,
+            reasons: decision?.reasons,
+            hitCount: state.metadata?.retrievalResult?.hitCount
+        });
+        
+        return {
+            messages: [...state.messages, new AIMessage({
+                content: refusalMessage,
+                additional_kwargs: {
+                    refusal: true,
+                    grounding_reasons: decision?.reasons,
+                    grounding_score: decision?.groundingScore
+                }
+            })],
+            refused: true,
+            agentPath: [...(state.agentPath || []), 'refused_safely']
+        };
+    }
+
     private async masterAgentNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
+            // 🔒 REDUNDANT SAFETY CHECK - Catch GCL bypass scenarios
+            if (!state.groundingDecision) {
+                loggingService.error('🚨 CRITICAL: Master agent invoked without grounding check');
+                
+                // Get the query for context
+                const lastMessage = state.messages[state.messages.length - 1];
+                const query = lastMessage?.content?.toString() || '';
+                
+                // Emergency re-check
+                const groundingContext = this.buildGroundingContext(state);
+                const decision = await groundingConfidenceService.evaluate(groundingContext);
+                
+                if (decision.decision !== 'GENERATE') {
+                    loggingService.error('🚨 Grounding bypass prevented. Decision was: ' + decision.decision, {
+                        query,
+                        groundingScore: decision.groundingScore,
+                        reasons: decision.reasons
+                    });
+                    
+                    
+                    return {
+                        groundingDecision: decision,
+                        requiresClarification: true,
+                        prohibitMemoryWrite: true,
+                        messages: [...state.messages, new AIMessage({
+                            content: `I need to verify my confidence before answering your question about "${query}". Could you rephrase your question?`,
+                            additional_kwargs: {
+                                emergency_check: true,
+                                grounding_reasons: decision.reasons,
+                                original_query: query
+                            }
+                        })],
+                        agentPath: [...(state.agentPath || []), 'emergency_grounding_check']
+                    };
+                }
+                
+                // Update state with emergency decision
+                state = { ...state, groundingDecision: decision, prohibitMemoryWrite: false };
+            }
+            
             // Use Langchain coordination if enabled
             if (this.langchainIntegrationEnabled && this.langchainCoordinatorAgent) {
                 return await this.masterAgentWithLangchain(state);
@@ -700,7 +1042,8 @@ Would you like me to help you with anything else, or would you prefer to check t
                     metadata: { 
                         ...state.metadata, 
                         strategy: state.chatMode,
-                        fallbackUsed: true
+                        fallbackUsed: true,
+                        originalQuery: query
                     }
                 };
             }
@@ -726,7 +1069,7 @@ Would you like me to help you with anything else, or would you prefer to check t
                 metadata: { 
                     ...state.metadata, 
                     strategy: state.chatMode,
-                    processingTime: Date.now() - (state.metadata?.startTime || Date.now())
+                    processingTime: Date.now() - (state.metadata?.startTime ?? Date.now())
                 }
             };
         } catch (error) {
@@ -1348,7 +1691,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         const lastPath = state.agentPath[state.agentPath.length - 1];
         
         if (lastPath === 'prompt_analysis_error') {
-            return 'master_agent'; // Skip everything on error
+            return 'grounding_gate'; // Go to grounding gate even on error
         }
         
         // Check if query might need real-time web data
@@ -1376,7 +1719,7 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
         const lastPath = state.agentPath[state.agentPath.length - 1];
         
         if (lastPath === 'web_scraping_error' || lastPath === 'web_scraping_failed') {
-            return 'master_agent'; // Proceed without web data
+            return 'grounding_gate'; // Proceed to grounding gate even without web data
         }
         
         if (state.scrapingResults && state.scrapingResults.length > 0) {
@@ -1391,18 +1734,248 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
             return '__end__'; // Cache hit, we're done
         }
         
-        return 'master_agent'; // Cache miss, proceed to master agent
+        return 'grounding_gate'; // Cache miss, proceed to grounding gate
+    }
+
+    /**
+     * Route after grounding gate - Critical decision routing
+     */
+    private routeAfterGroundingGate(state: MultiAgentState): string {
+        const decision = state.groundingDecision?.decision;
+        const config = groundingConfidenceService.getConfig();
+        
+        // Emergency bypass check (for critical incidents)
+        if (config.flags.emergencyBypass) {
+            loggingService.warn('🚨 Emergency bypass active - routing to master_agent');
+            return 'master_agent';
+        }
+        
+        // In shadow mode, always generate (but log the decision)
+        if (config.flags.shadowMode && !config.flags.blockingEnabled) {
+            loggingService.info('🔍 Shadow mode: Would have decided ' + decision + ', but allowing generation');
+            return 'master_agent';
+        }
+        
+        // Blocking mode: enforce decisions
+        switch (decision) {
+            case 'GENERATE':
+                return 'master_agent';
+            
+            case 'ASK_CLARIFY':
+                return 'clarification_needed';
+            
+            case 'SEARCH_MORE':
+                // Re-trigger web search or tool retry
+                loggingService.info('🔍 GCL requesting fresh search');
+                return 'web_scraper';
+            
+            case 'REFUSE':
+                // Only enforce REFUSE if strict refusal is enabled
+                if (config.flags.strictRefusal) {
+                    return 'refuse_safely';
+                }
+                // Otherwise, log but allow generation (Phase 2 behavior)
+                loggingService.info('🔍 Would REFUSE but strict refusal not enabled, allowing generation');
+                return 'master_agent';
+            
+            default:
+                // Fail safe: ask for clarification on unknown decision
+                loggingService.error('Unknown grounding decision: ' + decision);
+                return 'clarification_needed';
+        }
     }
 
     private routeAfterContentSummarization(state: MultiAgentState): string {
-        // If we have web scraping results, end here
+        // If we have web scraping results, proceed to grounding gate
         if (state.metadata?.contentSummary?.sourcesUsed > 0) {
-            loggingService.info('✅ Web scraping completed successfully, ending flow');
-            return '__end__';
+            loggingService.info('✅ Web scraping completed successfully, proceeding to grounding gate');
+            return 'grounding_gate';
         }
         
-        // If no web scraping was done, go to master agent
-        return 'master_agent';
+        // If no web scraping was done, still go to grounding gate (it will handle the decision)
+        loggingService.info('⚠️ No web scraping results, proceeding to grounding gate anyway');
+        return 'grounding_gate';
+    }
+
+    /**
+     * Build grounding context from current multi-agent state
+     */
+    private buildGroundingContext(state: MultiAgentState): GroundingContext {
+        const lastMessage = state.messages[state.messages.length - 1];
+        const query = lastMessage?.content?.toString() || '';
+        
+        // Extract retrieval signals from state metadata
+        const retrievalData = state.metadata?.retrievalResult || { documents: [], sources: [], totalResults: 0 };
+        const documents = retrievalData.documents || [];
+        
+        // Build sources array
+        const sources = documents.map((doc: any) => ({
+            sourceType: this.mapSourceType(doc.metadata?.source),
+            sourceId: doc.metadata?._id || doc.metadata?.documentId || 'unknown',
+            similarity: doc.metadata?.score || 0,
+            timestamp: doc.metadata?.createdAt ? new Date(doc.metadata.createdAt).getTime() : undefined
+        }));
+        
+        // Calculate similarities
+        const similarities = sources.map((s: any) => s.similarity).filter((s: number) => s > 0);
+        const maxSimilarity = similarities.length > 0 ? Math.max(...similarities) : 0;
+        const meanSimilarity = similarities.length > 0 
+            ? similarities.reduce((a: number, b: number) => a + b, 0) / similarities.length 
+            : 0;
+        
+        // Determine query type
+        const queryType = this.classifyQueryType(query);
+        
+        // Check if time-sensitive (from trending detector or query patterns)
+        const timeSensitive = state.metadata?.trendingAnalysis?.queryType === 'realtime' || 
+                             state.needsWebData || 
+                             this.isTimeSensitiveQuery(query);
+        
+        // Cache information
+        const cacheInfo = state.cacheHit ? {
+            used: true,
+            freshnessScore: this.calculateCacheFreshness(state),
+            cacheType: state.metadata?.cacheType || 'semantic'
+        } : undefined;
+        
+        // Intent signals (default to reasonable values if not present)
+        const intentConfidence = state.metadata?.intentConfidence || 0.8;
+        const intentAmbiguous = state.metadata?.intentAmbiguous || false;
+        
+        // Get context drift from cortexContextManager if available
+        const contextDriftHigh = this.detectContextDrift(state);
+        
+        return {
+            query,
+            queryType,
+            retrieval: {
+                hitCount: documents.length,
+                maxSimilarity,
+                meanSimilarity,
+                sources
+            },
+            cache: cacheInfo,
+            intent: {
+                confidence: intentConfidence,
+                ambiguous: intentAmbiguous
+            },
+            agentType: this.mapAgentType(state.currentAgent),
+            timeSensitive,
+            userId: state.userId,
+            conversationId: state.conversationId,
+            documentIds: state.metadata?.documentIds,
+            contextDriftHigh,
+            clarificationAttempts: state.clarificationAttempts,
+            searchAttempts: state.searchAttempts
+        };
+    }
+
+    /**
+     * Classify query type for grounding evaluation
+     */
+    private classifyQueryType(query: string): QueryType {
+        const lowerQuery = query.toLowerCase();
+        
+        // Action indicators
+        if (lowerQuery.match(/\b(create|delete|update|execute|run|deploy|start|stop|build|install|configure)\b/)) {
+            return 'ACTION';
+        }
+        
+        // Opinion indicators
+        if (lowerQuery.match(/\b(think|feel|opinion|recommend|should|better|best|prefer|suggest)\b/)) {
+            return 'OPINION';
+        }
+        
+        // Factual indicators
+        if (lowerQuery.match(/\b(what|when|where|who|how many|how much|define|explain)\b/)) {
+            return 'FACTUAL';
+        }
+        
+        return 'MIXED';
+    }
+
+    /**
+     * Detect context drift from cortexContextManager
+     */
+    private detectContextDrift(state: MultiAgentState): boolean {
+        // Check if cortexContextManager has detected high drift
+        if (state.metadata?.contextDrift !== undefined) {
+            return state.metadata.contextDrift > 0.7; // High drift threshold
+        }
+        
+        // Alternative: Check if state explicitly set contextDriftHigh
+        if (state.contextDriftHigh !== undefined) {
+            return state.contextDriftHigh;
+        }
+        
+        // Try to get from cortexContextManager service if available
+        try {
+            const cortexManager = CortexContextManagerService.getInstance();
+            const stats = cortexManager.getContextStats(state.userId);
+            // Check if there's a recent topic shift indicator in metadata
+            if (stats && (stats as any).topicShiftDetected) {
+                return true;
+            }
+        } catch (error) {
+            // cortexContextManager not available or error, assume no drift
+        }
+        
+        return false;
+    }
+
+    /**
+     * Check if query is time-sensitive
+     */
+    private isTimeSensitiveQuery(query: string): boolean {
+        const lowerQuery = query.toLowerCase();
+        return lowerQuery.match(/\b(now|current|today|latest|recent|real-time|live|this week|this month)\b/) !== null;
+    }
+
+    /**
+     * Calculate cache freshness score
+     */
+    private calculateCacheFreshness(state: MultiAgentState): number {
+        // If cache has explicit timestamp, calculate age-based freshness
+        const cacheTimestamp = state.semanticCacheResult?.timestamp;
+        if (cacheTimestamp) {
+            const ageMs = Date.now() - cacheTimestamp;
+            const ageMinutes = ageMs / (60 * 1000);
+            
+            // Decay function: fresh for 5 minutes, then exponential decay
+            if (ageMinutes < 5) return 1.0;
+            if (ageMinutes < 15) return 0.8;
+            if (ageMinutes < 60) return 0.5;
+            return 0.2;
+        }
+        
+        // Default: assume moderately fresh
+        return 0.7;
+    }
+
+    /**
+     * Map source type from metadata
+     */
+    private mapSourceType(source: string): 'doc' | 'memory' | 'web' | 'integration' {
+        if (!source) return 'doc';
+        const lowerSource = source.toLowerCase();
+        if (lowerSource.includes('memory') || lowerSource.includes('conversation')) return 'memory';
+        if (lowerSource.includes('web') || lowerSource.includes('scrape')) return 'web';
+        if (lowerSource.includes('mongodb') || lowerSource.includes('aws') || lowerSource.includes('github') || 
+            lowerSource.includes('vercel') || lowerSource.includes('google') || lowerSource.includes('slack')) return 'integration';
+        return 'doc';
+    }
+
+    /**
+     * Map current agent to AgentType
+     */
+    private mapAgentType(currentAgent: string): AgentType {
+        if (!currentAgent) return 'MASTER';
+        const lowerAgent = currentAgent.toLowerCase();
+        if (lowerAgent.includes('optimizer')) return 'OPTIMIZER';
+        if (lowerAgent.includes('quality')) return 'QA';
+        if (lowerAgent.includes('memory')) return 'MEMORY';
+        if (lowerAgent.includes('web')) return 'WEB_SCRAPER';
+        return 'MASTER';
     }
 
     private routeFromMaster(state: MultiAgentState): string {
@@ -1897,6 +2470,17 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
     private async memoryWriterNode(state: MultiAgentState): Promise<Partial<MultiAgentState>> {
         try {
             loggingService.info(`💾 Memory Writer processing for user: ${state.userId}`);
+
+            // 🔒 CRITICAL: Check if memory writes are prohibited by GCL
+            if (state.prohibitMemoryWrite) {
+                loggingService.warn('🚫 Memory write blocked by Grounding Confidence Layer', {
+                    userId: state.userId,
+                    conversationId: state.conversationId,
+                    groundingDecision: state.groundingDecision?.decision,
+                    groundingScore: state.groundingDecision?.groundingScore
+                });
+                return state; // Skip memory write
+            }
 
             // Get the final response from messages
             const finalMessage = state.messages[state.messages.length - 1];

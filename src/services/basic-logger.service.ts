@@ -61,7 +61,6 @@ export class BasicLoggerService {
      */
     private initializeSentry(): void {
         const sentryDsn = process.env.SENTRY_DSN;
-        const environment = process.env.NODE_ENV || 'development';
 
         if (sentryDsn && !this.sentryInitialized) {
             try {
@@ -432,7 +431,7 @@ export class BasicLoggerService {
     /**
      * Set Sentry user context
      */
-    static setSentryUser(user: { id?: string; email?: string; username?: string }): void {
+    static setSentryUser(_user: { id?: string; email?: string; username?: string }): void {
         const instance = BasicLoggerService.getInstance();
         if (instance.sentryInitialized) {
             // Uncomment if using Sentry
@@ -443,7 +442,7 @@ export class BasicLoggerService {
     /**
      * Add Sentry breadcrumb
      */
-    static addBreadcrumb(message: string, category: string, level: 'info' | 'warning' | 'error' = 'info'): void {
+    static addBreadcrumb(_message: string, _category: string, _level: 'info' | 'warning' | 'error' = 'info'): void {
         const instance = BasicLoggerService.getInstance();
         if (instance.sentryInitialized) {
             // Uncomment if using Sentry

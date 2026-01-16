@@ -18,7 +18,7 @@ export class PaymentWebhookController {
      * Stripe Webhook Handler
      * POST /api/webhooks/payment/stripe
      */
-    static async handleStripeWebhook(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async handleStripeWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
         const signature = req.headers['stripe-signature'] as string;
         const rawBody = (req as any).rawBody || JSON.stringify(req.body);
 
@@ -335,7 +335,7 @@ export class PaymentWebhookController {
      * Razorpay Webhook Handler
      * POST /api/webhooks/payment/razorpay
      */
-    static async handleRazorpayWebhook(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async handleRazorpayWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
         const signature = req.headers['x-razorpay-signature'] as string;
         const rawBody = (req as any).rawBody || JSON.stringify(req.body);
 
@@ -611,7 +611,7 @@ export class PaymentWebhookController {
      * PayPal Webhook Handler
      * POST /api/webhooks/payment/paypal
      */
-    static async handlePayPalWebhook(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async handlePayPalWebhook(req: Request, res: Response, _next: NextFunction): Promise<void> {
         const signature = req.headers['paypal-transmission-sig'] as string;
         const rawBody = (req as any).rawBody || JSON.stringify(req.body);
 

@@ -19,7 +19,6 @@ export class PromptTemplateController {
     
     // Access control optimization
     private static userProjectCache = new Map<string, { projects: string[]; timestamp: number }>();
-    private static readonly PROJECT_CACHE_TTL = 300000; // 5 minutes
     
     /**
      * Initialize background processor

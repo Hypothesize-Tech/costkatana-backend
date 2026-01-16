@@ -595,8 +595,6 @@ export class PayPalGatewayService implements IPaymentGateway {
                 throw new Error('PayPal SDK not initialized');
             }
 
-            const paypal = require('@paypal/checkout-server-sdk');
-            
             loggingService.info('Creating PayPal subscription', {
                 planId: params.planId,
                 interval: params.interval,
@@ -837,12 +835,12 @@ export class PayPalGatewayService implements IPaymentGateway {
                 throw new Error('PayPal SDK not initialized');
             }
 
-            const paypal = require('@paypal/checkout-server-sdk');
             
             // PayPal subscription updates are limited - mainly for cancellation
             if (params.cancelAtPeriodEnd !== undefined) {
                 if (params.cancelAtPeriodEnd) {
                     // Cancel subscription
+                    const paypal = require('@paypal/checkout-server-sdk');
                     const cancelRequest = new paypal.billingSubscriptions.SubscriptionsCancelRequest(params.subscriptionId);
                     cancelRequest.requestBody({
                         reason: 'User requested cancellation at period end',

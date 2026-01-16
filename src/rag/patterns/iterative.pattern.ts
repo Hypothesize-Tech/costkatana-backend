@@ -140,7 +140,6 @@ export class IterativeRAGPattern extends BaseRAGPattern {
         state.converged = await this.checkConvergence(
           query,
           state.partialAnswer,
-          extractedContext
         );
 
         if (state.converged) {
@@ -169,7 +168,6 @@ export class IterativeRAGPattern extends BaseRAGPattern {
         finalAnswer = await this.synthesizeFinalAnswer(
           query,
           state.partialAnswer,
-          allDocuments
         );
         totalGenerationDuration += Date.now() - synthStart;
       }
@@ -313,7 +311,6 @@ Refined Answer:`;
    * Check if answer has converged (no significant improvement likely)
    */
   private async checkConvergence(
-    query: string,
     answer: string,
     latestContext: string
   ): Promise<boolean> {
@@ -367,7 +364,6 @@ Follow-up question for more information:`;
   private async synthesizeFinalAnswer(
     query: string,
     iterativeAnswer: string,
-    allDocuments: Document[]
   ): Promise<string> {
     const prompt = `Synthesize a final comprehensive answer by consolidating the iterative answer and ensuring all key points are covered.
 

@@ -150,7 +150,7 @@ async function estimateOpenAITokens(text: string, model?: string): Promise<numbe
 /**
  * Anthropic tokenization (Claude models)
  */
-async function estimateAnthropicTokens(text: string, model?: string): Promise<number> {
+function estimateAnthropicTokens(text: string, model?: string): number {
     // Claude models use similar tokenization to GPT models
     // We can use tiktoken as approximation or implement Claude-specific logic
     try {
@@ -158,8 +158,49 @@ async function estimateAnthropicTokens(text: string, model?: string): Promise<nu
             const encoding = tiktoken.get_encoding('cl100k_base');
             const tokens = encoding.encode(text);
             encoding.free();
-            // Claude tokens are roughly 1.1x OpenAI tokens based on empirical testing
-            return Math.ceil(tokens.length * 1.1);
+            
+            // Different Claude models have different tokenization efficiency
+            let multiplier = 1.1; // Default multiplier
+            
+            if (model) {
+                // Claude 4.5 generation (latest)
+                if (model.includes('claude-opus-4.5')) {
+                    multiplier = 1.12; // Opus 4.5 - frontier intelligence, slightly more tokens for deep reasoning
+                } else if (model.includes('claude-sonnet-4.5')) {
+                    multiplier = 1.09; // Sonnet 4.5 - optimized for agents and coding
+                } else if (model.includes('claude-haiku-4.5')) {
+                    multiplier = 1.02; // Haiku 4.5 - most efficient, cost-effective
+                }
+                // Claude 4 generation
+                else if (model.includes('claude-opus-4')) {
+                    multiplier = 1.14; // Opus 4 - complex reasoning and coding
+                } else if (model.includes('claude-sonnet-4')) {
+                    multiplier = 1.08; // Sonnet 4 - balanced advanced reasoning
+                }
+                // Claude 3.5 generation
+                else if (model.includes('claude-3.5-sonnet')) {
+                    multiplier = 1.08; // Claude 3.5 Sonnet is highly efficient
+                } else if (model.includes('claude-3.5-haiku')) {
+                    multiplier = 1.03; // Claude 3.5 Haiku is most efficient
+                }
+                // Claude 3 generation (legacy)
+                else if (model.includes('claude-3-opus')) {
+                    multiplier = 1.15; // Opus uses slightly more tokens for better understanding
+                } else if (model.includes('claude-3-sonnet')) {
+                    multiplier = 1.1; // Sonnet is balanced
+                } else if (model.includes('claude-3-haiku')) {
+                    multiplier = 1.05; // Haiku is more efficient
+                }
+                // Claude 2 and legacy models
+                else if (model.includes('claude-2')) {
+                    multiplier = 1.2; // Claude-2 uses more tokens
+                } else if (model.includes('claude-instant')) {
+                    multiplier = 1.08; // Instant is more efficient
+                }
+            }
+            
+            // Claude tokens are roughly multiplier x OpenAI tokens based on empirical testing
+            return Math.ceil(tokens.length * multiplier);
         }
     } catch (error) {
         loggingService.warn('Claude tokenization estimation failed', { error });
@@ -199,9 +240,22 @@ async function estimateGoogleTokens(text: string, model?: string): Promise<numbe
     const charCount = text.length;
     const wordCount = text.trim().split(/\s+/).length;
     
-    // Gemini models tend to be more efficient with tokenization
-    const charBasedEstimate = Math.ceil(charCount / 3.5);
-    const wordBasedEstimate = Math.ceil(wordCount * 1.2);
+    // Different Gemini models have slightly different tokenization efficiency
+    let charDivisor = 3.5;
+    let wordMultiplier = 1.2;
+    
+    if (model) {
+        if (model.includes('gemini-pro')) {
+            charDivisor = 3.8; // Gemini Pro is more efficient
+            wordMultiplier = 1.15;
+        } else if (model.includes('gemini-ultra')) {
+            charDivisor = 3.2; // Ultra uses more tokens for better understanding
+            wordMultiplier = 1.25;
+        }
+    }
+    
+    const charBasedEstimate = Math.ceil(charCount / charDivisor);
+    const wordBasedEstimate = Math.ceil(wordCount * wordMultiplier);
     
     return Math.max(charBasedEstimate, wordBasedEstimate);
 }
@@ -213,9 +267,22 @@ async function estimateCohereTokens(text: string, model?: string): Promise<numbe
     const charCount = text.length;
     const wordCount = text.trim().split(/\s+/).length;
     
-    // Cohere models have efficient tokenization
-    const charBasedEstimate = Math.ceil(charCount / 4.5);
-    const wordBasedEstimate = Math.ceil(wordCount * 1.1);
+    // Different Cohere models have varying tokenization efficiency
+    let charDivisor = 4.5;
+    let wordMultiplier = 1.1;
+    
+    if (model) {
+        if (model.includes('command-r')) {
+            charDivisor = 4.8; // Command-R is more efficient
+            wordMultiplier = 1.05;
+        } else if (model.includes('command-light')) {
+            charDivisor = 4.2; // Light model uses more tokens
+            wordMultiplier = 1.15;
+        }
+    }
+    
+    const charBasedEstimate = Math.ceil(charCount / charDivisor);
+    const wordBasedEstimate = Math.ceil(wordCount * wordMultiplier);
     
     return Math.max(charBasedEstimate, wordBasedEstimate);
 }

@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { WorkflowVersion, IWorkflowVersion } from '../models/WorkflowVersion';
 import { Usage } from '../models/Usage';
 import { loggingService } from './logging.service';
-import { AutomationService } from './automation.service';
 
 export interface WorkflowVersionComparison {
     version1: IWorkflowVersion;

@@ -404,7 +404,7 @@ Respond in JSON format:
       // Legacy Claude 3 models removed - use Claude 3.5+ only
       
       // Updated Claude 3.5 models
-      'anthropic.claude-3-5-haiku-20241022-v1:0': { input: 0.00025, output: 0.00125 },
+      'global.anthropic.claude-haiku-4-5-20251001-v1:0': { input: 0.00025, output: 0.00125 },
       'anthropic.claude-3-5-sonnet-20240620-v1:0': { input: 0.003, output: 0.015 },
       
       // Claude 4 models

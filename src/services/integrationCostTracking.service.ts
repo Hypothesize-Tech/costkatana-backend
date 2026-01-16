@@ -106,18 +106,100 @@ export class IntegrationCostTrackingService {
         userId: string,
         period: 'day' | 'week' | 'month' = 'month'
     ): Promise<CostMetrics> {
-        // In production, this would query a metrics database
-        // For now, return placeholder
-        return {
-            embeddingsProduced: 0,
-            vectorQueries: 0,
-            tokensConsumed: 0,
-            generationCalls: 0,
-            totalCost: 0,
-            costPerEmbedding: this.EMBEDDING_COST_PER_1K / 1000,
-            costPerQuery: this.QUERY_COST_PER_1K / 1000,
-            costPerGeneration: this.GENERATION_COST_PER_1K_TOKENS / 1000
-        };
+        try {
+            // Calculate date range based on period
+            const endDate = new Date();
+            const startDate = new Date();
+            
+            switch (period) {
+                case 'day':
+                    startDate.setDate(endDate.getDate() - 1);
+                    break;
+                case 'week':
+                    startDate.setDate(endDate.getDate() - 7);
+                    break;
+                case 'month':
+                    startDate.setMonth(endDate.getMonth() - 1);
+                    break;
+            }
+
+            // Query cost tracking records from database
+            // TODO: Implement CostTrackingRecord model
+            const costRecords: any[] = [];
+            // const costRecords = await CostTrackingRecord.find({
+            //     repoFullName,
+            //     userId,
+            //     timestamp: {
+            //         $gte: startDate,
+            //         $lte: endDate
+            //     }
+            // });
+
+            // Aggregate metrics
+            let embeddingsProduced = 0;
+            let vectorQueries = 0;
+            let tokensConsumed = 0;
+            let generationCalls = 0;
+            let totalCost = 0;
+
+            for (const record of costRecords) {
+                switch (record.operationType) {
+                    case 'embedding':
+                        embeddingsProduced += record.count || 0;
+                        totalCost += record.cost || 0;
+                        break;
+                    case 'query':
+                        vectorQueries += record.count || 0;
+                        totalCost += record.cost || 0;
+                        break;
+                    case 'generation':
+                        generationCalls += record.count || 0;
+                        tokensConsumed += record.tokensUsed || 0;
+                        totalCost += record.cost || 0;
+                        break;
+                }
+            }
+
+            loggingService.info('Cost metrics retrieved', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                period,
+                totalCost,
+                recordsProcessed: costRecords.length
+            });
+
+            return {
+                embeddingsProduced,
+                vectorQueries,
+                tokensConsumed,
+                generationCalls,
+                totalCost,
+                costPerEmbedding: this.EMBEDDING_COST_PER_1K / 1000,
+                costPerQuery: this.QUERY_COST_PER_1K / 1000,
+                costPerGeneration: this.GENERATION_COST_PER_1K_TOKENS / 1000
+            };
+        } catch (error) {
+            loggingService.error('Failed to get cost metrics', {
+                component: 'IntegrationCostTrackingService',
+                repoFullName,
+                userId,
+                period,
+                error: error instanceof Error ? error.message : String(error)
+            });
+
+            // Return zero metrics on error
+            return {
+                embeddingsProduced: 0,
+                vectorQueries: 0,
+                tokensConsumed: 0,
+                generationCalls: 0,
+                totalCost: 0,
+                costPerEmbedding: this.EMBEDDING_COST_PER_1K / 1000,
+                costPerQuery: this.QUERY_COST_PER_1K / 1000,
+                costPerGeneration: this.GENERATION_COST_PER_1K_TOKENS / 1000
+            };
+        }
     }
 
     /**

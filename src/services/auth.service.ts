@@ -372,7 +372,7 @@ export class AuthService {
             }
 
             // Update last login and track activity in parallel
-            const [, tokens] = await Promise.all([
+            const [_] = await Promise.all([
                 // Update last login
                 (async () => {
                     user.lastLogin = new Date();

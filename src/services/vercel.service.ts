@@ -292,6 +292,14 @@ export class VercelService {
                     vercelUsername: userInfo.username,
                     connectionId: connection._id.toString()
                 });
+
+                // Auto-grant MCP permissions for new connection
+                const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+                await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+                    userId,
+                    'vercel',
+                    connection._id.toString()
+                );
             }
 
             // Sync projects

@@ -108,9 +108,9 @@ export const DEFAULT_STREAMING_CONFIG: CortexStreamingConfig = {
     timeout: 300000, // 5 minutes overall timeout
     budgetLimit: 1.00, // $1.00 budget limit
     models: {
-        encoder: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+        encoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         processor: 'anthropic.claude-4-1-opus-20250219-v1:0',
-        decoder: 'anthropic.claude-3-5-haiku-20241022-v1:0'
+        decoder: 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
     },
     streaming: {
         enableTokenStreaming: true,
@@ -1257,7 +1257,7 @@ export class CortexStreamingOrchestratorService extends EventEmitter {
     private calculateTokenCost(model: string, inputTokens: number, outputTokens: number): number {
         // This is a simplified cost calculation - in production you'd use actual pricing
         const modelCosts: { [key: string]: { input: number, output: number } } = {
-            'anthropic.claude-3-5-haiku-20241022-v1:0': { input: 0.0000008, output: 0.000004 },
+            'global.anthropic.claude-haiku-4-5-20251001-v1:0': { input: 0.0000008, output: 0.000004 },
             'anthropic.claude-3-7-sonnet-20250219-v1:0': { input: 0.000003, output: 0.000015 },
             'anthropic.claude-4-1-opus-20250219-v1:0': { input: 0.000003, output: 0.000015 },
             'amazon.nova-pro-v1:0': { input: 0.0000008, output: 0.0000032 }

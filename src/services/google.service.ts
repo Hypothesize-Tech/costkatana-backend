@@ -39,7 +39,7 @@ export class GoogleService {
     };
 
     private static readonly MAX_RETRIES = 3;
-    private static readonly RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
+    private static readonly _RETRY_DELAYS = [1000, 2000, 4000]; // Exponential backoff
     private static readonly REQUIRED_SCOPES: Record<string, string> = {
         'profile': 'https://www.googleapis.com/auth/userinfo.profile',
         'email': 'https://www.googleapis.com/auth/userinfo.email',

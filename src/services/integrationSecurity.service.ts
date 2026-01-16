@@ -116,12 +116,87 @@ export class IntegrationSecurityService {
      * Emergency kill-switch check
      */
     static async checkKillSwitch(
-        userId: string,
-        organizationId?: string
+        _userId: string,
+        _organizationId?: string
     ): Promise<boolean> {
-        // In production, would check database for kill-switch status
-        // For now, always return false (kill-switch not active)
-        return false;
+        try {
+            // Check global kill switch
+            const globalKillSwitch = await this.checkGlobalKillSwitch();
+            if (globalKillSwitch) {
+                loggingService.warn('Global kill switch activated', {
+                    component: 'IntegrationSecurityService',
+                    operation: 'checkKillSwitch'
+                });
+                return true;
+            }
+
+            // Check organization-specific kill switch if organizationId provided
+            if (_organizationId) {
+                const orgKillSwitch = await this.checkOrganizationKillSwitch(_organizationId);
+                if (orgKillSwitch) {
+                    loggingService.warn('Organization kill switch activated', {
+                        component: 'IntegrationSecurityService',
+                        operation: 'checkKillSwitch',
+                        organizationId: _organizationId
+                    });
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (error) {
+            loggingService.error('Kill switch check failed', {
+                component: 'IntegrationSecurityService',
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+            // Fail safe - return true to block operations if check fails
+            return true;
+        }
+    }
+
+    /**
+     * Check global kill switch from environment or database
+     */
+    private static async checkGlobalKillSwitch(): Promise<boolean> {
+        // Check environment variable first for immediate response
+        if (process.env.GLOBAL_KILL_SWITCH === 'true') {
+            return true;
+        }
+
+        // Check database for persistent kill switch setting
+        try {
+            // TODO: Create SystemConfiguration model
+            // const { SystemConfiguration } = await import('../models/SystemConfiguration');
+            // const config = await SystemConfiguration.findOne({ key: 'global_kill_switch' });
+            // return config?.value === 'true' || false;
+            return false;
+        } catch (error) {
+            loggingService.warn('Failed to check database kill switch', {
+                component: 'IntegrationSecurityService',
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+            return false;
+        }
+    }
+
+    /**
+     * Check organization-specific kill switch
+     */
+    private static async checkOrganizationKillSwitch(_organizationId: string): Promise<boolean> {
+        try {
+            // TODO: Create Organization model
+            // const { Organization } = await import('../models/Organization');
+            // const org = await Organization.findById(organizationId).select('killSwitchActive');
+            // return org?.killSwitchActive || false;
+            return false;
+        } catch (error) {
+            loggingService.warn('Failed to check organization kill switch', {
+                component: 'IntegrationSecurityService',
+                organizationId: _organizationId,
+                error: error instanceof Error ? error.message : 'Unknown'
+            });
+            return false;
+        }
     }
 }
 

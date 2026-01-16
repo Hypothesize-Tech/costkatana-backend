@@ -142,7 +142,6 @@ Return ONLY valid JSON, no markdown.`;
             packageManager?: string;
         }
     ): RequirementsAnalysis {
-        const lowerRequest = userRequest.toLowerCase();
         
         const intent = this.detectIntentFromKeywords(userRequest);
         const scope = this.detectScopeFromKeywords(userRequest);

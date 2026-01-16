@@ -160,7 +160,7 @@ export class QualityService {
         criteria.coherence = this.calculateCoherenceScore(responseMetrics);
 
         // Optimized relevance calculation using pre-computed word sets
-        criteria.relevance = this.calculateRelevanceScore(promptMetrics, responseMetrics, prompt, response);
+        criteria.relevance = this.calculateRelevanceScore(promptMetrics, responseMetrics);
 
         const overallScore = Object.values(criteria).reduce((a, b) => a + b, 0) / 5;
 
@@ -191,7 +191,7 @@ export class QualityService {
     /**
      * Calculate coherence score from text metrics
      */
-    private calculateCoherenceScore(metrics: any): number {
+    private calculateCoherenceScore(metrics: { paragraphCount: number; sentenceCount: number; avgWordsPerSentence: number }): number {
         const hasParagraphs = metrics.paragraphCount > 1;
         const hasSentences = metrics.sentenceCount > 2;
         const goodStructure = metrics.avgWordsPerSentence > 5 && metrics.avgWordsPerSentence < 30;
@@ -202,35 +202,12 @@ export class QualityService {
     /**
      * Calculate relevance score using word set intersection
      */
-    private calculateRelevanceScore(promptMetrics: any, responseMetrics: any, prompt: string, response: string): number {
+    private calculateRelevanceScore(promptMetrics: any, responseMetrics: any): number {
         // Use Set intersection for O(n) complexity instead of nested loops
         const intersection = new Set([...promptMetrics.words].filter(word => responseMetrics.words.has(word)));
         const matchingWords = intersection.size;
         
         return Math.min(100, (matchingWords / Math.max(promptMetrics.words.size, 1)) * 200);
-    }
-
-    /**
-     * Combine AI and automated scores
-     */
-    private combineScores(aiScore: QualityAssessment, autoScore: QualityAssessment): QualityAssessment {
-        const aiWeight = 0.7;
-        const autoWeight = 0.3;
-
-        const combinedCriteria: any = {};
-        for (const key in aiScore.criteria) {
-            combinedCriteria[key] = Math.round(
-                aiScore.criteria[key as keyof typeof aiScore.criteria] * aiWeight +
-                autoScore.criteria[key as keyof typeof autoScore.criteria] * autoWeight
-            );
-        }
-
-        return {
-            score: Math.round(aiScore.score * aiWeight + autoScore.score * autoWeight),
-            criteria: combinedCriteria,
-            confidence: aiScore.confidence * aiWeight + autoScore.confidence * autoWeight,
-            explanation: aiScore.explanation
-        };
     }
 
     /**
@@ -501,43 +478,6 @@ Provide your response in JSON format:
         } catch (error) {
             loggingService.error('Error updating user feedback:', { error: error instanceof Error ? error.message : String(error) });
             throw error;
-        }
-    }
-
-    // ============================================================================
-    // OPTIMIZATION UTILITY METHODS
-    // ============================================================================
-
-    /**
-     * Queue AI scoring for background processing
-     */
-    private queueAIScoring(
-        prompt: string, 
-        response: string, 
-        expectedOutput: string | undefined, 
-        fallbackScore: QualityAssessment
-    ): void {
-        this.aiScoringQueue.push(async () => {
-            try {
-                const aiScore = await this.aiModelScoring(prompt, response, expectedOutput);
-                const enhancedScore = this.combineScores(aiScore, fallbackScore);
-                
-                // Could store enhanced score for future reference or analytics
-                loggingService.debug('Enhanced AI score generated', {
-                    originalScore: fallbackScore.score,
-                    enhancedScore: enhancedScore.score
-                });
-            } catch (error) {
-                loggingService.warn('Background AI scoring failed', {
-                    error: error instanceof Error ? error.message : String(error)
-                });
-            }
-        });
-
-        if (!this.aiProcessor) {
-            this.aiProcessor = setTimeout(() => {
-                this.processAIScoringQueue();
-            }, 500); // Process queue every 500ms
         }
     }
 

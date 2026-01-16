@@ -1017,7 +1017,7 @@ If they need to perform an action, suggest the appropriate command.`;
         try {
             const response = await AIRouterService.invokeModel(
                 `${systemPrompt}\n\nUser: ${message}`,
-                'anthropic.claude-3-5-haiku-20241022-v1:0'
+                'global.anthropic.claude-haiku-4-5-20251001-v1:0'
             );
 
             return {

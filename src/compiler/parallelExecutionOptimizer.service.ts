@@ -91,7 +91,7 @@ export class ParallelExecutionOptimizerService {
     const levels = this.computeLevels(nodes);
 
     // Fourth pass: Find critical path
-    const criticalPath = this.findCriticalPath(nodes, edges);
+    const criticalPath = this.findCriticalPath(nodes);
     const totalLatency = this.computeTotalLatency(nodes, criticalPath);
 
     loggingService.info('Dependency graph built', {
@@ -164,7 +164,6 @@ export class ParallelExecutionOptimizerService {
    */
   private static findCriticalPath(
     nodes: Map<string, DependencyNode>,
-    edges: Map<string, string[]>
   ): string[] {
     const distances = new Map<string, number>();
     const parents = new Map<string, string | null>();

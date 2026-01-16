@@ -82,7 +82,7 @@ export function adaptiveRateLimitMiddleware(options: AdaptiveRateLimitOptions = 
                 // Handle rate limit exceeded
                 if (enableGracefulDegradation && priority !== 'high') {
                     // Try graceful degradation instead of hard rejection
-                    const degradationResult = await handleGracefulDegradation(req, res, degradationMode, decision);
+                    const degradationResult = await handleGracefulDegradation(req, res, degradationMode);
                     
                     if (degradationResult.handled) {
                         loggingService.info('Request handled via graceful degradation', {
@@ -180,7 +180,6 @@ async function handleGracefulDegradation(
     req: any,
     res: Response,
     mode: 'reduce_features' | 'cache_only' | 'essential_only',
-    decision: any
 ): Promise<{ handled: boolean; reason?: string }> {
     try {
         switch (mode) {

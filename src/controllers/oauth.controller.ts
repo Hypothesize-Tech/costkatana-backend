@@ -666,6 +666,36 @@ export class OAuthController {
                                 googleEmail: googleUser.email,
                                 isLinkingFlow,
                             });
+                            
+                            // ✅ Grant or update MCP permissions for reconnected Google account
+                            const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+                            const { McpPermission } = await import('../models/McpPermission');
+                            
+                            // Check if permissions already exist
+                            const existingPermission = await McpPermission.findOne({
+                                userId: targetUserId,
+                                integration: 'google',
+                                connectionId: connection._id,
+                            });
+                            
+                            if (!existingPermission) {
+                                // Permissions don't exist - grant them
+                                loggingService.info('Granting MCP permissions for reconnected Google account', {
+                                    userId: targetUserId,
+                                    connectionId: connection._id,
+                                });
+                                
+                                await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+                                    targetUserId,
+                                    'google',
+                                    connection._id.toString()
+                                );
+                            } else {
+                                loggingService.info('MCP permissions already exist for Google connection', {
+                                    userId: targetUserId,
+                                    connectionId: connection._id,
+                                });
+                            }
                         } else {
                             // Create new connection
                             loggingService.info('Creating new Google connection', {
@@ -699,6 +729,13 @@ export class OAuthController {
                                 isLinkingFlow,
                             });
                             
+                            // Auto-grant MCP permissions for new connection
+                            const { AutoGrantMCPPermissions } = await import('../mcp/permissions/auto-grant.service');
+                            await AutoGrantMCPPermissions.grantPermissionsForNewConnection(
+                                targetUserId,
+                                'google',
+                                connection._id.toString()
+                            );
                             // Create or update Integration record with connection metadata
                             try {
                                 const { Integration } = await import('../models/Integration');

@@ -1106,7 +1106,7 @@ Return a JSON object with the most relevant file paths (top 20):
             }
         }
         
-        const renderTree = (node: any, prefix = '', isLast = true): string => {
+        const renderTree = (node: any, prefix = ''): string => {
             let output = '';
             const entries = Object.entries(node);
             
@@ -1119,7 +1119,7 @@ Return a JSON object with the most relevant file paths (top 20):
                     // Directory
                     output += `${currentPrefix}${name}/\n`;
                     const nextPrefix = prefix + (isLastItem ? '    ' : '│   ');
-                    output += renderTree(value as Record<string, any>, nextPrefix, isLastItem);
+                    output += renderTree(value as Record<string, any>, nextPrefix);
                 } else if (value && typeof value === 'object' && 'type' in value) {
                     // File
                     const fileInfo = value as { type: string; category: string; language?: string; size: number };

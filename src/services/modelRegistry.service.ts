@@ -266,7 +266,7 @@ export class ModelRegistryService {
             },
             {
                 id: 'bedrock:claude-3-5-haiku',
-                name: 'anthropic.claude-3-5-haiku-20241022-v1:0',
+                name: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
                 displayName: 'Claude 3.5 Haiku',
                 provider: AIProviderType.Bedrock,
                 status: 'active',

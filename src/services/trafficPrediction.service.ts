@@ -2,7 +2,6 @@ import { loggingService } from './logging.service';
 import { cacheService } from './cache.service';
 import { preemptiveThrottlingService } from './preemptiveThrottling.service';
 import { gracefulDegradationService } from './gracefulDegradation.service';
-import { requestPrioritizationService } from './requestPrioritization.service';
 import { EventEmitter } from 'events';
 
 /**
@@ -360,7 +359,6 @@ export class TrafficPredictionService extends EventEmitter {
      */
     private calculateSpikeProbability(recentData: TrafficDataPoint[], predictedRps: number): number {
         const currentRps = recentData[recentData.length - 1].requests_per_second;
-        const avgRps = recentData.reduce((sum, point) => sum + point.requests_per_second, 0) / recentData.length;
         
         // Factors that increase spike probability
         let probability = 0;
@@ -378,7 +376,7 @@ export class TrafficPredictionService extends EventEmitter {
         }
         
         // 3. Historical pattern matching
-        const patternMatch = this.findMatchingPatterns(recentData);
+        const patternMatch = this.findMatchingPatterns();
         if (patternMatch.length > 0) {
             probability += 0.3 * patternMatch.reduce((sum, p) => sum + p.confidence, 0) / patternMatch.length;
         }
@@ -921,7 +919,7 @@ export class TrafficPredictionService extends EventEmitter {
     /**
      * Find patterns that match current traffic
      */
-    private findMatchingPatterns(recentData: TrafficDataPoint[]): TrafficPattern[] {
+    private findMatchingPatterns(): TrafficPattern[] {
         const matches: TrafficPattern[] = [];
         const now = new Date();
         

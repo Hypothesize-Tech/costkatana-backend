@@ -6,7 +6,6 @@ export interface TextAnalysis {
 }
 
 export async function analyzeText(text: string): Promise<TextAnalysis> {
-    const lowerText = text.toLowerCase();
     let complexity: 'simple' | 'medium' | 'complex';
 
     const wordCount = text.split(/\s+/).length;

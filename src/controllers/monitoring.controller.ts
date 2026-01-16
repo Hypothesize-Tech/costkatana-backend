@@ -615,14 +615,6 @@ export class MonitoringController {
     }
 
     /**
-     * Queue background operation
-     */
-    private static queueBackgroundOperation(operation: () => Promise<void>): void {
-        this.backgroundQueue.push(operation);
-        this.startBackgroundProcessor();
-    }
-
-    /**
      * Start background processor
      */
     private static startBackgroundProcessor(): void {

@@ -198,7 +198,7 @@ router.get('/learning-loop/stats/:userId', async (req: Request, res: Response): 
 /**
  * Get general learning loop statistics
  */
-router.get('/learning-loop/stats', async (req: Request, res: Response): Promise<Response> => {
+router.get('/learning-loop/stats', async (_req: Request, res: Response): Promise<Response> => {
   try {
     // Return aggregated stats - in production, get from current user
     return res.json({
@@ -227,12 +227,26 @@ router.get('/learning-loop/stats', async (req: Request, res: Response): Promise<
  */
 router.get('/learning-loop/outcomes/recent', async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { limit = 10 } = req.query;
+    const { limit, userId, startDate, endDate } = req.query;
     
-    // In production, query from RecommendationOutcome collection
+    const queryLimit = limit ? parseInt(limit as string) : 50;
+    const start = startDate 
+      ? new Date(startDate as string)
+      : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Default to last 7 days
+    
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    const outcomes = await LearningLoopService.getRecentRecommendationOutcomes({
+      userId: userId as string | undefined,
+      startDate: start,
+      endDate: end,
+      limit: queryLimit
+    });
+
     return res.json({
       success: true,
-      data: []
+      data: outcomes,
+      count: outcomes.length
     });
   } catch (error) {
     loggingService.error('Failed to get recent outcomes', {
@@ -518,7 +532,7 @@ router.get('/semantic/optimization-potential', async (req: Request, res: Respons
 /**
  * Get all semantic clusters
  */
-router.get('/semantic/clusters', async (req: Request, res: Response): Promise<Response> => {
+router.get('/semantic/clusters', async (_req: Request, res: Response): Promise<Response> => {
   try {
     const { SemanticCluster } = await import('../models/SemanticCluster');
     
@@ -550,7 +564,7 @@ router.get('/semantic/clusters', async (req: Request, res: Response): Promise<Re
 /**
  * Get latest global benchmark
  */
-router.get('/benchmarks/global', async (req: Request, res: Response): Promise<Response> => {
+router.get('/benchmarks/global', async (_req: Request, res: Response): Promise<Response> => {
   try {
     const benchmark = await GlobalBenchmarksService.getLatestGlobalBenchmark();
 
@@ -629,7 +643,7 @@ router.get('/benchmarks/model/:modelId', async (req: Request, res: Response): Pr
 /**
  * Generate benchmarks manually
  */
-router.post('/benchmarks/generate', async (req: Request, res: Response): Promise<Response> => {
+router.post('/benchmarks/generate', async (_req: Request, res: Response): Promise<Response> => {
   try {
     // Run in background
     GlobalBenchmarksService.generateAllBenchmarks().catch(error => {
@@ -656,7 +670,7 @@ router.post('/benchmarks/generate', async (req: Request, res: Response): Promise
 /**
  * Get all global benchmarks
  */
-router.get('/benchmarks/global/all', async (req: Request, res: Response): Promise<Response> => {
+router.get('/benchmarks/global/all', async (_req: Request, res: Response): Promise<Response> => {
   try {
     const { GlobalBenchmark } = await import('../models/GlobalBenchmark');
     
@@ -768,7 +782,7 @@ router.get('/benchmarks/compare', async (req: Request, res: Response): Promise<R
 /**
  * Run all background jobs once (admin only)
  */
-router.post('/admin/run-jobs', async (req: Request, res: Response): Promise<Response> => {
+router.post('/admin/run-jobs', async (_req: Request, res: Response): Promise<Response> => {
   try {
     // Run in background
     runAllJobsOnce().catch(error => {
@@ -795,7 +809,7 @@ router.post('/admin/run-jobs', async (req: Request, res: Response): Promise<Resp
 /**
  * Health check for Data Network Effects system
  */
-router.get('/health', async (req: Request, res: Response): Promise<Response> => {
+router.get('/health', async (_req: Request, res: Response): Promise<Response> => {
   try {
     // Check if core services are accessible
     const checks = {

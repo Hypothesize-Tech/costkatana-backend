@@ -1,5 +1,3 @@
-import { loggingService } from './logging.service';
-
 interface SmartRecommendation {
     type: 'prompt_optimization' | 'model_switch' | 'cost_reduction' | 'timing' | 'limit_warning' | 'personalized_coaching';
     priority: 'low' | 'medium' | 'high' | 'urgent';
@@ -306,7 +304,7 @@ export class RecommendationRulesService {
                 suggestedAction: percentage >= 90 
                     ? 'Switch to Cost Katana API immediately to avoid hitting limits.'
                     : 'Monitor your usage closely or switch to Cost Katana API for unlimited access.',
-                costKatanaUrl: `${process.env.FRONTEND_URL}/upgrade?source=limit_warning`,
+                costKatanaUrl: `${process.env.FRONTEND_URL}/upgrade?source=limit_warning&user=${userId.substring(0, 8)}`,
                 aiGenerated: false,
                 personalized: false,
                 confidence: 100

@@ -101,7 +101,7 @@ export class IntelligentRouterService {
     private static instance: IntelligentRouterService;
     private modelRegistry: ModelRegistryService;
     private pricingRegistry: PricingRegistryService;
-    private lastAdjustment: number = 0;
+    private lastAdjustment: number = Date.now();
 
     // 🎯 P2: Dynamic routing thresholds based on telemetry
     private performanceHistory = new Map<string, {

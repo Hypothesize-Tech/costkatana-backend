@@ -98,8 +98,6 @@ def test_{{functionName}}():
 
         // If no templates found, try generic templates
         if (templates.length === 0) {
-            const genericKey = `${requirements.generationType}_*`;
-            // Would search for generic templates here
             loggingService.warn('No specific templates found, using generic', {
                 component: 'TemplateSelectorService',
                 key,

@@ -36,7 +36,6 @@ export interface SamplingStats {
 export class SmartSamplingService {
     private static instance: SmartSamplingService;
     private analysisAgent: ChatBedrockConverse;
-    private readonly TARGET_SELECTION_RATE = 0.10; // 10% of messages
     private readonly MIN_LEARNING_VALUE = 0.5; // Minimum score to consider for vectorization
     private readonly BATCH_SIZE = 50; // Analyze in batches for efficiency
 

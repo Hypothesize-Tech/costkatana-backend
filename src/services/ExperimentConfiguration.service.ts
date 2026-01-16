@@ -1,4 +1,4 @@
-import { BaseService, ServiceError } from '../shared/BaseService';
+import { BaseService } from '../shared/BaseService';
 import { loggingService } from './logging.service';
 import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
 

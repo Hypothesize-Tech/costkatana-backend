@@ -60,7 +60,7 @@ class DSLParserService {
       }
       
       // Validate and transform to ActionDefinition
-      dsl = this.transformToDSL(parsed, errors, warnings);
+      dsl = this.transformToDSL(parsed, errors);
       
     } catch (error) {
       errors.push({
@@ -135,7 +135,7 @@ class DSLParserService {
     const warnings: ValidationWarning[] = [];
     
     // Transform to full DSL
-    const dsl = this.transformToDSL(input, errors, warnings);
+    const dsl = this.transformToDSL(input, errors);
     
     // Validate
     this.validateDSL(dsl, errors, warnings);
@@ -172,7 +172,6 @@ class DSLParserService {
   private transformToDSL(
     input: any,
     errors: ValidationError[],
-    warnings: ValidationWarning[]
   ): ActionDefinition {
     // Required fields
     if (!input.action) {

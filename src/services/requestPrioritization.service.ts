@@ -98,7 +98,6 @@ export class RequestPrioritizationService extends EventEmitter {
 
     // Adaptive prioritization state
     private systemLoadFactor = 0.5;
-    private priorityAdjustments = new Map<RequestPriority, number>();
     private starvationCounters = new Map<RequestPriority, number>();
 
     // Processing loop
@@ -245,7 +244,7 @@ export class RequestPrioritizationService extends EventEmitter {
             const totalTime = Date.now() - nextRequest.timestamp;
 
             // Update stats
-            this.updateStats(waitTime, processingTime, 'success');
+            this.updateStats(waitTime);
 
             // Resolve the request
             nextRequest.resolve(result);
@@ -274,7 +273,7 @@ export class RequestPrioritizationService extends EventEmitter {
             const totalTime = Date.now() - nextRequest.timestamp;
 
             // Update stats
-            this.updateStats(waitTime, processingTime, 'error');
+            this.updateStats(waitTime);
 
             // Reject the request
             nextRequest.reject(error);
@@ -535,7 +534,7 @@ export class RequestPrioritizationService extends EventEmitter {
     /**
      * Update statistics
      */
-    private updateStats(waitTime: number, processingTime: number, status: 'success' | 'error'): void {
+    private updateStats(waitTime: number): void {
         this.stats.processed++;
         
         // Update average wait time

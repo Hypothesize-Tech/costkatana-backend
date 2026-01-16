@@ -45,7 +45,6 @@ export class NotebookService {
   
   // Background processing queue
   private backgroundQueue: Array<() => Promise<void>> = [];
-  private backgroundProcessor?: NodeJS.Timeout;
 
   private constructor() {
     this.bedrockClient = new BedrockRuntimeClient({
@@ -59,6 +58,25 @@ export class NotebookService {
       NotebookService.instance = new NotebookService();
     }
     return NotebookService.instance;
+  }
+
+  /**
+   * Start background processor for queued tasks
+   */
+  private startBackgroundProcessor(): void {
+    // Process background queue every 5 seconds
+    setInterval(() => {
+      if (this.backgroundQueue.length > 0) {
+        const task = this.backgroundQueue.shift();
+        if (task) {
+          task().catch(err => {
+            loggingService.error('Background task failed', {
+              error: err instanceof Error ? err.message : String(err)
+            });
+          });
+        }
+      }
+    }, 5000);
   }
 
   /**
@@ -866,138 +884,6 @@ Provide timing and scaling insights.`;
   }
 
   /**
-   * Get cost timeline data
-   */
-  private async getCostTimelineData(timeframe: string): Promise<any> {
-    try {
-      // Get telemetry data for the timeframe
-      const endTime = new Date();
-      const startTime = new Date();
-      
-      // Calculate start time based on timeframe
-      switch (timeframe) {
-        case '1h': startTime.setHours(startTime.getHours() - 1); break;
-        case '24h': startTime.setHours(startTime.getHours() - 24); break;
-        case '7d': startTime.setDate(startTime.getDate() - 7); break;
-        case '30d': startTime.setDate(startTime.getDate() - 30); break;
-        default: startTime.setHours(startTime.getHours() - 24);
-      }
-
-      const telemetryData = await TelemetryService.queryTelemetry({
-        start_time: startTime,
-        end_time: endTime,
-        limit: 1000,
-        sort_by: 'timestamp',
-        sort_order: 'asc'
-      });
-
-      // Group by time intervals
-      const intervals = this.createTimeIntervals(startTime, endTime, timeframe);
-      const costByInterval = intervals.map(interval => {
-        const intervalData = telemetryData.data.filter((item: any) => {
-          const itemTime = new Date(item.timestamp);
-          return itemTime >= interval.start && itemTime < interval.end;
-        });
-        
-        const totalCost = intervalData.reduce((sum: number, item: any) => sum + (item.cost_usd || 0), 0);
-        return totalCost;
-      });
-
-      return {
-        labels: intervals.map(interval => interval.label),
-        datasets: [{
-          label: 'Cost ($)',
-          data: costByInterval,
-          borderColor: 'rgb(59, 130, 246)',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)'
-        }]
-      };
-    } catch (error) {
-      loggingService.error('Failed to get cost timeline data:', { error: error instanceof Error ? error.message : String(error) });
-      return {
-        labels: [],
-        datasets: [{
-          label: 'Cost ($)',
-          data: [],
-          borderColor: 'rgb(59, 130, 246)',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)'
-        }]
-      };
-    }
-  }
-
-  /**
-   * Get model comparison data
-   */
-  private async getModelComparisonData(timeframe: string): Promise<any> {
-    try {
-      const endTime = new Date();
-      const startTime = new Date();
-      
-      switch (timeframe) {
-        case '1h': startTime.setHours(startTime.getHours() - 1); break;
-        case '24h': startTime.setHours(startTime.getHours() - 24); break;
-        case '7d': startTime.setDate(startTime.getDate() - 7); break;
-        case '30d': startTime.setDate(startTime.getDate() - 30); break;
-        default: startTime.setHours(startTime.getHours() - 24);
-      }
-
-      const telemetryData = await TelemetryService.queryTelemetry({
-        start_time: startTime,
-        end_time: endTime,
-        limit: 1000
-      });
-
-      // Group by AI model
-      const modelStats = new Map();
-      
-      telemetryData.data.forEach((item: any) => {
-        if (item.gen_ai_model) {
-          const model = item.gen_ai_model;
-          if (!modelStats.has(model)) {
-            modelStats.set(model, {
-              model,
-              totalCost: 0,
-              totalDuration: 0,
-              count: 0
-            });
-          }
-          
-          const stats = modelStats.get(model);
-          stats.totalCost += item.cost_usd || 0;
-          stats.totalDuration += item.duration_ms || 0;
-          stats.count += 1;
-        }
-      });
-
-      const modelData = Array.from(modelStats.values()).map((stats: any) => ({
-        x: stats.totalDuration / stats.count, // Average duration
-        y: stats.totalCost / stats.count, // Average cost
-        model: stats.model
-      }));
-
-      const colors = this.generateDynamicColors(5);
-
-      return {
-        datasets: [{
-          label: 'Models',
-          data: modelData,
-          backgroundColor: colors.slice(0, modelData.length)
-        }]
-      };
-    } catch (error) {
-      loggingService.error('Failed to get model comparison data:', { error: error instanceof Error ? error.message : String(error) });
-      return {
-        datasets: [{
-          label: 'Models',
-          data: [],
-          backgroundColor: []
-        }]
-      };
-    }
-  }
-
-  /**
    * Get usage heatmap data with detailed insights
    */
   private async getUsageHeatmapData(_timeframe: string): Promise<any> {
@@ -1520,63 +1406,6 @@ Provide timing and scaling insights.`;
     };
   }
 
-  /**
-   * Get operation distribution data
-   */
-  private async getOperationDistributionData(timeframe: string): Promise<any> {
-    try {
-      const endTime = new Date();
-      const startTime = new Date();
-      
-      switch (timeframe) {
-        case '1h': startTime.setHours(startTime.getHours() - 1); break;
-        case '24h': startTime.setHours(startTime.getHours() - 24); break;
-        case '7d': startTime.setDate(startTime.getDate() - 7); break;
-        case '30d': startTime.setDate(startTime.getDate() - 30); break;
-        default: startTime.setHours(startTime.getHours() - 24);
-      }
-
-      const telemetryData = await TelemetryService.queryTelemetry({
-        start_time: startTime,
-        end_time: endTime,
-        limit: 1000
-      });
-
-      // Group by operation name
-      const operationCounts = new Map();
-      
-      telemetryData.data.forEach((item: any) => {
-        const operation = item.operation_name || 'Unknown';
-        operationCounts.set(operation, (operationCounts.get(operation) || 0) + 1);
-      });
-
-      // Sort by count and take top 10
-      const sortedOperations = Array.from(operationCounts.entries())
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 10);
-
-      const labels = sortedOperations.map(([name]) => name);
-      const data = sortedOperations.map(([,count]) => count);
-      const colors = this.generateDynamicColors(10);
-
-      return {
-        labels,
-        datasets: [{
-          data,
-          backgroundColor: colors.slice(0, data.length)
-        }]
-      };
-    } catch (error) {
-      loggingService.error('Failed to get operation distribution data:', { error: error instanceof Error ? error.message : String(error) });
-      return {
-        labels: [],
-        datasets: [{
-          data: [],
-          backgroundColor: []
-        }]
-      };
-    }
-  }
 
   /**
    * Get cost per token data
@@ -1806,31 +1635,6 @@ Provide timing and scaling insights.`;
   private recordFailure(): void {
     this.aiFailureCount++;
     this.lastFailureTime = Date.now();
-  }
-
-  /**
-   * Queue background operation
-   */
-  private queueBackgroundOperation(operation: () => Promise<void>): void {
-    this.backgroundQueue.push(operation);
-  }
-
-  /**
-   * Start background processor
-   */
-  private startBackgroundProcessor(): void {
-    this.backgroundProcessor = setInterval(async () => {
-      if (this.backgroundQueue.length > 0) {
-        const operation = this.backgroundQueue.shift();
-        if (operation) {
-          try {
-            await operation();
-          } catch (error) {
-            loggingService.error('Background operation failed:', { error: error instanceof Error ? error.message : String(error) });
-          }
-        }
-      }
-    }, 1000); // Process queue every second
   }
 
   /**
