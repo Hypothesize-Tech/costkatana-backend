@@ -11,11 +11,13 @@ import { loggingService } from "./logging.service";
 
 export interface QueryAnalysis {
     intent: string;
-    category: 'vercel' | 'analytics' | 'knowledge' | 'optimization' | 'general';
+    category: 'vercel' | 'analytics' | 'knowledge' | 'optimization' | 'general' | 'web_search';
     confidence: number;
     suggestedTools: string[];
     keywords: string[];
     requiresMultipleTools: boolean;
+    requiresWebSearch: boolean; // AI-determined need for external/real-time data
+    searchReason?: string; // Why web search is needed
 }
 
 export interface ToolSelectionResult {
@@ -96,11 +98,13 @@ Query: "${query}"
 Respond with JSON containing:
 {
   "intent": "what the user wants to do",
-  "category": "vercel|analytics|knowledge|optimization|general",
+  "category": "vercel|analytics|knowledge|optimization|web_search|general",
   "confidence": 0.0-1.0,
   "suggestedTools": ["tool1", "tool2"],
   "keywords": ["keyword1", "keyword2"],
-  "requiresMultipleTools": true/false
+  "requiresMultipleTools": true/false,
+  "requiresWebSearch": true/false,
+  "searchReason": "explanation if web search is needed"
 }
 
 Categories:
@@ -108,7 +112,21 @@ Categories:
 - analytics: Cost analysis, token usage, trends, patterns
 - knowledge: How-to, documentation, best practices
 - optimization: Cost optimization, performance improvement
+- web_search: External real-time information, current events, latest news
 - general: Other queries
+
+Web Search Decision (requiresWebSearch):
+Set requiresWebSearch to TRUE ONLY when the query explicitly needs:
+1. Real-time/current information (e.g., "latest", "today's", "current", "recent news")
+2. External web data not in our knowledge base (e.g., "search for", "find information about")
+3. Time-sensitive data (e.g., "what happened today", "latest pricing changes")
+4. Explicit search requests (e.g., "google search for", "look up")
+
+Set requiresWebSearch to FALSE when:
+1. Query is about CostKatana features, documentation, or internal data
+2. Query asks about cloud pricing (use knowledge_base instead)
+3. Query is vague or conversational (e.g., "tell me about that")
+4. Query is about user's own analytics or projects
 
 Respond ONLY with valid JSON, no markdown or extra text.`;
 
@@ -144,7 +162,8 @@ Respond ONLY with valid JSON, no markdown or extra text.`;
                 confidence: 0.5,
                 suggestedTools: ['knowledge_base_search'],
                 keywords: query.split(' ').slice(0, 5),
-                requiresMultipleTools: false
+                requiresMultipleTools: false,
+                requiresWebSearch: false
             };
         }
     }

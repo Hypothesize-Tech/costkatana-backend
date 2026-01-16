@@ -100,7 +100,30 @@ export class WebSearchTool extends Tool {
         const startTime = Date.now();
         
         try {
-            const request: WebSearchRequest = JSON.parse(input);
+            let request: WebSearchRequest;
+            
+            // Try to parse input as JSON
+            try {
+                request = JSON.parse(input);
+            } catch (parseError) {
+                // If parsing fails, treat input as a simple search query
+                loggingService.warn('WebSearchTool received non-JSON input, treating as search query', {
+                    input: input.substring(0, 200)
+                });
+                request = {
+                    operation: 'search',
+                    query: input
+                };
+            }
+            
+            // Validate and set default operation if missing
+            if (!request.operation) {
+                loggingService.warn('WebSearchTool operation missing, defaulting to search', {
+                    input: input.substring(0, 200)
+                });
+                request.operation = 'search';
+                request.query = request.query || input;
+            }
             
             loggingService.info('Web search operation initiated', {
                 operation: request.operation,

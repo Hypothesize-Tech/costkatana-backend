@@ -2344,17 +2344,64 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                 useMultiAgent: request.useMultiAgent
             });
 
-            loggingService.info('⚡ Using optimized multi-agent processing');
+            loggingService.info('⚡ Using optimized multi-agent processing with autonomous web search');
             
-            // Debug: Log what we're about to pass to multiAgentFlowService
-            loggingService.info('🔍 About to call multiAgentFlowService.processMessage', {
-                hasSelectionResponse: !!request.selectionResponse,
-                selectionResponse: request.selectionResponse,
-                message: request.message
-            });
-            
-            // Try to use multiAgentFlowService if available, otherwise fall back to direct Bedrock
+            // Use NEW AgentService with autonomous web search decision-making
             try {
+                const { AgentService } = await import('./agent.service');
+                
+                loggingService.info('🤖 Creating AgentService instance for autonomous web search');
+                
+                // Create AgentService instance
+                const agentService = new AgentService();
+                
+                const agentResponse = await agentService.queryWithMultiLlm({
+                    query: request.message || '',
+                    userId: request.userId,
+                    context: {
+                        conversationId: conversation._id.toString(),
+                        previousMessages: recentMessages,
+                        documentIds: request.documentIds
+                    }
+                });
+                
+                loggingService.info('✅ AgentService.queryWithMultiLlm completed', {
+                    success: agentResponse.success,
+                    hasMetadata: !!agentResponse.metadata,
+                    webSearchUsed: agentResponse.metadata?.webSearchUsed,
+                    aiWebSearchDecision: agentResponse.metadata?.aiWebSearchDecision
+                });
+                
+                const returnData = {
+                    response: agentResponse.response || 'No response generated',
+                    agentThinking: agentResponse.thinking,
+                    agentPath: [],
+                    optimizationsApplied: [],
+                    cacheHit: agentResponse.metadata?.fromCache || false,
+                    riskLevel: 'low',
+                    requiresIntegrationSelector: false,
+                    integrationSelectorData: undefined,
+                    metadata: agentResponse.metadata,
+                    // Extract web search metadata to top level for easier access
+                    webSearchUsed: agentResponse.metadata?.webSearchUsed || false,
+                    aiWebSearchDecision: agentResponse.metadata?.aiWebSearchDecision,
+                    mongodbIntegrationData: undefined,
+                    formattedResult: undefined
+                };
+                
+                loggingService.info('📤 [FLOW-3] chat.service.processWithLangchainMultiAgent RETURNING with AgentService data', {
+                    webSearchUsed: returnData.metadata?.webSearchUsed,
+                    aiWebSearchDecision: returnData.metadata?.aiWebSearchDecision
+                });
+                
+                return returnData;
+                
+            } catch (agentError) {
+                loggingService.warn('⚠️ AgentService failed, falling back to MultiAgentFlowService', {
+                    error: agentError instanceof Error ? agentError.message : String(agentError)
+                });
+                
+                // Fallback to old LangGraph flow
                 const multiAgentResult = await multiAgentFlowService.processMessage(
                     conversation._id.toString(),
                     request.userId,
@@ -2364,43 +2411,23 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
                         costBudget: 0.10,
                         previousMessages: recentMessages,
                         selectionResponse: request.selectionResponse,
-                        documentIds: request.documentIds // Pass document IDs for RAG context
+                        documentIds: request.documentIds
                     }
                 );
                 
-                loggingService.info('📥 [FLOW-2] chat.service.processWithLangchainMultiAgent RECEIVED from multiAgentFlow', {
-                    hasMongodbIntegrationData: !!multiAgentResult.mongodbIntegrationData && Object.keys(multiAgentResult.mongodbIntegrationData).length > 0,
-                    hasFormattedResult: !!multiAgentResult.formattedResult && Object.keys(multiAgentResult.formattedResult).length > 0,
-                    mongodbIntegrationDataKeys: multiAgentResult.mongodbIntegrationData ? Object.keys(multiAgentResult.mongodbIntegrationData) : [],
-                    formattedResultKeys: multiAgentResult.formattedResult ? Object.keys(multiAgentResult.formattedResult) : []
-                });
-
-                const returnData = {
+                return {
                     response: multiAgentResult.response,
                     agentThinking: multiAgentResult.thinking,
                     agentPath: multiAgentResult.agentPath,
                     optimizationsApplied: multiAgentResult.optimizationsApplied,
                     cacheHit: multiAgentResult.cacheHit,
                     riskLevel: multiAgentResult.riskLevel,
-                    // Pass IntegrationSelector data at root level
                     requiresIntegrationSelector: multiAgentResult.requiresIntegrationSelector,
                     integrationSelectorData: multiAgentResult.integrationSelectorData,
                     metadata: multiAgentResult.metadata,
                     mongodbIntegrationData: multiAgentResult.mongodbIntegrationData,
                     formattedResult: multiAgentResult.formattedResult
                 };
-
-                loggingService.info('📤 [FLOW-3] chat.service.processWithLangchainMultiAgent RETURNING', {
-                    hasMongodbIntegrationData: !!returnData.mongodbIntegrationData && Object.keys(returnData.mongodbIntegrationData).length > 0,
-                    hasFormattedResult: !!returnData.formattedResult && Object.keys(returnData.formattedResult).length > 0
-                });
-
-                return returnData;
-            } catch (multiAgentError) {
-                loggingService.warn('⚠️ MultiAgentFlowService failed, falling back to direct Bedrock', {
-                    error: multiAgentError instanceof Error ? multiAgentError.message : String(multiAgentError)
-                });
-                return await this.directBedrockFallback(request, recentMessages);
             }
         } catch (error) {
             loggingService.error('❌ Langchain multi-agent processing failed', {
@@ -2643,7 +2670,7 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         if (context.subjectConfidence < 0.6) {
             try {
                 const llm = new (await import('@langchain/aws')).ChatBedrockConverse({
-                    model: "us.global.anthropic.claude-haiku-4-5-20251001-v1:0",  // Using inference profile
+                    model: "global.anthropic.claude-haiku-4-5-20251001-v1:0",  // Using inference profile
                     region: process.env.AWS_REGION ?? 'us-east-1',
                     temperature: 0.1,
                     maxTokens: 200,
@@ -3173,7 +3200,7 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any; webSearchUsed?: boolean; aiWebSearchDecision?: any; metadata?: any }> {
         
         const userId = request.userId;
         const errorKey = `${userId}-processing`;
@@ -3221,11 +3248,10 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         request: ChatSendMessageRequest,
         conversation: IConversation,
         recentMessages: any[]
-    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any }> {
+    ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any; webSearchUsed?: boolean; aiWebSearchDecision?: any; metadata?: any }> {
         
         // Use Langchain Multi-Agent System if explicitly requested or for complex queries
-        const shouldUseLangchain = request.useMultiAgent || 
-                                  this.shouldUseLangchainForQuery(request.message || '');
+        const shouldUseLangchain = request.useMultiAgent || this.shouldUseLangchainForQuery(request.message || '');
         
         if (shouldUseLangchain) {
             loggingService.info('🚀 Routing to Langchain Multi-Agent System', {
@@ -3257,7 +3283,11 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
                 requiresIntegrationSelector: langchainResult.requiresIntegrationSelector,
                 integrationSelectorData: langchainResult.integrationSelectorData,
                 mongodbIntegrationData: langchainResult.mongodbIntegrationData,
-                formattedResult: langchainResult.formattedResult
+                formattedResult: langchainResult.formattedResult,
+                // Include web search metadata - extract from metadata if available
+                webSearchUsed: (langchainResult as any).webSearchUsed || langchainResult.metadata?.webSearchUsed || false,
+                aiWebSearchDecision: (langchainResult as any).aiWebSearchDecision || langchainResult.metadata?.aiWebSearchDecision,
+                metadata: langchainResult.metadata
             };
 
             loggingService.info('📤 [FLOW-5] chat.service.tryEnhancedProcessing RETURNING', {
@@ -6135,7 +6165,9 @@ Based ONLY on the search results above, provide a factual answer:`;
             });
             
             // Check if this is an autonomous request before processing
-            const isAutonomousRequest = await this.detectAutonomousRequest(finalMessage);
+            // BUT skip autonomous detection if useMultiAgent is explicitly true
+            // (to allow autonomous web search feature to work)
+            const isAutonomousRequest = !request.useMultiAgent && await this.detectAutonomousRequest(finalMessage);
             
             if (isAutonomousRequest) {
                 loggingService.info('🤖 Autonomous request detected, initiating governed agent', {
@@ -6351,8 +6383,10 @@ Based ONLY on the search results above, provide a factual answer:`;
                 riskLevel,
                 templateUsed: templateMetadata,
                 // Web search metadata
-                webSearchUsed: (processingResult as any).webSearchUsed || false,
+                webSearchUsed: (processingResult as any).webSearchUsed || (processingResult as any).metadata?.webSearchUsed || false,
                 quotaUsed: (processingResult as any).quotaUsed,
+                // AI autonomous web search decision metadata
+                aiWebSearchDecision: (processingResult as any).aiWebSearchDecision || (processingResult as any).metadata?.aiWebSearchDecision,
                 // IntegrationSelector data
                 requiresIntegrationSelector: processingResult.requiresIntegrationSelector,
                 integrationSelectorData: processingResult.integrationSelectorData,
