@@ -616,6 +616,60 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         notes: 'Mistral Pixtral Large - advanced AI model for text generation and chat'
     },
 
+    // OpenAI Models on AWS Bedrock
+    {
+        modelId: 'openai.gpt-oss-safeguard-20b',
+        modelName: 'GPT OSS Safeguard 20B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.50,
+        outputPrice: 1.50,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'safety', 'moderation', 'reasoning'],
+        category: 'text',
+        isLatest: true,
+        notes: 'OpenAI GPT OSS Safeguard 20B - Safety classification and policy reasoning'
+    },
+    {
+        modelId: 'openai.gpt-oss-safeguard-120b',
+        modelName: 'GPT OSS Safeguard 120B',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.00,
+        outputPrice: 6.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'safety', 'moderation', 'reasoning', 'advanced'],
+        category: 'text',
+        isLatest: true,
+        notes: 'OpenAI GPT OSS Safeguard 120B - Advanced safety reasoning and nuanced policy interpretation'
+    },
+    {
+        modelId: 'openai.gpt-oss-20b-1:0',
+        modelName: 'GPT OSS 20B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.40,
+        outputPrice: 1.20,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'reasoning', 'efficient'],
+        category: 'text',
+        isLatest: true,
+        notes: 'OpenAI GPT OSS 20B - Efficient reasoning and text generation'
+    },
+    {
+        modelId: 'openai.gpt-oss-120b-1:0',
+        modelName: 'GPT OSS 120B',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.80,
+        outputPrice: 5.40,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'reasoning', 'advanced'],
+        category: 'text',
+        isLatest: true,
+        notes: 'OpenAI GPT OSS 120B - Hybrid reasoning and extended thinking'
+    },
+
     // DeepSeek Models
     {
         modelId: 'deepseek.r1-v1:0',

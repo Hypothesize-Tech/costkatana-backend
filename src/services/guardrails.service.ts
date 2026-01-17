@@ -1,3 +1,11 @@
+/**
+ * OPTIMIZATION MODEL STRATEGY:
+ * 
+ * Primary: OpenAI GPT OSS Safeguard 20B (openai.gpt-oss-safeguard-20b)
+ * - Used for AI-powered optimization suggestions
+ * - Cost-effective for non-critical usage analysis
+ * - Provides contextual recommendations based on actual workflow patterns
+ */
 import { loggingService } from './logging.service';
 import { User } from '../models/User';
 import { Project } from '../models/Project';
@@ -1011,8 +1019,8 @@ export class GuardrailsService {
             // Build AI prompt with context
             const prompt = this.buildOptimizationPrompt(metric, percentage, workflowContext);
             
-            // Use AWS Bedrock to generate contextual suggestions
-            const modelId = 'amazon.nova-pro-v1:0';
+            // Use AWS Bedrock to generate contextual suggestions with Safeguard 20B
+            const modelId = 'openai.gpt-oss-safeguard-20b'; // Use 20B for cost-effective suggestions
             const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
             
             // Parse AI response

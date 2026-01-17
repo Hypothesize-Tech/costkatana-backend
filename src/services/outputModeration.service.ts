@@ -1,3 +1,21 @@
+/**
+ * SECURITY MODEL STRATEGY (Tiered Approach):
+ * 
+ * Primary: OpenAI GPT OSS Safeguard 20B (openai.gpt-oss-safeguard-20b)
+ * - Fast, cost-effective initial screening
+ * - Good for most moderation cases
+ * 
+ * Escalation: OpenAI GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b)
+ * - Deeper analysis for high-risk content
+ * - Triggered when confidence < 0.7 or high-severity threats
+ * 
+ * Fallback: Amazon Nova Pro (amazon.nova-pro-v1:0)
+ * - Used when Safeguard models unavailable
+ * - Proven reliability
+ * 
+ * Final Fallback: Pattern-based detection
+ * - Regex patterns if all AI models fail
+ */
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
@@ -159,14 +177,87 @@ export class OutputModerationService {
     }
 
     /**
-     * AI-powered moderation check using Bedrock
+     * AI-powered moderation check using Bedrock with tiered approach
+     * Primary: Safeguard 20B → Escalate to 120B if needed → Fallback to Nova Pro
      */
     private static async runAIModerationCheck(
         content: string,
         config: OutputModerationConfig,
-        _requestId: string
+        requestId: string
     ): Promise<OutputModerationResult> {
         const startTime = Date.now();
+        
+        // Stage 1: Initial check with Safeguard 20B (fast, cost-effective)
+        const primaryModelId = 'openai.gpt-oss-safeguard-20b';
+        
+        try {
+            const initialResult = await this.invokeSafeguardModel(
+                primaryModelId,
+                content,
+                config,
+                requestId,
+                startTime
+            );
+            
+            // Escalate to 120B if:
+            // 1. Low confidence (< 0.7) 
+            // 2. High-severity threat detected
+            const shouldEscalate = 
+                initialResult.confidence < 0.7 ||
+                this.isHighSeverityThreat(initialResult.violationCategories);
+            
+            if (shouldEscalate && initialResult.isBlocked) {
+                loggingService.info('Escalating to Safeguard 120B for deeper analysis', { requestId });
+                
+                try {
+                    const deepModelId = 'openai.gpt-oss-safeguard-120b';
+                    return await this.invokeSafeguardModel(
+                        deepModelId,
+                        content,
+                        config,
+                        requestId,
+                        startTime
+                    );
+                } catch (error) {
+                    loggingService.warn('120B escalation failed, using 20B result', { 
+                        error: error instanceof Error ? error.message : String(error) 
+                    });
+                    return initialResult;
+                }
+            }
+            
+            return initialResult;
+            
+        } catch (error) {
+            loggingService.warn('Safeguard 20B failed, falling back to Nova Pro', { 
+                error: error instanceof Error ? error.message : String(error) 
+            });
+            
+            // Fallback to Nova Pro
+            return await this.invokeNovaProFallback(content, config, requestId, startTime);
+        }
+    }
+
+    /**
+     * Check if threat categories are high severity (require 120B escalation)
+     */
+    private static isHighSeverityThreat(categories: string[]): boolean {
+        const highSeverity = ['violence', 'self-harm', 'criminal', 'weapons', 'illegal-drugs'];
+        return categories.some(cat => 
+            highSeverity.some(severe => cat.toLowerCase().includes(severe))
+        );
+    }
+
+    /**
+     * Invoke Safeguard or Nova Pro model for moderation
+     */
+    private static async invokeSafeguardModel(
+        modelId: string,
+        content: string,
+        config: OutputModerationConfig,
+        requestId: string,
+        startTime: number
+    ): Promise<OutputModerationResult> {
         const moderationPrompt = `
 You are a content moderation system. Analyze this model output for policy violations:
 
@@ -192,48 +283,43 @@ Respond with JSON only:
     "recommendedAction": "allow|annotate|redact|block"
 }`;
 
-        const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
         const estimatedInputTokens = Math.ceil(moderationPrompt.length / 4);
 
         try {
             const response = await retryBedrockOperation(async () => {
-                const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
+                // Format request body based on model type
+                let requestBody: any;
                 
-                let requestBody;
-                if (modelId.includes('nova')) {
-                    // Nova Pro format
-                    requestBody = JSON.stringify({
+                if (modelId.includes('openai')) {
+                    // OpenAI Safeguard models use simple string content format
+                    requestBody = {
+                        messages: [{ role: "user", content: moderationPrompt }],
+                        max_tokens: 500,
+                        temperature: 0.1
+                    };
+                } else {
+                    // Nova Pro uses Converse API format with content array
+                    requestBody = {
                         messages: [{ role: "user", content: [{ text: moderationPrompt }] }],
                         inferenceConfig: {
-                            max_new_tokens: 500,
+                            maxTokens: 500,
                             temperature: 0.1
                         }
-                    });
-                } else {
-                    // Claude format (fallback)
-                    requestBody = JSON.stringify({
-                        anthropic_version: "bedrock-2023-05-31",
-                        max_tokens: 500,
-                        messages: [{ role: "user", content: moderationPrompt }]
-                    });
+                    };
                 }
-
+                
                 const command = new InvokeModelCommand({
                     modelId,
-                    body: requestBody,
+                    body: JSON.stringify(requestBody),
                     contentType: 'application/json'
                 });
                 return this.bedrockClient.send(command);
             });
 
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
-            const modelId = process.env.AWS_BEDROCK_MODEL_ID || 'amazon.nova-pro-v1:0';
-            let responseText;
-            if (modelId.includes('nova')) {
-                responseText = responseBody.output?.message?.content?.[0]?.text || responseBody.output?.text || '';
-            } else {
-                responseText = responseBody.content?.[0]?.text || '';
-            }
+            const responseText = responseBody.output?.message?.content?.[0]?.text || 
+                                responseBody.content?.[0]?.text || 
+                                responseBody.output?.text || '';
             
             const analysis = JSON.parse(responseText);
             const estimatedOutputTokens = Math.ceil(responseText.length / 4);
@@ -246,13 +332,14 @@ Respond with JSON only:
                 model: modelId,
                 inputTokens: estimatedInputTokens,
                 outputTokens: estimatedOutputTokens,
-                estimatedCost: (estimatedInputTokens * 0.0000003 + estimatedOutputTokens * 0.0000012), // Approx Nova Pro pricing
+                estimatedCost: this.calculateCost(modelId, estimatedInputTokens, estimatedOutputTokens),
                 latency,
                 success: true,
                 metadata: {
                     contentLength: content.length,
                     isViolation: analysis.isViolation || false,
-                    threatLevel: analysis.threatLevel || 'low'
+                    threatLevel: analysis.threatLevel || 'low',
+                    requestId
                 }
             });
 
@@ -265,7 +352,9 @@ Respond with JSON only:
                 originalContent: content,
                 action: analysis.recommendedAction || config.action,
                 details: {
-                    method: 'ai_moderation',
+                    method: modelId.includes('120b') ? 'safeguard_120b' : 
+                            modelId.includes('20b') ? 'safeguard_20b' : 
+                            modelId.includes('nova') ? 'nova_pro_fallback' : 'ai_moderation',
                     toxicityScore: analysis.toxicityScore,
                     threatLevel: analysis.threatLevel || 'low'
                 }
@@ -285,9 +374,43 @@ Respond with JSON only:
                 error: error instanceof Error ? error.message : String(error)
             });
 
-            loggingService.error('AI output moderation failed', { error: error instanceof Error ? error.message : String(error) });
+            loggingService.error('AI output moderation failed', { 
+                error: error instanceof Error ? error.message : String(error),
+                modelId,
+                requestId
+            });
             throw error;
         }
+    }
+
+    /**
+     * Fallback to Nova Pro when Safeguard models fail
+     */
+    private static async invokeNovaProFallback(
+        content: string,
+        config: OutputModerationConfig,
+        requestId: string,
+        startTime: number
+    ): Promise<OutputModerationResult> {
+        const fallbackModelId = 'amazon.nova-pro-v1:0';
+        loggingService.info('Using Nova Pro fallback', { requestId });
+        
+        // Use existing invokeSafeguardModel logic (works for both OpenAI and Nova)
+        return await this.invokeSafeguardModel(fallbackModelId, content, config, requestId, startTime);
+    }
+
+    /**
+     * Calculate cost based on model pricing
+     */
+    private static calculateCost(modelId: string, inputTokens: number, outputTokens: number): number {
+        const pricing: Record<string, { input: number; output: number }> = {
+            'openai.gpt-oss-safeguard-20b': { input: 0.50, output: 1.50 },
+            'openai.gpt-oss-safeguard-120b': { input: 2.00, output: 6.00 },
+            'amazon.nova-pro-v1:0': { input: 0.80, output: 3.20 }
+        };
+        
+        const modelPricing = pricing[modelId] || pricing['amazon.nova-pro-v1:0'];
+        return (inputTokens * modelPricing.input + outputTokens * modelPricing.output) / 1_000_000;
     }
 
     /**
