@@ -9,10 +9,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 10.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 256000,
-        capabilities: ['text', 'reasoning', 'enterprise', 'agents'],
+        capabilities: ['text', 'reasoning', 'enterprise', 'agents', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Most performant model to date, excelling at tool use, agents, RAG, and multilingual use cases'
+        notes: 'Advanced generative model for advanced agents and multilingual tasks. Most performant model to date, excelling at tool use, agents, RAG, and multilingual use cases. Priced at $2.50 per 1M input tokens and $10.00 per 1M output tokens.'
     },
     {
         modelId: 'command-r7b-12-2024',
@@ -22,10 +22,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.15,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'edge', 'commodity-gpu'],
+        capabilities: ['text', 'edge', 'commodity-gpu', 'rag', 'tools', 'reasoning'],
         category: 'text',
         isLatest: true,
-        notes: 'Small, fast update delivered in December 2024, excels at RAG, tool use, and complex reasoning'
+        notes: 'Cost-effective generative model for simpler tasks. Small, fast update delivered in December 2024, excels at RAG, tool use, and complex reasoning. Priced at $0.0375 per 1M input tokens and $0.15 per 1M output tokens.'
     },
     {
         modelId: 'command-a-reasoning-08-2025',
@@ -35,10 +35,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 10.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 256000,
-        capabilities: ['text', 'reasoning', 'agentic', 'multilingual'],
+        capabilities: ['text', 'reasoning', 'agentic', 'multilingual', 'enterprise'],
         category: 'text',
         isLatest: true,
-        notes: 'First reasoning model, able to think before generating output for nuanced problem-solving and agent-based tasks in 23 languages'
+        notes: 'Advanced generative model for reasoning tasks. First reasoning model, able to think before generating output for nuanced problem-solving and agent-based tasks in 23 languages. Priced at $2.50 per 1M input tokens and $10.00 per 1M output tokens.'
     },
     {
         modelId: 'command-a-vision-07-2025',
@@ -51,7 +51,7 @@ export const COHERE_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'enterprise'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'First model capable of processing images, excelling in enterprise use cases like charts, graphs, diagrams, table understanding, OCR, and object detection'
+        notes: 'Advanced generative model for vision tasks. First model capable of processing images, excelling in enterprise use cases like charts, graphs, diagrams, table understanding, OCR, and object detection. Priced at $2.50 per 1M input tokens and $10.00 per 1M output tokens.'
     },
     {
         modelId: 'command-r-plus-04-2024',
@@ -61,10 +61,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 10.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'reasoning'],
+        capabilities: ['text', 'reasoning', 'rag', 'tools', 'enterprise'],
         category: 'text',
         isLatest: true,
-        notes: 'Instruction-following conversational model for complex RAG workflows and multi-step tool use'
+        notes: 'High-performance generative model for complex tasks. Instruction-following conversational model for complex RAG workflows and multi-step tool use. Priced at $2.50 per 1M input tokens and $10.00 per 1M output tokens.'
     },
     {
         modelId: 'command-r-08-2024',
@@ -74,10 +74,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'efficiency', 'performance'],
+        capabilities: ['text', 'efficiency', 'performance', 'rag', 'tools', 'agents'],
         category: 'text',
         isLatest: true,
-        notes: 'Update of Command R model delivered in August 2024'
+        notes: 'Balanced generative model for Retrieval-Augmented Generation (RAG) and tool use. Update of Command R model delivered in August 2024. Priced at $0.15 per 1M input tokens and $0.60 per 1M output tokens.'
     },
     {
         modelId: 'command-r-03-2024',
@@ -152,10 +152,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['embedding', 'multimodal', 'multilingual'],
+        capabilities: ['embedding', 'multimodal', 'multilingual', 'semantic-search', 'rag'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Leading multimodal embedding model for text and images, acts as intelligent retrieval engine for semantic search and RAG systems'
+        notes: 'Embed model for converting text/images to vectors for semantic search. Leading multimodal embedding model for text and images, acts as intelligent retrieval engine for semantic search and RAG systems. Priced at $0.12 per 1M tokens processed.'
     },
     {
         modelId: 'embed-english-v3.0',
@@ -165,10 +165,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 512,
-        capabilities: ['embedding', 'english'],
+        capabilities: ['embedding', 'english', 'semantic-search', 'rag'],
         category: 'embedding',
         isLatest: true,
-        notes: 'English-only embedding model for text classification and embeddings'
+        notes: 'Embed model for converting text to vectors for semantic search. English-only embedding model for text classification and embeddings. Priced at $0.10 per 1M tokens processed (usage-based pricing).'
     },
     {
         modelId: 'embed-english-light-v3.0',
@@ -178,10 +178,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 512,
-        capabilities: ['embedding', 'english', 'lightweight'],
+        capabilities: ['embedding', 'english', 'lightweight', 'semantic-search', 'rag'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Smaller, faster version of embed-english-v3.0, almost as capable but much faster'
+        notes: 'Embed model for converting text to vectors for semantic search. Smaller, faster version of embed-english-v3.0, almost as capable but much faster. Priced at $0.10 per 1M tokens processed (usage-based pricing).'
     },
     {
         modelId: 'embed-multilingual-v3.0',
@@ -191,10 +191,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 512,
-        capabilities: ['embedding', 'multilingual'],
+        capabilities: ['embedding', 'multilingual', 'semantic-search', 'rag'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Multilingual embedding model for classification and embeddings in multiple languages'
+        notes: 'Embed model for converting text to vectors for semantic search. Multilingual embedding model for classification and embeddings in multiple languages. Priced at $0.10 per 1M tokens processed (usage-based pricing).'
     },
     {
         modelId: 'embed-multilingual-light-v3.0',
@@ -204,10 +204,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 0.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 512,
-        capabilities: ['embedding', 'multilingual', 'lightweight'],
+        capabilities: ['embedding', 'multilingual', 'lightweight', 'semantic-search', 'rag'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Smaller, faster version of embed-multilingual-v3.0, almost as capable but much faster'
+        notes: 'Embed model for converting text to vectors for semantic search. Smaller, faster version of embed-multilingual-v3.0, almost as capable but much faster. Priced at $0.10 per 1M tokens processed (usage-based pricing).'
     },
     {
         modelId: 'rerank-v3.5',
@@ -217,10 +217,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 2.00,
         unit: PricingUnit.PER_1K_TOKENS,
         contextWindow: 4096,
-        capabilities: ['search', 'reranking', 'multilingual'],
+        capabilities: ['search', 'reranking', 'multilingual', 'semantic-search'],
         category: 'rerank',
         isLatest: true,
-        notes: 'Provides powerful semantic boost to search quality of any keyword or vector search system, $2.00 per 1K searches'
+        notes: 'Rerank model used to improve search result relevance. Provides powerful semantic boost to search quality of any keyword or vector search system. Priced at $2.00 per 1,000 searches (usage-based pricing).'
     },
     {
         modelId: 'rerank-english-v3.0',
@@ -230,10 +230,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 2.00,
         unit: PricingUnit.PER_1K_TOKENS,
         contextWindow: 4096,
-        capabilities: ['rerank', 'semantic-search', 'english'],
+        capabilities: ['rerank', 'semantic-search', 'english', 'search'],
         category: 'rerank',
         isLatest: true,
-        notes: 'English language document and semi-structured data reranking model'
+        notes: 'Rerank model used to improve search result relevance. English language document and semi-structured data reranking model. Priced at $2.00 per 1,000 searches (usage-based pricing).'
     },
     {
         modelId: 'rerank-multilingual-v3.0',
@@ -243,10 +243,10 @@ export const COHERE_PRICING: ModelPricing[] = [
         outputPrice: 2.00,
         unit: PricingUnit.PER_1K_TOKENS,
         contextWindow: 4096,
-        capabilities: ['rerank', 'semantic-search', 'multilingual'],
+        capabilities: ['rerank', 'semantic-search', 'multilingual', 'search'],
         category: 'rerank',
         isLatest: true,
-        notes: 'Multilingual document and semi-structured data reranking model'
+        notes: 'Rerank model used to improve search result relevance. Multilingual document and semi-structured data reranking model. Priced at $2.00 per 1,000 searches (usage-based pricing).'
     },
     {
         modelId: 'c4ai-aya-expanse-8b',

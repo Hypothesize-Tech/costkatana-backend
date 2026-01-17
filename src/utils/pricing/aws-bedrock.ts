@@ -1,51 +1,10 @@
 import { ModelPricing, PricingUnit } from './types';
 
 export const AWS_BEDROCK_PRICING: ModelPricing[] = [
-    // Amazon Nova Models
-    {
-        modelId: 'amazon.nova-pro-v1:0',
-        modelName: 'Nova Pro',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.80,
-        outputPrice: 3.20,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 300000,
-        capabilities: ['text', 'vision'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Pro - Best value multimodal model'
-    },
-    {
-        modelId: 'amazon.nova-lite-v1:0',
-        modelName: 'Nova Lite',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.06,
-        outputPrice: 0.24,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 300000,
-        capabilities: ['text', 'fast'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Lite - Fast and efficient'
-    },
-    {
-        modelId: 'amazon.nova-micro-v1:0',
-        modelName: 'Nova Micro',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.035,
-        outputPrice: 0.14,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 128000,
-        capabilities: ['text', 'fast'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Micro - Ultra fast for simple tasks'
-    },
-    
     // AI21 Labs Models
     {
         modelId: 'ai21.jamba-1-5-large-v1:0',
-        modelName: 'Jamba',
+        modelName: 'Jamba 1.5 Large',
         provider: 'AWS Bedrock',
         inputPrice: 2.0,
         outputPrice: 8.0,
@@ -58,7 +17,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'ai21.jamba-1-5-mini-v1:0',
-        modelName: 'Jamba',
+        modelName: 'Jamba 1.5 Mini',
         provider: 'AWS Bedrock',
         inputPrice: 0.2,
         outputPrice: 0.4,
@@ -71,7 +30,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
     },
     {
         modelId: 'ai21.jamba-instruct-v1:0',
-        modelName: 'Jamba Instruct',
+        modelName: 'Jamba-Instruct',
         provider: 'AWS Bedrock',
         inputPrice: 0.5,
         outputPrice: 0.7,
@@ -82,11 +41,92 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         isLatest: true,
         notes: 'AI21 Labs Jamba-Instruct - hybrid architecture for long context tasks'
     },
+    {
+        modelId: 'ai21.j2-mid-v1',
+        modelName: 'Jurassic-2 Mid',
+        provider: 'AWS Bedrock',
+        inputPrice: 12.5,
+        outputPrice: 12.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 8192,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'AI21 Labs Jurassic-2 Mid - advanced AI model for text generation and chat'
+    },
+    {
+        modelId: 'ai21.j2-ultra-v1',
+        modelName: 'Jurassic-2 Ultra',
+        provider: 'AWS Bedrock',
+        inputPrice: 18.8,
+        outputPrice: 18.8,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 8192,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'AI21 Labs Jurassic-2 Ultra - advanced AI model for text generation and chat'
+    },
 
     // Amazon Nova Models
+    // Nova 2.0 Series (Latest)
+    {
+        modelId: 'amazon.nova-2-lite-v1:0',
+        modelName: 'Nova 2 Lite',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.3,
+        outputPrice: 2.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['text', 'vision', 'video', 'multimodal', 'cache-read'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Amazon Nova 2 Lite - Text/Image/Video input: $0.3/1M tokens, Output: $2.5/1M tokens. Cache read: $0.075/1M tokens (75% discount)'
+    },
+    {
+        modelId: 'amazon.nova-2-omni-v1:0',
+        modelName: 'Nova 2 Omni (Preview)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.3,
+        outputPrice: 2.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['text', 'vision', 'video', 'audio', 'multimodal', 'cache-read'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Amazon Nova 2 Omni (Preview) - Text/Image/Video input: $0.3/1M tokens, Audio input: $1.0/1M tokens, Text output: $2.5/1M tokens, Image output: $40/1M tokens. Cache read: 75% discount'
+    },
+    {
+        modelId: 'amazon.nova-2-pro-v1:0',
+        modelName: 'Nova 2 Pro (Preview)',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.25,
+        outputPrice: 10.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['text', 'vision', 'video', 'audio', 'multimodal', 'cache-read'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Amazon Nova 2 Pro (Preview) - Text/Image/Video/Audio input: $1.25/1M tokens, Text output: $10/1M tokens. Cache read: 75% discount'
+    },
+    {
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        modelName: 'Nova 2 Sonic',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.0,
+        outputPrice: 12.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['speech', 'text', 'multimodal', 'native-audio'],
+        category: 'audio',
+        isLatest: true,
+        notes: 'Amazon Nova 2 Sonic - Speech input: $3.0/1M tokens, Speech output: $12.0/1M tokens. Text input: $0.33/1M tokens, Text output: $2.75/1M tokens'
+    },
+    
+    // Nova 1.0 Series
     {
         modelId: 'amazon.nova-micro-v1:0',
-        modelName: 'Amazon Nova Micro',
+        modelName: 'Nova Micro',
         provider: 'AWS Bedrock',
         inputPrice: 0.035,
         outputPrice: 0.14,
@@ -94,12 +134,12 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 128000,
         capabilities: ['text', 'efficient', 'cache-read'],
         category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Micro with cache read support ($0.00875/1M cache read tokens)'
+        isLatest: false,
+        notes: 'Amazon Nova Micro - Cache read: $0.00875/1M tokens (75% discount), Batch: $0.0175/$0.07 per 1M tokens'
     },
     {
         modelId: 'amazon.nova-lite-v1:0',
-        modelName: 'Amazon Nova Lite',
+        modelName: 'Nova Lite',
         provider: 'AWS Bedrock',
         inputPrice: 0.06,
         outputPrice: 0.24,
@@ -107,12 +147,12 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 300000,
         capabilities: ['text', 'multimodal', 'cache-read'],
         category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Lite with cache read support ($0.015/1M cache read tokens)'
+        isLatest: false,
+        notes: 'Amazon Nova Lite - Cache read: $0.015/1M tokens (75% discount), Batch: $0.03/$0.12 per 1M tokens'
     },
     {
         modelId: 'amazon.nova-pro-v1:0',
-        modelName: 'Amazon Nova Pro',
+        modelName: 'Nova Pro',
         provider: 'AWS Bedrock',
         inputPrice: 0.8,
         outputPrice: 3.2,
@@ -120,8 +160,8 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 300000,
         capabilities: ['text', 'multimodal', 'cache-read'],
         category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Pro with cache read support ($0.2/1M cache read tokens)'
+        isLatest: false,
+        notes: 'Amazon Nova Pro - Cache read: $0.2/1M tokens (75% discount), Batch: $0.4/$1.6 per 1M tokens'
     },
     {
         modelId: 'amazon.nova-premier-v1:0',
@@ -133,21 +173,36 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 300000,
         capabilities: ['text', 'multimodal', 'advanced-reasoning'],
         category: 'text',
-        isLatest: true,
-        notes: 'Amazon Nova Premier - advanced AI model for text generation and chat with cache read support'
+        isLatest: false,
+        notes: 'Amazon Nova Premier - Advanced reasoning capabilities. Batch: $1.25/$6.25 per 1M tokens'
     },
+    {
+        modelId: 'amazon.nova-sonic-v1:0',
+        modelName: 'Nova Sonic',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.4,
+        outputPrice: 13.6,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 300000,
+        capabilities: ['speech', 'text', 'multimodal', 'native-audio'],
+        category: 'audio',
+        isLatest: false,
+        notes: 'Amazon Nova Sonic - Speech input: $3.4/1M tokens, Speech output: $13.6/1M tokens. Text input: $0.06/1M tokens, Text output: $0.24/1M tokens'
+    },
+    
+    // Nova Creative Generation Models
     {
         modelId: 'amazon.nova-canvas-v1:0',
         modelName: 'Nova Canvas',
         provider: 'AWS Bedrock',
         inputPrice: 0.04,
         outputPrice: 0.04,
-        unit: PricingUnit.PER_REQUEST,
+        unit: PricingUnit.PER_IMAGE,
         contextWindow: 0,
         capabilities: ['image-generation'],
         category: 'image',
         isLatest: true,
-        notes: 'Amazon Nova Canvas via AWS Bedrock - image generation model'
+        notes: 'Amazon Nova Canvas - Standard quality (up to 1024x1024): $0.04/image, Premium quality (up to 1024x1024): $0.06/image, Standard quality (up to 2048x2048): $0.06/image, Premium quality (up to 2048x2048): $0.08/image'
     },
     {
         modelId: 'amazon.nova-reel-v1:0',
@@ -155,25 +210,27 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         provider: 'AWS Bedrock',
         inputPrice: 0.08,
         outputPrice: 0.08,
-        unit: PricingUnit.PER_REQUEST,
+        unit: PricingUnit.PER_SECOND,
         contextWindow: 0,
         capabilities: ['video-generation'],
         category: 'video',
         isLatest: true,
-        notes: 'Amazon Nova Reel via AWS Bedrock - video generation model'
+        notes: 'Amazon Nova Reel - $0.08 per second of video generated (720p, 24 fps)'
     },
+    
+    // Nova Embedding Models
     {
-        modelId: 'amazon.nova-sonic-v1:0',
-        modelName: 'Amazon Nova Sonic',
+        modelId: 'amazon.nova-multimodal-embeddings-v1:0',
+        modelName: 'Nova Multimodal Embeddings',
         provider: 'AWS Bedrock',
-        inputPrice: 3.4,
-        outputPrice: 13.6,
+        inputPrice: 0.135,
+        outputPrice: 0.0,
         unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 300000,
-        capabilities: ['speech', 'multimodal', 'native-audio'],
-        category: 'audio',
+        contextWindow: 0,
+        capabilities: ['embedding', 'multimodal'],
+        category: 'embedding',
         isLatest: true,
-        notes: 'Amazon Nova Sonic via AWS Bedrock. Text input: $0.06, Text output: $0.24'
+        notes: 'Amazon Nova Multimodal Embeddings (On-demand) - Text: $0.135/1M tokens, Standard image: $0.06/image, Document image: $0.6/image, Video: $0.7/second, Audio: $0.14/second. Batch: Text $0.0675/1M tokens, Standard image $0.03/image, Document image $0.48/image, Video $0.56/second, Audio $0.112/second'
     },
 
     // Amazon Titan Models
@@ -208,13 +265,28 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         modelName: 'Titan Embeddings V2',
         provider: 'AWS Bedrock',
         inputPrice: 0.02,
-        outputPrice: 0.02,
+        outputPrice: 0.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 8192,
         capabilities: ['embedding'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Amazon Titan Text Embeddings V2 - advanced AI model for text generation and chat'
+        notes: 'Amazon Titan Text Embeddings V2 - $0.02 per 1M input tokens. Embeddings model (no output tokens). Available for On-Demand and Batch inference'
+    },
+
+    // Other Amazon Models
+    {
+        modelId: 'amazon-rerank-v1.0',
+        modelName: 'Amazon Rerank v1.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.001,
+        outputPrice: 0.0,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['rerank', 'semantic-search', 'retrieval'],
+        category: 'retrieval',
+        isLatest: true,
+        notes: 'Amazon Rerank v1.0 - $1.00 per 1,000 queries. A query can contain up to 100 document chunks. If a query contains more than 100 document chunks, it is counted as multiple queries (e.g., 350 documents = 4 queries). Each document can contain up to 512 tokens (inclusive of query and document total tokens). If token length exceeds 512 tokens, it is broken down into multiple documents.'
     },
 
     // Anthropic Models on AWS Bedrock
@@ -222,184 +294,184 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         modelId: 'anthropic.claude-sonnet-4-5-v1:0',
         modelName: 'Claude Sonnet 4.5',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.3,
+        outputPrice: 16.5,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Sonnet 4.5 on AWS Bedrock - latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta)'
+        notes: 'Claude Sonnet 4.5 on AWS Bedrock (Geo/In-region) - Input: $3.3/1M, Output: $16.5/1M. Batch: $1.65/$8.25 per 1M. Cache (5m write): $4.125/1M, Cache (1h write): $6.6/1M, Cache read: $0.33/1M. Global: $3/$15 per 1M'
     },
     {
         modelId: 'anthropic.claude-haiku-4-5-v1:0',
         modelName: 'Claude Haiku 4.5',
         provider: 'AWS Bedrock',
-        inputPrice: 1.00,
-        outputPrice: 5.00,
+        inputPrice: 1.1,
+        outputPrice: 5.5,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Haiku 4.5 on AWS Bedrock - latest Claude Haiku model with improved performance'
+        notes: 'Claude Haiku 4.5 on AWS Bedrock (Geo/In-region) - Input: $1.1/1M, Output: $5.5/1M. Batch: $0.55/$2.75 per 1M. Cache (5m write): $1.375/1M, Cache (1h write): $2.2/1M, Cache read: $0.11/1M. Global: $1/$5 per 1M'
     },
-    // Global Inference Profile versions (same pricing as regional versions)
+    // Global Inference Profile versions (Global Cross-region Inference pricing)
     {
         modelId: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
         modelName: 'Claude Sonnet 4.5 (Global)',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 1_000_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Sonnet 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+        notes: 'Claude Sonnet 4.5 Long Context on AWS Bedrock Global Inference Profile - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Cache (5m write): $3.75/1M, Cache (1h write): $6/1M, Cache read: $0.3/1M. Routes to best available region'
     },
     {
         modelId: 'global.anthropic.claude-sonnet-4-20250514-v1:0',
         modelName: 'Claude Sonnet 4 (Global)',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Sonnet 4 on AWS Bedrock Global Inference Profile - routes to best available region'
+        notes: 'Claude Sonnet 4 on AWS Bedrock Global Inference Profile - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Cache (5m write): $3.75/1M, Cache read: $0.3/1M. Routes to best available region'
     },
     {
         modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude Haiku 4.5 (Global)',
         provider: 'AWS Bedrock',
-        inputPrice: 1.00,
-        outputPrice: 5.00,
+        inputPrice: 1.0,
+        outputPrice: 5.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Haiku 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+        notes: 'Claude Haiku 4.5 on AWS Bedrock Global Inference Profile - Input: $1/1M, Output: $5/1M. Batch: $0.5/$2.5 per 1M. Cache (5m write): $1.25/1M, Cache (1h write): $2/1M, Cache read: $0.1/1M. Routes to best available region'
     },
     {
         modelId: 'global.anthropic.claude-opus-4-5-20250514-v1:0',
         modelName: 'Claude Opus 4.5 (Global)',
         provider: 'AWS Bedrock',
-        inputPrice: 15.00,
-        outputPrice: 75.00,
+        inputPrice: 5.0,
+        outputPrice: 25.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Opus 4.5 on AWS Bedrock Global Inference Profile - routes to best available region'
+        notes: 'Claude Opus 4.5 on AWS Bedrock Global Inference Profile - Input: $5/1M, Output: $25/1M. Batch: $2.5/$12.5 per 1M. Cache (5m write): $6.25/1M, Cache (1h write): $10/1M, Cache read: $0.5/1M. Routes to best available region'
     },
     {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
-        modelName: 'Claude 4 Opus',
+        modelName: 'Claude Opus 4.1',
         provider: 'AWS Bedrock',
-        inputPrice: 15.00,
-        outputPrice: 75.00,
+        inputPrice: 15.0,
+        outputPrice: 75.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Opus 4.1 on AWS Bedrock - most powerful model for complex reasoning'
+        notes: 'Claude Opus 4.1 on AWS Bedrock (Geo/In-region) - Input: $15/1M, Output: $75/1M. Cache (5m write): $18.75/1M, Cache read: $1.5/1M. Batch not available'
     },
     {
         modelId: 'anthropic.claude-opus-4-20250514-v1:0',
         modelName: 'Claude Opus 4',
         provider: 'AWS Bedrock',
-        inputPrice: 15.00,
-        outputPrice: 75.00,
+        inputPrice: 15.0,
+        outputPrice: 75.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Opus 4 on AWS Bedrock - previous flagship model'
+        notes: 'Claude Opus 4 on AWS Bedrock (Geo/In-region) - Input: $15/1M, Output: $75/1M. Batch: $7.5/$37.5 per 1M. Cache (5m write): $18.75/1M, Cache read: $1.5/1M'
     },
     {
         modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
         modelName: 'Claude Sonnet 4',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Sonnet 4 on AWS Bedrock - high-performance model with exceptional reasoning'
+        notes: 'Claude Sonnet 4 on AWS Bedrock (Geo/In-region) - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Cache (5m write): $3.75/1M, Cache read: $0.3/1M. Global: $3/$15 per 1M'
     },
     {
         modelId: 'anthropic.claude-3-7-sonnet-20250219-v1:0',
         modelName: 'Claude Sonnet 3.7',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Sonnet 3.7 on AWS Bedrock - high-performance model with early extended thinking (deprecated)'
+        notes: 'Claude Sonnet 3.7 on AWS Bedrock (Geo/In-region) - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Cache (5m write): $3.75/1M, Cache read: $0.3/1M. High-performance model with early extended thinking (deprecated)'
     },
     {
         modelId: 'anthropic.claude-3-5-sonnet-20241022-v1:0',
         modelName: 'Claude Sonnet 3.5 v2',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Sonnet 3.5 v2 on AWS Bedrock - upgraded version'
+        notes: 'Claude Sonnet 3.5 v2 on AWS Bedrock (Geo/In-region) - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Cache (5m write): $3.75/1M, Cache read: $0.3/1M. Upgraded version'
     },
     {
         modelId: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
         modelName: 'Claude 3.5 Sonnet',
         provider: 'AWS Bedrock',
-        inputPrice: 3.00,
-        outputPrice: 15.00,
+        inputPrice: 3.0,
+        outputPrice: 15.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude 3.5 Sonnet on AWS Bedrock - advanced reasoning and analysis capabilities'
+        notes: 'Claude 3.5 Sonnet on AWS Bedrock (Geo/In-region) - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Advanced reasoning and analysis capabilities'
     },
     {
         modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude 3.5 Haiku',
         provider: 'AWS Bedrock',
-        inputPrice: 0.80,
-        outputPrice: 4.00,
+        inputPrice: 0.8,
+        outputPrice: 4.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude 3.5 Haiku on AWS Bedrock - fast and intelligent for quick responses (superseded by Haiku 4.5)'
+        notes: 'Claude 3.5 Haiku on AWS Bedrock (Geo/In-region) - Input: $0.8/1M, Output: $4/1M. Batch: $0.4/$2 per 1M. Cache (5m write): $1/1M, Cache read: $0.08/1M. Fast and intelligent for quick responses (superseded by Haiku 4.5)'
     },
     {
         modelId: 'anthropic.claude-3-opus-20240229-v1:0',
         modelName: 'Claude Opus 3',
         provider: 'AWS Bedrock',
-        inputPrice: 15.00,
-        outputPrice: 75.00,
+        inputPrice: 15.0,
+        outputPrice: 75.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Opus 3 on AWS Bedrock (legacy)'
+        notes: 'Claude Opus 3 on AWS Bedrock (Geo/In-region) - Input: $15/1M, Output: $75/1M. Batch: $7.5/$37.5 per 1M. Legacy model'
     },
     {
         modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
@@ -412,8 +484,91 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Haiku 3 on AWS Bedrock (legacy)'
+        notes: 'Claude Haiku 3 on AWS Bedrock (Geo/In-region) - Input: $0.25/1M, Output: $1.25/1M. Batch: $0.125/$0.625 per 1M. Legacy model'
     },
+    {
+        modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+        modelName: 'Claude Sonnet 3',
+        provider: 'AWS Bedrock',
+        inputPrice: 3.0,
+        outputPrice: 15.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude Sonnet 3 on AWS Bedrock (Geo/In-region) - Input: $3/1M, Output: $15/1M. Batch: $1.5/$7.5 per 1M. Legacy model'
+    },
+    {
+        modelId: 'anthropic.claude-2-1-v1:0',
+        modelName: 'Claude 2.1',
+        provider: 'AWS Bedrock',
+        inputPrice: 8.0,
+        outputPrice: 24.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude 2.1 on AWS Bedrock (Geo/In-region) - Input: $8/1M, Output: $24/1M. Legacy model'
+    },
+    {
+        modelId: 'anthropic.claude-2-v1:0',
+        modelName: 'Claude 2.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 8.0,
+        outputPrice: 24.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 100_000,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude 2.0 on AWS Bedrock (Geo/In-region) - Input: $8/1M, Output: $24/1M. Legacy model'
+    },
+    {
+        modelId: 'anthropic.claude-instant-v1',
+        modelName: 'Claude Instant',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.8,
+        outputPrice: 2.4,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 100_000,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude Instant on AWS Bedrock (Geo/In-region) - Input: $0.8/1M, Output: $2.4/1M. Legacy model'
+    },
+    
+    // Extended Access Models (Public Extended Access, Effective 1 Dec 2025)
+    {
+        modelId: 'anthropic.claude-3-5-sonnet-extended-access-v1:0',
+        modelName: 'Claude 3.5 Sonnet (Extended Access)',
+        provider: 'AWS Bedrock',
+        inputPrice: 6.0,
+        outputPrice: 30.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude 3.5 Sonnet (Public Extended Access, Effective 1 Dec 2025) - Input: $6/1M, Output: $30/1M. Batch: $3/$15 per 1M. Available in US East (N. Virginia), US East (Ohio), US West (Oregon), Europe (Frankfurt), Europe (Ireland), Europe (Zurich), Europe (Paris)'
+    },
+    {
+        modelId: 'anthropic.claude-3-5-sonnet-v2-extended-access-v1:0',
+        modelName: 'Claude 3.5 Sonnet v2 (Extended Access)',
+        provider: 'AWS Bedrock',
+        inputPrice: 6.0,
+        outputPrice: 30.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'multilingual'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Claude 3.5 Sonnet v2 (Public Extended Access, Effective 1 Dec 2025) - Input: $6/1M, Output: $30/1M. Batch: $3/$15 per 1M. Cache write: $7.5/1M, Cache read: $0.6/1M. Available in US East (N. Virginia), US East (Ohio), US West (Oregon)'
+    },
+    // Note: Long Context versions of Sonnet 4.5 and Sonnet 4 are available via Global Inference Profile
+    // with model IDs: global.anthropic.claude-sonnet-4-5-20250929-v1:0 (1M context) and similar variants
+    // Long Context pricing (Geo/In-region): Sonnet 4.5 LC - $6.6/$24.75 per 1M, Sonnet 4 LC - $6/$22.5 per 1M
 
     // Cohere Models on AWS Bedrock
     {
@@ -452,8 +607,8 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 512,
         capabilities: ['embedding'],
         category: 'embedding',
-        isLatest: true,
-        notes: 'Cohere Embed English v3 - advanced AI model for text generation and chat'
+        isLatest: false,
+        notes: 'Cohere Embed English v3 on AWS Bedrock - $0.10 per 1M input tokens. Embeddings model (no output tokens)'
     },
     {
         modelId: 'cohere.embed-multilingual-v3',
@@ -465,66 +620,41 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 512,
         capabilities: ['embedding', 'multilingual'],
         category: 'embedding',
+        isLatest: false,
+        notes: 'Cohere Embed Multilingual v3 on AWS Bedrock - $0.10 per 1M input tokens. Embeddings model (no output tokens)'
+    },
+    {
+        modelId: 'cohere.embed-4-v1:0',
+        modelName: 'Embed 4',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.12,
+        outputPrice: 0.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['embedding'],
+        category: 'embedding',
         isLatest: true,
-        notes: 'Cohere Embed Multilingual v3 - advanced AI model for text generation and chat'
+        notes: 'Cohere Embed 4 on AWS Bedrock - $0.12 per 1M input tokens. Latest embeddings model (no output tokens)'
+    },
+    {
+        modelId: 'cohere.rerank-3-5-v1:0',
+        modelName: 'Rerank 3.5',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.002,
+        outputPrice: 0.0,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['rerank', 'semantic-search', 'retrieval'],
+        category: 'retrieval',
+        isLatest: true,
+        notes: 'Cohere Rerank 3.5 on AWS Bedrock - $2.00 per 1,000 queries ($0.002 per query). A query can contain up to 100 document chunks. If a query contains more than 100 document chunks, it is counted as multiple queries (e.g., 350 documents = 4 queries). Each document can only contain up to 500 tokens (inclusive of the query and document\'s total tokens), and if the token length is higher than 512 tokens, it is broken down into multiple documents.'
     },
 
     // Meta Models on AWS Bedrock
-    {
-        modelId: 'meta.llama3-70b-instruct-v1:0',
-        modelName: 'Llama 3 70B',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.10,
-        outputPrice: 0.10,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 8192,
-        capabilities: ['text', 'instruct'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Meta Llama 3 70B - advanced AI model for text generation and chat'
-    },
-    {
-        modelId: 'meta.llama3-8b-instruct-v1:0',
-        modelName: 'Llama 3 8B',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.05,
-        outputPrice: 0.10,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 8192,
-        capabilities: ['text', 'instruct'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Meta Llama 3 8B - advanced AI model for text generation and chat'
-    },
-    {
-        modelId: 'meta.llama3-2-11b-instruct-v1:0',
-        modelName: 'Llama 3.2 11B',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.16,
-        outputPrice: 0.16,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 128000,
-        capabilities: ['text', 'instruct', 'vision'],
-        category: 'multimodal',
-        isLatest: true,
-        notes: 'Meta Llama 3.2 11B - advanced AI model for text generation and chat'
-    },
-    {
-        modelId: 'meta.llama3-2-90b-instruct-v1:0',
-        modelName: 'Llama 3.2 90B',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.72,
-        outputPrice: 0.72,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 128000,
-        capabilities: ['text', 'instruct', 'vision'],
-        category: 'multimodal',
-        isLatest: true,
-        notes: 'Meta Llama 3.2 90B - advanced AI model for text generation and chat'
-    },
+    // Llama 4 Series
     {
         modelId: 'meta.llama4-scout-17b-instruct-v1:0',
-        modelName: 'Llama 4 Scout',
+        modelName: 'Llama 4 Scout 17B',
         provider: 'AWS Bedrock',
         inputPrice: 0.17,
         outputPrice: 0.66,
@@ -533,11 +663,11 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 4 Scout 17B - advanced AI model for text generation and chat'
+        notes: 'Meta Llama 4 Scout 17B on AWS Bedrock (US East Ohio) - Input: $0.17/1M, Output: $0.66/1M. Batch: $0.085/$0.33 per 1M tokens'
     },
     {
         modelId: 'meta.llama4-maverick-17b-instruct-v1:0',
-        modelName: 'Llama 4 Maverick',
+        modelName: 'Llama 4 Maverick 17B',
         provider: 'AWS Bedrock',
         inputPrice: 0.24,
         outputPrice: 0.97,
@@ -546,10 +676,283 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct', 'vision'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'Meta Llama 4 Maverick 17B - advanced AI model for text generation and chat'
+        notes: 'Meta Llama 4 Maverick 17B on AWS Bedrock (US East Ohio) - Input: $0.24/1M, Output: $0.97/1M. Batch: $0.12/$0.485 per 1M tokens'
+    },
+    
+    // Llama 3.3 Series
+    {
+        modelId: 'meta.llama3-3-70b-instruct-v1:0',
+        modelName: 'Llama 3.3 Instruct (70B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.72,
+        outputPrice: 0.72,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Meta Llama 3.3 Instruct (70B) on AWS Bedrock (US East Ohio) - Input: $0.72/1M, Output: $0.72/1M. Batch: $0.36/$0.36 per 1M tokens'
+    },
+    
+    // Llama 3.2 Series
+    {
+        modelId: 'meta.llama3-2-1b-instruct-v1:0',
+        modelName: 'Llama 3.2 Instruct (1B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.1,
+        outputPrice: 0.1,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3.2 Instruct (1B) on AWS Bedrock (US East Ohio) - Input: $0.1/1M, Output: $0.1/1M. Batch not available'
+    },
+    {
+        modelId: 'meta.llama3-2-3b-instruct-v1:0',
+        modelName: 'Llama 3.2 Instruct (3B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3.2 Instruct (3B) on AWS Bedrock (US East Ohio) - Input: $0.15/1M, Output: $0.15/1M. Batch not available'
+    },
+    {
+        modelId: 'meta.llama3-2-11b-instruct-v1:0',
+        modelName: 'Llama 3.2 Instruct (11B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.16,
+        outputPrice: 0.16,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'instruct', 'vision'],
+        category: 'multimodal',
+        isLatest: false,
+        notes: 'Meta Llama 3.2 Instruct (11B) on AWS Bedrock (US East Ohio) - Input: $0.16/1M, Output: $0.16/1M. Batch not available'
+    },
+    {
+        modelId: 'meta.llama3-2-90b-instruct-v1:0',
+        modelName: 'Llama 3.2 Instruct (90B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.72,
+        outputPrice: 0.72,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['text', 'instruct', 'vision'],
+        category: 'multimodal',
+        isLatest: false,
+        notes: 'Meta Llama 3.2 Instruct (90B) on AWS Bedrock (US East Ohio) - Input: $0.72/1M, Output: $0.72/1M. Batch not available'
+    },
+    
+    // Llama 3.1 Series
+    {
+        modelId: 'meta.llama3-1-8b-instruct-v1:0',
+        modelName: 'Llama 3.1 Instruct (8B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.22,
+        outputPrice: 0.22,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3.1 Instruct (8B) on AWS Bedrock (US East Ohio) - Input: $0.22/1M, Output: $0.22/1M. Batch: $0.11/$0.11 per 1M tokens'
+    },
+    {
+        modelId: 'meta.llama3-1-70b-instruct-v1:0',
+        modelName: 'Llama 3.1 Instruct (70B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.72,
+        outputPrice: 0.72,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3.1 Instruct (70B) on AWS Bedrock (US East Ohio) - Input: $0.72/1M, Output: $0.72/1M. Batch: $0.36/$0.36 per 1M tokens. Latency optimized: $0.9/$0.9 per 1M tokens'
+    },
+    {
+        modelId: 'meta.llama3-1-405b-instruct-v1:0',
+        modelName: 'Llama 3.1 Instruct (405B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.4,
+        outputPrice: 2.4,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3.1 Instruct (405B) on AWS Bedrock (US East Ohio) - Input: $2.4/1M, Output: $2.4/1M. Batch: $1.2/$1.2 per 1M tokens. Latency optimized: $3/$3 per 1M tokens'
+    },
+    
+    // Llama 3 Series
+    {
+        modelId: 'meta.llama3-8b-instruct-v1:0',
+        modelName: 'Llama 3 Instruct (8B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.3,
+        outputPrice: 0.6,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 8192,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3 Instruct (8B) on AWS Bedrock (US East N. Virginia) - Input: $0.3/1M, Output: $0.6/1M'
+    },
+    {
+        modelId: 'meta.llama3-70b-instruct-v1:0',
+        modelName: 'Llama 3 Instruct (70B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.65,
+        outputPrice: 3.5,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 8192,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 3 Instruct (70B) on AWS Bedrock (US East N. Virginia) - Input: $2.65/1M, Output: $3.5/1M'
+    },
+    
+    // Llama 2 Series
+    {
+        modelId: 'meta.llama2-13b-chat-v1',
+        modelName: 'Llama 2 Chat (13B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.75,
+        outputPrice: 1.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 4096,
+        capabilities: ['text', 'chat'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 2 Chat (13B) on AWS Bedrock (US East N. Virginia, US West Oregon) - Input: $0.75/1M, Output: $1.0/1M'
+    },
+    {
+        modelId: 'meta.llama2-70b-chat-v1',
+        modelName: 'Llama 2 Chat (70B)',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.95,
+        outputPrice: 2.56,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 4096,
+        capabilities: ['text', 'chat'],
+        category: 'text',
+        isLatest: false,
+        notes: 'Meta Llama 2 Chat (70B) on AWS Bedrock (US East N. Virginia, US West Oregon) - Input: $1.95/1M, Output: $2.56/1M'
     },
 
     // Mistral AI Models on AWS Bedrock
+    // Latest Models
+    {
+        modelId: 'mistral.pixtral-large-2502-v1:0',
+        modelName: 'Pixtral Large (25.02)',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.0,
+        outputPrice: 6.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 128000,
+        capabilities: ['vision', 'multimodal', 'reasoning'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Mistral Pixtral Large (25.02) on AWS Bedrock (US East Ohio) - Input: $2/1M, Output: $6/1M. Batch not available'
+    },
+    {
+        modelId: 'mistral.magistral-small-1-2-v1:0',
+        modelName: 'Magistral Small 1.2',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.50,
+        outputPrice: 1.50,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Mistral Magistral Small 1.2 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.50/$1.50 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.59/$1.76. South America (Sao Paulo), Asia Pacific (Tokyo): $0.61/$1.82. Europe (London): $0.78/$2.33. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.voxtral-mini-1-0-v1:0',
+        modelName: 'Voxtral Mini 1.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.04,
+        outputPrice: 0.04,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'audio'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Mistral Voxtral Mini 1.0 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.04/$0.04 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.05/$0.05. South America (Sao Paulo), Asia Pacific (Tokyo): $0.05/$0.05. Europe (London): $0.06/$0.06. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.voxtral-small-1-0-v1:0',
+        modelName: 'Voxtral Small 1.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.10,
+        outputPrice: 0.30,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'audio'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Mistral Voxtral Small 1.0 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.10/$0.30 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.12/$0.35. South America (Sao Paulo), Asia Pacific (Tokyo): $0.12/$0.36. Europe (London): $0.16/$0.47. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.ministral-3b-3-0-v1:0',
+        modelName: 'Ministral 3B 3.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.10,
+        outputPrice: 0.10,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Mistral Ministral 3B 3.0 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.10/$0.10 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.12/$0.12. South America (Sao Paulo), Asia Pacific (Tokyo): $0.12/$0.12. Europe (London): $0.16/$0.16. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.ministral-8b-3-0-v1:0',
+        modelName: 'Ministral 8B 3.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 0.15,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Mistral Ministral 8B 3.0 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.15/$0.15 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.18/$0.18. South America (Sao Paulo), Asia Pacific (Tokyo): $0.18/$0.18. Europe (London): $0.23/$0.23. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.ministral-14b-3-0-v1:0',
+        modelName: 'Ministral 14B 3.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.20,
+        outputPrice: 0.20,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Mistral Ministral 14B 3.0 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.20/$0.20 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.24/$0.24. South America (Sao Paulo), Asia Pacific (Tokyo): $0.24/$0.24. Europe (London): $0.31/$0.31. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'mistral.mistral-large-3-v1:0',
+        modelName: 'Mistral Large 3',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.50,
+        outputPrice: 1.50,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Mistral Large 3 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.50/$1.50 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.59/$1.76. South America (Sao Paulo), Asia Pacific (Tokyo): $0.61/$1.82. Europe (London): $0.78/$2.33. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    
+    // Legacy Models
     {
         modelId: 'mistral.mistral-7b-instruct-v0:2',
         modelName: 'Mistral 7B Instruct',
@@ -561,7 +964,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: false,
-        notes: 'Mistral 7B Instruct on AWS Bedrock'
+        notes: 'Mistral 7B Instruct on AWS Bedrock (legacy)'
     },
     {
         modelId: 'mistral.mixtral-8x7b-instruct-v0:1',
@@ -574,7 +977,7 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'instruct'],
         category: 'text',
         isLatest: false,
-        notes: 'Mistral Mixtral 8x7B Instruct on AWS Bedrock'
+        notes: 'Mistral Mixtral 8x7B Instruct on AWS Bedrock (legacy)'
     },
     {
         modelId: 'mistral.mistral-large-2402-v1:0',
@@ -586,12 +989,12 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 32768,
         capabilities: ['text', 'instruct'],
         category: 'text',
-        isLatest: true,
-        notes: 'Mistral Large on AWS Bedrock'
+        isLatest: false,
+        notes: 'Mistral Large (24.02) on AWS Bedrock (legacy)'
     },
     {
         modelId: 'mistral.mistral-small-2402-v1:0',
-        modelName: 'Mistral Small',
+        modelName: 'Mistral Small (24.02)',
         provider: 'AWS Bedrock',
         inputPrice: 2.00,
         outputPrice: 6.00,
@@ -599,21 +1002,8 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 32768,
         capabilities: ['text', 'instruct'],
         category: 'text',
-        isLatest: true,
-        notes: 'Mistral Small - advanced AI model for text generation and chat'
-    },
-    {
-        modelId: 'mistral.pixtral-large-2502-v1:0',
-        modelName: 'Pixtral Large',
-        provider: 'AWS Bedrock',
-        inputPrice: 2.0,
-        outputPrice: 6.0,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 128000,
-        capabilities: ['vision', 'multimodal', 'reasoning'],
-        category: 'multimodal',
-        isLatest: true,
-        notes: 'Mistral Pixtral Large - advanced AI model for text generation and chat'
+        isLatest: false,
+        notes: 'Mistral Small (24.02) on AWS Bedrock (legacy)'
     },
 
     // OpenAI Models on AWS Bedrock
@@ -621,53 +1011,53 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         modelId: 'openai.gpt-oss-safeguard-20b',
         modelName: 'GPT OSS Safeguard 20B',
         provider: 'AWS Bedrock',
-        inputPrice: 0.50,
-        outputPrice: 1.50,
+        inputPrice: 0.07,
+        outputPrice: 0.20,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
         capabilities: ['text', 'safety', 'moderation', 'reasoning'],
         category: 'text',
         isLatest: true,
-        notes: 'OpenAI GPT OSS Safeguard 20B - Safety classification and policy reasoning'
+        notes: 'OpenAI GPT OSS Safeguard 20B on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.07/$0.20 per 1M tokens. Asia Pacific (Mumbai), South America (Sao Paulo), Asia Pacific (Tokyo): $0.08/$0.24. Europe (Ireland), Europe (Milan): $0.08/$0.23. Europe (London): $0.11/$0.31. Priority tier: 75% premium. Flex tier: 50% discount. Safety classification and policy reasoning'
     },
     {
         modelId: 'openai.gpt-oss-safeguard-120b',
         modelName: 'GPT OSS Safeguard 120B',
         provider: 'AWS Bedrock',
-        inputPrice: 2.00,
-        outputPrice: 6.00,
+        inputPrice: 0.15,
+        outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
         capabilities: ['text', 'safety', 'moderation', 'reasoning', 'advanced'],
         category: 'text',
         isLatest: true,
-        notes: 'OpenAI GPT OSS Safeguard 120B - Advanced safety reasoning and nuanced policy interpretation'
+        notes: 'OpenAI GPT OSS Safeguard 120B on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.15/$0.60 per 1M tokens. Asia Pacific (Mumbai), South America (Sao Paulo), Asia Pacific (Tokyo): $0.18/$0.71. Europe (Ireland), Europe (Milan): $0.18/$0.70. Europe (London): $0.23/$0.93. Priority tier: 75% premium. Flex tier: 50% discount. Advanced safety reasoning and nuanced policy interpretation'
     },
     {
         modelId: 'openai.gpt-oss-20b-1:0',
         modelName: 'GPT OSS 20B',
         provider: 'AWS Bedrock',
-        inputPrice: 0.40,
-        outputPrice: 1.20,
+        inputPrice: 0.07,
+        outputPrice: 0.30,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
         capabilities: ['text', 'reasoning', 'efficient'],
         category: 'text',
         isLatest: true,
-        notes: 'OpenAI GPT OSS 20B - Efficient reasoning and text generation'
+        notes: 'OpenAI GPT OSS 20B on AWS Bedrock (US East Ohio) - Standard: $0.07/$0.30 per 1M tokens. Batch: $0.035/$0.15 per 1M tokens. Priority: $0.1225/$0.525 per 1M tokens. Flex: $0.035/$0.15 per 1M tokens. Efficient reasoning and text generation'
     },
     {
         modelId: 'openai.gpt-oss-120b-1:0',
         modelName: 'GPT OSS 120B',
         provider: 'AWS Bedrock',
-        inputPrice: 1.80,
-        outputPrice: 5.40,
+        inputPrice: 0.15,
+        outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
         capabilities: ['text', 'reasoning', 'advanced'],
         category: 'text',
         isLatest: true,
-        notes: 'OpenAI GPT OSS 120B - Hybrid reasoning and extended thinking'
+        notes: 'OpenAI GPT OSS 120B on AWS Bedrock (US East Ohio) - Standard: $0.15/$0.60 per 1M tokens. Batch: $0.075/$0.30 per 1M tokens. Priority: $0.2625/$1.05 per 1M tokens. Flex: $0.075/$0.30 per 1M tokens. Hybrid reasoning and extended thinking'
     },
 
     // DeepSeek Models
@@ -682,10 +1072,249 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['text', 'reasoning', 'cot'],
         category: 'reasoning',
         isLatest: true,
-        notes: 'DeepSeek R1 - advanced AI model for text generation and chat'
+        notes: 'DeepSeek R1 on AWS Bedrock (Standard Tier) - Input: $1.35/1M, Output: $5.4/1M. Advanced reasoning model with chain-of-thought capabilities'
+    },
+    {
+        modelId: 'deepseek.v3-1-v1:0',
+        modelName: 'DeepSeek V3.1',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.58,
+        outputPrice: 1.68,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'reasoning'],
+        category: 'text',
+        isLatest: true,
+        notes: 'DeepSeek V3.1 on AWS Bedrock - Standard Tier: $0.58/$1.68 per 1M tokens. Priority Tier: $1.015/$2.94 per 1M tokens. Flex Tier: $0.29/$0.84 per 1M tokens'
     },
 
     // Stability AI Models
+    // Image Generation Models (US East N. Virginia)
+    {
+        modelId: 'stability.stable-diffusion-3-5-large-v1:0',
+        modelName: 'Stable Diffusion 3.5 Large',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.08,
+        outputPrice: 0.08,
+        unit: PricingUnit.PER_IMAGE,
+        contextWindow: 0,
+        capabilities: ['image-generation'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Diffusion 3.5 Large on AWS Bedrock (US East N. Virginia) - $0.08 per generated image'
+    },
+    {
+        modelId: 'stability.stable-image-core-v1:0',
+        modelName: 'Stable Image Core',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.04,
+        outputPrice: 0.04,
+        unit: PricingUnit.PER_IMAGE,
+        contextWindow: 0,
+        capabilities: ['image-generation'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Core on AWS Bedrock (US East N. Virginia) - $0.04 per generated image'
+    },
+    {
+        modelId: 'stability.stable-diffusion-3-large-v1:0',
+        modelName: 'Stable Diffusion 3 Large',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.08,
+        outputPrice: 0.08,
+        unit: PricingUnit.PER_IMAGE,
+        contextWindow: 0,
+        capabilities: ['image-generation'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Diffusion 3 Large on AWS Bedrock (US East N. Virginia) - $0.08 per generated image'
+    },
+    {
+        modelId: 'stability.stable-image-ultra-v1:0',
+        modelName: 'Stable Image Ultra',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.14,
+        outputPrice: 0.14,
+        unit: PricingUnit.PER_IMAGE,
+        contextWindow: 0,
+        capabilities: ['image-generation'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Ultra on AWS Bedrock (US East N. Virginia) - $0.14 per generated image'
+    },
+    
+    // Image Editing Services (Oregon, N. Virginia, Ohio)
+    {
+        modelId: 'stability.stable-image-remove-background-v1:0',
+        modelName: 'Stable Image Remove Background',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'background-removal'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Remove Background on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-erase-object-v1:0',
+        modelName: 'Stable Image Erase Object',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'object-removal'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Erase Object on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-control-structure-v1:0',
+        modelName: 'Stable Image Control Structure',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'control-net', 'structure-control'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Control Structure on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-control-sketch-v1:0',
+        modelName: 'Stable Image Control Sketch',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'control-net', 'sketch-to-image'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Control Sketch on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-style-guide-v1:0',
+        modelName: 'Stable Image Style Guide',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'style-transfer'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Style Guide on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-search-and-replace-v1:0',
+        modelName: 'Stable Image Search and Replace',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'object-replacement'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Search and Replace on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-inpaint-v1:0',
+        modelName: 'Stable Image Inpaint',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'inpainting'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Inpaint on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-search-and-recolor-v1:0',
+        modelName: 'Stable Image Search and Recolor',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.07,
+        outputPrice: 0.07,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'recoloring'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Search and Recolor on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.07 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-style-transfer-v1:0',
+        modelName: 'Stable Image Style Transfer',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.08,
+        outputPrice: 0.08,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'style-transfer'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Style Transfer on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.08 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-conservative-upscale-v1:0',
+        modelName: 'Stable Image Conservative Upscale',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.40,
+        outputPrice: 0.40,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'upscaling'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Conservative Upscale on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.40 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-creative-upscale-v1:0',
+        modelName: 'Stable Image Creative Upscale',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.60,
+        outputPrice: 0.60,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'upscaling'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Creative Upscale on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.60 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-fast-upscale-v1:0',
+        modelName: 'Stable Image Fast Upscale',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.03,
+        outputPrice: 0.03,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'upscaling'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Fast Upscale on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.03 per generation'
+    },
+    {
+        modelId: 'stability.stable-image-outpaint-v1:0',
+        modelName: 'Stable Image Outpaint',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.06,
+        outputPrice: 0.06,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['image-editing', 'outpainting'],
+        category: 'image',
+        isLatest: true,
+        notes: 'Stability AI Stable Image Outpaint on AWS Bedrock (Oregon, N. Virginia, Ohio) - $0.06 per generation'
+    },
+    
+    // Legacy Stability AI Models
     {
         modelId: 'stability.stable-diffusion-xl-v1:0',
         modelName: 'Stable Diffusion XL',
@@ -696,27 +1325,27 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         contextWindow: 0,
         capabilities: ['image-generation'],
         category: 'image',
-        isLatest: true,
-        notes: 'Stability AI Stable Diffusion XL - advanced AI model for text generation and chat'
+        isLatest: false,
+        notes: 'Stability AI Stable Diffusion XL (legacy) - Previous generation model. Pricing depends on step count and image resolution'
     },
 
     // TwelveLabs Models
     {
         modelId: 'twelvelabs.pegasus-1-2-v1:0',
-        modelName: 'Pegasus v1.2',
+        modelName: 'Pegasus 1.2',
         provider: 'AWS Bedrock',
-        inputPrice: 0.0,
+        inputPrice: 0.00049,
         outputPrice: 0.0,
-        unit: PricingUnit.PER_REQUEST,
+        unit: PricingUnit.PER_SECOND,
         contextWindow: 0,
         capabilities: ['text', 'video', 'multimodal'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'TwelveLabs Pegasus v1.2 - advanced AI model for text generation and chat'
+        notes: 'TwelveLabs Pegasus 1.2 on AWS Bedrock (US East Ohio) - Video input: $0.00049 per second. Output: $0.0075 per 1,000 tokens ($7.5 per 1M tokens). Available in Global Cross-region Inference and Geo/In-region Cross-region Inference. Audio input, image input, and text request pricing: N/A'
     },
     {
         modelId: 'twelvelabs.marengo-embed-2-7-v1:0',
-        modelName: 'Marengo Embed v2.7',
+        modelName: 'Marengo Embed 2.7',
         provider: 'AWS Bedrock',
         inputPrice: 0.0,
         outputPrice: 0.0,
@@ -725,6 +1354,257 @@ export const AWS_BEDROCK_PRICING: ModelPricing[] = [
         capabilities: ['embedding', 'multimodal'],
         category: 'embedding',
         isLatest: true,
-        notes: 'TwelveLabs Marengo Embed v2.7 - advanced AI model for text generation and chat'
+        notes: 'TwelveLabs Marengo Embed 2.7 on AWS Bedrock (US East Ohio) - Geo/In-region Cross-region Inference. Video input, audio input, image input, text request, and output pricing: N/A'
+    },
+    {
+        modelId: 'twelvelabs.marengo-embed-3-0-v1:0',
+        modelName: 'Marengo Embed 3.0',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.0,
+        outputPrice: 0.0,
+        unit: PricingUnit.PER_REQUEST,
+        contextWindow: 0,
+        capabilities: ['embedding', 'multimodal'],
+        category: 'embedding',
+        isLatest: true,
+        notes: 'TwelveLabs Marengo Embed 3.0 on AWS Bedrock (US East Ohio) - Geo/In-region Cross-region Inference. Video input, audio input, image input, text request, and output pricing: N/A'
+    },
+
+    // Google Gemma Models on AWS Bedrock
+    {
+        modelId: 'google.gemma-3-4b-v1:0',
+        modelName: 'Gemma 3 4B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.04,
+        outputPrice: 0.08,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Google Gemma 3 4B on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.04/$0.08 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.05/$0.09. South America (Sao Paulo), Asia Pacific (Tokyo): $0.05/$0.10. Europe (London): $0.06/$0.12. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'google.gemma-3-12b-v1:0',
+        modelName: 'Gemma 3 12B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.09,
+        outputPrice: 0.29,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Google Gemma 3 12B on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.09/$0.29 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.11/$0.34. South America (Sao Paulo), Asia Pacific (Tokyo): $0.11/$0.35. Europe (London): $0.14/$0.45. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'google.gemma-3-27b-v1:0',
+        modelName: 'Gemma 3 27B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.23,
+        outputPrice: 0.38,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'instruct'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Google Gemma 3 27B on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.23/$0.38 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.27/$0.45. South America (Sao Paulo), Asia Pacific (Tokyo): $0.28/$0.46. Europe (London): $0.36/$0.59. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+
+    // Kimi AI Models on AWS Bedrock
+    {
+        modelId: 'kimi.k2-thinking-v1:0',
+        modelName: 'Kimi K2 Thinking',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.60,
+        outputPrice: 2.50,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'reasoning', 'thinking'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Kimi K2 Thinking on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.60/$2.50 per 1M tokens. Asia Pacific (Mumbai): $0.71/$2.94. South America (Sao Paulo), Asia Pacific (Tokyo): $0.73/$3.03. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+
+    // Luma AI Models on AWS Bedrock
+    {
+        modelId: 'luma.ray2-720p-v1:0',
+        modelName: 'Luma Ray2 (720p)',
+        provider: 'AWS Bedrock',
+        inputPrice: 1.50,
+        outputPrice: 1.50,
+        unit: PricingUnit.PER_SECOND,
+        contextWindow: 0,
+        capabilities: ['video-generation'],
+        category: 'video',
+        isLatest: true,
+        notes: 'Luma Ray2 on AWS Bedrock (US West Oregon) - $1.50 per second of video generated (720p, 24 fps)'
+    },
+    {
+        modelId: 'luma.ray2-540p-v1:0',
+        modelName: 'Luma Ray2 (540p)',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.75,
+        outputPrice: 0.75,
+        unit: PricingUnit.PER_SECOND,
+        contextWindow: 0,
+        capabilities: ['video-generation'],
+        category: 'video',
+        isLatest: true,
+        notes: 'Luma Ray2 on AWS Bedrock (US West Oregon) - $0.75 per second of video generated (540p, 24 fps)'
+    },
+
+    // MiniMax AI Models on AWS Bedrock
+    {
+        modelId: 'minimax.m2-v1:0',
+        modelName: 'Minimax M2',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.30,
+        outputPrice: 1.20,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Minimax M2 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.30/$1.20 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.35/$1.41. South America (Sao Paulo), Asia Pacific (Tokyo): $0.36/$1.45. Europe (London): $0.47/$1.86. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+
+    // NVIDIA Models on AWS Bedrock
+    {
+        modelId: 'nvidia.nemotron-nano-2-v1:0',
+        modelName: 'NVIDIA Nemotron Nano 2',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.06,
+        outputPrice: 0.23,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'NVIDIA Nemotron Nano 2 on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.06/$0.23 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.07/$0.27. South America (Sao Paulo), Asia Pacific (Tokyo): $0.07/$0.28. Europe (London): $0.09/$0.36. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+    {
+        modelId: 'nvidia.nemotron-nano-2-vl-v1:0',
+        modelName: 'NVIDIA Nemotron Nano 2 VL',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.20,
+        outputPrice: 0.60,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'vision', 'multimodal'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'NVIDIA Nemotron Nano 2 VL (Vision-Language) on AWS Bedrock (US East N. Virginia, US East Ohio, US West Oregon) - Standard: $0.20/$0.60 per 1M tokens. Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.24/$0.71. South America (Sao Paulo), Asia Pacific (Tokyo): $0.24/$0.73. Europe (London): $0.31/$0.93. Priority tier: 75% premium. Flex tier: 50% discount'
+    },
+
+    // Writer Models
+    {
+        modelId: 'writer.palmyra-x4-v1:0',
+        modelName: 'Palmyra X4',
+        provider: 'AWS Bedrock',
+        inputPrice: 2.5,
+        outputPrice: 10.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Writer Palmyra X4 on AWS Bedrock - Input: $0.0025 per 1,000 tokens ($2.5 per 1M tokens), Output: $0.010 per 1,000 tokens ($10 per 1M tokens)'
+    },
+    {
+        modelId: 'writer.palmyra-x5-v1:0',
+        modelName: 'Palmyra X5',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.6,
+        outputPrice: 6.0,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Writer Palmyra X5 on AWS Bedrock - Input: $0.0006 per 1,000 tokens ($0.6 per 1M tokens), Output: $0.006 per 1,000 tokens ($6 per 1M tokens)'
+    },
+
+    // Qwen Models
+    // Qwen3 Models with Standard/Batch/Priority/Flex Tier Pricing (US East Ohio)
+    {
+        modelId: 'qwen.qwen3-coder-30b-a3b-v1:0',
+        modelName: 'Qwen3 Coder 30B A3B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 0.6,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'code'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Qwen Qwen3 Coder 30B A3B on AWS Bedrock (US East Ohio) - Standard: $0.00015/$0.0006 per 1K tokens ($0.15/$0.6 per 1M tokens). Batch: $0.000075/$0.0003 per 1K tokens ($0.075/$0.3 per 1M tokens). Priority: $0.0002625/$0.00105 per 1K tokens ($0.2625/$1.05 per 1M tokens, 75% premium). Flex: $0.000075/$0.0003 per 1K tokens ($0.075/$0.3 per 1M tokens, 50% discount)'
+    },
+    {
+        modelId: 'qwen.qwen3-32b-v1:0',
+        modelName: 'Qwen3 32B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 0.6,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Qwen Qwen3 32B on AWS Bedrock (US East Ohio) - Standard: $0.00015/$0.0006 per 1K tokens ($0.15/$0.6 per 1M tokens). Batch: $0.000075/$0.0003 per 1K tokens ($0.075/$0.3 per 1M tokens). Priority: $0.0002625/$0.00105 per 1K tokens ($0.2625/$1.05 per 1M tokens, 75% premium). Flex: $0.000075/$0.0003 per 1K tokens ($0.075/$0.3 per 1M tokens, 50% discount)'
+    },
+    {
+        modelId: 'qwen.qwen3-235b-a22b-2507-v1:0',
+        modelName: 'Qwen3 235B A22B 2507',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.22,
+        outputPrice: 0.88,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Qwen Qwen3 235B A22B 2507 on AWS Bedrock (US East Ohio) - Standard: $0.00022/$0.00088 per 1K tokens ($0.22/$0.88 per 1M tokens). Batch: $0.00011/$0.00044 per 1K tokens ($0.11/$0.44 per 1M tokens). Priority: $0.000385/$0.00154 per 1K tokens ($0.385/$1.54 per 1M tokens, 75% premium). Flex: $0.00011/$0.00044 per 1K tokens ($0.11/$0.44 per 1M tokens, 50% discount)'
+    },
+    {
+        modelId: 'qwen.qwen3-coder-480b-a35b-v1:0',
+        modelName: 'Qwen3 Coder 480B A35B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.45,
+        outputPrice: 1.8,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'code'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Qwen Qwen3 Coder 480B A35B on AWS Bedrock (US East Ohio) - Standard: $0.00045/$0.0018 per 1K tokens ($0.45/$1.8 per 1M tokens). Batch: $0.000225/$0.0009 per 1K tokens ($0.225/$0.9 per 1M tokens). Priority: $0.0007875/$0.00315 per 1K tokens ($0.7875/$3.15 per 1M tokens, 75% premium). Flex: $0.000225/$0.0009 per 1K tokens ($0.225/$0.9 per 1M tokens, 50% discount)'
+    },
+    
+    // Qwen3 Models with On-Demand Pricing (Multiple Regions)
+    {
+        modelId: 'qwen.qwen3-next-80b-a3b-v1:0',
+        modelName: 'Qwen3 Next 80B A3B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.15,
+        outputPrice: 1.2,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Qwen Qwen3 Next 80B A3B on AWS Bedrock - US East (N. Virginia), US East (Ohio), US West (Oregon): $0.00015/$0.00120 per 1K tokens ($0.15/$1.2 per 1M tokens). Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.00018/$0.00141 per 1K tokens ($0.18/$1.41 per 1M tokens). South America (Sao Paulo), Asia Pacific (Tokyo): $0.00018/$0.00145 per 1K tokens ($0.18/$1.45 per 1M tokens). Europe (London): $0.00023/$0.00186 per 1K tokens ($0.23/$1.86 per 1M tokens)'
+    },
+    {
+        modelId: 'qwen.qwen3-vl-235b-a22b-v1:0',
+        modelName: 'Qwen3 VL 235B A22B',
+        provider: 'AWS Bedrock',
+        inputPrice: 0.53,
+        outputPrice: 2.66,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 0,
+        capabilities: ['text', 'vision', 'multimodal'],
+        category: 'multimodal',
+        isLatest: true,
+        notes: 'Qwen Qwen3 VL 235B A22B on AWS Bedrock - US East (N. Virginia), US East (Ohio), US West (Oregon): $0.00053/$0.00266 per 1K tokens ($0.53/$2.66 per 1M tokens). Asia Pacific (Mumbai), Europe (Ireland), Europe (Milan): $0.00062/$0.00313 per 1K tokens ($0.62/$3.13 per 1M tokens). South America (Sao Paulo), Asia Pacific (Tokyo): $0.00064/$0.00322 per 1K tokens ($0.64/$3.22 per 1M tokens). Europe (London): $0.00082/$0.00412 per 1K tokens ($0.82/$4.12 per 1M tokens)'
     }
 ]; 

@@ -3,20 +3,33 @@ import { ModelPricing, PricingUnit } from './types';
 export const ANTHROPIC_PRICING: ModelPricing[] = [
     // === Claude 4.5 Series (Latest) ===
     {
-        modelId: 'claude-sonnet-4-5',
+        modelId: 'claude-sonnet-4-5-20250929',
         modelName: 'Claude Sonnet 4.5',
         provider: 'Anthropic',
         inputPrice: 3.00,
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning', 'coding', 'agents'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'coding', 'agents', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta). Cached: $0.30. Batch: $1.50/$7.50'
+        notes: 'Latest Claude Sonnet model with enhanced capabilities and 1M context window support (beta). Reliable knowledge cutoff: Jan 2025. Training data cutoff: Jul 2025. Max output: 64K tokens. Cached: $0.30. Batch: $1.50/$7.50'
     },
     {
-        modelId: 'anthropic.claude-sonnet-4-5-v1:0',
+        modelId: 'claude-sonnet-4-5',
+        modelName: 'Claude Sonnet 4.5 (Alias)',
+        provider: 'Anthropic',
+        inputPrice: 3.00,
+        outputPrice: 15.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'coding', 'agents', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Alias for claude-sonnet-4-5-20250929 - automatically points to latest snapshot'
+    },
+    {
+        modelId: 'anthropic.claude-sonnet-4-5-20250929-v1:0',
         modelName: 'Claude Sonnet 4.5 (Bedrock)',
         provider: 'AWS Bedrock',
         inputPrice: 3.00,
@@ -26,49 +39,88 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Sonnet 4.5 via AWS Bedrock - latest Claude Sonnet model with enhanced capabilities'
+        notes: 'Claude Sonnet 4.5 via AWS Bedrock - latest Claude Sonnet model with enhanced capabilities. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Jul 2025. Max output: 64K tokens'
     },
     {
-        modelId: 'claude-haiku-4-5',
+        modelId: 'claude-haiku-4-5-20251001',
         modelName: 'Claude Haiku 4.5',
         provider: 'Anthropic',
         inputPrice: 1.00,
         outputPrice: 5.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'fast'],
+        capabilities: ['text', 'vision', 'multimodal', 'fast', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude Haiku model with improved performance and capabilities. Cached: $0.10. Batch: $0.50/$2.50'
+        notes: 'Latest Claude Haiku model with improved performance and capabilities. Reliable knowledge cutoff: Feb 2025. Training data cutoff: Jul 2025. Max output: 64K tokens. Cached: $0.10. Batch: $0.50/$2.50'
     },
     {
-        modelId: 'anthropic.claude-haiku-4-5-v1:0',
+        modelId: 'claude-haiku-4-5',
+        modelName: 'Claude Haiku 4.5 (Alias)',
+        provider: 'Anthropic',
+        inputPrice: 1.00,
+        outputPrice: 5.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'fast', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Alias for claude-haiku-4-5-20251001 - automatically points to latest snapshot'
+    },
+    {
+        modelId: 'anthropic.claude-haiku-4-5-20251001-v1:0',
         modelName: 'Claude Haiku 4.5 (Bedrock)',
         provider: 'AWS Bedrock',
         inputPrice: 1.00,
         outputPrice: 5.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
+        capabilities: ['text', 'vision', 'multimodal', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Claude Haiku 4.5 via AWS Bedrock - latest Claude Haiku model'
+        notes: 'Claude Haiku 4.5 via AWS Bedrock - latest Claude Haiku model. Reliable knowledge cutoff: Feb 2025. Training data cutoff: Jul 2025. Max output: 64K tokens'
     },
     {
-        modelId: 'claude-opus-4-5',
+        modelId: 'claude-opus-4-5-20251101',
         modelName: 'Claude Opus 4.5',
         provider: 'Anthropic',
         inputPrice: 5.00,
         outputPrice: 25.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning', 'premium'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'premium', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Latest Claude Opus model with enhanced capabilities. Cached: $0.50. Batch: $2.50/$12.50'
+        notes: 'Latest Claude Opus model with enhanced capabilities. Reliable knowledge cutoff: May 2025. Training data cutoff: Aug 2025. Max output: 64K tokens. Cached: $0.50. Batch: $2.50/$12.50'
+    },
+    {
+        modelId: 'claude-opus-4-5',
+        modelName: 'Claude Opus 4.5 (Alias)',
+        provider: 'Anthropic',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'premium', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Alias for claude-opus-4-5-20251101 - automatically points to latest snapshot'
+    },
+    {
+        modelId: 'anthropic.claude-opus-4-5-20251101-v1:0',
+        modelName: 'Claude Opus 4.5 (Bedrock)',
+        provider: 'AWS Bedrock',
+        inputPrice: 5.00,
+        outputPrice: 25.00,
+        unit: PricingUnit.PER_1M_TOKENS,
+        contextWindow: 200_000,
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
+        category: 'text',
+        isLatest: true,
+        notes: 'Claude Opus 4.5 via AWS Bedrock - premium model combining maximum intelligence with practical performance. Reliable knowledge cutoff: May 2025. Training data cutoff: Aug 2025. Max output: 64K tokens'
     },
 
-    // === Claude 4 Series ===
+    // === Claude 4 Series (Legacy) ===
     {
         modelId: 'claude-opus-4-1-20250805',
         modelName: 'Claude Opus 4.1',
@@ -77,10 +129,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 75.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Most capable and intelligent Claude model yet - superior reasoning and advanced coding. Cached: $1.50'
+        isLatest: false,
+        notes: 'Legacy model - migrate to Claude Opus 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 32K tokens. Cached: $1.50'
     },
     {
         modelId: 'anthropic.claude-opus-4-1-20250805-v1:0',
@@ -92,8 +144,8 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Claude Opus 4.1 via AWS Bedrock - most capable and intelligent Claude model yet'
+        isLatest: false,
+        notes: 'Claude Opus 4.1 via AWS Bedrock - legacy model, migrate to Claude Opus 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 32K tokens'
     },
     {
         modelId: 'claude-opus-4-20250514',
@@ -103,10 +155,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 75.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Previous flagship model with very high intelligence and capability. Cached: $1.50'
+        isLatest: false,
+        notes: 'Legacy model - migrate to Claude Opus 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 32K tokens. Cached: $1.50'
     },
     {
         modelId: 'anthropic.claude-opus-4-20250514-v1:0',
@@ -118,8 +170,8 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Claude Opus 4 via AWS Bedrock - previous flagship model'
+        isLatest: false,
+        notes: 'Claude Opus 4 via AWS Bedrock - legacy model, migrate to Claude Opus 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 32K tokens'
     },
     {
         modelId: 'claude-sonnet-4-20250514',
@@ -129,10 +181,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning', 'coding'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'coding', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'High-performance model with exceptional reasoning and efficiency (1M context beta available). Cached: $0.30'
+        isLatest: false,
+        notes: 'Legacy model - migrate to Claude Sonnet 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 64K tokens. 1M context beta available. Cached: $0.30'
     },
     {
         modelId: 'anthropic.claude-sonnet-4-20250514-v1:0',
@@ -144,8 +196,8 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         contextWindow: 200_000,
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
-        isLatest: true,
-        notes: 'Claude Sonnet 4 via AWS Bedrock - high-performance model with exceptional reasoning'
+        isLatest: false,
+        notes: 'Claude Sonnet 4 via AWS Bedrock - legacy model, migrate to Claude Sonnet 4.5. Reliable knowledge cutoff: Jan 2025. Training data cutoff: Mar 2025. Max output: 64K tokens. 1M context beta available'
     },
 
     // === Claude 3.7 Series (Deprecated) ===
@@ -157,10 +209,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 15.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'reasoning', 'coding'],
+        capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'coding', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'High-performance model with early extended thinking (Oct 2024 cutoff, 64k output) - DEPRECATED. Cached: $0.30'
+        notes: 'DEPRECATED - migrate to Claude Sonnet 4.5. Reliable knowledge cutoff: Oct 2024. Training data cutoff: Nov 2024. Max output: 64K tokens (128K tokens with beta header output-128k-2025-02-19). Cached: $0.30'
     },
     {
         modelId: 'anthropic.claude-3-7-sonnet-20250219-v1:0',
@@ -173,7 +225,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'reasoning', 'extended-thinking', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Sonnet 3.7 via AWS Bedrock - high-performance model with early extended thinking - DEPRECATED'
+        notes: 'Claude Sonnet 3.7 via AWS Bedrock - DEPRECATED, migrate to Claude Sonnet 4.5. Reliable knowledge cutoff: Oct 2024. Training data cutoff: Nov 2024. Max output: 64K tokens'
     },
 
     // === Claude 3.5 Series ===
@@ -224,13 +276,13 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 4.00,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'fast'],
+        capabilities: ['text', 'vision', 'multimodal', 'fast', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Fast Claude model (July 2024 cutoff, 8k output) - superseded by Haiku 4.5. Cached: $0.08'
+        notes: 'Legacy model - migrate to Claude Haiku 4.5. Training data cutoff: July 2024. Max output: 8K tokens. Cached: $0.08'
     },
     {
-        modelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        modelId: 'anthropic.claude-3-5-haiku-20241022-v1:0',
         modelName: 'Claude Haiku 3.5 (Bedrock)',
         provider: 'AWS Bedrock',
         inputPrice: 0.80,
@@ -240,20 +292,7 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Haiku 3.5 via AWS Bedrock - superseded by Haiku 4.5'
-    },
-    {
-        modelId: 'us.global.anthropic.claude-haiku-4-5-20251001-v1:0',
-        modelName: 'Claude Haiku 3.5 (Bedrock Inference Profile)',
-        provider: 'AWS Bedrock',
-        inputPrice: 0.80,
-        outputPrice: 4.00,
-        unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
-        category: 'text',
-        isLatest: true,
-        notes: 'Claude 3.5 Haiku via AWS Bedrock inference profile'
+        notes: 'Claude Haiku 3.5 via AWS Bedrock - legacy model, migrate to Claude Haiku 4.5. Training data cutoff: July 2024. Max output: 8K tokens'
     },
 
     // === Claude 3 Series (Legacy) ===
@@ -278,10 +317,10 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 1.25,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'fast'],
+        capabilities: ['text', 'vision', 'multimodal', 'fast', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Fast and compact model (Aug 2023 cutoff, 4k output). Cached: $0.03'
+        notes: 'Legacy model - migrate to Claude Haiku 4.5. Training data cutoff: Aug 2023. Max output: 4K tokens. Cached: $0.03'
     },
     {
         modelId: 'anthropic.claude-3-haiku-20240307-v1:0',
@@ -291,9 +330,9 @@ export const ANTHROPIC_PRICING: ModelPricing[] = [
         outputPrice: 1.25,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 200_000,
-        capabilities: ['text', 'vision', 'multilingual'],
+        capabilities: ['text', 'vision', 'multimodal', 'multilingual'],
         category: 'text',
         isLatest: false,
-        notes: 'Claude Haiku 3 via AWS Bedrock (legacy)'
+        notes: 'Claude Haiku 3 via AWS Bedrock - legacy model, migrate to Claude Haiku 4.5. Training data cutoff: Aug 2023. Max output: 4K tokens'
     }
 ]; 
