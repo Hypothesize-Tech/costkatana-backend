@@ -146,111 +146,21 @@ export class UniversalPlanGeneratorService {
       // Generate search queries based on task
       const searchQueries = await this.generateSearchQueries(userRequest, classification);
 
-      // Import GoogleSearchService
-      const { GoogleSearchService } = await import('./googleSearch.service');
-      const { BedrockService } = await import('./tracedBedrock.service');
-      const googleSearch = GoogleSearchService.getInstance();
+      // Google Search Service removed - using placeholder research
+      loggingService.warn('Google Search not configured, using placeholder research');
+      return this.getPlaceholderResearch(userRequest, searchQueries);
 
-      if (!googleSearch.isConfigured()) {
-        loggingService.warn('Google Search not configured, using placeholder research');
-        return this.getPlaceholderResearch(userRequest, searchQueries);
-      }
-
-      // Perform web searches
-      const allSources: ResearchResult['sources'] = [];
-      
-      for (const query of searchQueries.slice(0, 3)) { // Max 3 queries to save quota
-        try {
-          const results = await googleSearch.search(query, {
-            maxResults: 5,
-            deepContent: false // Don't fetch full content for research
-          });
-
-          results.forEach(result => {
-            allSources.push({
-              title: result.title,
-              url: result.url,
-              snippet: result.snippet || '',
-              relevance: 0.8
-            });
-          });
-        } catch (searchError) {
-          loggingService.warn('Search query failed', {
-            component: 'UniversalPlanGeneratorService',
-            query,
-            error: searchError instanceof Error ? searchError.message : String(searchError)
-          });
-        }
-      }
-
-      // Synthesize findings using AI
-      const sourcesText = allSources
-        .slice(0, 10) // Top 10 sources
-        .map((source, idx) => `[${idx + 1}] ${source.title}\n${source.snippet}\nURL: ${source.url}`)
-        .join('\n\n');
-
-      const synthesisPrompt = `Based on these web search results about "${userRequest}", provide:
-
-1. A concise synthesis (2-3 sentences) of the key information
-2. 3-5 key findings or best practices
-
-Search Results:
-${sourcesText}
-
-Respond in JSON format:
-{
-  "synthesis": "...",
-  "keyFindings": ["finding 1", "finding 2", ...]
-}`;
-
-      const synthesisResponse = await BedrockService.invokeModel(
-        synthesisPrompt,
-        'amazon.nova-lite-v1:0',
-        { useSystemPrompt: false }
-      ) as string;
-
-      // Parse synthesis
-      let synthesis = 'Research completed';
-      let keyFindings: string[] = [];
-
-      try {
-        const cleaned = synthesisResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-        const parsed = JSON.parse(cleaned) as { synthesis?: string; keyFindings?: string[] };
-        synthesis = parsed.synthesis ?? synthesis;
-        keyFindings = parsed.keyFindings ?? keyFindings;
-      } catch (parseError) {
-        loggingService.warn('Failed to parse synthesis', {
-          component: 'UniversalPlanGeneratorService',
-          error: parseError instanceof Error ? parseError.message : String(parseError)
-        });
-      }
-
-      loggingService.info('✅ Research completed', {
-        component: 'UniversalPlanGeneratorService',
-        sourcesCount: allSources.length,
-        keyFindingsCount: keyFindings.length
-      });
-
-      return {
-        query: userRequest,
-        sources: allSources.slice(0, 15), // Max 15 sources
-        synthesis,
-        keyFindings
-      };
 
     } catch (error) {
-      loggingService.error('Research failed', {
+      loggingService.error('Failed to conduct research', {
         component: 'UniversalPlanGeneratorService',
         operation: 'conductResearch',
+        type: classification.type,
         error: error instanceof Error ? error.message : String(error)
       });
-
-      // Return placeholder research on failure
-      const searchQueries = await this.generateSearchQueries(userRequest, classification);
-      return this.getPlaceholderResearch(userRequest, searchQueries);
+      throw error;
     }
   }
-
   /**
    * Get placeholder research when web search is unavailable
    */

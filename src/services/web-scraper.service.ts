@@ -2,8 +2,6 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { loggingService } from './logging.service';
 
-// DOM types not needed for Node.js backend scraping
-
 export interface ScrapedPricingData {
     provider: string;
     url: string;
@@ -15,12 +13,13 @@ export interface ScrapedPricingData {
 
 export class WebScraperService {
     private static readonly PROVIDER_URLS = {
-        'OpenAI': 'https://openai.com/pricing',
-        'Anthropic': 'https://www.anthropic.com/pricing',
-        'Google AI': 'https://cloud.google.com/vertex-ai/pricing',
-        'AWS Bedrock': 'https://aws.amazon.com/bedrock/pricing/',
-        'Cohere': 'https://cohere.com/pricing',
-        'Mistral': 'https://mistral.ai/technology/#pricing'
+        'OpenAI': 'https://platform.openai.com/docs/pricing',
+        'Anthropic': 'https://platform.claude.com/docs/en/about-claude/pricing',
+        'Google AI': 'https://ai.google.dev/gemini-api/docs/pricing',
+        'AWS Bedrock': 'https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference-supported.html',
+        'Cohere': 'docs.cohere.com/docs/models',
+        'Mistral': 'mistral.ai/pricing#api-pricing',
+        'Grok': 'docs.x.ai/docs/models'
     };
 
     private static readonly USER_AGENTS = [
@@ -35,7 +34,7 @@ export class WebScraperService {
 
     static async scrapeProviderPricing(provider: string): Promise<ScrapedPricingData> {
         const url = this.PROVIDER_URLS[provider as keyof typeof this.PROVIDER_URLS];
-
+        
         if (!url) {
             return {
                 provider,
@@ -49,135 +48,76 @@ export class WebScraperService {
 
         loggingService.info(`Starting to scrape pricing for ${provider} from ${url}`);
 
-        // Try multiple methods for scraping
-        let content = '';
-        let success = false;
-        let error = '';
-
-        // Method 1: Try simple HTTP request first (faster)
         try {
-            content = await this.scrapeWithAxios(url);
-            if (content && content.length > 1000) { // Reasonable content length
-                success = true;
-                loggingService.info(`Successfully scraped ${provider} with Axios (${content.length} chars)`);
-            }
-        } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : String(err);
-            loggingService.warn(`Axios scraping failed for ${provider}: ${errorMessage}`);
-        }
+            // Make HTTP request with proper headers
+            const response = await axios.get(`https://${url}`, {
+                headers: {
+                    'User-Agent': this.getRandomUserAgent(),
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
+                },
+                timeout: 30000, // 30 second timeout
+                maxRedirects: 5
+            });
 
-        // Method 2: If simple request failed, try alternative headers/approaches
-        if (!success) {
-            try {
-                // Try with different headers and approaches
-                content = await this.scrapeWithAlternativeMethod(url);
-                if (content && content.length > 1000) {
-                    success = true;
-                    loggingService.info(`Successfully scraped ${provider} with alternative method (${content.length} chars)`);
-                }
-            } catch (err) {
-                const errorMessage = err instanceof Error ? err.message : String(err);
-                error = `Both scraping methods failed: ${errorMessage}`;
-                loggingService.error(`Alternative scraping failed for ${provider}:`, { error: errorMessage });
-            }
-        }
+            // Parse HTML with cheerio
+            const $ = cheerio.load(response.data);
+            
+            // Remove script and style tags
+            $('script, style').remove();
+            
+            // Extract text content
+            let content = $('body').text();
+            
+            // Clean up whitespace
+            content = content
+                .replace(/\s+/g, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
 
-        // Method 3: Provider-specific fallback content if scraping fails
-        if (!success) {
-            content = await this.getFallbackContent(provider);
-            if (content) {
-                success = true;
+            if (content && content.length > 100) {
+                loggingService.info(`Successfully scraped ${content.length} characters for ${provider}`);
+                return {
+                    provider,
+                    url: `https://${url}`,
+                    content,
+                    scrapedAt: new Date(),
+                    success: true
+                };
+            } else {
+                throw new Error('Insufficient content scraped');
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error(`Direct scraping failed for ${provider}: ${errorMessage}`);
+            
+            // Fall back to our comprehensive pricing data
+            const fallbackContent = this.getFallbackContent(provider);
+            if (fallbackContent) {
                 loggingService.info(`Using fallback content for ${provider}`);
+                return {
+                    provider,
+                    url: `https://${url}`,
+                    content: fallbackContent,
+                    scrapedAt: new Date(),
+                    success: true
+                };
             }
-        }
 
-        return {
-            provider,
-            url,
-            content,
-            scrapedAt: new Date(),
-            success,
-            error: success ? undefined : error
-        };
+            return {
+                provider,
+                url: `https://${url}`,
+                content: '',
+                scrapedAt: new Date(),
+                success: false,
+                error: errorMessage
+            };
+        }
     }
 
-    private static async scrapeWithAxios(url: string): Promise<string> {
-        const response = await axios.get(url, {
-            headers: {
-                'User-Agent': this.getRandomUserAgent(),
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
-                'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
-            },
-            timeout: 15000,
-            maxRedirects: 5
-        });
-
-        const $ = cheerio.load(response.data);
-
-        // Remove script and style elements
-        $('script, style, nav, header, footer, .cookie-banner, .ad, .advertisement').remove();
-
-        // Extract meaningful content
-        const content = $('body').text()
-            .replace(/\s+/g, ' ')  // Normalize whitespace
-            .replace(/\n\s*\n/g, '\n')  // Remove empty lines
-            .trim();
-
-        return content;
-    }
-
-    private static async scrapeWithAlternativeMethod(url: string): Promise<string> {
-        // Try with different user agents and headers for better success rate
-        const alternativeHeaders = {
-            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-        };
-
-        const response = await axios.get(url, {
-            headers: alternativeHeaders,
-            timeout: 20000,
-            maxRedirects: 10,
-            validateStatus: (status) => status < 500, // Accept 4xx responses
-        });
-
-        const $ = cheerio.load(response.data);
-
-        // Remove unwanted elements more aggressively
-        $('script, style, nav, header, footer, .cookie-banner, .ad, .advertisement, .navbar, .menu, .sidebar').remove();
-
-        // Try to find main content areas first
-        let content = '';
-        const contentSelectors = ['main', '.content', '.pricing', '.plans', '.price', 'article', '.container'];
-
-        for (const selector of contentSelectors) {
-            const mainContent = $(selector).text();
-            if (mainContent && mainContent.length > content.length) {
-                content = mainContent;
-            }
-        }
-
-        // If no main content found, use body
-        if (!content || content.length < 500) {
-            content = $('body').text();
-        }
-
-        // Clean up the content
-        return content
-            .replace(/\s+/g, ' ')  // Normalize whitespace
-            .replace(/\n\s*\n/g, '\n')  // Remove empty lines
-            .trim();
-    }
-
-    private static async getFallbackContent(provider: string): Promise<string> {
+    private static getFallbackContent(provider: string): string {
         // Provide comprehensive fallback pricing data with latest known pricing (January 2025)
         const fallbackData: { [key: string]: string } = {
             'OpenAI': `
@@ -352,6 +292,24 @@ export class WebScraperService {
                 Mistral 8x7B: $0.7 per 1M input tokens, $0.7 per 1M output tokens
                 Mistral 8x22B: $2 per 1M input tokens, $6 per 1M output tokens
                 Embeddings: $0.1 per 1M tokens
+            `,
+            'Grok': `
+                xAI Grok API Pricing (Latest Known Rates - 2025)
+                
+                Grok 2 (grok-2-1212): $2.00 per 1M input tokens, $10.00 per 1M output tokens
+                Grok 2 Vision (grok-2-vision-1212): $2.00 per 1M input tokens, $10.00 per 1M output tokens
+                Grok Beta (grok-beta): $5.00 per 1M input tokens, $15.00 per 1M output tokens
+                
+                Context Windows:
+                Grok 2: 131,072 tokens
+                Grok 2 Vision: 131,072 tokens
+                Grok Beta: 131,072 tokens
+                
+                Capabilities: text, reasoning, analysis, code generation, multimodal (vision)
+                Categories: text, multimodal
+                
+                Source: xAI Official Documentation
+                Last Updated: January 2025
             `
         };
 
@@ -364,18 +322,11 @@ export class WebScraperService {
 
         loggingService.info(`Starting to scrape pricing data for ${providers.length} providers`);
 
-        // Scrape providers in parallel but with some delay to avoid rate limiting
-        for (let i = 0; i < providers.length; i++) {
-            const provider = providers[i];
-
+        for (const provider of providers) {
             try {
                 const result = await this.scrapeProviderPricing(provider);
                 results.push(result);
-
-                // Add small delay between requests
-                if (i < providers.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
+                loggingService.info(`Scraped ${provider}: ${result.success ? 'success' : 'failed'}`);
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 loggingService.error(`Failed to scrape ${provider}: ${errorMessage}`);

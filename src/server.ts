@@ -25,6 +25,7 @@ import cookieParser from 'cookie-parser';
 import { agentService } from './services/agent.service';
 import { redisService } from './services/redis.service';
 import { backupScheduler } from './services/backupScheduler';
+import { ModelDiscoveryJob } from './jobs/modelDiscovery.job';
 import { otelBaggageMiddleware } from './middleware/otelBaggage';
 import { requestMetricsMiddleware } from './middleware/requestMetrics';
 import { TelemetryService } from './services/telemetry.service';
@@ -769,6 +770,27 @@ export const startServer = async () => {
                     operation: 'startServer',
                     type: 'server_startup',
                     step: 'backup_scheduler_failed',
+                    error: error instanceof Error ? error.message : 'Unknown error'
+                });
+            }
+        });
+
+        // Start Model Discovery cron job
+        setImmediate(() => {
+            try {
+                ModelDiscoveryJob.start();
+                loggingService.info('✅ Model discovery cron job started successfully', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'model_discovery_started'
+                });
+            } catch (error) {
+                loggingService.warn('⚠️ Model discovery job failed to start (non-critical)', {
+                    component: 'Server',
+                    operation: 'startServer',
+                    type: 'server_startup',
+                    step: 'model_discovery_failed',
                     error: error instanceof Error ? error.message : 'Unknown error'
                 });
             }

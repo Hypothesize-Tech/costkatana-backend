@@ -1,3 +1,11 @@
+/**
+ * OPTIMIZATION MODEL STRATEGY:
+ * 
+ * Primary: OpenAI GPT OSS Safeguard 20B (openai.gpt-oss-safeguard-20b)
+ * - Used for AI-powered optimization suggestions
+ * - Cost-effective for non-critical usage analysis
+ * - Provides contextual recommendations based on actual workflow patterns
+ */
 import { loggingService } from './logging.service';
 import { User } from '../models/User';
 import { Project } from '../models/Project';
@@ -7,7 +15,6 @@ import { EmailService } from './email.service';
 import { Response } from 'express';
 
 import { Usage } from '../models/Usage';
-import { AutomationConnection } from '../models/AutomationConnection';
 import mongoose from 'mongoose';
 import { MODEL_PRICING } from '../utils/pricing';
 import { AIRouterService } from './aiRouter.service';
@@ -185,54 +192,6 @@ export class GuardrailsService {
             // Skip check for unlimited (-1) limits
             if (planLimits.workflows === -1) {
                 return null;
-            }
-
-            // Count active automation connections (each connection represents a workflow)
-            const activeConnections = await AutomationConnection.countDocuments({
-                userId: new mongoose.Types.ObjectId(userId),
-                status: 'active'
-            });
-
-            const currentValue = activeConnections;
-            const limitValue = planLimits.workflows;
-            const percentage = (currentValue / limitValue) * 100;
-
-            // Hard limit reached
-            if (currentValue >= limitValue) {
-                return {
-                    type: 'hard',
-                    metric: 'workflows',
-                    current: currentValue,
-                    limit: limitValue,
-                    percentage: 100,
-                    message: `Workflow limit reached (${currentValue}/${limitValue}). Upgrade to create more workflows.`,
-                    action: 'block',
-                    suggestions: this.getUpgradeSuggestions(planName, 'workflows')
-                };
-            }
-
-            // Warning thresholds
-            for (const threshold of this.WARNING_THRESHOLDS) {
-                if (percentage >= threshold && percentage < threshold + 5) {
-                    // Get AI-powered contextual suggestions
-                    const suggestions = await this.getOptimizationSuggestions(userId, 'workflows', percentage);
-                    
-                    const violation: GuardrailViolation = {
-                        type: 'warning',
-                        metric: 'workflows',
-                        current: currentValue,
-                        limit: limitValue,
-                        percentage,
-                        message: `${threshold}% of workflow limit reached (${currentValue}/${limitValue})`,
-                        action: 'allow',
-                        suggestions
-                    };
-
-                    // Queue alert for background processing
-                    this.queueAlert(userId, violation);
-                    
-                    return violation;
-                }
             }
 
             return null;
@@ -561,7 +520,7 @@ export class GuardrailsService {
         const userObjectId = new mongoose.Types.ObjectId(userId);
         
         // Parallel execution of optimized queries
-        const [projectCount, usageData, logCount, workflowCount] = await Promise.all([
+        const [projectCount, usageData, logCount] = await Promise.all([
             // Projects count
             Project.countDocuments({
                 $or: [
@@ -594,19 +553,12 @@ export class GuardrailsService {
                 userId,
                 createdAt: { $gte: startOfMonth }
             }),
-            
-            // Workflows count - count active automation connections
-            AutomationConnection.countDocuments({
-                userId: userObjectId,
-                status: 'active'
-            })
         ]);
 
         return {
             projects: { count: projectCount },
             usage: usageData[0] || { totalTokens: 0, totalCost: 0, requestCount: 0 },
             logs: { count: logCount },
-            workflows: { count: workflowCount || 0 }
         };
     }
 
@@ -1067,8 +1019,8 @@ export class GuardrailsService {
             // Build AI prompt with context
             const prompt = this.buildOptimizationPrompt(metric, percentage, workflowContext);
             
-            // Use AWS Bedrock to generate contextual suggestions
-            const modelId = 'amazon.nova-pro-v1:0';
+            // Use AWS Bedrock to generate contextual suggestions with Safeguard 20B
+            const modelId = 'openai.gpt-oss-safeguard-20b'; // Use 20B for cost-effective suggestions
             const aiResponse = await AIRouterService.invokeModel(prompt, modelId);
             
             // Parse AI response

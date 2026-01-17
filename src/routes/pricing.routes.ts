@@ -41,8 +41,12 @@ router.get('/cache-status', PricingController.getCacheStatus);
 // Protected endpoints (authentication required)
 router.use(authenticate);
 
+// Clear pricing cache (admin only)
+router.delete('/cache', PricingController.clearCache);
+
 // Force update all pricing data (admin only)
 router.post('/update', PricingController.forceUpdate);
+
 
 // Initialize pricing service (admin only)
 router.post('/initialize', PricingController.initialize);

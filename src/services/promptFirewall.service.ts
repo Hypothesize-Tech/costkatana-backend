@@ -1,3 +1,21 @@
+/**
+ * SECURITY MODEL STRATEGY (Tiered Approach):
+ * 
+ * Primary: OpenAI GPT OSS Safeguard 20B (openai.gpt-oss-safeguard-20b)
+ * - Fast, cost-effective initial screening
+ * - Good for most threat detection cases
+ * 
+ * Escalation: OpenAI GPT OSS Safeguard 120B (openai.gpt-oss-safeguard-120b)
+ * - Deeper analysis for high-risk threats
+ * - Triggered when confidence < 0.7 or high-risk categories detected
+ * 
+ * Fallback: Amazon Nova Pro (amazon.nova-pro-v1:0)
+ * - Used when Safeguard models unavailable
+ * - Proven reliability
+ * 
+ * Final Fallback: Pattern-based detection
+ * - Pre-compiled regex patterns if all AI models fail
+ */
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
@@ -409,8 +427,8 @@ export class PromptFirewallService {
     }
 
     /**
-     * Stage 2: AI-based Detection - Deep content analysis for all 15 threat categories
-     * Uses Nova Pro or Claude via Bedrock for comprehensive threat detection
+     * Stage 2: AI-based Detection with tiered approach
+     * Primary: Safeguard 20B → Escalate to 120B → Fallback to Nova Pro
      */
     private static async runAIDetection(
         prompt: string,
@@ -422,12 +440,8 @@ export class PromptFirewallService {
         const useBedrockModels = process.env.ENABLE_BEDROCK_FIREWALL === 'true' && this.bedrockClient;
 
         if (useBedrockModels && !this.isServiceCircuitBreakerOpen()) {
-            try {
-                // Use Nova Pro for fast, cost-effective detection (primary)
-                // Fallback to Claude 3.5 Sonnet for complex cases
-                const modelId = 'amazon.nova-pro-v1:0'; // Primary model
-                
-                let detectionPrompt = `You are a security AI analyzing user requests to an AI cost optimization platform. This platform helps users manage their databases, cloud infrastructure, and integrations.
+            // Build detection prompt once (accessible in both try and catch blocks)
+            let detectionPrompt = `You are a security AI analyzing user requests to an AI cost optimization platform. This platform helps users manage their databases, cloud infrastructure, and integrations.
 
 IMPORTANT CONTEXT:
 - Users are AUTHORIZED to query their OWN data, databases, and resources
@@ -461,18 +475,18 @@ DO NOT FLAG AS THREAT:
 
 ${isHTML ? 'NOTE: This content was extracted from HTML. Pay special attention to hidden or obfuscated threats.\n' : ''}`;
 
-                // Include HTML metadata if available
-                if (isHTML && htmlMetadata) {
-                    detectionPrompt += `HTML Metadata Context:
+            // Include HTML metadata if available
+            if (isHTML && htmlMetadata) {
+                detectionPrompt += `HTML Metadata Context:
 - Source: ${htmlMetadata.source || 'unknown'}
 - Tags: ${htmlMetadata.tags ? htmlMetadata.tags.join(', ') : 'none'}
 - Attributes: ${htmlMetadata.attributes ? JSON.stringify(htmlMetadata.attributes) : 'none'}
 - Suspicious Elements: ${htmlMetadata.suspiciousElements ? htmlMetadata.suspiciousElements.join(', ') : 'none'}
 
 `;
-                }
+            }
 
-                detectionPrompt += `Content to analyze:
+            detectionPrompt += `Content to analyze:
 "${prompt.substring(0, 4000)}"
 
 Detection threshold: ${threshold}
@@ -488,125 +502,231 @@ Respond with ONLY a JSON object in this exact format:
 
 JSON Response:`;
 
+            try {
+                // Primary: Safeguard 20B for fast threat detection
+                const primaryModelId = 'openai.gpt-oss-safeguard-20b';
 
+                // OpenAI Safeguard models use simple string content format
                 const requestBody = {
                     messages: [
                         {
                             role: 'user',
-                            content: [{ text: detectionPrompt }]
+                            content: detectionPrompt  // Simple string, not array
                         }
                     ],
-                    inferenceConfig: {
-                        max_new_tokens: 500,
-                        temperature: 0.0,
-                        top_p: 0.9
-                    }
+                    max_tokens: 500,  // OpenAI format uses snake_case
+                    temperature: 0.0,
+                    top_p: 0.9
                 };
 
-                const input = {
-                    modelId,
-                    contentType: 'application/json',
-                    accept: 'application/json',
-                    body: JSON.stringify(requestBody)
-                };
-
-                const command = new InvokeModelCommand(input);
-                const response = await retryBedrockOperation(
-                    () => this.bedrockClient.send(command),
-                    {
-                        maxRetries: 2,
-                        baseDelay: 500,
-                        maxDelay: 5000,
-                        backoffMultiplier: 1.5,
-                        jitterFactor: 0.2
-                    },
-                    {
-                        modelId,
-                        operation: 'aiThreatDetection'
-                    }
+                // Stage 1: Initial check with Safeguard 20B
+                const initialResult = await this.invokeThreatDetectionModel(
+                    primaryModelId,
+                    requestBody,
+                    prompt,
+                    threshold,
+                    isHTML,
+                    htmlMetadata
                 );
+
+                // Escalate to 120B for high-risk threats
+                const shouldEscalate = 
+                    initialResult.confidence < 0.7 ||
+                    this.isHighRiskThreat(initialResult.threatCategory || '');
                 
-                const responseBody = JSON.parse(new TextDecoder().decode(response.body)) as any;
-                // Nova Pro response format
-                const responseText = responseBody.output?.message?.content?.[0]?.text || 
-                                   responseBody.output?.text || 
-                                   responseBody.content?.[0]?.text || 
-                                   responseBody.text || 
-                                   responseBody.generation || 
-                                   '';
-                
-                // Parse JSON response
-                let detectionResult: any = null;
-                try {
-                    // Extract JSON from response (might be wrapped in markdown code blocks)
-                    const jsonMatch = (responseText as string).match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                        detectionResult = JSON.parse(jsonMatch[0]);
-                    }
-                } catch (parseError) {
-                    loggingService.warn('Failed to parse AI detection response, using fallback', {
-                        error: parseError instanceof Error ? parseError.message : String(parseError),
-                        responseText: (responseText as string).substring(0, 200)
+                if (shouldEscalate && initialResult.isBlocked) {
+                    loggingService.info('Escalating threat detection to Safeguard 120B', {
+                        category: initialResult.threatCategory,
+                        confidence: initialResult.confidence
                     });
-                }
-
-                if (detectionResult?.isThreat) {
-                    // Reset failure count on success
-                    this.serviceFailureCount = 0;
                     
-                    // Normalize threat category to match ThreatLog enum
-                    const normalizedCategory = this.normalizeThreatCategory(detectionResult.threatCategory || 'harmful_content');
-                    
-                    return {
-                        isBlocked: true,
-                        threatCategory: normalizedCategory,
-                        confidence: detectionResult.confidence || 0.9,
-                        reason: detectionResult.reason || 'AI detected security threat',
-                        stage: 'llama-guard',
-                        matchedPatterns: detectionResult.matchedPatterns || [],
-                        riskScore: detectionResult.confidence || 0.9,
-                        containmentAction: (detectionResult.confidence || 0.9) > 0.8 ? 'block' : 'sandbox',
-                        details: {
-                            method: 'ai_detection_nova_pro',
-                            modelId,
+                    try {
+                        const deepModelId = 'openai.gpt-oss-safeguard-120b';
+                        return await this.invokeThreatDetectionModel(
+                            deepModelId,
+                            requestBody,
+                            prompt,
+                            threshold,
                             isHTML,
-                            htmlMetadata: htmlMetadata || null,
-                            originalCategory: detectionResult.threatCategory,
-                            threshold
-                        }
-                    };
-                }
-
-                // Reset failure count on success
-                this.serviceFailureCount = 0;
-                
-                return {
-                    isBlocked: false,
-                    confidence: detectionResult?.confidence || 0.1,
-                    reason: 'No threats detected by AI analysis',
-                    stage: 'llama-guard',
-                    details: {
-                        method: 'ai_detection_nova_pro',
-                        modelId,
-                        isHTML,
-                        htmlMetadata: htmlMetadata || null,
-                        threshold
+                            htmlMetadata
+                        );
+                    } catch (error) {
+                        loggingService.warn('120B escalation failed, using 20B result', { 
+                            error: error instanceof Error ? error.message : String(error) 
+                        });
+                        return initialResult;
                     }
-                };
+                }
+                
+                return initialResult;
 
             } catch (error) {
-                this.recordServiceFailure();
-                loggingService.warn('AI detection failed, using fallback', { 
-                    error: error instanceof Error ? error.message : String(error),
-                    isHTML,
-                    hasHtmlMetadata: !!htmlMetadata,
-                    threshold
+                loggingService.warn('Safeguard models failed, falling back to Nova Pro', {
+                    error: error instanceof Error ? error.message : String(error)
                 });
+                
+                // Fallback to Nova Pro
+                try {
+                    const fallbackModelId = 'amazon.nova-pro-v1:0';
+                    // Nova Pro uses the Converse API format with content array
+                    const novaRequestBody = {
+                        messages: [
+                            {
+                                role: 'user',
+                                content: [{ text: detectionPrompt }]
+                            }
+                        ],
+                        inferenceConfig: {
+                            maxTokens: 500,
+                            temperature: 0.0,
+                            topP: 0.9
+                        }
+                    };
+                    return await this.invokeThreatDetectionModel(
+                        fallbackModelId,
+                        novaRequestBody,
+                        prompt,
+                        threshold,
+                        isHTML,
+                        htmlMetadata
+                    );
+                } catch (fallbackError) {
+                    this.recordServiceFailure();
+                    loggingService.warn('All AI detection failed, using pattern-based fallback', { 
+                        error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+                    });
+                }
             }
         }
 
         // Fallback to pattern matching
         return this.fallbackContentCheck(prompt);
+    }
+
+    /**
+     * Check if threat category is high-risk (requires 120B escalation)
+     */
+    private static isHighRiskThreat(category: string): boolean {
+        const highRisk = [
+            'prompt_injection',
+            'data_exfiltration',
+            'criminal_planning',
+            'violence',
+            'self_harm',
+            'weapons',
+            'jailbreak_attempt'
+        ];
+        return highRisk.some(risk => category.toLowerCase().includes(risk));
+    }
+
+    /**
+     * Invoke threat detection model (Safeguard 20B/120B or Nova Pro)
+     */
+    private static async invokeThreatDetectionModel(
+        modelId: string,
+        requestBody: any,
+        prompt: string,
+        threshold: number,
+        isHTML: boolean = false,
+        htmlMetadata?: any
+    ): Promise<ThreatDetectionResult> {
+        const input = {
+            modelId,
+            contentType: 'application/json',
+            accept: 'application/json',
+            body: JSON.stringify(requestBody)
+        };
+
+        const command = new InvokeModelCommand(input);
+        const response = await retryBedrockOperation(
+            () => this.bedrockClient.send(command),
+            {
+                maxRetries: 2,
+                baseDelay: 500,
+                maxDelay: 5000,
+                backoffMultiplier: 1.5,
+                jitterFactor: 0.2
+            },
+            {
+                modelId,
+                operation: 'aiThreatDetection'
+            }
+        );
+        
+        const responseBody = JSON.parse(new TextDecoder().decode(response.body)) as any;
+        const responseText = responseBody.output?.message?.content?.[0]?.text ?? 
+                           responseBody.output?.text ?? 
+                           responseBody.content?.[0]?.text ?? 
+                           responseBody.text ?? 
+                           responseBody.generation ?? 
+                           '';
+        
+        // Parse JSON response
+        let detectionResult: any = null;
+        try {
+            // Extract JSON from response (might be wrapped in markdown code blocks)
+            const jsonMatch = (responseText as string).match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                detectionResult = JSON.parse(jsonMatch[0]);
+            }
+        } catch (parseError) {
+            loggingService.warn('Failed to parse AI detection response, using fallback', {
+                error: parseError instanceof Error ? parseError.message : String(parseError),
+                responseText: (responseText as string).substring(0, 200),
+                modelId,
+                prompt: prompt.substring(0, 100)
+            });
+        }
+
+        if (detectionResult?.isThreat) {
+            // Reset failure count on success
+            this.serviceFailureCount = 0;
+            
+            // Normalize threat category to match ThreatLog enum
+            const normalizedCategory = this.normalizeThreatCategory(detectionResult.threatCategory ?? 'harmful_content');
+            
+            return {
+                isBlocked: true,
+                threatCategory: normalizedCategory,
+                confidence: detectionResult.confidence ?? 0.9,
+                reason: detectionResult.reason ?? 'AI detected security threat',
+                stage: 'llama-guard',
+                matchedPatterns: detectionResult.matchedPatterns ?? [],
+                riskScore: detectionResult.confidence ?? 0.9,
+                containmentAction: (detectionResult.confidence ?? 0.9) > 0.8 ? 'block' : 'sandbox',
+                details: {
+                    method: modelId.includes('120b') ? 'safeguard_120b' : 
+                            modelId.includes('20b') ? 'safeguard_20b' : 
+                            modelId.includes('nova') ? 'nova_pro_fallback' : 'ai_detection',
+                    modelId,
+                    isHTML,
+                    htmlMetadata: htmlMetadata ?? null,
+                    originalCategory: detectionResult.threatCategory,
+                    threshold,
+                    prompt: prompt.substring(0, 100)
+                }
+            };
+        }
+
+        // Reset failure count on success
+        this.serviceFailureCount = 0;
+        
+        return {
+            isBlocked: false,
+            confidence: detectionResult?.confidence ?? 0.1,
+            reason: 'No threats detected by AI analysis',
+            stage: 'llama-guard',
+            details: {
+                method: modelId.includes('120b') ? 'safeguard_120b' : 
+                        modelId.includes('20b') ? 'safeguard_20b' : 
+                        modelId.includes('nova') ? 'nova_pro_fallback' : 'ai_detection',
+                modelId,
+                isHTML,
+                htmlMetadata: htmlMetadata ?? null,
+                threshold,
+                prompt: prompt.substring(0, 100)
+            }
+        };
     }
 
 
