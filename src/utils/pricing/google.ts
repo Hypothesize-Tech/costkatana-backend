@@ -10,10 +10,10 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 12.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2000000,
-    capabilities: ['text', 'vision', 'reasoning', 'coding', 'agents'],
+    capabilities: ['text', 'vision', 'reasoning', 'coding', 'agents', 'multimodal'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Latest Gemini 3 Pro preview model. Cached: $0.20'
+    notes: 'Latest Gemini 3 Pro preview model. Input (text, image, video, audio): $2.00/1M tokens (<=200K), $4.00/1M tokens (>200K). Text output: $12.00/1M tokens (<=200K), $18.00/1M tokens (>200K). Cached input: $0.20/1M tokens (<=200K), $0.40/1M tokens (>200K). Batch API: $1.00/$6.00 (<=200K), $2.00/$9.00 (>200K). Image output: $120/1M tokens (1K/2K image = 1120 tokens = $0.134/image, 4K image = 2000 tokens = $0.24/image)'
   },
   {
     modelId: 'gemini-3-pro-image-preview',
@@ -23,10 +23,23 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 12.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2000000,
-    capabilities: ['text', 'image', 'vision'],
+    capabilities: ['text', 'image', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Latest Gemini 3 Pro Image preview model'
+    notes: 'Latest Gemini 3 Pro Image preview model with image generation capabilities. Image output: $120/1M tokens (1K/2K image = 1120 tokens = $0.134/image, 4K image = 2000 tokens = $0.24/image)'
+  },
+  {
+    modelId: 'gemini-3-flash-preview',
+    modelName: 'Gemini 3 Flash Preview',
+    provider: 'Google AI',
+    inputPrice: 0.5,
+    outputPrice: 3.0,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 2000000,
+    capabilities: ['text', 'vision', 'audio', 'fast', 'multimodal'],
+    category: 'multimodal',
+    isLatest: true,
+    notes: 'Latest Gemini 3 Flash preview model. Input (text, image, video): $0.50/1M tokens. Input (audio): $1.00/1M tokens. Text output: $3.00/1M tokens. Cached input: $0.05/1M tokens (text/image/video), $0.10/1M tokens (audio). Batch API: $0.25/1M tokens (text/image/video), $0.50/1M tokens (audio) input, $1.50/1M tokens output'
   },
   // === Gemini 2.5 Models (Latest) ===
   {
@@ -37,10 +50,23 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 10.0, // <= 200k tokens
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2000000,
-    capabilities: ['text', 'vision', 'reasoning', 'coding'],
+    capabilities: ['text', 'vision', 'reasoning', 'coding', 'multimodal'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Our state-of-the-art thinking model, capable of reasoning over complex problems in code, math, and STEM, as well as analyzing large datasets, codebases, and documents using long context. Best for multimodal understanding, coding (web development), and complex prompts. Cached: $0.125. $2.50/$15.00 for prompts > 200k tokens'
+    notes: 'Our state-of-the-art thinking model, capable of reasoning over complex problems in code, math, and STEM, as well as analyzing large datasets, codebases, and documents using long context. Best for multimodal understanding, coding (web development), and complex prompts. Input (text, image, video, audio): $1.25/1M tokens (<=200K), $2.50/1M tokens (>200K). Text output: $10.00/1M tokens (<=200K), $15.00/1M tokens (>200K). Cached: $0.125/1M tokens (<=200K), $0.250/1M tokens (>200K). Batch API: $0.625/$5.00 (<=200K), $1.25/$7.50 (>200K)'
+  },
+  {
+    modelId: 'gemini-2.5-pro-computer-use-preview',
+    modelName: 'Gemini 2.5 Pro Computer Use-Preview',
+    provider: 'Google AI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 2000000,
+    capabilities: ['text', 'vision', 'reasoning', 'coding', 'computer-use', 'multimodal'],
+    category: 'multimodal',
+    isLatest: true,
+    notes: 'Gemini 2.5 Pro with Computer Use capabilities. Input (text, image, video, audio): $1.25/1M tokens (<=200K), $2.50/1M tokens (>200K). Text output: $10.00/1M tokens (<=200K), $15.00/1M tokens (>200K). Computer Use billing uses the Gemini 2.5 Pro SKU'
   },
   {
     modelId: 'gemini-2.5-flash',
@@ -50,10 +76,10 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 2.5,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 1000000,
-    capabilities: ['text', 'vision', 'audio', 'fast'],
+    capabilities: ['text', 'vision', 'audio', 'fast', 'multimodal', 'image-generation'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Our best model in terms of price-performance, offering well-rounded capabilities. Best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases. Support for Live API included for some endpoints. See the model\'s thinking process as part of the response. Cached: $0.03. Audio input: $1.00'
+    notes: 'Our best model in terms of price-performance, offering well-rounded capabilities. Best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases. Support for Live API included for some endpoints. See the model\'s thinking process as part of the response. Input (text, image, video): $0.30/1M tokens. Audio input: $1.00/1M tokens. Text output: $2.50/1M tokens. Image output: $30/1M tokens (1024x1024 image = 1290 tokens). Cached: $0.030/1M tokens. Batch API: $0.15/$1.25 (text/image/video), $0.50/$1.25 (audio)'
   },
   {
     modelId: 'gemini-2.5-flash-lite-preview',
@@ -89,10 +115,10 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 0.4,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 1000000,
-    capabilities: ['text', 'vision', 'fast'],
+    capabilities: ['text', 'vision', 'fast', 'multimodal'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Our fastest flash model optimized for cost-efficiency and high throughput (stable version). Features 1M token context window and multimodal input. Cached: $0.01. Audio input: $0.50'
+    notes: 'Our fastest flash model optimized for cost-efficiency and high throughput (stable version). Features 1M token context window and multimodal input. Input (text, image, video): $0.10/1M tokens. Audio input: $0.30/1M tokens. Text output: $0.40/1M tokens. Cached: $0.010/1M tokens (text/image/video), $0.030/1M tokens (audio). Batch API: $0.05/$0.20 (text/image/video), $0.15/$0.20 (audio)'
   },
   {
     modelId: 'gemini-2.5-flash-audio',
@@ -111,14 +137,14 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     modelId: 'gemini-2.5-flash-lite-audio-preview',
     modelName: 'Gemini 2.5 Flash-Lite Audio Preview',
     provider: 'Google AI',
-    inputPrice: 0.5, // audio input
+    inputPrice: 0.3, // audio input
     outputPrice: 0.4, // text output
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 1000000,
     capabilities: ['audio', 'multimodal', 'audio-input', 'high-throughput'],
     category: 'audio',
     isLatest: true,
-    notes: 'Gemini 2.5 Flash-Lite with audio input capabilities'
+    notes: 'Gemini 2.5 Flash-Lite with audio input capabilities. Audio input: $0.30/1M tokens. Text output: $0.40/1M tokens'
   },
   {
     modelId: 'gemini-2.5-flash-native-audio',
@@ -178,14 +204,27 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     modelId: 'gemini-2.0-flash',
     modelName: 'Gemini 2.0 Flash',
     provider: 'Google AI',
-    inputPrice: 0.1, // text/image/video
-    outputPrice: 0.4,
+    inputPrice: 0.15, // text/image/video
+    outputPrice: 0.60,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 1000000,
-    capabilities: ['text', 'vision', 'audio'],
+    capabilities: ['text', 'vision', 'audio', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Our second generation workhorse model, with a 1 million token context window. Most balanced multimodal model built for the era of Agents. Cached: $0.025. Audio input: $0.70'
+    notes: 'Our second generation workhorse model, with a 1 million token context window. Most balanced multimodal model built for the era of Agents. Input (text, image, video): $0.15/1M tokens. Audio input: $1.00/1M tokens. Text output: $0.60/1M tokens. Batch API: $0.075/$0.30. Tuning: $3.00/1M training tokens'
+  },
+  {
+    modelId: 'gemini-2.0-flash-image-generation',
+    modelName: 'Gemini 2.0 Flash Image Generation',
+    provider: 'Google AI',
+    inputPrice: 0.15,
+    outputPrice: 30.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 1000000,
+    capabilities: ['text', 'vision', 'audio', 'image-generation', 'multimodal'],
+    category: 'multimodal',
+    isLatest: false,
+    notes: 'Gemini 2.0 Flash with image generation capabilities. Input (text, image, video): $0.15/1M tokens. Audio input: $1.00/1M tokens. Video input: $3.00/1M tokens. Text output: $0.60/1M tokens. Image output: $30.00/1M tokens'
   },
   {
     modelId: 'gemini-2.0-flash-lite',
@@ -195,10 +234,10 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 0.3,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 1000000,
-    capabilities: ['text', 'fast'],
+    capabilities: ['text', 'fast', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Our second generation small workhorse model, with a 1 million token context window. Optimized for cost efficiency and low latency, built for at scale usage'
+    notes: 'Our second generation small workhorse model, with a 1 million token context window. Optimized for cost efficiency and low latency, built for at scale usage. Input (text, image, video, audio): $0.075/1M tokens. Text output: $0.30/1M tokens. Batch API: $0.0375/$0.15. Tuning: $1.00/1M training tokens'
   },
   {
     modelId: 'gemini-2.0-flash-audio',
@@ -450,10 +489,10 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     outputPrice: 0.0,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 2048,
-    capabilities: ['embeddings'],
+    capabilities: ['embeddings', 'semantic-search'],
     category: 'embedding',
     isLatest: true,
-    notes: 'Gemini embedding model for semantic search and similarity tasks'
+    notes: 'Gemini embedding model for semantic search and similarity tasks. Online requests: $0.00015 per 1,000 input tokens. Batch requests: $0.00012 per 1,000 input tokens. Output: No charge'
   },
   {
     modelId: 'text-embedding-004',
@@ -494,20 +533,20 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     capabilities: ['image-generation', 'text-to-image', 'higher-quality'],
     category: 'image',
     isLatest: true,
-    notes: 'Use text prompts to generate novel images with higher quality than our previous image generation models'
+    notes: 'Use text prompts to generate novel images with higher quality than our previous image generation models. Priced at $0.04 per image'
   },
   {
     modelId: 'imagen-4-fast-generation',
     modelName: 'Imagen 4 for Fast Generation',
     provider: 'Google AI',
-    inputPrice: 0.04, // Standard
-    outputPrice: 0.04, // Standard
+    inputPrice: 0.02, // Fast
+    outputPrice: 0.02, // Fast
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image', 'higher-quality', 'lower-latency'],
     category: 'image',
     isLatest: true,
-    notes: 'Use text prompts to generate novel images with higher quality and lower latency than our previous image generation models'
+    notes: 'Use text prompts to generate novel images with higher quality and lower latency than our previous image generation models. Priced at $0.02 per image'
   },
   {
     modelId: 'imagen-4-ultra-generation',
@@ -520,20 +559,33 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     capabilities: ['image-generation', 'text-to-image', 'higher-quality', 'better-prompt-adherence'],
     category: 'image',
     isLatest: true,
-    notes: 'Use text prompts to generate novel images with higher quality and better prompt adherence than our previous image generation models'
+    notes: 'Use text prompts to generate novel images with higher quality and better prompt adherence than our previous image generation models. Priced at $0.06 per image'
+  },
+  {
+    modelId: 'imagen-4-upscaling',
+    modelName: 'Imagen 4 for Upscaling',
+    provider: 'Google AI',
+    inputPrice: 0.06,
+    outputPrice: 0.06,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'upscaling', 'image-enhancement'],
+    category: 'image',
+    isLatest: true,
+    notes: 'Increase resolution of a generated image to 2K, 3K, and 4K. Priced at $0.06 per image'
   },
   {
     modelId: 'imagen-3-generation',
     modelName: 'Imagen 3 for Generation',
     provider: 'Google AI',
-    inputPrice: 0.03,
-    outputPrice: 0.03,
+    inputPrice: 0.04,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
-    capabilities: ['image-generation', 'text-to-image'],
+    capabilities: ['image-generation', 'text-to-image', 'image-editing', 'customization'],
     category: 'image',
     isLatest: false,
-    notes: 'Use text prompts to generate novel images'
+    notes: 'Use text prompts to generate novel images, edit an image, or customize an image. Priced at $0.04 per image'
   },
   {
     modelId: 'imagen-3-editing-customization',
@@ -552,14 +604,118 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     modelId: 'imagen-3-fast-generation',
     modelName: 'Imagen 3 for Fast Generation',
     provider: 'Google AI',
-    inputPrice: 0.03,
-    outputPrice: 0.03,
+    inputPrice: 0.02,
+    outputPrice: 0.02,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image', 'lower-latency'],
     category: 'image',
     isLatest: false,
-    notes: 'Use text prompts to generate novel images with lower latency than our other image generation models'
+    notes: 'Use text prompts to generate novel images with lower latency than our other image generation models. Priced at $0.02 per image'
+  },
+  {
+    modelId: 'imagen-2-generation',
+    modelName: 'Imagen 2 for Generation',
+    provider: 'Google AI',
+    inputPrice: 0.020,
+    outputPrice: 0.020,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'text-to-image'],
+    category: 'image',
+    isLatest: false,
+    notes: 'Use text prompts to generate novel images. Priced at $0.020 per image'
+  },
+  {
+    modelId: 'imagen-2-editing',
+    modelName: 'Imagen 2 for Editing',
+    provider: 'Google AI',
+    inputPrice: 0.020,
+    outputPrice: 0.020,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'image-editing', 'mask-editing'],
+    category: 'image',
+    isLatest: false,
+    notes: 'Edit an image using mask free or mask approach. Priced at $0.020 per image'
+  },
+  {
+    modelId: 'imagen-1-generation',
+    modelName: 'Imagen 1 for Generation',
+    provider: 'Google AI',
+    inputPrice: 0.020,
+    outputPrice: 0.020,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'text-to-image'],
+    category: 'image',
+    isLatest: false,
+    notes: 'Use text prompts to generate novel images. Priced at $0.020 per image'
+  },
+  {
+    modelId: 'imagen-1-editing',
+    modelName: 'Imagen 1 for Editing',
+    provider: 'Google AI',
+    inputPrice: 0.020,
+    outputPrice: 0.020,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'image-editing', 'mask-editing'],
+    category: 'image',
+    isLatest: false,
+    notes: 'Edit an image using mask free or mask approach. Priced at $0.020 per image'
+  },
+  {
+    modelId: 'imagen-1-upscaling',
+    modelName: 'Imagen 1 for Upscaling',
+    provider: 'Google AI',
+    inputPrice: 0.003,
+    outputPrice: 0.003,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'upscaling', 'image-enhancement'],
+    category: 'image',
+    isLatest: false,
+    notes: 'Increase resolution of a generated image to 2k and 4k. Priced at $0.003 per image'
+  },
+  {
+    modelId: 'imagen-visual-captioning',
+    modelName: 'Imagen Visual Captioning',
+    provider: 'Google AI',
+    inputPrice: 0.0015,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'captioning', 'image-analysis'],
+    category: 'image',
+    isLatest: true,
+    notes: 'Generate a short or long text caption for an image. Priced at $0.0015 per image'
+  },
+  {
+    modelId: 'imagen-visual-qa',
+    modelName: 'Imagen Visual Q&A',
+    provider: 'Google AI',
+    inputPrice: 0.0015,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'vqa', 'image-analysis'],
+    category: 'image',
+    isLatest: true,
+    notes: 'Provide an answer based on a question referencing an image. Priced at $0.0015 per image'
+  },
+  {
+    modelId: 'imagen-product-recontext',
+    modelName: 'Imagen Product Recontext',
+    provider: 'Google AI',
+    inputPrice: 0.12,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'product-recontext', 'scene-generation'],
+    category: 'image',
+    isLatest: true,
+    notes: 'Re-imagine products in a new scene. Requires 1-3 images of the same product and a text prompt describing desired scene. Priced at $0.12 per image'
   },
   {
     modelId: 'imagen-captioning-vqa',
@@ -577,43 +733,186 @@ export const GOOGLE_PRICING: ModelPricing[] = [
 
   // === Veo Models (Video Generation) ===
   {
-    modelId: 'veo-2',
-    modelName: 'Veo 2',
+    modelId: 'veo-3.1-video-audio-720p-1080p',
+    modelName: 'Veo 3.1 Video + Audio (720p/1080p)',
     provider: 'Google AI',
-    inputPrice: 0.35, // per second
-    outputPrice: 0.35, // per second
-    unit: PricingUnit.PER_REQUEST,
+    inputPrice: 0.40,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'higher-quality'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate high-quality videos with synchronized speech/sound effects from a text prompt or reference image. Output resolution: 720p, 1080p. Priced at $0.40 per second'
+  },
+  {
+    modelId: 'veo-3.1-video-audio-4k',
+    modelName: 'Veo 3.1 Video + Audio (4K)',
+    provider: 'Google AI',
+    inputPrice: 0.60,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'higher-quality', '4k'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate high-quality videos with synchronized speech/sound effects from a text prompt or reference image. Output resolution: 4K. Priced at $0.60 per second'
+  },
+  {
+    modelId: 'veo-3.1-video-720p-1080p',
+    modelName: 'Veo 3.1 Video (720p/1080p)',
+    provider: 'Google AI',
+    inputPrice: 0.20,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality'],
     category: 'video',
     isLatest: true,
-    notes: 'Use text prompts and images to generate novel videos with higher quality than our previous video generation model (priced per second)'
+    notes: 'Generate high-quality videos from a text prompt or reference image. Output resolution: 720p, 1080p. Priced at $0.20 per second'
   },
   {
-    modelId: 'veo-3',
-    modelName: 'Veo 3',
+    modelId: 'veo-3.1-video-4k',
+    modelName: 'Veo 3.1 Video (4K)',
     provider: 'Google AI',
-    inputPrice: 0.35, // per second
-    outputPrice: 0.35, // per second
-    unit: PricingUnit.PER_REQUEST,
+    inputPrice: 0.40,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality', '4k'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate high-quality videos from a text prompt or reference image. Output resolution: 4K. Priced at $0.40 per second'
+  },
+  {
+    modelId: 'veo-3.1-fast-video-audio-720p-1080p',
+    modelName: 'Veo 3.1 Fast Video + Audio (720p/1080p)',
+    provider: 'Google AI',
+    inputPrice: 0.15,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'lower-latency'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate videos with synchronized speech/sound effects from a text prompt or reference image faster. Output resolution: 720p, 1080p. Priced at $0.15 per second'
+  },
+  {
+    modelId: 'veo-3.1-fast-video-audio-4k',
+    modelName: 'Veo 3.1 Fast Video + Audio (4K)',
+    provider: 'Google AI',
+    inputPrice: 0.35,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'lower-latency', '4k'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate videos with synchronized speech/sound effects from a text prompt or reference image faster. Output resolution: 4K. Priced at $0.35 per second'
+  },
+  {
+    modelId: 'veo-3.1-fast-video-720p-1080p',
+    modelName: 'Veo 3.1 Fast Video (720p/1080p)',
+    provider: 'Google AI',
+    inputPrice: 0.10,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'lower-latency'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate videos from a text prompt or reference image faster. Output resolution: 720p, 1080p. Priced at $0.10 per second'
+  },
+  {
+    modelId: 'veo-3.1-fast-video-4k',
+    modelName: 'Veo 3.1 Fast Video (4K)',
+    provider: 'Google AI',
+    inputPrice: 0.30,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'lower-latency', '4k'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate videos from a text prompt or reference image faster. Output resolution: 4K. Priced at $0.30 per second'
+  },
+  {
+    modelId: 'veo-3-video-audio',
+    modelName: 'Veo 3 Video + Audio',
+    provider: 'Google AI',
+    inputPrice: 0.40,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'higher-quality'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate high-quality videos with synchronized speech/sound effects from a text prompt or reference image. Output resolution: 720p, 1080p. Priced at $0.40 per second'
+  },
+  {
+    modelId: 'veo-3-video',
+    modelName: 'Veo 3 Video',
+    provider: 'Google AI',
+    inputPrice: 0.20,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality'],
     category: 'video',
     isLatest: true,
-    notes: 'Use text prompts and images to generate novel videos with higher quality than our previous video generation model (priced per second)'
+    notes: 'Generate high-quality videos from a text prompt or reference image. Output resolution: 720p, 1080p. Priced at $0.20 per second'
   },
   {
-    modelId: 'veo-3-fast',
-    modelName: 'Veo 3 Fast',
+    modelId: 'veo-3-fast-video-audio',
+    modelName: 'Veo 3 Fast Video + Audio',
     provider: 'Google AI',
-    inputPrice: 0.35, // per second
-    outputPrice: 0.35, // per second
-    unit: PricingUnit.PER_REQUEST,
+    inputPrice: 0.15,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
-    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality', 'lower-latency'],
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'audio-generation', 'lower-latency'],
     category: 'video',
     isLatest: true,
-    notes: 'Use text prompts and images to generate novel videos with higher quality and lower latency than our previous video generation model (priced per second)'
+    notes: 'Generate videos with synchronized speech/sound effects from a text prompt or reference image faster. Output resolution: 720p, 1080p. Priced at $0.15 per second'
+  },
+  {
+    modelId: 'veo-3-fast-video',
+    modelName: 'Veo 3 Fast Video',
+    provider: 'Google AI',
+    inputPrice: 0.10,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'lower-latency'],
+    category: 'video',
+    isLatest: true,
+    notes: 'Generate videos from a text prompt or reference image faster. Output resolution: 720p, 1080p. Priced at $0.10 per second'
+  },
+  {
+    modelId: 'veo-2-video',
+    modelName: 'Veo 2 Video',
+    provider: 'Google AI',
+    inputPrice: 0.50,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality'],
+    category: 'video',
+    isLatest: false,
+    notes: 'Generate videos from a text prompt or reference image. Output resolution: 720p. Priced at $0.50 per second'
+  },
+  {
+    modelId: 'veo-2-advanced-controls',
+    modelName: 'Veo 2 Advanced Controls',
+    provider: 'Google AI',
+    inputPrice: 0.50,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
+    contextWindow: 0,
+    capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'interpolation', 'camera-controls'],
+    category: 'video',
+    isLatest: false,
+    notes: 'Generate videos through start and end frame interpolation, extend generated videos, and apply camera controls. Output resolution: 720p. Priced at $0.50 per second'
   },
 
   // === Preview Models ===
@@ -621,40 +920,55 @@ export const GOOGLE_PRICING: ModelPricing[] = [
     modelId: 'virtual-try-on',
     modelName: 'Virtual Try-On',
     provider: 'Google AI',
-    inputPrice: 0.0, // Free tier only
-    outputPrice: 0.0, // Free tier only
+    inputPrice: 0.06,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'virtual-try-on', 'clothing'],
     category: 'image',
     isLatest: true,
-    notes: 'Generate images of people wearing clothing products (preview model, free tier only)'
+    notes: 'Create images of people wearing different clothes. Requires 1 image of a person and 1 image of clothing. Priced at $0.06 per image'
   },
   {
     modelId: 'veo-3-preview',
     modelName: 'Veo 3 Preview',
     provider: 'Google AI',
-    inputPrice: 0.35, // per second
-    outputPrice: 0.35, // per second
-    unit: PricingUnit.PER_REQUEST,
+    inputPrice: 0.20,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality', 'preview'],
     category: 'video',
     isLatest: true,
-    notes: 'Use text prompts and images to generate novel videos with higher quality than our previous video generation model (preview model, priced per second)'
+    notes: 'Use text prompts and images to generate novel videos with higher quality than our previous video generation model (preview model). Output resolution: 720p, 1080p. Priced at $0.20 per second'
   },
   {
     modelId: 'veo-3-fast-preview',
     modelName: 'Veo 3 Fast Preview',
     provider: 'Google AI',
-    inputPrice: 0.35, // per second
-    outputPrice: 0.35, // per second
-    unit: PricingUnit.PER_REQUEST,
+    inputPrice: 0.10,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_SECOND,
     contextWindow: 0,
     capabilities: ['video-generation', 'text-to-video', 'image-to-video', 'higher-quality', 'lower-latency', 'preview'],
     category: 'video',
     isLatest: true,
-    notes: 'Use text prompts and images to generate novel videos with higher quality and lower latency than our previous video generation model (preview model, priced per second)'
+    notes: 'Use text prompts and images to generate novel videos with higher quality and lower latency than our previous video generation model (preview model). Output resolution: 720p, 1080p. Priced at $0.10 per second'
+  },
+
+  // === Lyria Models (Music Generation) ===
+  {
+    modelId: 'lyria-2',
+    modelName: 'Lyria 2',
+    provider: 'Google AI',
+    inputPrice: 0.06,
+    outputPrice: 0.0,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['music-generation', 'text-to-music', 'instrumental'],
+    category: 'audio',
+    isLatest: true,
+    notes: 'High-quality instrumental music generation ideal for sophisticated composition and detailed creative exploration. Priced at $0.06 per 30 seconds'
   },
 
   // === Legacy Models for Backward Compatibility ===

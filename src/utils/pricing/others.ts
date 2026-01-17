@@ -4,29 +4,29 @@ export const OTHERS_PRICING: ModelPricing[] = [
     // DeepSeek Models
     {
         modelId: 'deepseek-chat',
-        modelName: 'DeepSeek Chat',
+        modelName: 'DeepSeek Chat (V3.2)',
         provider: 'DeepSeek',
         inputPrice: 0.28,
         outputPrice: 0.42,
         unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 32768,
-        capabilities: ['text', 'instruct', 'coding', 'json', 'functions'],
+        contextWindow: 128000,
+        capabilities: ['text', 'instruct', 'coding', 'json', 'functions', 'chat-prefix-completion', 'fim-completion'],
         category: 'text',
         isLatest: true,
-        notes: 'DeepSeek Chat model. Cached: $0.028'
+        notes: 'DeepSeek V3.2 model with 128K context. Max output: 4K default, 8K maximum. Cache hit: $0.028 per 1M tokens'
     },
     {
         modelId: 'deepseek-reasoner',
-        modelName: 'DeepSeek Reasoner',
+        modelName: 'DeepSeek Reasoner (V3.2 Thinking Mode)',
         provider: 'DeepSeek',
         inputPrice: 0.28,
         outputPrice: 0.42,
         unit: PricingUnit.PER_1M_TOKENS,
-        contextWindow: 32768,
-        capabilities: ['text', 'reasoning', 'thinking'],
+        contextWindow: 128000,
+        capabilities: ['text', 'reasoning', 'thinking', 'cot', 'json', 'functions', 'chat-prefix-completion'],
         category: 'reasoning',
         isLatest: true,
-        notes: 'DeepSeek Reasoner model. Cached: $0.028'
+        notes: 'DeepSeek V3.2 reasoning model with CoT (Thinking Mode). Max output: 32K default, 64K maximum. Cache hit: $0.028 per 1M tokens. FIM completion not supported.'
     },
 
     // Grok Models

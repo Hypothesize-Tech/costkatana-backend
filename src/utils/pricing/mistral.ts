@@ -71,27 +71,27 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         modelId: 'codestral-2508',
         modelName: 'Codestral 2508',
         provider: 'Mistral AI',
-        inputPrice: 0.3,
-        outputPrice: 0.9,
+        inputPrice: 0.20,
+        outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 256000,
         capabilities: ['code', 'programming', 'multilingual-code', 'fill-in-middle', 'code-correction', 'test-generation'],
         category: 'code',
         isLatest: true,
-        notes: 'Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks.'
+        notes: 'Coding-focused model. Priced at $0.20 per 1M input tokens and $0.60 per 1M output tokens. Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks. Available on La Plateforme API with up to 256K context window. Fine-tuning available.'
     },
     {
         modelId: 'codestral-latest',
         modelName: 'Codestral 2508',
         provider: 'Mistral AI',
-        inputPrice: 0.3,
-        outputPrice: 0.9,
+        inputPrice: 0.20,
+        outputPrice: 0.60,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 256000,
         capabilities: ['code', 'programming', 'multilingual-code', 'fill-in-middle', 'code-correction', 'test-generation'],
         category: 'code',
         isLatest: true,
-        notes: 'Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks.'
+        notes: 'Coding-focused model. Priced at $0.20 per 1M input tokens and $0.60 per 1M output tokens. Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks. Available on La Plateforme API with up to 256K context window. Fine-tuning available.'
     },
     {
         modelId: 'voxtral-mini-2507',
@@ -156,7 +156,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['ocr', 'document-understanding', 'annotations', 'text-extraction'],
         category: 'document',
         isLatest: true,
-        notes: 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.'
+        notes: 'OCR service powering Document AI stack for extracting interleaved text and images. Priced at $2.00 per 1,000 pages (50% discount with Batch-API). Available on La Plateforme API.'
     },
     {
         modelId: 'mistral-ocr-latest',
@@ -169,7 +169,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['ocr', 'multimodal', 'text'],
         category: 'document',
         isLatest: true,
-        notes: 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.'
+        notes: 'OCR service powering Document AI stack for extracting interleaved text and images. Priced at $2.00 per 1,000 pages (50% discount with Batch-API). Available on La Plateforme API.'
     },
     {
         modelId: 'ministral-3b',
@@ -205,10 +205,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 6.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'reasoning', 'complex-tasks', 'high-complexity'],
+        capabilities: ['text', 'reasoning', 'complex-tasks', 'high-complexity', 'function-calling'],
         category: 'text',
         isLatest: true,
-        notes: 'Our top-tier large model for high-complexity tasks with the latest version released November 2024 (v24.11).'
+        notes: 'Top-tier large model for high-complexity tasks. Priced at $2.00 per 1M input tokens and $6.00 per 1M output tokens. Latest version released November 2024 (v24.11). Available on La Plateforme API with up to 128K context window. Supports function calling. Fine-tuning available ($9/1M tokens + storage for Fine-tuned Large 2). Also available on Azure AI Foundry.'
     },
     {
         modelId: 'mistral-large-latest',
@@ -218,10 +218,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 6.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'agentic', 'multimodal', 'reasoning'],
+        capabilities: ['text', 'agentic', 'multimodal', 'reasoning', 'function-calling'],
         category: 'text',
         isLatest: true,
-        notes: 'Our top-tier large model for high-complexity tasks with the latest version released November 2024.'
+        notes: 'Top-tier large model for high-complexity tasks. Priced at $2.00 per 1M input tokens and $6.00 per 1M output tokens. Latest version released November 2024. Available on La Plateforme API with up to 128K context window. Supports function calling. Fine-tuning available ($9/1M tokens + storage for Fine-tuned Large 2). Also available on Azure AI Foundry.'
     },
     {
         modelId: 'pixtral-large-2411',
@@ -279,14 +279,14 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         modelId: 'mistral-embed',
         modelName: 'Mistral Embed',
         provider: 'Mistral AI',
-        inputPrice: 0.1,
+        inputPrice: 0.01,
         outputPrice: 0.0,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 8192,
-        capabilities: ['text', 'embedding'],
+        capabilities: ['text', 'embedding', 'semantic-search'],
         category: 'embedding',
         isLatest: true,
-        notes: 'Our state-of-the-art semantic for extracting representation of text extracts.'
+        notes: 'Embedding model for extracting semantic representations of text. Priced at $0.01 per 1M tokens. Our state-of-the-art semantic for extracting representation of text extracts. Available on La Plateforme API.'
     },
     {
         modelId: 'codestral-embed-2505',
@@ -441,10 +441,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.3,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'multimodal', 'multilingual', 'open-source', 'image-understanding'],
+        capabilities: ['text', 'multimodal', 'multilingual', 'open-source', 'image-understanding', 'function-calling'],
         category: 'multimodal',
         isLatest: false,
-        notes: 'A new leader in the small models category with image understanding capabilities, released March 2025 (v25.03).'
+        notes: 'A new leader in the small models category with image understanding capabilities, released March 2025 (v25.03). Priced at $0.10 per 1M input tokens and $0.30 per 1M output tokens. Available on La Plateforme API with up to 128K context window. Supports function calling. Fine-tuning available. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'mistral-small-2501',
@@ -467,10 +467,10 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         outputPrice: 0.3,
         unit: PricingUnit.PER_1M_TOKENS,
         contextWindow: 128000,
-        capabilities: ['text', 'agentic', 'multimodal', 'lightweight'],
+        capabilities: ['text', 'agentic', 'multimodal', 'lightweight', 'function-calling'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'An update to our previous small model, released June 2025.'
+        notes: 'An update to our previous small model, released June 2025. Priced at $0.10 per 1M input tokens and $0.30 per 1M output tokens. Available on La Plateforme API with up to 128K context window. Supports function calling. Fine-tuning available. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'magistral-small-2506',
@@ -535,7 +535,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['vision', 'multimodal', 'small', 'image-understanding'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'A 12B model with image understanding capabilities in addition to text.'
+        notes: 'Multimodal model with image understanding capabilities. Priced at $0.15 per 1M tokens (input/output). A 12B model with image understanding capabilities in addition to text. Available on La Plateforme API with up to 128K context window. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'pixtral-12b',
@@ -548,7 +548,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['vision', 'multimodal', 'small', 'image-understanding'],
         category: 'multimodal',
         isLatest: true,
-        notes: 'A 12B model with image understanding capabilities in addition to text.'
+        notes: 'Multimodal model with image understanding capabilities. Priced at $0.15 per 1M tokens (input/output). A 12B model with image understanding capabilities in addition to text. Available on La Plateforme API with up to 128K context window. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'open-mistral-nemo-2407',
@@ -561,7 +561,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multilingual', 'open-source', 'best-multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Our best multilingual open source model released July 2024.'
+        notes: 'Our best multilingual open source model released July 2024. Priced at $0.15 per 1M tokens (input/output). Available on La Plateforme API with up to 128K context window. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'open-mistral-nemo',
@@ -574,7 +574,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'multilingual', 'open-source', 'best-multilingual'],
         category: 'text',
         isLatest: true,
-        notes: 'Our best multilingual open source model released July 2024.'
+        notes: 'Our best multilingual open source model released July 2024. Priced at $0.15 per 1M tokens (input/output). Available on La Plateforme API with up to 128K context window. Also available on Azure AI Foundry.'
     },
     {
         modelId: 'mistral-nemo',
@@ -600,7 +600,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'open-source', 'fast'],
         category: 'text',
         isLatest: false,
-        notes: 'A 7B transformer model, fast-deployed and easily customisable.'
+        notes: 'A 7B transformer model, fast-deployed and easily customisable. Open-source/open-weights model available for self-hosting (free to use, but requires own infrastructure). Also available on La Plateforme API and Azure AI Foundry.'
     },
     {
         modelId: 'open-mixtral-8x7b',
@@ -613,7 +613,7 @@ export const MISTRAL_PRICING: ModelPricing[] = [
         capabilities: ['text', 'mixture-of-experts', 'open-source'],
         category: 'text',
         isLatest: false,
-        notes: 'A 7B sparse Mixture-of-Experts (SMoE). Uses 12.9B active parameters out of 45B total.'
+        notes: 'A 7B sparse Mixture-of-Experts (SMoE). Uses 12.9B active parameters out of 45B total. Open-source/open-weights model available for self-hosting (free to use, but requires own infrastructure). Also available on La Plateforme API and Azure AI Foundry.'
     },
     {
         modelId: 'open-mixtral-8x22b',

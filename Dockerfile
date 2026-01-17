@@ -157,6 +157,13 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV REDIS_CONNECTION_TIMEOUT=5000
 ENV REDIS_RETRY_DELAY=1000
 ENV REDIS_MAX_RETRIES=3
+# Sentry configuration (DSN should be provided via docker-compose or ECS task definition)
+# ENV SENTRY_DSN= (set this via environment at runtime)
+ENV SENTRY_ENVIRONMENT=production
+ENV SENTRY_TRACES_SAMPLE_RATE=0.1
+ENV SENTRY_PROFILES_SAMPLE_RATE=0.1
+ENV SENTRY_ENABLE_PERFORMANCE_MONITORING=true
+ENV SENTRY_ENABLE_PROFILING=true
 
 # Logs dir
 RUN mkdir -p logs && chown nodejs:nodejs logs
@@ -165,5 +172,6 @@ USER nodejs
 EXPOSE 8000
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/server.js"]
+# Use the same command as npm start to ensure Sentry and OpenTelemetry are initialized
+CMD ["node", "--max-old-space-size=4096", "--expose-gc", "-r", "./dist/observability/register.js", "dist/server.js"]
     

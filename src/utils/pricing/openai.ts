@@ -1,7 +1,141 @@
 import { ModelPricing, PricingUnit } from './types';
 
 export const OPENAI_PRICING: ModelPricing[] = [
-  // === GPT-5 Models (Latest) ===
+  // === GPT-5.2 Models (Latest) ===
+  {
+    modelId: 'gpt-5.2',
+    modelName: 'GPT-5.2',
+    provider: 'OpenAI',
+    inputPrice: 1.75,
+    outputPrice: 14.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents'],
+    category: 'text',
+    isLatest: true,
+    notes: 'Latest GPT-5 model. Standard: $1.75/$14.00 per 1M tokens. Batch: $0.875/$7.00. Flex: $0.875/$7.00. Priority: $3.50/$28.00. Cached input: $0.175 (standard), $0.0875 (batch/flex), $0.35 (priority)'
+  },
+  {
+    modelId: 'gpt-5.2-pro',
+    modelName: 'GPT-5.2 Pro',
+    provider: 'OpenAI',
+    inputPrice: 21.00,
+    outputPrice: 168.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents', 'premium'],
+    category: 'text',
+    isLatest: true,
+    notes: 'Premium version of GPT-5.2. Standard: $21.00/$168.00 per 1M tokens. Batch: $10.50/$84.00'
+  },
+  {
+    modelId: 'gpt-5.2-codex',
+    modelName: 'GPT-5.2-Codex',
+    provider: 'OpenAI',
+    inputPrice: 1.75,
+    outputPrice: 14.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['code', 'programming', 'agents', 'coding'],
+    category: 'code',
+    isLatest: true,
+    notes: 'GPT-5.2 optimized for agentic coding in Codex. Standard: $1.75/$14.00 per 1M tokens. Priority: $3.50/$28.00. Cached input: $0.175 (standard), $0.35 (priority)'
+  },
+  {
+    modelId: 'gpt-5.2-chat-latest',
+    modelName: 'GPT-5.2 Chat',
+    provider: 'OpenAI',
+    inputPrice: 1.75,
+    outputPrice: 14.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'chat', 'reasoning', 'analysis'],
+    category: 'text',
+    isLatest: true,
+    notes: 'GPT-5.2 model used in ChatGPT. Standard: $1.75/$14.00 per 1M tokens. Cached input: $0.175'
+  },
+
+  // === GPT-5.1 Models ===
+  {
+    modelId: 'gpt-5.1',
+    modelName: 'GPT-5.1',
+    provider: 'OpenAI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents'],
+    category: 'text',
+    isLatest: true,
+    notes: 'GPT-5.1 model. Standard: $1.25/$10.00 per 1M tokens. Batch: $0.625/$5.00. Flex: $0.625/$5.00. Priority: $2.50/$20.00. Cached input: $0.125 (standard), $0.0625 (batch/flex), $0.25 (priority)'
+  },
+  {
+    modelId: 'gpt-5.1-codex-max',
+    modelName: 'GPT-5.1-Codex Max',
+    provider: 'OpenAI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['code', 'programming', 'agents', 'coding'],
+    category: 'code',
+    isLatest: true,
+    notes: 'GPT-5.1 optimized for agentic coding. Standard: $1.25/$10.00 per 1M tokens. Priority: $2.50/$20.00. Cached input: $0.125 (standard), $0.25 (priority)'
+  },
+  {
+    modelId: 'gpt-5.1-codex',
+    modelName: 'GPT-5.1-Codex',
+    provider: 'OpenAI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['code', 'programming', 'agents', 'coding'],
+    category: 'code',
+    isLatest: true,
+    notes: 'GPT-5.1 optimized for agentic coding in Codex. Standard: $1.25/$10.00 per 1M tokens. Priority: $2.50/$20.00. Cached input: $0.125 (standard), $0.25 (priority)'
+  },
+  {
+    modelId: 'gpt-5.1-codex-mini',
+    modelName: 'GPT-5.1-Codex Mini',
+    provider: 'OpenAI',
+    inputPrice: 0.25,
+    outputPrice: 2.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['code', 'programming', 'agents', 'coding', 'efficient'],
+    category: 'code',
+    isLatest: true,
+    notes: 'Cost-efficient GPT-5.1 Codex variant. Standard: $0.25/$2.00 per 1M tokens. Cached input: $0.025'
+  },
+  {
+    modelId: 'gpt-5.1-chat-latest',
+    modelName: 'GPT-5.1 Chat',
+    provider: 'OpenAI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'chat', 'reasoning', 'analysis'],
+    category: 'text',
+    isLatest: true,
+    notes: 'GPT-5.1 model used in ChatGPT. Standard: $1.25/$10.00 per 1M tokens. Cached input: $0.125'
+  },
+  {
+    modelId: 'gpt-5.1-search-api',
+    modelName: 'GPT-5.1 Search API',
+    provider: 'OpenAI',
+    inputPrice: 1.25,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'search', 'multimodal', 'reasoning'],
+    category: 'search',
+    isLatest: true,
+    notes: 'GPT-5.1 with search capabilities. Standard: $1.25/$10.00 per 1M tokens. Cached input: $0.125. Web search: $10.00/1k calls + search content tokens billed at model rates'
+  },
+
+  // === GPT-5 Models ===
   {
     modelId: 'gpt-5',
     modelName: 'GPT-5',
@@ -13,7 +147,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents'],
     category: 'text',
     isLatest: true,
-    notes: 'The best model for coding and agentic tasks across domains'
+    notes: 'The best model for coding and agentic tasks across domains. Standard: $1.25/$10.00 per 1M tokens. Batch: $0.625/$5.00. Flex: $0.625/$5.00. Priority: $2.50/$20.00. Cached input: $0.125 (standard), $0.0625 (batch/flex), $0.25 (priority)'
   },
   {
     modelId: 'gpt-5-mini',
@@ -26,7 +160,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'efficient'],
     category: 'text',
     isLatest: true,
-    notes: 'A faster, cost-efficient version of GPT-5 for well-defined tasks'
+    notes: 'A faster, cost-efficient version of GPT-5 for well-defined tasks. Standard: $0.25/$2.00 per 1M tokens. Batch: $0.125/$1.00. Flex: $0.125/$1.00. Priority: $0.45/$3.60. Cached input: $0.025 (standard), $0.0125 (batch/flex), $0.045 (priority)'
   },
   {
     modelId: 'gpt-5-nano',
@@ -39,7 +173,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'fast', 'cost-effective'],
     category: 'text',
     isLatest: true,
-    notes: 'Fastest, most cost-efficient version of GPT-5'
+    notes: 'Fastest, most cost-efficient version of GPT-5. Standard: $0.05/$0.40 per 1M tokens. Batch: $0.025/$0.20. Flex: $0.025/$0.20. Cached input: $0.005 (standard), $0.0025 (batch/flex)'
   },
   {
     modelId: 'gpt-5-pro',
@@ -52,7 +186,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'coding', 'agents', 'premium'],
     category: 'text',
     isLatest: true,
-    notes: 'Version of GPT-5 that produces smarter and more precise responses. Batch: $7.50/$60.00'
+    notes: 'Version of GPT-5 that produces smarter and more precise responses. Standard: $15.00/$120.00 per 1M tokens. Batch: $7.50/$60.00'
   },
   {
     modelId: 'gpt-5-codex',
@@ -65,7 +199,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['code', 'programming', 'agents', 'coding'],
     category: 'code',
     isLatest: true,
-    notes: 'A version of GPT-5 optimized for agentic coding in Codex'
+    notes: 'A version of GPT-5 optimized for agentic coding in Codex. Standard: $1.25/$10.00 per 1M tokens. Priority: $2.50/$20.00. Cached input: $0.125 (standard), $0.25 (priority)'
   },
   {
     modelId: 'gpt-5-chat-latest',
@@ -78,7 +212,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'chat', 'reasoning', 'analysis'],
     category: 'text',
     isLatest: true,
-    notes: 'GPT-5 model used in ChatGPT (not recommended for API use)'
+    notes: 'GPT-5 model used in ChatGPT. Standard: $1.25/$10.00 per 1M tokens. Cached input: $0.125'
   },
 
   // === GPT-4.1 Series (Latest) ===
@@ -93,7 +227,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'analysis', 'enhanced'],
     category: 'text',
     isLatest: true,
-    notes: 'Smartest non-reasoning model'
+    notes: 'Smartest non-reasoning model. Standard: $2.00/$8.00 per 1M tokens. Batch: $1.00/$4.00. Priority: $3.50/$14.00. Cached input: $0.50 (standard), $0.875 (priority). Fine-tuning: $25.00 training, $3.00/$0.75/$12.00 (standard), $1.50/$0.50/$6.00 (batch)'
   },
   {
     modelId: 'gpt-4.1-mini',
@@ -106,7 +240,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'analysis', 'efficient'],
     category: 'text',
     isLatest: true,
-    notes: 'Smaller, faster version of GPT-4.1'
+    notes: 'Smaller, faster version of GPT-4.1. Standard: $0.40/$1.60 per 1M tokens. Batch: $0.20/$0.80. Priority: $0.70/$2.80. Cached input: $0.10 (standard), $0.175 (priority). Fine-tuning: $5.00 training, $0.80/$0.20/$3.20 (standard), $0.40/$0.10/$1.60 (batch)'
   },
   {
     modelId: 'gpt-4.1-nano',
@@ -119,7 +253,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'fast', 'cost-effective'],
     category: 'text',
     isLatest: true,
-    notes: 'Fastest, most cost-efficient version of GPT-4.1'
+    notes: 'Fastest, most cost-efficient version of GPT-4.1. Standard: $0.10/$0.40 per 1M tokens. Batch: $0.05/$0.20. Priority: $0.20/$0.80. Cached input: $0.025 (standard), $0.05 (priority). Fine-tuning: $1.50 training, $0.20/$0.05/$0.80 (standard), $0.10/$0.025/$0.40 (batch)'
   },
 
   // === GPT-4o Series (Latest) ===
@@ -134,7 +268,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'analysis'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Latest GPT-4o model with multimodal capabilities. Cached: $1.25. Batch: $1.25/$5.00'
+    notes: 'Latest GPT-4o model with multimodal capabilities. Standard: $2.50/$10.00 per 1M tokens. Batch: $1.25/$5.00. Priority: $4.25/$17.00. Cached input: $1.25 (standard), $2.125 (priority). Fine-tuning: $25.00 training, $3.75/$1.875/$15.00 (standard), $2.225/$0.90/$12.50 (batch)'
   },
   {
     modelId: 'gpt-4o-2024-05-13',
@@ -147,7 +281,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'GPT-4o model from May 2024'
+    notes: 'GPT-4o model from May 2024. Standard: $5.00/$15.00 per 1M tokens. Priority: $8.75/$26.25'
   },
   {
     modelId: 'gpt-4o-audio-preview',
@@ -160,7 +294,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'multimodal'],
     category: 'audio',
     isLatest: true,
-    notes: 'GPT-4o with audio input capabilities'
+    notes: 'GPT-4o with audio input capabilities. Text: $2.50/$10.00 per 1M tokens. Audio: $40.00/$80.00 per 1M tokens'
   },
   {
     modelId: 'gpt-4o-realtime-preview',
@@ -173,7 +307,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'realtime', 'multimodal'],
     category: 'realtime',
     isLatest: true,
-    notes: 'GPT-4o with realtime processing capabilities. Cached: $2.50. Audio: $40/$80 per 1M'
+    notes: 'GPT-4o with realtime processing capabilities. Text: $5.00/$20.00 per 1M tokens. Cached: $2.50. Audio: $40.00/$80.00 per 1M tokens. Image: $5.00/$0.50 per 1M tokens'
   },
   {
     modelId: 'gpt-4o-mini-2024-07-18',
@@ -186,7 +320,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'efficient'],
     category: 'multimodal',
     isLatest: true,
-    notes: 'Efficient GPT-4o variant with multimodal capabilities'
+    notes: 'Efficient GPT-4o variant with multimodal capabilities. Standard: $0.15/$0.60 per 1M tokens. Batch: $0.075/$0.30. Priority: $0.25/$1.00. Cached input: $0.075 (standard), $0.125 (priority). Fine-tuning: $3.00 training, $0.30/$0.15/$1.20 (standard), $0.15/$0.075/$0.60 (batch)'
   },
   {
     modelId: 'gpt-4o-mini-audio-preview',
@@ -199,7 +333,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'efficient'],
     category: 'audio',
     isLatest: true,
-    notes: 'GPT-4o Mini with audio input capabilities'
+    notes: 'GPT-4o Mini with audio input capabilities. Text: $0.15/$0.60 per 1M tokens. Audio: $10.00/$20.00 per 1M tokens'
   },
   {
     modelId: 'gpt-4o-mini-realtime-preview',
@@ -212,7 +346,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'realtime', 'efficient'],
     category: 'realtime',
     isLatest: true,
-    notes: 'GPT-4o Mini with realtime processing capabilities. Cached: $0.30. Audio: $10/$20 per 1M'
+    notes: 'GPT-4o Mini with realtime processing capabilities. Text: $0.60/$2.40 per 1M tokens. Cached: $0.30. Audio: $10.00/$20.00 per 1M tokens. Image: $0.80/$0.08 per 1M tokens'
   },
 
   // === O-Series Models (Latest) ===
@@ -227,7 +361,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'pro'],
     category: 'reasoning',
     isLatest: true,
-    notes: 'Version of o3 with more compute for better responses'
+    notes: 'Version of o3 with more compute for better responses. Standard: $20.00/$80.00 per 1M tokens. Batch: $10.00/$40.00'
   },
   {
     modelId: 'o3-deep-research',
@@ -240,7 +374,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'research', 'analysis', 'deep'],
     category: 'research',
     isLatest: true,
-    notes: 'Our most powerful deep research model'
+    notes: 'Our most powerful deep research model. Standard: $10.00/$40.00 per 1M tokens. Batch: $5.00/$20.00. Cached input: $2.50 (standard)'
   },
   {
     modelId: 'o4-mini',
@@ -253,7 +387,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'efficient'],
     category: 'reasoning',
     isLatest: true,
-    notes: 'Fast, cost-efficient reasoning model, succeeded by GPT-5 mini'
+    notes: 'Fast, cost-efficient reasoning model, succeeded by GPT-5 mini. Standard: $1.10/$4.40 per 1M tokens. Batch: $0.55/$2.20. Flex: $0.55/$2.20. Priority: $2.00/$8.00. Cached input: $0.275 (standard), $0.138 (flex), $0.50 (priority). Fine-tuning: $100.00/hour training, $4.00/$1.00/$16.00 (standard), $2.00/$0.50/$8.00 (batch), $2.00/$0.50/$8.00 (with data sharing)'
   },
   {
     modelId: 'o4-mini-deep-research',
@@ -266,7 +400,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'research', 'analysis', 'efficient'],
     category: 'research',
     isLatest: true,
-    notes: 'Faster, more affordable deep research model'
+    notes: 'Faster, more affordable deep research model. Standard: $2.00/$8.00 per 1M tokens. Batch: $1.00/$4.00. Cached input: $0.50 (standard)'
   },
   {
     modelId: 'o3',
@@ -279,7 +413,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis'],
     category: 'reasoning',
     isLatest: true,
-    notes: 'Reasoning model for complex tasks, succeeded by GPT-5'
+    notes: 'Reasoning model for complex tasks, succeeded by GPT-5. Standard: $2.00/$8.00 per 1M tokens. Batch: $1.00/$4.00. Flex: $1.00/$4.00. Priority: $3.50/$14.00. Cached input: $0.50 (standard), $0.25 (flex), $0.875 (priority)'
   },
   {
     modelId: 'o1-pro',
@@ -292,7 +426,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'premium'],
     category: 'reasoning',
     isLatest: true,
-    notes: 'Version of o1 with more compute for better responses'
+    notes: 'Version of o1 with more compute for better responses. Standard: $150.00/$600.00 per 1M tokens. Batch: $75.00/$300.00'
   },
   {
     modelId: 'o1',
@@ -305,7 +439,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis', 'advanced'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'Previous full o-series reasoning model'
+    notes: 'Previous full o-series reasoning model. Standard: $15.00/$60.00 per 1M tokens. Batch: $7.50/$30.00. Cached input: $7.50 (standard)'
   },
   {
     modelId: 'o3-mini',
@@ -318,7 +452,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'efficient'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'A small model alternative to o3'
+    notes: 'A small model alternative to o3. Standard: $1.10/$4.40 per 1M tokens. Batch: $0.55/$2.20. Cached input: $0.55 (standard)'
   },
   {
     modelId: 'o1-mini',
@@ -331,7 +465,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'efficient'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'Deprecated - A small model alternative to o1'
+    notes: 'Deprecated - A small model alternative to o1. Standard: $1.10/$4.40 per 1M tokens. Batch: $0.55/$2.20. Cached input: $0.55 (standard)'
   },
 
   // === Video Generation Models ===
@@ -364,6 +498,32 @@ export const OPENAI_PRICING: ModelPricing[] = [
 
   // === Image Generation Models ===
   {
+    modelId: 'gpt-image-1.5',
+    modelName: 'GPT Image 1.5',
+    provider: 'OpenAI',
+    inputPrice: 5.00,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'text-to-image'],
+    category: 'image',
+    isLatest: true,
+    notes: 'Latest state-of-the-art image generation model. Text tokens: $5.00/$10.00 per 1M tokens (standard), $1.25 cached input. Image tokens: $8.00/$32.00 per 1M tokens (standard), $2.00 cached input. Per image: Low $0.009 (1024x1024), $0.013 (1024x1536/1536x1024); Medium $0.034 (1024x1024), $0.05 (1024x1536/1536x1024); High $0.133 (1024x1024), $0.2 (1024x1536/1536x1024). Text output tokens include model reasoning tokens'
+  },
+  {
+    modelId: 'chatgpt-image-latest',
+    modelName: 'ChatGPT Image Latest',
+    provider: 'OpenAI',
+    inputPrice: 5.00,
+    outputPrice: 10.00,
+    unit: PricingUnit.PER_REQUEST,
+    contextWindow: 0,
+    capabilities: ['image-generation', 'text-to-image'],
+    category: 'image',
+    isLatest: true,
+    notes: 'GPT Image model used in ChatGPT. Text tokens: $5.00/$10.00 per 1M tokens (standard), $1.25 cached input. Image tokens: $8.00/$32.00 per 1M tokens (standard), $2.00 cached input. Per image: Low $0.009 (1024x1024), $0.013 (1024x1536/1536x1024); Medium $0.034 (1024x1024), $0.05 (1024x1536/1536x1024); High $0.133 (1024x1024), $0.2 (1024x1536/1536x1024)'
+  },
+  {
     modelId: 'gpt-image-1',
     modelName: 'GPT Image 1',
     provider: 'OpenAI',
@@ -373,8 +533,8 @@ export const OPENAI_PRICING: ModelPricing[] = [
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image'],
     category: 'image',
-    isLatest: true,
-    notes: 'State-of-the-art image generation model. Cached: $1.25. Low: $0.011, Med: $0.042, High: $0.167/img'
+    isLatest: false,
+    notes: 'State-of-the-art image generation model. Text tokens: $5.00 per 1M tokens (standard), $1.25 cached input. Image tokens: $10.00/$40.00 per 1M tokens (standard), $2.50 cached input. Per image: Low $0.011 (1024x1024), $0.016 (1024x1536/1536x1024); Medium $0.042 (1024x1024), $0.063 (1024x1536/1536x1024); High $0.167 (1024x1024), $0.25 (1024x1536/1536x1024)'
   },
   {
     modelId: 'gpt-image-1-mini',
@@ -386,34 +546,34 @@ export const OPENAI_PRICING: ModelPricing[] = [
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image', 'cost-efficient'],
     category: 'image',
-    isLatest: true,
-    notes: 'A cost-efficient version of GPT Image 1. Cached: $0.20. Low: $0.005, Med: $0.011, High: $0.036/img'
+    isLatest: false,
+    notes: 'A cost-efficient version of GPT Image 1. Text tokens: $2.00 per 1M tokens (standard), $0.20 cached input. Image tokens: $2.50/$8.00 per 1M tokens (standard), $0.25 cached input. Per image: Low $0.005 (1024x1024), $0.006 (1024x1536/1536x1024); Medium $0.011 (1024x1024), $0.015 (1024x1536/1536x1024); High $0.036 (1024x1024), $0.052 (1024x1536/1536x1024)'
   },
   {
     modelId: 'dall-e-3',
     modelName: 'DALL·E 3',
     provider: 'OpenAI',
     inputPrice: 0.04,
-    outputPrice: 0.04,
+    outputPrice: 0.08,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image'],
     category: 'image',
     isLatest: false,
-    notes: 'Previous generation image generation model'
+    notes: 'Previous generation image generation model. Standard: $0.04 (1024x1024), $0.08 (1024x1536/1536x1024). HD: $0.08 (1024x1024), $0.12 (1024x1536/1536x1024)'
   },
   {
     modelId: 'dall-e-2',
     modelName: 'DALL·E 2',
     provider: 'OpenAI',
-    inputPrice: 0.02,
+    inputPrice: 0.016,
     outputPrice: 0.02,
     unit: PricingUnit.PER_REQUEST,
     contextWindow: 0,
     capabilities: ['image-generation', 'text-to-image'],
     category: 'image',
     isLatest: false,
-    notes: 'Our first image generation model'
+    notes: 'Our first image generation model. Standard: $0.016 (1024x1024), $0.018 (1024x1536), $0.02 (1536x1024)'
   },
 
   // === Audio and Realtime Models ===
@@ -428,7 +588,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'realtime', 'multimodal'],
     category: 'realtime',
     isLatest: true,
-    notes: 'Model capable of realtime text and audio inputs and outputs. Cached: $0.40. Audio: $32/$64 per 1M'
+    notes: 'Model capable of realtime text and audio inputs and outputs. Text: $4.00/$16.00 per 1M tokens (standard). Cached: $0.40. Audio: $32.00/$64.00 per 1M tokens. Image: $5.00/$0.50 per 1M tokens'
   },
   {
     modelId: 'gpt-realtime-mini',
@@ -441,7 +601,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'realtime', 'efficient'],
     category: 'realtime',
     isLatest: true,
-    notes: 'A cost-efficient version of GPT Realtime. Cached: $0.06. Audio: $10/$20 per 1M'
+    notes: 'A cost-efficient version of GPT Realtime. Text: $0.60/$2.40 per 1M tokens (standard). Cached: $0.06. Audio: $10.00/$20.00 per 1M tokens. Image: $0.80/$0.08 per 1M tokens'
   },
   {
     modelId: 'gpt-audio',
@@ -454,7 +614,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'multimodal'],
     category: 'audio',
     isLatest: true,
-    notes: 'For audio inputs and outputs with Chat Completions API'
+    notes: 'For audio inputs and outputs with Chat Completions API. Text: $2.50/$10.00 per 1M tokens. Audio: $32.00/$64.00 per 1M tokens'
   },
   {
     modelId: 'gpt-audio-mini',
@@ -467,7 +627,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'audio', 'efficient'],
     category: 'audio',
     isLatest: true,
-    notes: 'A cost-efficient version of GPT Audio. Audio: $10/$20 per 1M'
+    notes: 'A cost-efficient version of GPT Audio. Text: $0.60/$2.40 per 1M tokens. Audio: $10.00/$20.00 per 1M tokens'
   },
 
   // === Transcription Models ===
@@ -482,20 +642,20 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['audio', 'transcription', 'speech-to-text'],
     category: 'audio',
     isLatest: true,
-    notes: 'Speech-to-text model powered by GPT-4o. ~$0.006/min'
+    notes: 'Speech-to-text model powered by GPT-4o. Text tokens: $2.50/$10.00 per 1M tokens. Audio tokens: $6.00 per 1M tokens. Estimated cost: $0.006 per minute'
   },
   {
     modelId: 'gpt-4o-transcribe-diarize',
     modelName: 'GPT-4o Transcribe Diarize',
     provider: 'OpenAI',
-    inputPrice: 0.20,
-    outputPrice: 0.20,
+    inputPrice: 2.50,
+    outputPrice: 10.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 0,
     capabilities: ['audio', 'transcription', 'speech-to-text', 'diarization'],
     category: 'audio',
     isLatest: true,
-    notes: 'Transcription model that identifies who\'s speaking when'
+    notes: 'Transcription model that identifies who\'s speaking when. Text tokens: $2.50/$10.00 per 1M tokens. Audio tokens: $6.00 per 1M tokens. Estimated cost: $0.006 per minute'
   },
   {
     modelId: 'gpt-4o-mini-transcribe',
@@ -508,7 +668,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['audio', 'transcription', 'speech-to-text', 'efficient'],
     category: 'audio',
     isLatest: true,
-    notes: 'Speech-to-text model powered by GPT-4o mini. ~$0.003/min'
+    notes: 'Speech-to-text model powered by GPT-4o mini. Text tokens: $1.25/$5.00 per 1M tokens. Audio tokens: $3.00 per 1M tokens. Estimated cost: $0.003 per minute'
   },
   {
     modelId: 'whisper-1',
@@ -521,7 +681,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['audio', 'transcription', 'speech-to-text', 'general-purpose'],
     category: 'audio',
     isLatest: true,
-    notes: 'General-purpose speech recognition model'
+    notes: 'General-purpose speech recognition model. Priced at $0.006 per minute'
   },
 
   // === Text-to-Speech Models ===
@@ -530,13 +690,13 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelName: 'GPT-4o mini TTS',
     provider: 'OpenAI',
     inputPrice: 0.60,
-    outputPrice: 0.00,
+    outputPrice: 12.00,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 0,
     capabilities: ['audio', 'text-to-speech', 'tts'],
     category: 'audio',
     isLatest: true,
-    notes: 'Text-to-speech model powered by GPT-4o mini. ~$0.015/min'
+    notes: 'Text-to-speech model powered by GPT-4o mini. Text tokens: $0.60 per 1M tokens. Audio tokens: $12.00 per 1M tokens. Estimated cost: $0.015 per minute'
   },
   {
     modelId: 'tts-1',
@@ -549,7 +709,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['audio', 'text-to-speech', 'tts', 'fast'],
     category: 'audio',
     isLatest: true,
-    notes: 'Text-to-speech model optimized for speed'
+    notes: 'Text-to-speech model optimized for speed. Priced at $15.00 per 1M characters'
   },
   {
     modelId: 'tts-1-hd',
@@ -562,7 +722,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['audio', 'text-to-speech', 'tts', 'high-quality'],
     category: 'audio',
     isLatest: true,
-    notes: 'Text-to-speech model optimized for quality'
+    notes: 'Text-to-speech model optimized for quality. Priced at $30.00 per 1M characters'
   },
 
   // === Open-Weight Models ===
@@ -605,20 +765,20 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['code', 'programming', 'reasoning'],
     category: 'code',
     isLatest: true,
-    notes: 'Fast reasoning model optimized for the Codex CLI'
+    notes: 'Fast reasoning model optimized for the Codex CLI. Standard: $1.50/$6.00 per 1M tokens. Cached input: $0.375'
   },
   {
     modelId: 'omni-moderation-latest',
     modelName: 'omni-moderation',
     provider: 'OpenAI',
-    inputPrice: 0.10,
-    outputPrice: 0.10,
+    inputPrice: 0.0,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 32768,
     capabilities: ['moderation', 'text', 'image', 'harmful-content-detection'],
     category: 'moderation',
     isLatest: true,
-    notes: 'Identify potentially harmful content in text and images'
+    notes: 'Identify potentially harmful content in text and images. Made available free of charge. Built-in tools: Code Interpreter ($0.03-$1.92/container based on memory), File search storage ($0.10/GB per day, 1GB free), File search tool calls ($2.50/1k calls), Web search ($10.00/1k calls for reasoning models, $25.00/1k calls for non-reasoning models) + search content tokens billed at model rates'
   },
   {
     modelId: 'gpt-4o-mini-search-preview-2025-03-11',
@@ -631,7 +791,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'search', 'multimodal'],
     category: 'search',
     isLatest: true,
-    notes: 'GPT-4o Mini with search capabilities for enhanced information retrieval. Web search: $10/1k calls'
+    notes: 'GPT-4o Mini with search capabilities for enhanced information retrieval. Text: $0.15/$0.60 per 1M tokens. Web search: $10.00/1k calls + search content tokens billed at model rates (non-reasoning models: $25.00/1k calls, search content tokens are free)'
   },
   {
     modelId: 'gpt-4o-search-preview-2025-03-11',
@@ -644,7 +804,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'search', 'multimodal'],
     category: 'search',
     isLatest: true,
-    notes: 'GPT-4o with search capabilities for enhanced information retrieval. Web search: $25/1k calls'
+    notes: 'GPT-4o with search capabilities for enhanced information retrieval. Text: $2.50/$10.00 per 1M tokens. Web search: $10.00/1k calls + search content tokens billed at model rates (non-reasoning models: $25.00/1k calls, search content tokens are free)'
   },
   {
     modelId: 'computer-use-preview-2025-03-11',
@@ -657,7 +817,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'computer-use', 'automation'],
     category: 'computer-use',
     isLatest: true,
-    notes: 'Model optimized for computer use and automation tasks. Batch: $1.50/$6.00'
+    notes: 'Model optimized for computer use and automation tasks. Standard: $3.00/$12.00 per 1M tokens. Batch: $1.50/$6.00'
   },
 
   // === Embedding Models ===
@@ -666,39 +826,39 @@ export const OPENAI_PRICING: ModelPricing[] = [
     modelName: 'Text Embedding 3 Small',
     provider: 'OpenAI',
     inputPrice: 0.02,
-    outputPrice: 0.02,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 8191,
     capabilities: ['embedding', 'semantic-search'],
     category: 'embedding',
     isLatest: true,
-    notes: 'Latest small embedding model for semantic search and analysis'
+    notes: 'Latest small embedding model for semantic search and analysis. Online: $0.02 per 1M tokens. Batch: $0.01 per 1M tokens'
   },
   {
     modelId: 'text-embedding-3-large',
     modelName: 'Text Embedding 3 Large',
     provider: 'OpenAI',
     inputPrice: 0.13,
-    outputPrice: 0.13,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 8191,
     capabilities: ['embedding', 'semantic-search', 'high-quality'],
     category: 'embedding',
     isLatest: true,
-    notes: 'Latest large embedding model with highest quality for semantic search'
+    notes: 'Latest large embedding model with highest quality for semantic search. Online: $0.13 per 1M tokens. Batch: $0.065 per 1M tokens'
   },
   {
     modelId: 'text-embedding-ada-002',
     modelName: 'Text Embedding Ada 002',
     provider: 'OpenAI',
     inputPrice: 0.10,
-    outputPrice: 0.10,
+    outputPrice: 0.0,
     unit: PricingUnit.PER_1M_TOKENS,
     contextWindow: 8191,
     capabilities: ['embedding', 'semantic-search'],
     category: 'embedding',
     isLatest: false,
-    notes: 'Previous generation embedding model for semantic search'
+    notes: 'Previous generation embedding model for semantic search. Online: $0.10 per 1M tokens. Batch: $0.05 per 1M tokens'
   },
 
   // === ChatGPT Models ===
@@ -713,7 +873,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal', 'chat'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'GPT-4o model used in ChatGPT (not recommended for API use)'
+    notes: 'GPT-4o model used in ChatGPT (not recommended for API use). Standard: $5.00/$15.00 per 1M tokens. Batch: $5.00/$15.00'
   },
 
   // === Legacy and Deprecated Models ===
@@ -728,7 +888,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Deprecated - Large model'
+    notes: 'Deprecated - Large model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
   },
   {
     modelId: 'o1-preview',
@@ -741,7 +901,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'reasoning', 'analysis'],
     category: 'reasoning',
     isLatest: false,
-    notes: 'Deprecated - Preview of our first o-series reasoning model'
+    notes: 'Deprecated - Preview of our first o-series reasoning model. Standard: $15.00/$60.00 per 1M tokens. Batch: $7.50/$30.00'
   },
   {
     modelId: 'text-moderation-latest',
@@ -780,7 +940,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Deprecated - Replacement for the GPT-3 ada and babbage base models. Batch: $0.20/$0.20'
+    notes: 'Deprecated - Replacement for the GPT-3 ada and babbage base models. Standard: $0.40/$0.40 per 1M tokens. Batch: $0.20/$0.20. Fine-tuning: $0.40 training, $1.60/$1.60 (standard), $0.80/$0.90 (batch)'
   },
   {
     modelId: 'davinci-002',
@@ -793,7 +953,98 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Deprecated - Replacement for the GPT-3 curie and davinci base models. Batch: $1.00/$1.00'
+    notes: 'Deprecated - Replacement for the GPT-3 curie and davinci base models. Standard: $2.00/$2.00 per 1M tokens. Batch: $1.00/$1.00. Fine-tuning: $6.00 training, $12.00/$12.00 (standard), $6.00/$6.00 (batch)'
+  },
+  {
+    modelId: 'gpt-4-turbo-2024-04-09',
+    modelName: 'GPT-4 Turbo (2024-04-09)',
+    provider: 'OpenAI',
+    inputPrice: 10.00,
+    outputPrice: 30.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'vision', 'multimodal'],
+    category: 'multimodal',
+    isLatest: false,
+    notes: 'Legacy GPT-4 Turbo model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
+  },
+  {
+    modelId: 'gpt-4-0125-preview',
+    modelName: 'GPT-4 (0125 Preview)',
+    provider: 'OpenAI',
+    inputPrice: 10.00,
+    outputPrice: 30.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'vision', 'multimodal'],
+    category: 'multimodal',
+    isLatest: false,
+    notes: 'Legacy GPT-4 preview model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
+  },
+  {
+    modelId: 'gpt-4-1106-preview',
+    modelName: 'GPT-4 (1106 Preview)',
+    provider: 'OpenAI',
+    inputPrice: 10.00,
+    outputPrice: 30.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'vision', 'multimodal'],
+    category: 'multimodal',
+    isLatest: false,
+    notes: 'Legacy GPT-4 preview model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
+  },
+  {
+    modelId: 'gpt-4-1106-vision-preview',
+    modelName: 'GPT-4 Vision (1106 Preview)',
+    provider: 'OpenAI',
+    inputPrice: 10.00,
+    outputPrice: 30.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 128000,
+    capabilities: ['text', 'vision', 'multimodal'],
+    category: 'multimodal',
+    isLatest: false,
+    notes: 'Legacy GPT-4 vision preview model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
+  },
+  {
+    modelId: 'gpt-4-0613',
+    modelName: 'GPT-4 (0613)',
+    provider: 'OpenAI',
+    inputPrice: 30.00,
+    outputPrice: 60.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 8192,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-4 model. Standard: $30.00/$60.00 per 1M tokens. Batch: $15.00/$30.00'
+  },
+  {
+    modelId: 'gpt-4-0314',
+    modelName: 'GPT-4 (0314)',
+    provider: 'OpenAI',
+    inputPrice: 30.00,
+    outputPrice: 60.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 8192,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-4 model. Standard: $30.00/$60.00 per 1M tokens. Batch: $15.00/$30.00'
+  },
+  {
+    modelId: 'gpt-4-32k',
+    modelName: 'GPT-4 32K',
+    provider: 'OpenAI',
+    inputPrice: 60.00,
+    outputPrice: 120.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 32768,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-4 model with 32K context. Standard: $60.00/$120.00 per 1M tokens. Batch: $30.00/$60.00'
   },
   {
     modelId: 'gpt-4o-mini',
@@ -806,7 +1057,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Fast, affordable small model for focused tasks'
+    notes: 'Fast, affordable small model for focused tasks. Standard: $0.15/$0.60 per 1M tokens. Batch: $0.075/$0.30'
   },
   {
     modelId: 'gpt-4o',
@@ -819,7 +1070,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Fast, intelligent, flexible GPT model'
+    notes: 'Fast, intelligent, flexible GPT model. Standard: $2.50/$10.00 per 1M tokens. Batch: $1.25/$5.00'
   },
   {
     modelId: 'gpt-4-turbo',
@@ -832,7 +1083,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text', 'vision', 'multimodal'],
     category: 'multimodal',
     isLatest: false,
-    notes: 'Legacy GPT-4 Turbo model'
+    notes: 'Legacy GPT-4 Turbo model. Standard: $10.00/$30.00 per 1M tokens. Batch: $5.00/$15.00'
   },
   {
     modelId: 'gpt-4',
@@ -845,7 +1096,7 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Legacy GPT-4 base model'
+    notes: 'Legacy GPT-4 base model. Standard: $30.00/$60.00 per 1M tokens. Batch: $15.00/$30.00'
   },
   {
     modelId: 'gpt-3.5-turbo-0125',
@@ -858,7 +1109,72 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Legacy GPT-3.5 Turbo model'
+    notes: 'Legacy GPT-3.5 Turbo model. Standard: $0.50/$1.50 per 1M tokens. Batch: $0.25/$0.75. Fine-tuning: $8.00 training, $3.00/$6.00 (standard), $1.50/$3.00 (batch)'
+  },
+  {
+    modelId: 'gpt-3.5-turbo-1106',
+    modelName: 'GPT-3.5 Turbo (1106)',
+    provider: 'OpenAI',
+    inputPrice: 1.00,
+    outputPrice: 2.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 16385,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-3.5 Turbo model. Standard: $1.00/$2.00 per 1M tokens. Batch: $1.00/$2.00'
+  },
+  {
+    modelId: 'gpt-3.5-turbo-0613',
+    modelName: 'GPT-3.5 Turbo (0613)',
+    provider: 'OpenAI',
+    inputPrice: 1.50,
+    outputPrice: 2.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 16385,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-3.5 Turbo model. Standard: $1.50/$2.00 per 1M tokens. Batch: $1.50/$2.00'
+  },
+  {
+    modelId: 'gpt-3.5-0301',
+    modelName: 'GPT-3.5 (0301)',
+    provider: 'OpenAI',
+    inputPrice: 1.50,
+    outputPrice: 2.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 16385,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-3.5 model. Standard: $1.50/$2.00 per 1M tokens. Batch: $1.50/$2.00'
+  },
+  {
+    modelId: 'gpt-3.5-turbo-16k-0613',
+    modelName: 'GPT-3.5 Turbo 16K (0613)',
+    provider: 'OpenAI',
+    inputPrice: 3.00,
+    outputPrice: 4.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 16385,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-3.5 Turbo model with 16K context. Standard: $3.00/$4.00 per 1M tokens. Batch: $1.50/$2.00'
+  },
+  {
+    modelId: 'gpt-3.5-turbo-instruct',
+    modelName: 'GPT-3.5 Turbo Instruct',
+    provider: 'OpenAI',
+    inputPrice: 1.50,
+    outputPrice: 2.00,
+    unit: PricingUnit.PER_1M_TOKENS,
+    contextWindow: 16385,
+    capabilities: ['text'],
+    category: 'text',
+    isLatest: false,
+    notes: 'Legacy GPT-3.5 Turbo Instruct model. Standard: $1.50/$2.00 per 1M tokens'
   },
   {
     modelId: 'gpt-3.5-turbo',
@@ -871,6 +1187,6 @@ export const OPENAI_PRICING: ModelPricing[] = [
     capabilities: ['text'],
     category: 'text',
     isLatest: false,
-    notes: 'Legacy GPT-3.5 Turbo model'
+    notes: 'Legacy GPT-3.5 Turbo model. Standard: $0.50/$1.50 per 1M tokens. Batch: $0.25/$0.75. Fine-tuning: $8.00 training, $3.00/$6.00 (standard), $1.50/$3.00 (batch)'
   }
 ]; 
