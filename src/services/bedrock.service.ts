@@ -9,6 +9,7 @@ import { loggingService } from './logging.service';
 import { AICostTrackingService } from './aiCostTracking.service';
 import { decodeFromTOON } from '../utils/toon.utils';
 import { S3Service } from './s3.service';
+import { RawPricingData, LLMExtractionResult } from '../types/modelDiscovery.types';
 
 interface PromptOptimizationRequest {
     prompt: string;
@@ -1511,6 +1512,205 @@ Format your response as JSON:
             });
 
             throw error;
+        }
+    }
+
+    /**
+     * Extract model names from search results using Nova Pro
+     * Phase 1 of model discovery
+     */
+    static async extractModelsFromText(provider: string, searchText: string): Promise<LLMExtractionResult> {
+        try {
+            const prompt = `Analyze the following search results about ${provider} AI models and extract a list of all model names/IDs mentioned.
+
+Search Content:
+${searchText}
+
+Your task: Extract ONLY the model names or model IDs. Return a JSON array of strings.
+
+Example output format:
+["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "claude-3-5-sonnet", "gemini-1.5-pro"]
+
+Rules:
+1. Include ONLY official model names/IDs, not marketing names
+2. Include version numbers if present (e.g., "gpt-4-turbo", "claude-3-5-sonnet-20241022")
+3. Do NOT include pricing information
+4. Do NOT include descriptions or explanations
+5. Return ONLY the JSON array, nothing else
+
+Return your response as a valid JSON array:`;
+
+            const result = await this.invokeModel(
+                prompt,
+                'us.amazon.nova-pro-v1:0'
+            );
+
+            // Parse the JSON response
+            let models: string[];
+            try {
+                const cleanResponse = result.trim()
+                    .replace(/^```json\n?/, '')
+                    .replace(/\n?```$/, '')
+                    .trim();
+                models = JSON.parse(cleanResponse);
+            } catch (parseError) {
+                loggingService.error('Failed to parse model names from LLM response', {
+                    response: result,
+                    error: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+                return {
+                    success: false,
+                    error: 'Failed to parse JSON response',
+                    prompt,
+                    response: result
+                };
+            }
+
+            loggingService.info(`Extracted ${models.length} models for ${provider}`, {
+                provider,
+                modelsCount: models.length
+            });
+
+            return {
+                success: true,
+                data: models,
+                prompt,
+                response: result.result
+            };
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Error extracting models from text', {
+                provider,
+                error: errorMessage
+            });
+            return {
+                success: false,
+                error: errorMessage,
+                prompt: '',
+                response: ''
+            };
+        }
+    }
+
+    /**
+     * Extract pricing data from search results using Nova Pro
+     * Phase 2 of model discovery
+     */
+    static async extractPricingFromText(
+        provider: string,
+        modelName: string,
+        searchText: string
+    ): Promise<LLMExtractionResult> {
+        try {
+            const prompt = `Analyze the following search results about ${provider}'s ${modelName} model and extract precise pricing information.
+
+Search Content:
+${searchText}
+
+Return ONLY valid JSON with this exact structure:
+{
+  "modelId": "exact-model-identifier",
+  "modelName": "Human readable name",
+  "inputPricePerMToken": 2.50,
+  "outputPricePerMToken": 10.00,
+  "cachedInputPricePerMToken": 1.25,
+  "contextWindow": 128000,
+  "capabilities": ["text", "multimodal", "code"],
+  "category": "text",
+  "isLatest": true
+}
+
+CRITICAL PRICING CONVERSION RULES:
+- Prices MUST be in dollars per MILLION tokens (not per 1K tokens)
+- If you see "$2.50 per 1M tokens" or "$2.50 per million tokens" → use 2.50
+- If you see "$0.50 per 1K tokens" or "$0.50 per thousand tokens" → convert to 500.0 (multiply by 1000)
+- If you see "$15 per 1M tokens" → use 15.0
+- DO NOT multiply prices that are already per million tokens!
+
+**CRITICAL DECIMAL HANDLING:**
+- When parsing numbers, ensure that decimal points are correctly interpreted
+- For example, "$1.750" means ONE dollar and 75 cents, NOT $1750!
+- Always treat a period (.) as a decimal separator
+- "$1.750 per 1M tokens" → 1.75 (NOT 1750)
+- "$0.075 per 1M tokens" → 0.075 (NOT 75)
+
+FIELD REQUIREMENTS:
+- modelId: Use the exact technical identifier (e.g., "gpt-4o", "claude-3-5-sonnet-20241022")
+- modelName: Human-readable name (e.g., "GPT-4o", "Claude 3.5 Sonnet")
+- inputPricePerMToken: MUST be a number in dollars per million tokens
+- outputPricePerMToken: MUST be a number in dollars per million tokens
+- cachedInputPricePerMToken: Optional, only if cached pricing exists
+- contextWindow: Maximum context window in tokens (e.g., 128000, 200000)
+- capabilities: Array of strings like "text", "multimodal", "code", "reasoning", "vision", "image"
+- category: ONE of: "text", "multimodal", "embedding", "code"
+- isLatest: true if this is the newest/recommended model, false otherwise
+
+EXAMPLES OF CORRECT CONVERSIONS:
+- "$2.50 per 1M tokens" → inputPricePerMToken: 2.50
+- "$10.00 per million tokens" → outputPricePerMToken: 10.00
+- "$0.15 per 1M tokens" → inputPricePerMToken: 0.15
+- "$0.50 per 1K tokens" → inputPricePerMToken: 500.0
+- "$30 per million tokens" → outputPricePerMToken: 30.0
+- "$1.750 per 1M tokens" → inputPricePerMToken: 1.75 (ONE dollar and 75 cents)
+- "$0.075 per 1M tokens" → inputPricePerMToken: 0.075 (7.5 cents)
+
+Return ONLY the JSON object, no markdown formatting, no additional text.`;
+
+            const result = await this.invokeModel(
+                prompt,
+                'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
+            );
+
+            // Parse the JSON response
+            let pricingData: RawPricingData;
+            try {
+                const cleanResponse = result.trim()
+                    .replace(/^```json\n?/, '')
+                    .replace(/\n?```$/, '')
+                    .trim();
+                pricingData = JSON.parse(cleanResponse);
+            } catch (parseError) {
+                loggingService.error('Failed to parse pricing data from LLM response', {
+                    modelName,
+                    response: result,
+                    error: parseError instanceof Error ? parseError.message : String(parseError)
+                });
+                return {
+                    success: false,
+                    error: 'Failed to parse JSON response',
+                    prompt,
+                    response: result
+                };
+            }
+
+            loggingService.info(`Extracted pricing for ${provider} ${modelName}`, {
+                provider,
+                modelName,
+                inputPrice: pricingData.inputPricePerMToken,
+                outputPrice: pricingData.outputPricePerMToken
+            });
+
+            return {
+                success: true,
+                data: pricingData,
+                prompt,
+                response: result
+            };
+
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error('Error extracting pricing from text', {
+                provider,
+                modelName,
+                error: errorMessage
+            });
+            return {
+                success: false,
+                error: errorMessage,
+                prompt: '',
+                response: ''
+            };
         }
     }
 }

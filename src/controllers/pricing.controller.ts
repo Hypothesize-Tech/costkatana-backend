@@ -215,6 +215,24 @@ export class PricingController {
         }
     }
 
+    // Clear all pricing caches
+    static async clearCache(_req: Request, res: Response): Promise<void> {
+        try {
+            RealtimePricingService.clearCache();
+
+            res.json({
+                success: true,
+                message: 'All pricing caches cleared successfully'
+            });
+        } catch (error) {
+            loggingService.error('Error clearing cache:', { error: error instanceof Error ? error.message : String(error) });
+            res.status(500).json({
+                success: false,
+                error: 'Failed to clear cache'
+            });
+        }
+    }
+
     // Initialize pricing service
     static async initialize(_req: Request, res: Response): Promise<void> {
         try {
@@ -280,33 +298,27 @@ export class PricingController {
             // If no providers specified, scrape all
             const providersToScrape = providers && providers.length > 0
                 ? providers
-                : ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral'];
+                : ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral', 'Grok'];
 
             // Start scraping in background (don't wait for completion)
-            const scrapingPromise = WebScraperService.scrapeAllProviders();
+            const results = await WebScraperService.scrapeAllProviders();
 
             // Return immediately with status
             res.json({
                 success: true,
                 data: {
-                    message: 'Web scraping initiated',
-                    scrapingStatus: providersToScrape.map((provider: string) => ({
-                        provider,
-                        status: 'pending',
-                        progress: 0,
-                        message: 'Scraping queued',
-                        lastAttempt: new Date()
+                    message: 'Web scraping completed',
+                    scrapingStatus: results.map(result => ({
+                        provider: result.provider,
+                        status: result.success ? 'completed' : 'failed',
+                        progress: result.success ? 100 : 0,
+                        message: result.success ? 'Scraping completed' : result.error || 'Scraping failed',
+                        lastAttempt: result.scrapedAt
                     }))
                 }
             });
 
-            // Handle scraping completion in background
-            scrapingPromise.then(results => {
-                loggingService.info(`🎉 Web scraping completed for ${results.length} providers`);
-            }).catch(error => {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                loggingService.error(`❌ Web scraping failed: ${errorMessage}`);
-            });
+            loggingService.info(`🎉 Web scraping completed for ${results.length} providers`);
 
         } catch (error) {
             loggingService.error('Error triggering scraping:', { error: error instanceof Error ? error.message : String(error) });

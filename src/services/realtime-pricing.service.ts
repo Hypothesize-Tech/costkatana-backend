@@ -3,6 +3,7 @@ import { bedrockClient, AWS_CONFIG } from '../config/aws';
 import { loggingService } from './logging.service';
 import { retryBedrockOperation } from '../utils/bedrockRetry';
 import { WebScraperService } from './web-scraper.service';
+import { AIModelPricing } from '../models/AIModelPricing';
 
 export interface ProviderPricing {
     provider: string;
@@ -40,7 +41,7 @@ export interface PricingComparison {
 export class RealtimePricingService {
     private static pricingCache = new Map<string, ProviderPricing>();
     private static lastUpdateTime = new Map<string, Date>();
-    private static updateInterval = 30 * 60 * 1000; // 30 minutes
+    private static updateInterval = 24 * 60 * 60 * 1000; // 24 hours
     private static isUpdating = false;
     
     // Background processing queue
@@ -165,7 +166,23 @@ export class RealtimePricingService {
     }
 
     private static async extractPricingData(provider: string, scrapedContent: string): Promise<ProviderPricing> {
-        const extractPrompt = `Extract structured pricing data from the following official pricing page content for ${provider}.
+        const extractPrompt = `Extract structured pricing data from the following content for ${provider}.
+        
+        IMPORTANT: Extract pricing information from the provided content. If specific pricing is not found, use these reference prices:
+        
+        OpenAI Reference Prices (2025):
+        - GPT-4o: $2.50/$10.00 per 1M tokens (input/output)
+        - GPT-4o mini: $0.15/$0.60 per 1M tokens  
+        - GPT-4.1: $10.00/$30.00 per 1M tokens
+        - GPT-4.1 mini: $0.30/$1.20 per 1M tokens
+        - GPT-3.5 Turbo: $0.50/$1.50 per 1M tokens
+        - o3: $15.00/$60.00 per 1M tokens
+        - o3-mini: $1.20/$4.80 per 1M tokens
+        
+        Grok/xAI Reference Prices (2025):
+        - Grok 2 (grok-2-1212): $2.00/$10.00 per 1M tokens
+        - Grok 2 Vision (grok-2-vision-1212): $2.00/$10.00 per 1M tokens  
+        - Grok Beta (grok-beta): $5.00/$15.00 per 1M tokens
         
         This is real content scraped from ${provider}'s official pricing page. Extract ALL models and their pricing information.
         
@@ -191,7 +208,12 @@ export class RealtimePricingService {
         ${scrapedContent}
 
         Critical Instructions:
-        - Convert ALL prices to per MILLION tokens format (e.g., if you see $0.50 per 1K tokens, convert to 500 per million tokens)
+        - If provider is "Grok", make sure to use Grok model names (grok-2-1212, grok-2-vision-1212, grok-beta), NOT OpenAI model names
+        - IMPORTANT: Prices should be in DOLLARS per MILLION tokens. 
+          * If you see "$2.50 per 1M tokens" or "$2.50 per million tokens", use 2.50
+          * If you see "$0.50 per 1K tokens" or "$0.50 per thousand tokens", convert to 500 per million tokens
+          * If you see "$15 per 1M tokens", use 15.0
+          * DO NOT multiply prices that are already per million tokens!
         - Extract ALL models mentioned, including different versions and sizes
         - Use exact model names/IDs as they appear on the pricing page
         - Mark the newest/latest models as isLatest: true
@@ -200,6 +222,13 @@ export class RealtimePricingService {
         - For capabilities, include relevant tags like: text, multimodal, code, reasoning, analysis, embedding, image, vision
         - Category should be the primary use case: text, multimodal, embedding, or code
         - Ensure ALL numeric values are actual numbers, not strings
+        
+        Example pricing conversions:
+        - "$2.50 per 1M tokens" → inputPricePerMToken: 2.5
+        - "$10.00 per million tokens" → outputPricePerMToken: 10.0
+        - "$0.15 per 1M tokens" → inputPricePerMToken: 0.15
+        - "$0.50 per 1K tokens" → inputPricePerMToken: 500.0
+        - "$30 per million tokens" → outputPricePerMToken: 30.0
         
         Return ONLY valid JSON without markdown formatting or additional text.`;
 
@@ -248,7 +277,7 @@ export class RealtimePricingService {
         }
     }
 
-    private static async updateProviderPricing(provider: string): Promise<ProviderPricing> {
+        private static async updateProviderPricing(provider: string): Promise<ProviderPricing> {
         try {
             loggingService.info(`Updating pricing for ${provider}`);
 
@@ -274,7 +303,7 @@ export class RealtimePricingService {
         }
 
         this.isUpdating = true;
-        const providers = ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral'];
+        const providers = ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral', 'Grok'];
 
         try {
             loggingService.info('Starting pricing update for all providers');
@@ -296,89 +325,105 @@ export class RealtimePricingService {
     }
 
     static async getPricingForProvider(provider: string): Promise<ProviderPricing | null> {
-        const cached = this.pricingCache.get(provider);
-        const lastUpdate = this.lastUpdateTime.get(provider);
+        try {
+            // Query MongoDB for active models
+            const models = await AIModelPricing.find({
+                provider: this.normalizeProviderName(provider),
+                isActive: true,
+                isDeprecated: false,
+                validationStatus: 'verified'
+            }).sort({ isLatest: -1, lastUpdated: -1 });
 
-        // If no cache or cache is older than 1 hour, update
-        if (!cached || !lastUpdate || Date.now() - lastUpdate.getTime() > 60 * 60 * 1000) {
-            try {
-                return await this.updateProviderPricing(provider);
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                loggingService.error(`Failed to get updated pricing for ${provider}, returning cached: ${errorMessage}`);
-                return cached || null;
+            if (models.length === 0) {
+                loggingService.warn(`No models found in MongoDB for ${provider}, using fallback`);
+                // Fall back to cache if MongoDB has no data
+                const cached = this.pricingCache.get(provider);
+                if (cached) {
+                    return cached;
+                }
+                return null;
             }
-        }
 
-        return cached;
+            const providerPricing: ProviderPricing = {
+                provider,
+                models: models.map(m => ({
+                    modelId: m.modelId,
+                    modelName: m.modelName,
+                    inputPricePerMToken: m.inputPricePerMToken,
+                    outputPricePerMToken: m.outputPricePerMToken,
+                    contextWindow: m.contextWindow,
+                    capabilities: m.capabilities,
+                    category: m.category,
+                    isLatest: m.isLatest
+                })),
+                source: `MongoDB (${models[0]?.discoverySource})`,
+                lastUpdated: models[0]?.lastUpdated || new Date()
+            };
+
+            // Update cache
+            this.pricingCache.set(provider, providerPricing);
+            this.lastUpdateTime.set(provider, new Date());
+
+            return providerPricing;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            loggingService.error(`Error getting pricing from MongoDB for ${provider}: ${errorMessage}`);
+            
+            // Fall back to cache
+            const cached = this.pricingCache.get(provider);
+            return cached || null;
+        }
+    }
+
+    /**
+     * Normalize provider names to match MongoDB schema
+     */
+    private static normalizeProviderName(provider: string): string {
+        const mapping: Record<string, string> = {
+            'OpenAI': 'openai',
+            'Anthropic': 'anthropic',
+            'Google AI': 'google-ai',
+            'AWS Bedrock': 'aws-bedrock',
+            'Cohere': 'cohere',
+            'Mistral': 'mistral',
+            'Grok': 'xai'
+        };
+        return mapping[provider] || provider.toLowerCase();
     }
 
     static async getAllPricing(): Promise<ProviderPricing[]> {
-        const providers = ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral'];
+        const providers = ['OpenAI', 'Anthropic', 'Google AI', 'AWS Bedrock', 'Cohere', 'Mistral', 'Grok'];
         const results: ProviderPricing[] = [];
-        const uncachedProviders: string[] = [];
 
-        // First pass: collect all cached data immediately
-        for (const provider of providers) {
-            const cached = this.pricingCache.get(provider);
-            const lastUpdate = this.lastUpdateTime.get(provider);
+        // Fetch from MongoDB for all providers in parallel
+        const providerPromises = providers.map(provider => 
+            this.getPricingForProvider(provider).catch(error => {
+                loggingService.error(`Error fetching pricing for ${provider}`, {
+                    error: error instanceof Error ? error.message : String(error)
+                });
+                return null;
+            })
+        );
 
-            // Use cache if available and not too old (6 hours)
-            const cacheMaxAge = 6 * 60 * 60 * 1000; // 6 hours
-            if (cached && lastUpdate && Date.now() - lastUpdate.getTime() < cacheMaxAge) {
-                results.push(cached);
-            } else {
-                // Mark for background update but don't block
-                uncachedProviders.push(provider);
+        const providerResults = await Promise.all(providerPromises);
 
-                // If we have any cached data (even if stale), use it for immediate response
-                if (cached) {
-                    results.push(cached);
-                }
+        // Collect non-null results
+        for (const result of providerResults) {
+            if (result) {
+                results.push(result);
             }
         }
 
-        // Trigger background updates for uncached/stale providers (don't await)
-        if (uncachedProviders.length > 0) {
-            loggingService.info(`Triggering background updates for ${uncachedProviders.length} providers: ${uncachedProviders.join(', ')}`);
-
-            // Start background updates without blocking the response
-            this.updateProvidersInBackground(uncachedProviders).catch(error => {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                loggingService.error(`Background update failed: ${errorMessage}`);
-            });
-        }
-
-        // If we have no cached data at all, return fallback data to avoid empty response
+        // If we got no results from MongoDB, try fallback
         if (results.length === 0) {
-            loggingService.warn('No cached pricing data available, generating fallback data');
+            loggingService.warn('No pricing data from MongoDB, using fallback');
             return await this.generateFallbackPricingData();
         }
 
-        loggingService.info(`Returning ${results.length} cached pricing providers`);
         return results;
     }
 
-    private static async updateProvidersInBackground(providers: string[]): Promise<void> {
-        loggingService.info(`Starting background update for providers: ${providers.join(', ')}`);
-
-        // Update providers in parallel for faster completion
-        const updatePromises = providers.map(async (provider) => {
-            try {
-                loggingService.info(`Background update starting for ${provider}`);
-                const pricingData = await this.updateProviderPricing(provider);
-                loggingService.info(`Background update completed for ${provider}`);
-                return pricingData;
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                loggingService.error(`Background update failed for ${provider}: ${errorMessage}`);
-                return null;
-            }
-        });
-
-        await Promise.all(updatePromises);
-        loggingService.info(`Background update completed for all providers`);
-    }
+    
 
     private static async generateFallbackPricingData(): Promise<ProviderPricing[]> {
         // When no cache exists, generate basic fallback data from web scraper fallbacks
@@ -561,5 +606,16 @@ export class RealtimePricingService {
         // Clear caches
         this.contentCache.clear();
         this.providerStrategies.clear();
+    }
+
+    /**
+     * Clear all pricing caches
+     */
+    static clearCache(): void {
+        loggingService.info('Clearing all pricing caches');
+        this.pricingCache.clear();
+        this.lastUpdateTime.clear();
+        this.contentCache.clear();
+        loggingService.info('All pricing caches cleared successfully');
     }
 } 
