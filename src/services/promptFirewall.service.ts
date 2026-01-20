@@ -26,7 +26,7 @@ export interface ThreatDetectionResult {
     threatCategory?: string;
     confidence: number;
     reason: string;
-    stage: 'prompt-guard' | 'llama-guard' | 'rag-guard' | 'tool-guard';
+    stage: 'prompt-guard' | 'openai-safeguard' | 'rag-guard' | 'tool-guard';
     details?: any;
     matchedPatterns?: string[];
     riskScore?: number;
@@ -40,7 +40,7 @@ export interface FirewallConfig {
     enableRAGSecurity: boolean;
     enableToolSecurity: boolean;
     promptGuardThreshold: number; // 0.0 to 1.0
-    llamaGuardThreshold: number; // 0.0 to 1.0
+    openaiSafeguardThreshold: number; // 0.0 to 1.0
     ragSecurityThreshold: number; // 0.0 to 1.0
     toolSecurityThreshold: number; // 0.0 to 1.0
     sandboxHighRisk: boolean;
@@ -251,7 +251,7 @@ export class PromptFirewallService {
 
             // Stage 2: Advanced AI-based detection (Deep content analysis for all threat categories)
             if (config.enableAdvancedFirewall) {
-                const aiDetectionResult = await this.runAIDetection(textToScan, config.llamaGuardThreshold, isHTML, preparedContent.metadata);
+                const aiDetectionResult = await this.runAIDetection(textToScan, config.openaiSafeguardThreshold, isHTML, preparedContent.metadata);
                 
                 // Log ALL threats detected by AI, even if confidence is below blocking threshold
                 // This ensures compliance tracking and monitoring
@@ -299,7 +299,7 @@ export class PromptFirewallService {
                 isBlocked: false,
                 confidence: 0.0,
                 reason: 'No threats detected',
-                stage: config.enableAdvancedFirewall ? 'llama-guard' : 'prompt-guard',
+                stage: config.enableAdvancedFirewall ? 'openai-safeguard' : 'prompt-guard',
                 containmentAction: 'allow'
             };
 
@@ -308,7 +308,7 @@ export class PromptFirewallService {
                 isBlocked: false,
                 confidence: 0.0,
                 reason: 'Prompt passed all security checks',
-                stage: config.enableAdvancedFirewall ? 'llama-guard' : 'prompt-guard'
+                stage: config.enableAdvancedFirewall ? 'openai-safeguard' : 'prompt-guard'
             };
 
         } catch (error) {
@@ -690,7 +690,7 @@ JSON Response:`;
                 threatCategory: normalizedCategory,
                 confidence: detectionResult.confidence ?? 0.9,
                 reason: detectionResult.reason ?? 'AI detected security threat',
-                stage: 'llama-guard',
+                stage: 'openai-safeguard',
                 matchedPatterns: detectionResult.matchedPatterns ?? [],
                 riskScore: detectionResult.confidence ?? 0.9,
                 containmentAction: (detectionResult.confidence ?? 0.9) > 0.8 ? 'block' : 'sandbox',
@@ -715,7 +715,7 @@ JSON Response:`;
             isBlocked: false,
             confidence: detectionResult?.confidence ?? 0.1,
             reason: 'No threats detected by AI analysis',
-            stage: 'llama-guard',
+            stage: 'openai-safeguard',
             details: {
                 method: modelId.includes('120b') ? 'safeguard_120b' : 
                         modelId.includes('20b') ? 'safeguard_20b' : 
@@ -802,7 +802,7 @@ JSON Response:`;
                     threatCategory: 'harmful_content',
                     confidence: maxConfidence,
                     reason: 'Content contains potentially harmful patterns (optimized check)',
-                    stage: 'llama-guard',
+                    stage: 'openai-safeguard',
                     matchedPatterns,
                     riskScore: maxConfidence,
                     containmentAction: 'block',
@@ -818,7 +818,7 @@ JSON Response:`;
             isBlocked: false,
             confidence: maxConfidence,
             reason: 'No harmful content detected (optimized check)',
-            stage: 'llama-guard',
+            stage: 'openai-safeguard',
             containmentAction: 'allow',
             details: {
                 method: 'optimized_content_filtering',
@@ -1043,7 +1043,7 @@ JSON Response:`;
             enableRAGSecurity: true,
             enableToolSecurity: true,
             promptGuardThreshold: 0.5, // 50% confidence threshold
-            llamaGuardThreshold: 0.8,   // 80% confidence threshold
+            openaiSafeguardThreshold: 0.8,   // 80% confidence threshold
             ragSecurityThreshold: 0.6,  // 60% confidence threshold for RAG threats
             toolSecurityThreshold: 0.7, // 70% confidence threshold for tool security
             sandboxHighRisk: true,       // Sandbox high-risk requests instead of blocking
@@ -1096,10 +1096,10 @@ JSON Response:`;
             }
         }
         
-        if (headers['costkatana-firewall-llama-threshold']) {
-            const threshold = parseFloat(headers['costkatana-firewall-llama-threshold']);
+        if (headers['costkatana-firewall-openai-threshold']) {
+            const threshold = parseFloat(headers['costkatana-firewall-openai-threshold']);
             if (!isNaN(threshold) && threshold >= 0 && threshold <= 1) {
-                config.llamaGuardThreshold = threshold;
+                config.openaiSafeguardThreshold = threshold;
             }
         }
         
