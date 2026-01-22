@@ -6,7 +6,7 @@ export interface IThreatLog extends Document {
     userId?: ObjectId;
     threatCategory: string;
     confidence: number;
-    stage: 'prompt-guard' | 'llama-guard';
+    stage: 'prompt-guard' | 'openai-safeguard';
     reason: string;
     details: any;
     costSaved: number;
@@ -63,7 +63,7 @@ const threatLogSchema = new Schema<IThreatLog>({
     stage: {
         type: String,
         required: true,
-        enum: ['prompt-guard', 'llama-guard', 'rag-guard', 'tool-guard', 'output-guard']
+        enum: ['prompt-guard', 'openai-safeguard', 'rag-guard', 'tool-guard', 'output-guard']
     },
     reason: {
         type: String,

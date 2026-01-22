@@ -330,7 +330,7 @@ export class ModerationController {
                     enableBasicFirewall: true,
                     enableAdvancedFirewall: true,
                     promptGuardThreshold: 0.7,
-                    llamaGuardThreshold: 0.7
+                    openaiSafeguardThreshold: 0.7
                 },
                 outputModeration: {
                     enableOutputModeration: true,
@@ -795,7 +795,7 @@ export class ModerationController {
                                     inputThreats: { 
                                         $sum: { 
                                             $cond: [
-                                                { $in: ['$stage', ['prompt-guard', 'llama-guard']] }, 
+                                                { $in: ['$stage', ['prompt-guard', 'openai-safeguard']] }, 
                                                 1, 
                                                 0
                                             ]
@@ -813,7 +813,7 @@ export class ModerationController {
                                     inputCostSaved: { 
                                         $sum: { 
                                             $cond: [
-                                                { $in: ['$stage', ['prompt-guard', 'llama-guard']] }, 
+                                                { $in: ['$stage', ['prompt-guard', 'openai-safeguard']] }, 
                                                 '$costSaved', 
                                                 0
                                             ]
@@ -835,7 +835,7 @@ export class ModerationController {
                         inputThreatsByCategory: [
                             {
                                 $match: {
-                                    stage: { $in: ['prompt-guard', 'llama-guard'] }
+                                    stage: { $in: ['prompt-guard', 'openai-safeguard'] }
                                 }
                             },
                             {

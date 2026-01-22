@@ -219,7 +219,7 @@ export class LLMSecurityService {
                         isBlocked: false,
                         confidence: 0.0,
                         reason: 'Content contains only trusted domain links - bypassed security check',
-                        stage: 'llama-guard',
+                        stage: 'openai-safeguard',
                         containmentAction: 'allow'
                     }
                 };
@@ -245,7 +245,7 @@ export class LLMSecurityService {
                         isBlocked: false,
                         confidence: 0.0,
                         reason: 'Integration command - bypassed security check',
-                        stage: 'llama-guard',
+                        stage: 'openai-safeguard',
                         containmentAction: 'allow'
                     }
                 };
