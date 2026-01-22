@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r tsconfig-paths/register -r ts-node/register -r ./src/observability/register.ts src/server.ts\"",
-    "build": "NODE_OPTIONS='--max-old-space-size=8192' tsc",
+    "build": "NODE_OPTIONS='--max-old-space-size=8192' tsc && tsc-alias",
     "start": "SENTRY_RELEASE=$npm_package_version node --max-old-space-size=4096 --expose-gc -r ./dist/observability/register.js dist/server.js",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -187,6 +187,7 @@
     "supertest": "^7.1.4",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.3"
   },
