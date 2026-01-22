@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { KeyVaultService, CreateProxyKeyRequest } from '../services/keyVault.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // Validation schemas
 const createProviderKeySchema = z.object({
@@ -34,44 +36,14 @@ export class KeyVaultController {
     /**
      * Create a new provider key
      */
-    static async createProviderKey(req: any, res: Response): Promise<void> {
+    static async createProviderKey(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const validatedData = createProviderKeySchema.parse(req.body);
 
         try {
-            loggingService.info('Provider key creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                providerKeyName: validatedData.name,
-                provider: validatedData.provider,
-                hasDescription: !!validatedData.description,
-                hasApiKey: !!validatedData.apiKey,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Provider key creation failed - authentication required', {
-                    providerKeyName: validatedData.name,
-                    provider: validatedData.provider,
-                    hasDescription: !!validatedData.description,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Provider key creation processing started', {
-                userId,
-                providerKeyName: validatedData.name,
-                provider: validatedData.provider,
-                hasDescription: !!validatedData.description,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('createProviderKey', req);
 
             // Ensure all required fields are present
             const providerKeyRequest = {
@@ -95,24 +67,15 @@ export class KeyVaultController {
                 lastUsed: providerKey.lastUsed
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Provider key created successfully', {
-                userId,
-                providerKeyName: validatedData.name,
-                provider: validatedData.provider,
-                duration,
-                providerKeyId: providerKey._id,
-                hasDescription: !!validatedData.description,
-                isActive: providerKey.isActive,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('createProviderKey', req, startTime, {
+                providerKeyId: providerKey._id
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'provider_key_created',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     providerKeyName: validatedData.name,
@@ -129,19 +92,6 @@ export class KeyVaultController {
                 data: response
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Provider key creation failed', {
-                userId,
-                providerKeyName: validatedData?.name,
-                provider: validatedData?.provider,
-                hasDescription: !!validatedData?.description,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -150,69 +100,26 @@ export class KeyVaultController {
                 });
                 return;
             }
-
-            res.status(400).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('createProviderKey', error, req, res, startTime);
         }
     }
 
     /**
      * Create a new proxy key
      */
-    static async createProxyKey(req: any, res: Response): Promise<void> {
+    static async createProxyKey(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const validatedData = createProxyKeySchema.parse(req.body);
 
         try {
-            loggingService.info('Proxy key creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                proxyKeyName: validatedData.name,
-                providerKeyId: validatedData.providerKeyId,
-                hasDescription: !!validatedData.description,
-                hasProjectId: !!validatedData.projectId,
-                hasPermissions: !!validatedData.permissions && validatedData.permissions.length > 0,
-                hasBudgetLimits: !!(validatedData.budgetLimit || validatedData.dailyBudgetLimit || validatedData.monthlyBudgetLimit),
-                hasRateLimit: !!validatedData.rateLimit,
-                hasAllowedIPs: !!validatedData.allowedIPs && validatedData.allowedIPs.length > 0,
-                hasAllowedDomains: !!validatedData.allowedDomains && validatedData.allowedDomains.length > 0,
-                hasExpiresAt: !!validatedData.expiresAt,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Proxy key creation failed - authentication required', {
-                    proxyKeyName: validatedData.name,
-                    providerKeyId: validatedData.providerKeyId,
-                    hasDescription: !!validatedData.description,
-                    hasProjectId: !!validatedData.projectId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('createProxyKey', req);
+            
+            ServiceHelper.validateObjectId(validatedData.providerKeyId, 'providerKeyId');
+            if (validatedData.projectId) {
+                ServiceHelper.validateObjectId(validatedData.projectId, 'projectId');
             }
-
-            loggingService.info('Proxy key creation processing started', {
-                userId,
-                proxyKeyName: validatedData.name,
-                providerKeyId: validatedData.providerKeyId,
-                hasDescription: !!validatedData.description,
-                hasProjectId: !!validatedData.projectId,
-                hasPermissions: !!validatedData.permissions && validatedData.permissions.length > 0,
-                hasBudgetLimits: !!(validatedData.budgetLimit || validatedData.dailyBudgetLimit || validatedData.monthlyBudgetLimit),
-                hasRateLimit: !!validatedData.rateLimit,
-                hasAllowedIPs: !!validatedData.allowedIPs && validatedData.allowedIPs.length > 0,
-                hasAllowedDomains: !!validatedData.allowedDomains && validatedData.allowedDomains.length > 0,
-                hasExpiresAt: !!validatedData.expiresAt,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Convert expiresAt string to Date if provided and ensure required fields
             const requestData: CreateProxyKeyRequest = {
@@ -232,31 +139,15 @@ export class KeyVaultController {
 
             const proxyKey = await KeyVaultService.createProxyKey(userId, requestData);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Proxy key created successfully', {
-                userId,
-                proxyKeyName: validatedData.name,
-                providerKeyId: validatedData.providerKeyId,
-                duration,
-                proxyKeyId: proxyKey._id,
-                hasDescription: !!validatedData.description,
-                hasProjectId: !!validatedData.projectId,
-                hasPermissions: !!validatedData.permissions && validatedData.permissions.length > 0,
-                hasBudgetLimits: !!(validatedData.budgetLimit || validatedData.dailyBudgetLimit || validatedData.monthlyBudgetLimit),
-                hasRateLimit: !!validatedData.rateLimit,
-                hasAllowedIPs: !!validatedData.allowedIPs && validatedData.allowedIPs.length > 0,
-                hasAllowedDomains: !!validatedData.allowedDomains && validatedData.allowedDomains.length > 0,
-                hasExpiresAt: !!validatedData.expiresAt,
-                isActive: proxyKey.isActive,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('createProxyKey', req, startTime, {
+                proxyKeyId: proxyKey._id
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'proxy_key_created',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     proxyKeyName: validatedData.name,
@@ -298,72 +189,20 @@ export class KeyVaultController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Proxy key creation failed', {
-                userId,
-                proxyKeyName: validatedData?.name,
-                providerKeyId: validatedData?.providerKeyId,
-                hasDescription: !!validatedData?.description,
-                hasProjectId: !!validatedData?.projectId,
-                hasPermissions: !!validatedData?.permissions && validatedData?.permissions.length > 0,
-                hasBudgetLimits: !!(validatedData?.budgetLimit || validatedData?.dailyBudgetLimit || validatedData?.monthlyBudgetLimit),
-                hasRateLimit: !!validatedData?.rateLimit,
-                hasAllowedIPs: !!validatedData?.allowedIPs && validatedData?.allowedIPs.length > 0,
-                hasAllowedDomains: !!validatedData?.allowedDomains && validatedData?.allowedDomains.length > 0,
-                hasExpiresAt: !!validatedData?.expiresAt,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (error instanceof z.ZodError) {
-                res.status(400).json({
-                    success: false,
-                    error: 'Validation error',
-                    details: error.errors
-                });
-                return;
-            }
-
-            res.status(400).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('createProxyKey', error, req, res, startTime);
         }
     }
 
     /**
      * Get all provider keys for the authenticated user
      */
-    static async getProviderKeys(req: any, res: Response): Promise<void> {
+    static async getProviderKeys(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
 
         try {
-            loggingService.info('Provider keys retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Provider keys retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Provider keys retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getProviderKeys', req);
 
             const providerKeys = await KeyVaultService.getProviderKeys(userId);
 
@@ -379,21 +218,15 @@ export class KeyVaultController {
                 lastUsed: key.lastUsed
             }));
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Provider keys retrieved successfully', {
-                userId,
-                duration,
-                providerKeysCount: providerKeys.length,
-                hasProviderKeys: !!providerKeys && providerKeys.length > 0,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('getProviderKeys', req, startTime, {
+                providerKeysCount: providerKeys.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'provider_keys_retrieved',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     providerKeysCount: providerKeys.length,
@@ -406,80 +239,37 @@ export class KeyVaultController {
                 data: response
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Provider keys retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve provider keys'
-            });
+            ControllerHelper.handleError('getProviderKeys', error, req, res, startTime);
         }
     }
 
     /**
      * Get all proxy keys for the authenticated user
      */
-    static async getProxyKeys(req: any, res: Response): Promise<void> {
+    static async getProxyKeys(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const projectId = req.query.projectId as string;
 
         try {
-            loggingService.info('Proxy keys retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                projectId,
-                hasProjectId: !!projectId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Proxy keys retrieval failed - authentication required', {
-                    projectId,
-                    hasProjectId: !!projectId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getProxyKeys', req);
+            
+            if (projectId) {
+                ServiceHelper.validateObjectId(projectId, 'projectId');
             }
-
-            loggingService.info('Proxy keys retrieval processing started', {
-                userId,
-                projectId,
-                hasProjectId: !!projectId,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const proxyKeys = await KeyVaultService.getProxyKeys(userId, projectId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Proxy keys retrieved successfully', {
-                userId,
-                projectId,
-                hasProjectId: !!projectId,
-                duration,
-                proxyKeysCount: proxyKeys.length,
-                hasProxyKeys: !!proxyKeys && proxyKeys.length > 0,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('getProxyKeys', req, startTime, {
+                proxyKeysCount: proxyKeys.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'proxy_keys_retrieved',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     projectId,
@@ -494,91 +284,41 @@ export class KeyVaultController {
                 data: proxyKeys
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Proxy keys retrieval failed', {
-                userId,
-                projectId,
-                hasProjectId: !!projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve proxy keys'
-            });
+            ControllerHelper.handleError('getProxyKeys', error, req, res, startTime);
         }
     }
 
     /**
      * Delete a provider key
      */
-    static async deleteProviderKey(req: any, res: Response): Promise<void> {
+    static async deleteProviderKey(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const providerKeyId = req.params.providerKeyId;
 
         try {
-            loggingService.info('Provider key deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                providerKeyId,
-                hasProviderKeyId: !!providerKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Provider key deletion failed - authentication required', {
-                    providerKeyId,
-                    hasProviderKeyId: !!providerKeyId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('deleteProviderKey', req);
+            
             if (!providerKeyId) {
-                loggingService.warn('Provider key deletion failed - missing provider key ID', {
-                    userId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Provider key ID is required'
                 });
                 return;
             }
-
-            loggingService.info('Provider key deletion processing started', {
-                userId,
-                providerKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            
+            ServiceHelper.validateObjectId(providerKeyId, 'providerKeyId');
 
             await KeyVaultService.deleteProviderKey(userId, providerKeyId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Provider key deleted successfully', {
-                userId,
-                providerKeyId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('deleteProviderKey', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'provider_key_deleted',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     providerKeyId
@@ -590,90 +330,41 @@ export class KeyVaultController {
                 message: 'Provider key deleted successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Provider key deletion failed', {
-                userId,
-                providerKeyId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('deleteProviderKey', error, req, res, startTime);
         }
     }
 
     /**
      * Delete a proxy key
      */
-    static async deleteProxyKey(req: any, res: Response): Promise<void> {
+    static async deleteProxyKey(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const proxyKeyId = req.params.proxyKeyId;
 
         try {
-            loggingService.info('Proxy key deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Proxy key deletion failed - authentication required', {
-                    proxyKeyId,
-                    hasProxyKeyId: !!proxyKeyId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('deleteProxyKey', req);
+            
             if (!proxyKeyId) {
-                loggingService.warn('Proxy key deletion failed - missing proxy key ID', {
-                    userId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Proxy key ID is required'
                 });
                 return;
             }
-
-            loggingService.info('Proxy key deletion processing started', {
-                userId,
-                proxyKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            
+            ServiceHelper.validateObjectId(proxyKeyId, 'proxyKeyId');
 
             await KeyVaultService.deleteProxyKey(userId, proxyKeyId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Proxy key deleted successfully', {
-                userId,
-                proxyKeyId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('deleteProxyKey', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'proxy_key_deleted',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     proxyKeyId
@@ -685,97 +376,42 @@ export class KeyVaultController {
                 message: 'Proxy key deleted successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Proxy key deletion failed', {
-                userId,
-                proxyKeyId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('deleteProxyKey', error, req, res, startTime);
         }
     }
 
     /**
      * Toggle proxy key active status
      */
-    static async updateProxyKeyStatus(req: any, res: Response): Promise<void> {
+    static async updateProxyKeyStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const proxyKeyId = req.params.proxyKeyId;
         const { isActive } = updateProxyKeyStatusSchema.parse(req.body);
 
         try {
-            loggingService.info('Proxy key status update initiated', {
-                userId,
-                hasUserId: !!userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                isActive,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Proxy key status update failed - authentication required', {
-                    proxyKeyId,
-                    hasProxyKeyId: !!proxyKeyId,
-                    isActive,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateProxyKeyStatus', req);
+            
             if (!proxyKeyId) {
-                loggingService.warn('Proxy key status update failed - missing proxy key ID', {
-                    userId,
-                    isActive,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Proxy key ID is required'
                 });
                 return;
             }
-
-            loggingService.info('Proxy key status update processing started', {
-                userId,
-                proxyKeyId,
-                isActive,
-                requestId: req.headers['x-request-id'] as string
-            });
+            
+            ServiceHelper.validateObjectId(proxyKeyId, 'proxyKeyId');
 
             const updatedProxyKey = await KeyVaultService.toggleProxyKey(userId, proxyKeyId, isActive);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Proxy key status updated successfully', {
-                userId,
-                proxyKeyId,
-                isActive,
-                duration,
-                hasUpdatedProxyKey: !!updatedProxyKey,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('updateProxyKeyStatus', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'proxy_key_status_updated',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     proxyKeyId,
@@ -790,18 +426,6 @@ export class KeyVaultController {
                 data: updatedProxyKey
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Proxy key status update failed', {
-                userId,
-                proxyKeyId,
-                isActive,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (error instanceof z.ZodError) {
                 res.status(400).json({
                     success: false,
@@ -810,70 +434,35 @@ export class KeyVaultController {
                 });
                 return;
             }
-
-            res.status(400).json({
-                success: false,
-                error: error.message
-            });
+            ControllerHelper.handleError('updateProxyKeyStatus', error, req, res, startTime);
         }
     }
 
     /**
      * Get proxy key analytics
      */
-    static async getProxyKeyAnalytics(req: any, res: Response): Promise<void> {
+    static async getProxyKeyAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
         const proxyKeyId = req.query.proxyKeyId as string;
 
         try {
-            loggingService.info('Proxy key analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Proxy key analytics retrieval failed - authentication required', {
-                    proxyKeyId,
-                    hasProxyKeyId: !!proxyKeyId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getProxyKeyAnalytics', req);
+            
+            if (proxyKeyId) {
+                ServiceHelper.validateObjectId(proxyKeyId, 'proxyKeyId');
             }
-
-            loggingService.info('Proxy key analytics retrieval processing started', {
-                userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const analytics = await KeyVaultService.getProxyKeyAnalytics(userId, proxyKeyId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Proxy key analytics retrieved successfully', {
-                userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                duration,
-                hasAnalytics: !!analytics,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('getProxyKeyAnalytics', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'proxy_key_analytics_retrieved',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     proxyKeyId,
@@ -887,77 +476,33 @@ export class KeyVaultController {
                 data: analytics
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Proxy key analytics retrieval failed', {
-                userId,
-                proxyKeyId,
-                hasProxyKeyId: !!proxyKeyId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve proxy key analytics'
-            });
+            ControllerHelper.handleError('getProxyKeyAnalytics', error, req, res, startTime);
         }
     }
 
     /**
      * Get key vault dashboard data
      */
-    static async getDashboard(req: any, res: Response): Promise<void> {
+    static async getDashboard(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
 
         try {
-            loggingService.info('Key vault dashboard retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getDashboard', req);
 
-            if (!userId) {
-                loggingService.warn('Key vault dashboard retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Authentication required'
-                });
-                return;
-            }
-
-            loggingService.info('Key vault dashboard retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            
             const dashboardData = await KeyVaultService.getDashboardData(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Key vault dashboard retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getDashboard', req, startTime, {
                 providerKeysCount: dashboardData.providerKeys.length,
-                proxyKeysCount: dashboardData.proxyKeys.length,
-                hasProviderKeys: !!dashboardData.providerKeys && dashboardData.providerKeys.length > 0,
-                hasProxyKeys: !!dashboardData.proxyKeys && dashboardData.proxyKeys.length > 0,
-                hasAnalytics: !!dashboardData.analytics,
-                requestId: req.headers['x-request-id'] as string
+                proxyKeysCount: dashboardData.proxyKeys.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'key_vault_dashboard_retrieved',
                 category: 'key_vault_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     providerKeysCount: dashboardData.providerKeys.length,
@@ -973,20 +518,7 @@ export class KeyVaultController {
                 data: dashboardData
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Key vault dashboard retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve key vault dashboard'
-            });
+            ControllerHelper.handleError('getDashboard', error, req, res, startTime);
         }
     }
 }

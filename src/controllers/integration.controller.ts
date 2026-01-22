@@ -1,24 +1,27 @@
 import { Response } from 'express';
 import axios from 'axios';
-import { IntegrationService } from '../services/integration.service';
-import { NotificationService } from '../services/notification.service';
-import { loggingService } from '../services/logging.service';
+import { IntegrationService } from '@services/integration.service';
+import { NotificationService } from '@services/notification.service';
+import { loggingService } from '@services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
 export class IntegrationController {
     /**
      * Create a new integration
      * POST /api/integrations
      */
-    static async createIntegration(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-            }
+    static async createIntegration(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        // Auth check
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return res;
+        }
+        const userId = req.userId!;
 
+        ControllerHelper.logRequestStart('createIntegration', req);
+
+        try {
             const { type, name, description, credentials, alertRouting, deliveryConfig, metadata } = req.body;
 
             if (!type || !name || !credentials) {
@@ -39,6 +42,20 @@ export class IntegrationController {
                 metadata
             });
 
+            ControllerHelper.logRequestSuccess('createIntegration', req, startTime, {
+                integrationId: integration._id,
+                integrationType: type
+            });
+
+            ControllerHelper.logBusinessEvent(
+                'integration_created',
+                'integrations',
+                userId,
+                undefined,
+                { integrationType: type, integrationName: name }
+            );
+
+            // Keep existing response format (backward compatibility)
             return res.status(201).json({
                 success: true,
                 message: 'Integration created successfully',
@@ -55,11 +72,8 @@ export class IntegrationController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Error creating integration', { error: error.message });
-            return res.status(500).json({
-                success: false,
-                message: error.message || 'Failed to create integration'
-            });
+            ControllerHelper.handleError('createIntegration', error, req, res, startTime);
+            return res;
         }
     }
 
@@ -67,16 +81,21 @@ export class IntegrationController {
      * Get all integrations for the user
      * GET /api/integrations
      */
-    static async getIntegrations(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-            }
+    static async getIntegrations(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        // Auth check
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return res;
+        }
+        const userId = req.userId!;
 
+        ControllerHelper.logRequestStart('getIntegrations', req, {
+            type: req.query.type,
+            status: req.query.status
+        });
+
+        try {
             const { type, status } = req.query;
 
             const integrations = await IntegrationService.getUserIntegrations(userId, {
@@ -101,17 +120,19 @@ export class IntegrationController {
                 updatedAt: integration.updatedAt
             }));
 
+            ControllerHelper.logRequestSuccess('getIntegrations', req, startTime, {
+                count: formattedIntegrations.length
+            });
+
+            // Keep existing response format (backward compatibility)
             return res.status(200).json({
                 success: true,
                 data: formattedIntegrations,
                 count: formattedIntegrations.length
             });
         } catch (error: any) {
-            loggingService.error('Error getting integrations', { error: error.message });
-            return res.status(500).json({
-                success: false,
-                message: error.message || 'Failed to get integrations'
-            });
+            ControllerHelper.handleError('getIntegrations', error, req, res, startTime);
+            return res;
         }
     }
 
@@ -119,16 +140,20 @@ export class IntegrationController {
      * Get a specific integration
      * GET /api/integrations/:id
      */
-    static async getIntegration(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-            }
+    static async getIntegration(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        // Auth check
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return res;
+        }
+        const userId = req.userId!;
 
+        ControllerHelper.logRequestStart('getIntegration', req, {
+            integrationId: req.params.id
+        });
+
+        try {
             const { id } = req.params;
 
             const integration = await IntegrationService.getIntegrationById(id, userId);
@@ -140,6 +165,12 @@ export class IntegrationController {
                 });
             }
 
+            ControllerHelper.logRequestSuccess('getIntegration', req, startTime, {
+                integrationId: id,
+                integrationType: integration.type
+            });
+
+            // Keep existing response format (backward compatibility)
             return res.status(200).json({
                 success: true,
                 data: {
@@ -159,11 +190,10 @@ export class IntegrationController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Error getting integration', { error: error.message });
-            return res.status(500).json({
-                success: false,
-                message: error.message || 'Failed to get integration'
+            ControllerHelper.handleError('getIntegration', error, req, res, startTime, {
+                integrationId: req.params.id
             });
+            return res;
         }
     }
 

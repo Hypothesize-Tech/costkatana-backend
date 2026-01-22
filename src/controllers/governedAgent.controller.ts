@@ -5,22 +5,23 @@ import { ApprovalManagerService } from '../services/approvalManager.service';
 import { IntegrationOrchestratorService, IntegrationStep } from '../services/integrationOrchestrator.service';
 import { UniversalVerificationService } from '../services/universalVerification.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class GovernedAgentController {
   /**
    * Initiate a new governed task
    * POST /api/governed-agent/initiate
    */
-  static async initiateTask(req: any, res: Response): Promise<Response> {
-    try {
-      const userId = req.userId || req.user?.id;
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-      }
+  static async initiateTask(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('initiateTask', req);
 
+    try {
       const { userRequest } = req.body;
 
       if (!userRequest || typeof userRequest !== 'string') {
@@ -31,6 +32,11 @@ export class GovernedAgentController {
       }
 
       const task = await GovernedAgentService.initiateTask(userRequest, userId);
+
+      ControllerHelper.logRequestSuccess('initiateTask', req, startTime, {
+        taskId: task.id,
+        mode: task.mode
+      });
 
       return res.status(200).json({
         success: true,
@@ -43,17 +49,8 @@ export class GovernedAgentController {
       });
 
     } catch (error) {
-      loggingService.error('Failed to initiate task', {
-        component: 'GovernedAgentController',
-        operation: 'initiateTask',
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to initiate task',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('initiateTask', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -61,17 +58,18 @@ export class GovernedAgentController {
    * Generate execution plan for a task
    * POST /api/governed-agent/:taskId/generate-plan
    */
-  static async generatePlan(req: any, res: Response): Promise<Response> {
-    try {
-      const userId = req.userId || req.user?.id;
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-      }
+  static async generatePlan(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { taskId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('generatePlan', req, { taskId });
 
-      const { taskId } = req.params;
+    try {
+      ServiceHelper.validateObjectId(taskId, 'taskId');
+      
       const { clarifyingAnswers } = req.body; // Optional answers to clarifying questions
 
       const task = await GovernedAgentService.getTask(taskId, userId);
@@ -345,17 +343,17 @@ export class GovernedAgentController {
    * Get task status
    * GET /api/governed-agent/:taskId
    */
-  static async getTaskStatus(req: any, res: Response): Promise<Response> {
-    try {
-      const userId = req.userId || req.user?.id;
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'Authentication required'
-        });
-      }
+  static async getTaskStatus(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { taskId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getTaskStatus', req, { taskId });
 
-      const { taskId } = req.params;
+    try {
+      ServiceHelper.validateObjectId(taskId, 'taskId');
 
       const task = await GovernedAgentService.getTask(taskId, userId);
       if (!task) {
@@ -365,23 +363,16 @@ export class GovernedAgentController {
         });
       }
 
+      ControllerHelper.logRequestSuccess('getTaskStatus', req, startTime, { taskId });
+
       return res.status(200).json({
         success: true,
         data: task
       });
 
     } catch (error) {
-      loggingService.error('Failed to get task status', {
-        component: 'GovernedAgentController',
-        operation: 'getTaskStatus',
-        error: error instanceof Error ? error.message : String(error)
-      });
-
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to get task status',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getTaskStatus', error, req, res, startTime, { taskId });
+      return res;
     }
   }
 

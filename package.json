@@ -4,7 +4,7 @@
   "description": "AI-powered cost optimization backend for Cost Katana - Intelligent monitoring, personalized recommendations, predictive analytics, and seamless onboarding for AI usage optimization",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r ts-node/register -r ./src/observability/register.ts src/server.ts\"",
+    "dev": "nodemon --exec \"node --max-old-space-size=4096 --expose-gc -r tsconfig-paths/register -r ts-node/register -r ./src/observability/register.ts src/server.ts\"",
     "build": "NODE_OPTIONS='--max-old-space-size=8192' tsc",
     "start": "SENTRY_RELEASE=$npm_package_version node --max-old-space-size=4096 --expose-gc -r ./dist/observability/register.js dist/server.js",
     "test": "jest",

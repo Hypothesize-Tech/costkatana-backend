@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { Usage } from '../models/Usage';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class MonitoringController {
     // Background processing queue
@@ -12,29 +14,16 @@ export class MonitoringController {
     /**
      * Trigger intelligent monitoring for a specific user
      */
-    static async triggerUserMonitoring(req: any, res: Response): Promise<void> {
+    static async triggerUserMonitoring(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('triggerUserMonitoring', req);
 
         try {
-            loggingService.info('User monitoring trigger initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('User monitoring processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-            
             const duration = Date.now() - startTime;
-
-            loggingService.info('User monitoring triggered successfully', {
-                userId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -45,6 +34,8 @@ export class MonitoringController {
                     userId
                 }
             });
+
+            ControllerHelper.logRequestSuccess('triggerUserMonitoring', req, startTime);
             
             res.json({
                 success: true,
@@ -56,42 +47,22 @@ export class MonitoringController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User monitoring trigger failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to trigger monitoring',
-                message: error.message
-            });
+            ControllerHelper.handleError('triggerUserMonitoring', error, req, res, startTime);
         }
     }
 
     /**
      * Get user's current usage status and predictions
      */
-    static async getUserUsageStatus(req: any, res: Response): Promise<void> {
+    static async getUserUsageStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getUserUsageStatus', req);
 
         try {
-            loggingService.info('User usage status retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('User usage status processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
             
             // Get optimized date ranges
             const { startOfMonth, startOfDay } = this.getOptimizedDateRanges();
@@ -203,24 +174,6 @@ export class MonitoringController {
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('User usage status retrieved successfully', {
-                userId,
-                duration,
-                monthlyUsageCount: monthlyUsage.length,
-                dailyUsageCount: dailyUsage.length,
-                monthlyGPT4Count,
-                monthlyGPT35Count,
-                totalMonthlyCost,
-                averageTokensPerRequest: Math.round(averageTokensPerRequest),
-                detectedPlan,
-                monthlyUsagePercentage: Math.round(monthlyUsagePercentage * 100) / 100,
-                dailyUsagePercentage: Math.round(dailyUsagePercentage * 100) / 100,
-                projectedMonthlyUsage,
-                warningsCount: warnings.length,
-                hasWarnings: warnings.length > 0,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             // Log business event
             loggingService.logBusiness({
                 event: 'user_usage_status_retrieved',
@@ -241,6 +194,11 @@ export class MonitoringController {
                     warningsCount: warnings.length,
                     hasWarnings: warnings.length > 0
                 }
+            });
+
+            ControllerHelper.logRequestSuccess('getUserUsageStatus', req, startTime, {
+                monthlyUsageCount: monthlyUsage.length,
+                dailyUsageCount: dailyUsage.length
             });
 
             res.json({
@@ -295,42 +253,22 @@ export class MonitoringController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User usage status retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get usage status',
-                message: error.message
-            });
+            ControllerHelper.handleError('getUserUsageStatus', error, req, res, startTime);
         }
     }
 
     /**
      * Get smart recommendations for the user
      */
-    static async getSmartRecommendations(req: any, res: Response): Promise<void> {
+    static async getSmartRecommendations(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getSmartRecommendations', req);
 
         try {
-            loggingService.info('Smart recommendations retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.info('Smart recommendations processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
             
             // Get optimized date ranges
             const { startOfMonth } = this.getOptimizedDateRanges();
@@ -352,14 +290,6 @@ export class MonitoringController {
             if (recentUsage.length === 0) {
                 const duration = Date.now() - startTime;
 
-                loggingService.info('Smart recommendations retrieved successfully - no usage data', {
-                    userId,
-                    duration,
-                    recentUsageCount: recentUsage.length,
-                    recommendationsCount: recommendations.length,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 // Log business event
                 loggingService.logBusiness({
                     event: 'smart_recommendations_retrieved',
@@ -371,6 +301,10 @@ export class MonitoringController {
                         recommendationsCount: recommendations.length,
                         hasRecommendations: false
                     }
+                });
+
+                ControllerHelper.logRequestSuccess('getSmartRecommendations', req, startTime, {
+                    recommendationsCount: 0
                 });
 
                 res.json({

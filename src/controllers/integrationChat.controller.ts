@@ -9,6 +9,8 @@ import { DiscordService } from '../services/discord.service';
 import { GitHubService } from '../services/github.service';
 import { IGitHubConnection } from '../models';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export interface ExecuteCommandRequest {
   message: string;
@@ -27,15 +29,15 @@ export class IntegrationChatController {
    * Execute integration command from chat
    * POST /api/chat/integrations/execute
    */
-  static async executeCommand(req: Request, res: Response): Promise<Response> {
+  static async executeCommand(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('executeCommand', req);
+
     try {
-      const userId = (req as any).user?.id || (req as any).user?._id?.toString();
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not authenticated'
-        });
-      }
 
       const { message, mentions }: ExecuteCommandRequest = req.body;
 
@@ -65,21 +67,18 @@ export class IntegrationChatController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('executeCommand', req, startTime, {
+        success: result.success
+      });
+
       return res.json({
         success: result.success,
         data: result.result,
         auditLog: result.auditLog
       });
     } catch (error: any) {
-      loggingService.error('Failed to execute integration command', {
-        error: error.message,
-        stack: error.stack
-      });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to execute command',
-        error: error.message
-      });
+      ControllerHelper.handleError('executeCommand', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -87,15 +86,15 @@ export class IntegrationChatController {
    * Get autocomplete suggestions for @ mentions
    * GET /api/chat/integrations/autocomplete
    */
-  static async getAutocomplete(req: Request, res: Response): Promise<Response> {
+  static async getAutocomplete(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAutocomplete', req, { query: req.query });
+
     try {
-      const userId = (req as any).user?.id || (req as any).user?._id?.toString();
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not authenticated'
-        });
-      }
 
       const queryParams = req.query as unknown as Partial<AutocompleteRequest>;
       const query = typeof queryParams.query === 'string' ? queryParams.query : '';
@@ -178,19 +177,17 @@ export class IntegrationChatController {
         );
       }
 
+      ControllerHelper.logRequestSuccess('getAutocomplete', req, startTime, {
+        suggestionsCount: filteredSuggestions.length
+      });
+
       return res.json({
         success: true,
         data: filteredSuggestions
       });
     } catch (error: any) {
-      loggingService.error('Failed to get autocomplete suggestions', {
-        error: error.message
-      });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to get autocomplete suggestions',
-        error: error.message
-      });
+      ControllerHelper.handleError('getAutocomplete', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -198,15 +195,16 @@ export class IntegrationChatController {
    * List entities for an integration type
    * GET /api/chat/integrations/:type/entities
    */
-  static async listEntities(req: Request, res: Response): Promise<Response> {
+  static async listEntities(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { type } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('listEntities', req, { type });
+
     try {
-      const userId = (req as any).user?.id || (req as any).user?._id?.toString();
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not authenticated'
-        });
-      }
 
       const { type } = req.params;
       const { entityType } = req.query;
@@ -317,19 +315,18 @@ export class IntegrationChatController {
         // Return empty array on error rather than failing
       }
 
+      ControllerHelper.logRequestSuccess('listEntities', req, startTime, {
+        type,
+        entitiesCount: entities.length
+      });
+
       return res.json({
         success: true,
         data: entities
       });
     } catch (error: any) {
-      loggingService.error('Failed to list entities', {
-        error: error.message
-      });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to list entities',
-        error: error.message
-      });
+      ControllerHelper.handleError('listEntities', error, req, res, startTime, { type });
+      return res;
     }
   }
 
@@ -337,15 +334,16 @@ export class IntegrationChatController {
    * Get sub-entities for a parent entity
    * GET /api/chat/integrations/:type/:entityId/subentities
    */
-  static async getSubEntities(req: Request, res: Response): Promise<Response> {
+  static async getSubEntities(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
+    const { type, entityId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getSubEntities', req, { type, entityId });
+
     try {
-      const userId = (req as any).user?.id || (req as any).user?._id?.toString();
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message: 'User not authenticated'
-        });
-      }
 
       const { type, entityId } = req.params;
       const { subEntityType } = req.query;
@@ -515,19 +513,19 @@ export class IntegrationChatController {
         // Return empty array on error rather than failing
       }
 
+      ControllerHelper.logRequestSuccess('getSubEntities', req, startTime, {
+        type,
+        entityId,
+        subEntitiesCount: subEntities.length
+      });
+
       return res.json({
         success: true,
         data: subEntities
       });
     } catch (error: any) {
-      loggingService.error('Failed to get sub-entities', {
-        error: error.message
-      });
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to get sub-entities',
-        error: error.message
-      });
+      ControllerHelper.handleError('getSubEntities', error, req, res, startTime, { type, entityId });
+      return res;
     }
   }
 }

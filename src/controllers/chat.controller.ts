@@ -1,20 +1,17 @@
-import { Request, Response } from 'express';
-import { loggingService } from '../services/logging.service';
-import { ChatService } from '../services/chat.service';
-import { LLMSecurityService } from '../services/llmSecurity.service';
-import { v4 as uuidv4 } from 'uuid';
-import { extractLinkMetadata } from '../utils/linkMetadata';
+import {  Response } from 'express';
+import { loggingService } from '@services/logging.service';
+import { ChatService } from '@services/chat.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ChatSecurityHandler, LinkMetadataEnricher } from '@services/chat/security';
 
-export interface AuthenticatedRequest extends Request {
-    userId?: string;
-}
+// Keep this for backward compatibility with existing code
+export type { AuthenticatedRequest };
 
 /**
  * Send a message to a specific AWS Bedrock model
  */
 export const sendMessage = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { 
         message, 
         modelId, 
@@ -35,286 +32,62 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
     } = req.body;
 
     try {
-        loggingService.info('Chat message request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Chat message', req, {
             modelId,
             conversationId: conversationId || 'new',
             messageLength: message?.length || 0,
             hasTemplate: !!templateId,
             hasVariables: !!templateVariables,
             temperature,
-            maxTokens,
-            requestId: req.headers['x-request-id'] as string
+            maxTokens
         });
-
-        if (!userId) {
-            loggingService.warn('Chat message request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
 
         // Validate that either message or templateId is provided (or attachments for file-only messages)
         if (!message && !templateId && !attachments?.length) {
-            loggingService.warn('Chat message request failed - neither message, templateId, nor attachments provided', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Either message, templateId, or attachments must be provided'
-            });
+            ControllerHelper.sendError(res, 400, 'Either message, templateId, or attachments must be provided');
             return;
         }
 
         if (!modelId) {
-            loggingService.warn('Chat message request failed - missing modelId', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'modelId is required'
-            });
+            ControllerHelper.sendError(res, 400, 'modelId is required');
             return;
         }
 
         // SECURITY CHECK: Comprehensive threat detection before processing message
-        // This checks for all 15 threat categories including HTML content
         if (message) {
-            try {
-                const requestId = req.headers['x-request-id'] as string || 
-                                 `chat_${Date.now()}_${uuidv4()}`;
-                
-                // Extract IP address and user agent for logging
-                const ipAddress = req.ip || 
-                                req.headers['x-forwarded-for']?.toString().split(',')[0] || 
-                                req.socket.remoteAddress || 
-                                'unknown';
-                const userAgent = req.headers['user-agent'] || 'unknown';
+            const securityResult = await ChatSecurityHandler.checkMessageSecurity(
+                message,
+                userId,
+                req,
+                maxTokens
+            );
 
-                // Estimate cost for this request (rough estimate: ~$0.01 per 1000 tokens)
-                // message is guaranteed to be defined here due to the if (message) check above
-                const messageLength = message ? message.length : 0;
-                const estimatedTokens = Math.ceil(messageLength / 4) + (maxTokens || 1000);
-                const estimatedCost = estimatedTokens * 0.00001; // Rough estimate
-
-                // Perform comprehensive security check
-                const securityCheck = await LLMSecurityService.performSecurityCheck(
-                    message,
-                    requestId,
-                    userId,
-                    {
-                        estimatedCost,
-                        provenanceSource: 'chat-api',
-                        ipAddress,
-                        userAgent,
-                        source: 'chat-api'
-                    }
-                );
-
-                // If threat detected, block the request
-                if (securityCheck.result.isBlocked) {
-                    loggingService.warn('Chat message blocked by security', {
-                        requestId,
-                        userId,
-                        modelId,
-                        threatCategory: securityCheck.result.threatCategory,
-                        confidence: securityCheck.result.confidence,
-                        stage: securityCheck.result.stage,
-                        reason: securityCheck.result.reason
-                    });
-
-                    res.status(403).json({
-                        success: false,
-                        message: securityCheck.result.reason || 'Message blocked by security system',
-                        error: 'SECURITY_BLOCK',
-                        threatCategory: securityCheck.result.threatCategory,
-                        confidence: securityCheck.result.confidence,
-                        stage: securityCheck.result.stage
-                    });
-                    return;
-                }
-
-                loggingService.debug('Chat message security check passed', {
-                    requestId,
-                    userId,
-                    modelId,
-                    messageLength: message.length
+            // If threat detected, block the request
+            if (securityResult.isBlocked) {
+                res.status(403).json({
+                    success: false,
+                    message: securityResult.reason || 'Message blocked by security system',
+                    error: 'SECURITY_BLOCK',
+                    threatCategory: securityResult.threatCategory,
+                    confidence: securityResult.confidence,
+                    stage: securityResult.stage
                 });
-
-            } catch (error: any) {
-                // Log security check failures but allow request to proceed (fail-open)
-                loggingService.error('Chat message security check failed, allowing request', {
-                    error: error instanceof Error ? error.message : String(error),
-                    userId,
-                    modelId,
-                    messageLength: message?.length || 0
-                });
-                // Continue to process the message if security check fails
+                return;
             }
         }
 
         // AUTO-DETECT AND EXTRACT METADATA FOR LINKS IN MESSAGE (non-blocking)
         let enrichedMessage = message;
         if (message) {
-            try {
-                const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
-                const detectedUrls = message.match(urlPattern);
-
-                if (detectedUrls && detectedUrls.length > 0) {
-                    loggingService.debug('Detected URLs in message, extracting metadata', {
-                        userId,
-                        urlCount: detectedUrls.length,
-                        urls: detectedUrls
-                    });
-
-                    // Extract metadata for all detected URLs with timeout (don't block message sending)
-                    const metadataPromises = detectedUrls.map(async (url: string) => {
-                        try {
-                            // Use Promise.race with timeout to prevent blocking
-                            const timeoutPromise = new Promise<{ url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null }>((resolve) => 
-                                setTimeout(() => resolve({ url, metadata: null }), 2000)
-                            );
-                            const fetchPromise = extractLinkMetadata(url).then(metadata => ({ url, metadata }));
-                            return await Promise.race([fetchPromise, timeoutPromise]);
-                        } catch (error) {
-                            // Fallback to just URL if metadata extraction fails
-                            loggingService.debug('Link metadata extraction failed', {
-                                url,
-                                error: error instanceof Error ? error.message : String(error)
-                            });
-                            return { url, metadata: null };
-                        }
-                    });
-
-                    // Wait for metadata extraction (with timeout) but don't block if it takes too long
-                    type UrlWithMetadata = { url: string; metadata: import('../utils/linkMetadata').LinkMetadata | null };
-                    const urlsWithMetadata = await Promise.race([
-                        Promise.all(metadataPromises),
-                        new Promise<UrlWithMetadata[]>((resolve) => 
-                            setTimeout(() => resolve(detectedUrls.map((url: string) => ({ url, metadata: null }))), 2500)
-                        )
-                    ]);
-
-                    // Build link context to prepend at the beginning of the message
-                    // This ensures the AI sees the instructions FIRST before any other content
-                    let linkContextPrefix = '';
-                    const linkDescriptions: string[] = [];
-                    
-                    urlsWithMetadata.forEach(({ url, metadata }) => {
-                        if (metadata?.title) {
-                            // Consistent format for all public links with explicit instructions
-                            const linkType = metadata.type === 'repository' ? 'Repository' : 
-                                          metadata.type === 'video' ? 'Video' : 
-                                          metadata.siteName ?? 'Link';
-                            
-                            // Build comprehensive link info with scraped content
-                            let linkInfo = `📎 **ATTACHED PUBLIC LINK - ${linkType}:**\n**Title:** ${metadata.title}\n**URL:** ${url}`;
-                            
-                            if (metadata.description) {
-                                linkInfo += `\n**Description:** ${metadata.description.substring(0, 300)}${metadata.description.length > 300 ? '...' : ''}`;
-                            }
-                            
-                            // Add AI-generated summary if available (from Puppeteer + AI scraping)
-                            if (metadata.summary) {
-                                linkInfo += `\n\n**📊 AI SUMMARY:**\n${metadata.summary}`;
-                            }
-                            
-                            // Add structured data if extracted by AI
-                            if (metadata.structuredData) {
-                                linkInfo += `\n\n**📋 STRUCTURED DATA EXTRACTED:**\n${JSON.stringify(metadata.structuredData, null, 2).substring(0, 1000)}`;
-                            }
-                            
-                            // Add full content if available
-                            if (metadata.fullContent && metadata.fullContent.length > 100) {
-                                const contentPreview = metadata.fullContent.substring(0, 5000);
-                                linkInfo += `\n\n**📄 FULL PAGE CONTENT:**\n${contentPreview}${metadata.fullContent.length > 5000 ? '...\n[Content truncated for length]' : ''}`;
-                            }
-                            
-                            // Add code blocks if available
-                            if (metadata.codeBlocks && metadata.codeBlocks.length > 0) {
-                                linkInfo += `\n\n**CODE BLOCKS FOUND (${metadata.codeBlocks.length}):**`;
-                                metadata.codeBlocks.slice(0, 3).forEach((block: { language?: string; code: string }, idx: number) => {
-                                    const lang = block.language ? ` (${block.language})` : '';
-                                    linkInfo += `\n\n**Code Block ${idx + 1}${lang}:**\n\`\`\`${block.language ?? ''}\n${block.code.substring(0, 1000)}\n\`\`\``;
-                                });
-                                if (metadata.codeBlocks.length > 3) {
-                                    linkInfo += `\n... and ${metadata.codeBlocks.length - 3} more code blocks`;
-                                }
-                            }
-                            
-                            // Add images info if available
-                            if (metadata.images && metadata.images.length > 0) {
-                                linkInfo += `\n\n**🖼️ IMAGES FOUND:** ${metadata.images.length} images on this page`;
-                            }
-                            
-                            // Add scraping method info for transparency
-                            if (metadata.scrapingMethod) {
-                                const methodLabel = metadata.scrapingMethod === 'puppeteer-ai' 
-                                    ? '🤖 Advanced AI Scraping (Puppeteer + AI Analysis + Vector Storage)'
-                                    : '⚡ Fast Scraping (Axios + Cheerio)';
-                                linkInfo += `\n\n**Method:** ${methodLabel}`;
-                            }
-                            
-                            linkDescriptions.push(linkInfo);
-                            
-                            // Remove URL from message (will be replaced with just the link info)
-                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
-                            
-                            loggingService.debug('Link metadata extracted and added to message', {
-                                url,
-                                title: metadata.title,
-                                siteName: metadata.siteName,
-                                type: metadata.type,
-                                hasFullContent: !!metadata.fullContent,
-                                codeBlocksCount: metadata.codeBlocks?.length || 0,
-                                imagesCount: metadata.images?.length || 0,
-                                scrapingMethod: metadata.scrapingMethod,
-                                hasSummary: !!metadata.summary,
-                                hasStructuredData: !!metadata.structuredData,
-                                relevanceScore: metadata.relevanceScore
-                            });
-                        } else {
-                            // For links without metadata - still provide explicit context
-                            const linkInfo = `📎 **ATTACHED PUBLIC LINK:**\n**URL:** ${url}`;
-                            linkDescriptions.push(linkInfo);
-                            
-                            // Remove URL from message
-                            enrichedMessage = enrichedMessage.replace(url, `[LINK_${linkDescriptions.length}]`);
-                        }
-                    });
-                    
-                    // Prepend all link information at the VERY BEGINNING with strong instructions
-                    if (linkDescriptions.length > 0) {
-                        linkContextPrefix = `\n\n⚠️ **IMPORTANT: USER IS ASKING ABOUT THE LINK(S) BELOW** ⚠️\n\n${linkDescriptions.join('\n\n')}\n\n**🚨 CRITICAL INSTRUCTIONS - READ CAREFULLY:**\n1. The user's question is SPECIFICALLY about the link(s) shown above\n2. You MUST provide a comprehensive summary based on:\n   - The full page content provided above\n   - Any code blocks extracted from the page\n   - Images and other media found on the page\n   - The overall structure and purpose of the content\n3. COMPLETELY IGNORE and DO NOT mention:\n   - Any Google Drive files\n   - Any other documents or files\n   - Any previous conversation context about other topics\n   - Anything not directly related to the link(s) above\n4. Your summary should cover:\n   - What the page/repository/content is about\n   - Key sections or components\n   - Any code, technical details, or implementations mentioned\n   - The purpose and functionality\n5. Be thorough and detailed in your analysis of the scraped content\n\n**User's question:**\n`;
-                        
-                        // Replace link placeholders back with just the URL
-                        linkDescriptions.forEach((_, index) => {
-                            const url = urlsWithMetadata[index]?.url || '';
-                            enrichedMessage = enrichedMessage.replace(`[LINK_${index + 1}]`, url);
-                        });
-                        
-                        // Prepend the link context at the beginning
-                        enrichedMessage = linkContextPrefix + enrichedMessage;
-                    }
-                }
-            } catch (error) {
-                // Log error but continue with original message if metadata extraction fails
-                loggingService.error('Failed to extract link metadata in chat controller', {
-                    error: error instanceof Error ? error.message : String(error),
-                    userId,
-                    messageLength: message?.length || 0
-                });
-                // Continue with original message
-            }
+            const enrichmentResult = await LinkMetadataEnricher.enrichMessage(message, userId);
+            enrichedMessage = enrichmentResult.enrichedMessage;
         }
 
         const result = await ChatService.sendMessage({
@@ -339,25 +112,23 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
             req
         });
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Chat message sent successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Chat message', req, startTime, {
             modelId,
             conversationId: conversationId || 'new',
-            duration,
             messageLength: message?.length || 0,
             responseLength: result.response?.length || 0,
-            requestId: req.headers['x-request-id'] as string
+            temperature,
+            maxTokens
         });
 
         // Log business event
-        loggingService.logBusiness({
-            event: 'chat_message_sent',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
+        ControllerHelper.logBusinessEvent(
+            'chat_message_sent',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            {
                 modelId,
                 conversationId: conversationId || 'new',
                 messageLength: message?.length || 0,
@@ -365,7 +136,7 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
                 temperature,
                 maxTokens
             }
-        });
+        );
 
         // Debug: Log what we received from service
         loggingService.info('📥 [FLOW-9] CONTROLLER RECEIVED from ChatService.sendMessage', {
@@ -395,22 +166,9 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
         });
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Chat message failed', {
-            userId,
+        ControllerHelper.handleError('Chat message', error, req, res, startTime, {
             modelId,
-            conversationId: conversationId || 'new',
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to send message',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            conversationId: conversationId || 'new'
         });
     }
 };
@@ -420,87 +178,57 @@ export const sendMessage = async (req: AuthenticatedRequest, res: Response): Pro
  */
 export const updateMessageViewType = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { messageId } = req.params;
     const { viewType } = req.body;
 
     try {
-        loggingService.info('MongoDB message view type update request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('MongoDB message view type update', req, {
             messageId,
-            viewType,
-            requestId: req.headers['x-request-id'] as string
+            viewType
         });
 
-        if (!userId) {
-            loggingService.warn('MongoDB message view type update failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-            res.status(401).json({ success: false, message: 'Authentication required' });
-            return;
-        }
-
+        // Defensive checks
         if (!messageId) {
-            loggingService.warn('MongoDB message view type update failed - missing messageId', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-            res.status(400).json({ success: false, message: 'Message ID is required' });
+            ControllerHelper.sendError(res, 400, 'Message ID is required');
             return;
         }
 
         const validViewTypes = ['table', 'json', 'schema', 'stats', 'chart', 'text', 'error', 'empty', 'explain'];
         if (!viewType || !validViewTypes.includes(viewType)) {
-            loggingService.warn('MongoDB message view type update failed - invalid viewType', {
-                userId,
-                messageId,
-                viewType,
-                validViewTypes,
-                requestId: req.headers['x-request-id'] as string
-            });
-            res.status(400).json({ success: false, message: 'Invalid viewType provided' });
+            ControllerHelper.sendError(res, 400, 'Invalid viewType provided');
             return;
         }
 
         const success = await ChatService.updateChatMessageViewType(messageId, userId, viewType);
 
-        const duration = Date.now() - startTime;
-
         if (success) {
-            loggingService.info('MongoDB message view type updated successfully', {
-                userId,
+            // Log success
+            ControllerHelper.logRequestSuccess('MongoDB message view type update', req, startTime, {
                 messageId,
-                viewType,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                viewType
             });
-            res.json({ success: true, message: 'View type updated successfully' });
+
+            ControllerHelper.sendSuccess(res, null, 'View type updated successfully');
         } else {
             loggingService.warn('MongoDB message view type update failed - message not found or not a MongoDB result', {
                 userId,
                 messageId,
                 viewType,
-                duration,
+                duration: Date.now() - startTime,
                 requestId: req.headers['x-request-id'] as string
             });
-            res.status(404).json({ success: false, message: 'MongoDB result message not found or not accessible' });
+            ControllerHelper.sendError(res, 404, 'MongoDB result message not found or not accessible');
         }
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        loggingService.error('Failed to update MongoDB message view type', {
-            userId,
+        ControllerHelper.handleError('MongoDB message view type update', error, req, res, startTime, {
             messageId,
-            viewType,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update message view type',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            viewType
         });
     }
 };
@@ -510,42 +238,25 @@ export const updateMessageViewType = async (req: AuthenticatedRequest, res: Resp
  */
 export const getConversationHistory = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { conversationId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
     const offset = parseInt(req.query.offset as string) || 0;
 
     try {
-        loggingService.info('Conversation history request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation history', req, {
             conversationId,
             limit,
-            offset,
-            requestId: req.headers['x-request-id'] as string
+            offset
         });
 
-        if (!userId) {
-            loggingService.warn('Conversation history request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
+        // Defensive check (route validation should catch this)
         if (!conversationId) {
-            loggingService.warn('Conversation history request failed - missing conversation ID', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Conversation ID is required'
-            });
+            ControllerHelper.sendError(res, 400, 'Conversation ID is required');
             return;
         }
 
@@ -556,57 +267,37 @@ export const getConversationHistory = async (req: AuthenticatedRequest, res: Res
             offset
         );
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation history retrieved successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation history', req, startTime, {
             conversationId,
-            duration,
             limit,
             offset,
             historyLength: history.messages?.length || 0,
-            totalMessages: history.total || 0,
-            requestId: req.headers['x-request-id'] as string
+            totalMessages: history.total || 0
         });
 
         // Log business event
-        loggingService.logBusiness({
-            event: 'conversation_history_retrieved',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
+        ControllerHelper.logBusinessEvent(
+            'conversation_history_retrieved',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            {
                 conversationId,
                 limit,
                 offset,
                 historyLength: history.messages?.length || 0,
                 totalMessages: history.total || 0
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: history
-        });
+        ControllerHelper.sendSuccess(res, history);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation history retrieval failed', {
-            userId,
+        ControllerHelper.handleError('Conversation history retrieval', error, req, res, startTime, {
             conversationId,
             limit,
-            offset,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get conversation history',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            offset
         });
     }
 };
@@ -616,31 +307,21 @@ export const getConversationHistory = async (req: AuthenticatedRequest, res: Res
  */
 export const getUserConversations = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const limit = parseInt(req.query.limit as string) || 20;
     const offset = parseInt(req.query.offset as string) || 0;
     const includeArchived = req.query.includeArchived === 'true';
 
     try {
-        loggingService.info('User conversations request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('User conversations', req, {
             limit,
             offset,
-            includeArchived,
-            requestId: req.headers['x-request-id'] as string
+            includeArchived
         });
-
-        if (!userId) {
-            loggingService.warn('User conversations request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
 
         const conversations = await ChatService.getUserConversations(
             userId, 
@@ -649,57 +330,37 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
             includeArchived
         );
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('User conversations retrieved successfully', {
-            userId,
-            duration,
+        // Log success
+        ControllerHelper.logRequestSuccess('User conversations', req, startTime, {
             limit,
             offset,
             includeArchived,
             conversationsCount: conversations.conversations?.length || 0,
-            totalConversations: conversations.total || 0,
-            requestId: req.headers['x-request-id'] as string
+            totalConversations: conversations.total || 0
         });
 
         // Log business event
-        loggingService.logBusiness({
-            event: 'user_conversations_retrieved',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
+        ControllerHelper.logBusinessEvent(
+            'user_conversations_retrieved',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            {
                 limit,
                 offset,
                 includeArchived,
                 conversationsCount: conversations.conversations?.length || 0,
                 totalConversations: conversations.total || 0
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: conversations
-        });
+        ControllerHelper.sendSuccess(res, conversations);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('User conversations retrieval failed', {
-            userId,
+        ControllerHelper.handleError('User conversations retrieval', error, req, res, startTime, {
             limit,
             offset,
-            includeArchived,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get conversations',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            includeArchived
         });
     }
 };
@@ -709,95 +370,57 @@ export const getUserConversations = async (req: AuthenticatedRequest, res: Respo
  */
 export const createConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { title, modelId } = req.body;
 
     try {
-        loggingService.info('Conversation creation request initiated', {
-            userId,
-            title: title || `Chat with ${modelId}`,
-            modelId,
-            requestId: req.headers['x-request-id'] as string
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        const conversationTitle = title || `Chat with ${modelId}`;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation creation', req, {
+            title: conversationTitle,
+            modelId
         });
 
-        if (!userId) {
-            loggingService.warn('Conversation creation request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
+        // Defensive check (route/service validation should catch this)
         if (!modelId) {
-            loggingService.warn('Conversation creation request failed - missing model ID', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Model ID is required'
-            });
+            ControllerHelper.sendError(res, 400, 'Model ID is required');
             return;
         }
 
         const conversation: any = await ChatService.createConversation({
             userId,
-            title: title || `Chat with ${modelId}`,
+            title: conversationTitle,
             modelId
         });
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation created successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation creation', req, startTime, {
             conversationId: conversation.id,
-            title: title || `Chat with ${modelId}`,
-            modelId,
-            duration,
-            requestId: req.headers['x-request-id'] as string
+            title: conversationTitle,
+            modelId
         });
 
         // Log business event
-        loggingService.logBusiness({
-            event: 'conversation_created',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
+        ControllerHelper.logBusinessEvent(
+            'conversation_created',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            {
                 conversationId: conversation.id,
-                title: title || `Chat with ${modelId}`,
+                title: conversationTitle,
                 modelId
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: conversation
-        });
+        ControllerHelper.sendSuccess(res, conversation);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation creation failed', {
-            userId,
-            title: title || `Chat with ${modelId}`,
-            modelId,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create conversation',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('Conversation creation', error, req, res, startTime, { modelId });
     }
 };
 
@@ -805,32 +428,26 @@ export const createConversation = async (req: AuthenticatedRequest, res: Respons
  * Update conversation GitHub context
  */
 export const updateConversationGitHubContext = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = req.userId;
+    const startTime = Date.now();
     const { conversationId } = req.params;
     const { githubContext } = req.body;
 
     try {
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
 
+        // Log request start
+        ControllerHelper.logRequestStart('Update GitHub context', req, { conversationId });
+
+        // Defensive checks
         if (!conversationId) {
-            res.status(400).json({
-                success: false,
-                message: 'Conversation ID is required'
-            });
+            ControllerHelper.sendError(res, 400, 'Conversation ID is required');
             return;
         }
 
         if (!githubContext || !(githubContext as { connectionId?: string; repositoryId?: number }).connectionId || !(githubContext as { connectionId?: string; repositoryId?: number }).repositoryId) {
-            res.status(400).json({
-                success: false,
-                message: 'Valid GitHub context is required'
-            });
+            ControllerHelper.sendError(res, 400, 'Valid GitHub context is required');
             return;
         }
 
@@ -844,10 +461,7 @@ export const updateConversationGitHubContext = async (req: AuthenticatedRequest,
         });
 
         if (!conversation) {
-            res.status(404).json({
-                success: false,
-                message: 'Conversation not found or access denied'
-            });
+            ControllerHelper.sendError(res, 404, 'Conversation not found or access denied');
             return;
         }
 
@@ -861,10 +475,7 @@ export const updateConversationGitHubContext = async (req: AuthenticatedRequest,
         });
 
         if (!connection) {
-            res.status(404).json({
-                success: false,
-                message: 'GitHub connection not found or inactive'
-            });
+            ControllerHelper.sendError(res, 404, 'GitHub connection not found or inactive');
             return;
         }
 
@@ -878,29 +489,16 @@ export const updateConversationGitHubContext = async (req: AuthenticatedRequest,
             }
         });
 
-        loggingService.info('Conversation GitHub context updated', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Update GitHub context', req, startTime, {
             conversationId,
             repository: githubCtx.repositoryFullName
         });
 
-        res.json({
-            success: true,
-            message: 'GitHub context updated successfully'
-        });
+        ControllerHelper.sendSuccess(res, null, 'GitHub context updated successfully');
 
     } catch (error: any) {
-        loggingService.error('Failed to update conversation GitHub context', {
-            userId,
-            conversationId,
-            error: error.message
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update GitHub context',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('Update GitHub context', error, req, res, startTime, { conversationId });
     }
 };
 
@@ -909,85 +507,40 @@ export const updateConversationGitHubContext = async (req: AuthenticatedRequest,
  */
 export const deleteConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { conversationId } = req.params;
 
     try {
-        loggingService.info('Conversation deletion request initiated', {
-            userId,
-            conversationId,
-            requestId: req.headers['x-request-id'] as string
-        });
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
 
-        if (!userId) {
-            loggingService.warn('Conversation deletion request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation deletion', req, { conversationId });
 
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
+        // Defensive check (route validation should catch this)
         if (!conversationId) {
-            loggingService.warn('Conversation deletion request failed - missing conversation ID', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Conversation ID is required'
-            });
+            ControllerHelper.sendError(res, 400, 'Conversation ID is required');
             return;
         }
 
         await ChatService.deleteConversation(conversationId, userId);
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation deleted successfully', {
-            userId,
-            conversationId,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation deletion', req, startTime, { conversationId });
 
         // Log business event
-        loggingService.logBusiness({
-            event: 'conversation_deleted',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
-                conversationId
-            }
-        });
+        ControllerHelper.logBusinessEvent(
+            'conversation_deleted',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            { conversationId }
+        );
 
-        res.json({
-            success: true,
-            message: 'Conversation deleted successfully'
-        });
+        ControllerHelper.sendSuccess(res, null, 'Conversation deleted successfully');
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation deletion failed', {
-            userId,
-            conversationId,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to delete conversation',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('Conversation deletion', error, req, res, startTime, { conversationId });
     }
 };
 
@@ -996,87 +549,49 @@ export const deleteConversation = async (req: AuthenticatedRequest, res: Respons
  */
 export const renameConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { id } = req.params;
     const { title } = req.body;
 
     try {
-        loggingService.info('Conversation rename request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation rename', req, {
             conversationId: id,
-            newTitle: title,
-            requestId: req.headers['x-request-id'] as string
+            newTitle: title
         });
 
-        if (!userId) {
-            loggingService.warn('Conversation rename request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
+        // Validation already handled by express-validator in routes
+        // But we keep this defensive check since title could be whitespace
         if (!title || title.trim().length === 0) {
-            loggingService.warn('Conversation rename request failed - invalid title', {
-                userId,
-                conversationId: id,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'Title is required and cannot be empty'
-            });
+            ControllerHelper.sendError(res, 400, 'Title is required and cannot be empty');
             return;
         }
 
         const updatedConversation = await ChatService.renameConversation(userId, id, title);
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation renamed successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation rename', req, startTime, {
             conversationId: id,
-            newTitle: title,
-            duration,
-            requestId: req.headers['x-request-id'] as string
+            newTitle: title
         });
 
-        loggingService.logBusiness({
-            event: 'conversation_renamed',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
-                conversationId: id
-            }
-        });
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            'conversation_renamed',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            { conversationId: id }
+        );
 
-        res.json({
-            success: true,
-            data: updatedConversation
-        });
+        ControllerHelper.sendSuccess(res, updatedConversation);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation rename failed', {
-            userId,
-            conversationId: id,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to rename conversation',
-            error: error instanceof Error ? error.message : 'Unknown error'
+        ControllerHelper.handleError('Conversation rename', error, req, res, startTime, {
+            conversationId: id
         });
     }
 };
@@ -1086,89 +601,44 @@ export const renameConversation = async (req: AuthenticatedRequest, res: Respons
  */
 export const archiveConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { id } = req.params;
     const { archived } = req.body;
 
     try {
-        loggingService.info('Conversation archive request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation archive', req, {
             conversationId: id,
-            archived,
-            requestId: req.headers['x-request-id'] as string
+            archived
         });
 
-        if (!userId) {
-            loggingService.warn('Conversation archive request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
-        if (typeof archived !== 'boolean') {
-            loggingService.warn('Conversation archive request failed - invalid archived value', {
-                userId,
-                conversationId: id,
-                archived,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'archived must be a boolean value'
-            });
-            return;
-        }
-
+        // Validation already handled by express-validator in routes
         const updatedConversation = await ChatService.archiveConversation(userId, id, archived);
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation archive status updated successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation archive', req, startTime, {
             conversationId: id,
-            archived,
-            duration,
-            requestId: req.headers['x-request-id'] as string
+            archived
         });
 
-        loggingService.logBusiness({
-            event: archived ? 'conversation_archived' : 'conversation_unarchived',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
-                conversationId: id
-            }
-        });
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            archived ? 'conversation_archived' : 'conversation_unarchived',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            { conversationId: id }
+        );
 
-        res.json({
-            success: true,
-            data: updatedConversation
-        });
+        ControllerHelper.sendSuccess(res, updatedConversation);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation archive failed', {
-            userId,
+        ControllerHelper.handleError('Conversation archive', error, req, res, startTime, {
             conversationId: id,
-            archived,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update conversation archive status',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            archived
         });
     }
 };
@@ -1178,89 +648,44 @@ export const archiveConversation = async (req: AuthenticatedRequest, res: Respon
  */
 export const pinConversation = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { id } = req.params;
     const { pinned } = req.body;
 
     try {
-        loggingService.info('Conversation pin request initiated', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Conversation pin', req, {
             conversationId: id,
-            pinned,
-            requestId: req.headers['x-request-id'] as string
+            pinned
         });
 
-        if (!userId) {
-            loggingService.warn('Conversation pin request failed - no user authentication', {
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(401).json({ 
-                success: false, 
-                message: 'Authentication required' 
-            });
-            return;
-        }
-
-        if (typeof pinned !== 'boolean') {
-            loggingService.warn('Conversation pin request failed - invalid pinned value', {
-                userId,
-                conversationId: id,
-                pinned,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(400).json({
-                success: false,
-                message: 'pinned must be a boolean value'
-            });
-            return;
-        }
-
+        // Validation already handled by express-validator in routes
         const updatedConversation = await ChatService.pinConversation(userId, id, pinned);
 
-        const duration = Date.now() - startTime;
-
-        loggingService.info('Conversation pin status updated successfully', {
-            userId,
+        // Log success
+        ControllerHelper.logRequestSuccess('Conversation pin', req, startTime, {
             conversationId: id,
-            pinned,
-            duration,
-            requestId: req.headers['x-request-id'] as string
+            pinned
         });
 
-        loggingService.logBusiness({
-            event: pinned ? 'conversation_pinned' : 'conversation_unpinned',
-            category: 'chat_management',
-            value: duration,
-            metadata: {
-                userId,
-                conversationId: id
-            }
-        });
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            pinned ? 'conversation_pinned' : 'conversation_unpinned',
+            'chat_management',
+            userId,
+            Date.now() - startTime,
+            { conversationId: id }
+        );
 
-        res.json({
-            success: true,
-            data: updatedConversation
-        });
+        ControllerHelper.sendSuccess(res, updatedConversation);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Conversation pin failed', {
-            userId,
+        ControllerHelper.handleError('Conversation pin', error, req, res, startTime, {
             conversationId: id,
-            pinned,
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            duration,
-            requestId: req.headers['x-request-id'] as string
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update conversation pin status',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            pinned
         });
     }
 };
@@ -1268,54 +693,45 @@ export const pinConversation = async (req: AuthenticatedRequest, res: Response):
 /**
  * Get available models for chat
  */
-export const getAvailableModels = async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+export const getAvailableModels = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
 
     try {
+        // Log request start (no auth required for this public endpoint)
         loggingService.info('Available models request initiated', {
-            requestId: _req.headers['x-request-id'] as string
+            requestId: req.headers['x-request-id'] as string
         });
 
         const models = await ChatService.getAvailableModels();
 
-        const duration = Date.now() - startTime;
-
+        // Log success
         loggingService.info('Available models retrieved successfully', {
-            duration,
+            duration: Date.now() - startTime,
             modelsCount: models.length,
-            requestId: _req.headers['x-request-id'] as string
+            requestId: req.headers['x-request-id'] as string
         });
 
-        // Log business event
+        // Log business event (no userId for public endpoint)
         loggingService.logBusiness({
             event: 'available_models_retrieved',
             category: 'chat_management',
-            value: duration,
+            value: Date.now() - startTime,
             metadata: {
                 modelsCount: models.length
             }
         });
 
-        res.json({
-            success: true,
-            data: models
-        });
+        ControllerHelper.sendSuccess(res, models);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
         loggingService.error('Available models retrieval failed', {
             error: error.message || 'Unknown error',
             stack: error.stack,
-            duration,
-            requestId: _req.headers['x-request-id'] as string
+            duration: Date.now() - startTime,
+            requestId: req.headers['x-request-id'] as string
         });
 
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get available models',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.sendError(res, 500, 'Failed to get available models', error);
     }
 };
 
@@ -1324,25 +740,20 @@ export const getAvailableModels = async (_req: AuthenticatedRequest, res: Respon
  */
 export const modifyPlan = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { chatId } = req.params;
     const { taskId, modifications } = req.body;
 
     try {
-        loggingService.info('Plan modification request', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Plan modification', req, {
             chatId,
             taskId,
             modifications
         });
-
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
 
         const { GovernedAgentService } = await import('../services/governedAgent.service');
         
@@ -1352,41 +763,31 @@ export const modifyPlan = async (req: AuthenticatedRequest, res: Response): Prom
             modifications
         );
 
-        const duration = Date.now() - startTime;
+        // Log success
+        ControllerHelper.logRequestSuccess('Plan modification', req, startTime, {
+            chatId,
+            taskId
+        });
         
-        loggingService.logBusiness({
-            event: 'plan_modified',
-            category: 'governed_agent',
-            value: duration,
-            metadata: {
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            'plan_modified',
+            'governed_agent',
+            userId,
+            Date.now() - startTime,
+            {
                 chatId,
                 taskId,
-                userId,
                 modificationType: Object.keys(modifications)
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: updatedTask
-        });
+        ControllerHelper.sendSuccess(res, updatedTask);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Plan modification failed', {
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            userId,
+        ControllerHelper.handleError('Plan modification', error, req, res, startTime, {
             chatId,
-            taskId,
-            duration
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to modify plan',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            taskId
         });
     }
 };
@@ -1396,25 +797,20 @@ export const modifyPlan = async (req: AuthenticatedRequest, res: Response): Prom
  */
 export const askAboutPlan = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { chatId } = req.params;
     const { taskId, question } = req.body;
 
     try {
-        loggingService.info('Plan question request', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Plan question', req, {
             chatId,
             taskId,
             question
         });
-
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
 
         const { GovernedAgentService } = await import('../services/governedAgent.service');
         
@@ -1424,44 +820,35 @@ export const askAboutPlan = async (req: AuthenticatedRequest, res: Response): Pr
             question
         );
 
-        const duration = Date.now() - startTime;
+        // Log success
+        ControllerHelper.logRequestSuccess('Plan question', req, startTime, {
+            chatId,
+            taskId,
+            questionLength: question.length
+        });
         
-        loggingService.logBusiness({
-            event: 'plan_question_answered',
-            category: 'governed_agent',
-            value: duration,
-            metadata: {
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            'plan_question_answered',
+            'governed_agent',
+            userId,
+            Date.now() - startTime,
+            {
                 chatId,
                 taskId,
-                userId,
                 questionLength: question.length
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: {
-                question,
-                answer
-            }
+        ControllerHelper.sendSuccess(res, {
+            question,
+            answer
         });
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Plan question failed', {
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            userId,
+        ControllerHelper.handleError('Plan question', error, req, res, startTime, {
             chatId,
-            taskId,
-            duration
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to answer question',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            taskId
         });
     }
 };
@@ -1471,25 +858,20 @@ export const askAboutPlan = async (req: AuthenticatedRequest, res: Response): Pr
  */
 export const requestCodeChanges = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { chatId, taskId } = req.params;
     const { changeRequest } = req.body;
 
     try {
-        loggingService.info('Code change request', {
-            userId,
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Code change request', req, {
             chatId,
             taskId,
             changeRequest
         });
-
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
 
         const { GovernedAgentService } = await import('../services/governedAgent.service');
         
@@ -1499,41 +881,32 @@ export const requestCodeChanges = async (req: AuthenticatedRequest, res: Respons
             changeRequest
         );
 
-        const duration = Date.now() - startTime;
+        // Log success
+        ControllerHelper.logRequestSuccess('Code change request', req, startTime, {
+            chatId,
+            originalTaskId: taskId,
+            newTaskId: newTask.id
+        });
         
-        loggingService.logBusiness({
-            event: 'code_changes_requested',
-            category: 'governed_agent',
-            value: duration,
-            metadata: {
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            'code_changes_requested',
+            'governed_agent',
+            userId,
+            Date.now() - startTime,
+            {
                 chatId,
-                userId,
                 originalTaskId: taskId,
                 newTaskId: newTask.id
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: newTask
-        });
+        ControllerHelper.sendSuccess(res, newTask);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Code change request failed', {
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            userId,
+        ControllerHelper.handleError('Code change request', error, req, res, startTime, {
             chatId,
-            taskId,
-            duration
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to request code changes',
-            error: error instanceof Error ? error.message : 'Unknown error'
+            taskId
         });
     }
 };
@@ -1543,22 +916,15 @@ export const requestCodeChanges = async (req: AuthenticatedRequest, res: Respons
  */
 export const getChatPlans = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
     const startTime = Date.now();
-    const userId = req.userId;
     const { chatId } = req.params;
 
     try {
-        loggingService.info('Get chat plans request', {
-            userId,
-            chatId
-        });
+        // Auth check using helper
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
 
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
+        // Log request start
+        ControllerHelper.logRequestStart('Get chat plans', req, { chatId });
 
         const { ChatTaskLink } = await import('../models/ChatTaskLink');
         const { GovernedTaskModel } = await import('../services/governedAgent.service');
@@ -1567,10 +933,7 @@ export const getChatPlans = async (req: AuthenticatedRequest, res: Response): Pr
         const taskLink = await ChatTaskLink.findOne({ chatId });
         
         if (!taskLink || taskLink.taskIds.length === 0) {
-            res.json({
-                success: true,
-                data: []
-            });
+            ControllerHelper.sendSuccess(res, []);
             return;
         }
 
@@ -1580,40 +943,28 @@ export const getChatPlans = async (req: AuthenticatedRequest, res: Response): Pr
             userId
         }).sort({ createdAt: -1 });
 
-        const duration = Date.now() - startTime;
+        // Log success
+        ControllerHelper.logRequestSuccess('Get chat plans', req, startTime, {
+            chatId,
+            plansCount: tasks.length
+        });
         
-        loggingService.logBusiness({
-            event: 'chat_plans_retrieved',
-            category: 'governed_agent',
-            value: duration,
-            metadata: {
+        // Log business event
+        ControllerHelper.logBusinessEvent(
+            'chat_plans_retrieved',
+            'governed_agent',
+            userId,
+            Date.now() - startTime,
+            {
                 chatId,
-                userId,
                 plansCount: tasks.length
             }
-        });
+        );
 
-        res.json({
-            success: true,
-            data: tasks
-        });
+        ControllerHelper.sendSuccess(res, tasks);
 
     } catch (error: any) {
-        const duration = Date.now() - startTime;
-        
-        loggingService.error('Get chat plans failed', {
-            error: error.message || 'Unknown error',
-            stack: error.stack,
-            userId,
-            chatId,
-            duration
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get chat plans',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('Get chat plans', error, req, res, startTime, { chatId });
     }
 };
 
@@ -1621,14 +972,16 @@ export const getChatPlans = async (req: AuthenticatedRequest, res: Response): Pr
  * Stream chat-wide updates including governed tasks
  */
 export const streamChatUpdates = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-    const userId = req.userId;
+    const startTime = Date.now();
     const { chatId } = req.params;
 
     try {
-        if (!userId) {
-            res.status(401).json({ success: false, message: 'Authentication required' });
-            return;
-        }
+        // Auth check using helper (but don't return, SSE needs special handling)
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        // Log request start
+        ControllerHelper.logRequestStart('Chat SSE stream', req, { chatId });
 
         // Set SSE headers
         res.setHeader('Content-Type', 'text/event-stream');
@@ -1636,13 +989,6 @@ export const streamChatUpdates = async (req: AuthenticatedRequest, res: Response
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
         res.flushHeaders();
-
-        loggingService.info('Started SSE stream for chat', { 
-            chatId, 
-            userId, 
-            component: 'ChatController', 
-            operation: 'streamChatUpdates' 
-        });
 
         // Send initial connection event
         res.write(`event: connected\ndata: ${JSON.stringify({ 
@@ -1654,7 +1000,6 @@ export const streamChatUpdates = async (req: AuthenticatedRequest, res: Response
         let pollInterval: NodeJS.Timeout | null = null;
         let heartbeatInterval: NodeJS.Timeout | null = null;
         const maxDuration = 30 * 60 * 1000; // 30 minutes max
-        const startTime = Date.now();
 
         const cleanupIntervals = () => {
             if (pollInterval) clearInterval(pollInterval);
@@ -1743,14 +1088,13 @@ export const streamChatUpdates = async (req: AuthenticatedRequest, res: Response
         loggingService.error('Failed to start chat SSE stream', {
             error: error.message || 'Unknown error',
             stack: error.stack,
-            userId,
+            userId: req.userId,
             chatId
         });
 
-        res.status(500).json({
-            success: false,
-            message: 'Failed to start chat stream',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        // Only send JSON error if headers haven't been sent yet
+        if (!res.headersSent) {
+            ControllerHelper.sendError(res, 500, 'Failed to start chat stream', error);
+        }
     }
 }; 

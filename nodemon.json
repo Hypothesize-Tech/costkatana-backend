@@ -3,9 +3,9 @@
   "ext": "ts",
   "ignore": ["src/**/*.spec.ts", "src/**/*.test.ts"],
   "execMap": { 
-    "ts": "node -r ts-node/register" 
+    "ts": "node -r tsconfig-paths/register -r ts-node/register" 
   },
   "events": {
-    "start": "node -r ts-node/register -r ./src/observability/register.ts src/server.ts"
+    "start": "node -r tsconfig-paths/register -r ts-node/register -r ./src/observability/register.ts src/server.ts"
   }
 }

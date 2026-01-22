@@ -3,6 +3,8 @@ import { webhookService } from '../services/webhook.service';
 import { webhookDeliveryService } from '../services/webhookDelivery.service';
 import { loggingService } from '../services/logging.service';
 import { WEBHOOK_EVENTS } from '../types/webhook.types';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class WebhookController {
     // Background processing queue
@@ -30,10 +32,13 @@ export class WebhookController {
     /**
      * Create a new webhook
      */
-    static async createWebhook(req: any, res: Response): Promise<Response> {
+    static async createWebhook(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
-        const { requestId, userId } = this.validateAuthentication(req, res);
-        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('createWebhook', req);
 
         try {
             // Check circuit breaker
@@ -50,9 +55,9 @@ export class WebhookController {
             }
 
             const webhook = await webhookService.createWebhook(userId, webhookData);
-            const duration = Date.now() - startTime;
 
             // Queue business event logging to background
+            const duration = Date.now() - startTime;
             this.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'webhook_created',
@@ -70,6 +75,11 @@ export class WebhookController {
 
             // Reset failure count on success
             this.dbFailureCount = 0;
+
+            ControllerHelper.logRequestSuccess('createWebhook', req, startTime, {
+                webhookId: webhook._id,
+                webhookName: webhook.name
+            });
 
             return res.status(201).json({
                 success: true,
@@ -90,31 +100,23 @@ export class WebhookController {
             });
         } catch (error: any) {
             WebhookController.recordDbFailure();
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Webhook creation failed', {
-                requestId,
-                userId,
-                webhookName: req.body?.name,
-                error: error.message || 'Unknown error',
-                duration
-            });
-            
-            return res.status(500).json({ 
-                error: 'Failed to create webhook' 
-            });
+            ControllerHelper.handleError('createWebhook', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get user's webhooks
      */
-    static async getWebhooks(req: any, res: Response): Promise<Response> {
+    static async getWebhooks(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getWebhooks', req, { query: req.query });
+
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
 
             const { active, events } = req.query;
             const filters: any = {};
@@ -128,6 +130,10 @@ export class WebhookController {
             }
 
             const webhooks = await webhookService.getUserWebhooks(userId, filters);
+
+            ControllerHelper.logRequestSuccess('getWebhooks', req, startTime, {
+                count: webhooks.length
+            });
 
             return res.json({
                 success: true,
@@ -150,38 +156,33 @@ export class WebhookController {
                 }))
             });
         } catch (error: any) {
-            loggingService.error('Get webhooks failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                active: req.query.active,
-                events: req.query.events,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch webhooks' 
-            });
+            ControllerHelper.handleError('getWebhooks', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get a single webhook
      */
-    static async getWebhook(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
+    static async getWebhook(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { id } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getWebhook', req, { webhookId: id });
 
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'webhookId');
 
             const webhook = await webhookService.getWebhook(id, userId);
             
             if (!webhook) {
                 return res.status(404).json({ error: 'Webhook not found' });
             }
+
+            ControllerHelper.logRequestSuccess('getWebhook', req, startTime, { webhookId: id });
 
             return res.json({
                 success: true,
@@ -214,31 +215,25 @@ export class WebhookController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Get webhook failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                webhookId: req.params.id,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch webhook' 
-            });
+            ControllerHelper.handleError('getWebhook', error, req, res, startTime, { webhookId: id });
+            return res;
         }
     }
 
     /**
      * Update a webhook
      */
-    static async updateWebhook(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
+    static async updateWebhook(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { id } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('updateWebhook', req, { webhookId: id });
 
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'webhookId');
 
             const updates = req.body;
 
@@ -260,15 +255,9 @@ export class WebhookController {
                 return res.status(404).json({ error: 'Webhook not found' });
             }
 
-            loggingService.info('Webhook updated successfully', {
-                requestId: req.headers['x-request-id'] as string,
-                userId,
+            ControllerHelper.logRequestSuccess('updateWebhook', req, startTime, {
                 webhookId: webhook._id,
-                webhookName: webhook.name,
-                hasUrl: !!webhook.url,
-                eventsCount: webhook.events.length,
-                isActive: webhook.active,
-                hasVersion: !!webhook.version
+                webhookName: webhook.name
             });
 
             return res.json({
@@ -289,33 +278,25 @@ export class WebhookController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Update webhook failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                webhookId: req.params.id,
-                hasUpdates: !!req.body,
-                updateFields: req.body ? Object.keys(req.body) : [],
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to update webhook' 
-            });
+            ControllerHelper.handleError('updateWebhook', error, req, res, startTime, { webhookId: id });
+            return res;
         }
     }
 
     /**
      * Delete a webhook
      */
-    static async deleteWebhook(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            const { id } = req.params;
+    static async deleteWebhook(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { id } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('deleteWebhook', req, { webhookId: id });
 
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+        try {
+            ServiceHelper.validateObjectId(id, 'webhookId');
 
             const deleted = await webhookService.deleteWebhook(id, userId);
             
@@ -323,28 +304,15 @@ export class WebhookController {
                 return res.status(404).json({ error: 'Webhook not found' });
             }
 
-            loggingService.info('Webhook deleted successfully', {
-                requestId: req.headers['x-request-id'] as string,
-                userId,
-                webhookId: id
-            });
+            ControllerHelper.logRequestSuccess('deleteWebhook', req, startTime, { webhookId: id });
 
             return res.json({
                 success: true,
                 message: 'Webhook deleted successfully'
             });
         } catch (error: any) {
-            loggingService.error('Delete webhook failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                webhookId: req.params.id,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to delete webhook' 
-            });
+            ControllerHelper.handleError('deleteWebhook', error, req, res, startTime, { webhookId: id });
+            return res;
         }
     }
 
@@ -469,20 +437,23 @@ export class WebhookController {
     /**
      * Get a single delivery
      */
-    static async getDelivery(req: any, res: Response): Promise<Response> {
+    static async getDelivery(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { deliveryId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getDelivery', req, { deliveryId });
+
         try {
-            const userId = req.user?.id;
-            const { deliveryId } = req.params;
-
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
-
             const delivery = await webhookService.getDelivery(deliveryId, userId);
             
             if (!delivery) {
                 return res.status(404).json({ error: 'Delivery not found' });
             }
+
+            ControllerHelper.logRequestSuccess('getDelivery', req, startTime, { deliveryId });
 
             return res.json({
                 success: true,
@@ -506,40 +477,32 @@ export class WebhookController {
                 }
             });
         } catch (error: any) {
-            loggingService.error('Get webhook delivery failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                deliveryId: req.params.deliveryId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch delivery' 
-            });
+            ControllerHelper.handleError('getDelivery', error, req, res, startTime, { deliveryId });
+            return res;
         }
     }
 
     /**
      * Replay a delivery
      */
-    static async replayDelivery(req: any, res: Response): Promise<Response> {
-        try {
-            const userId = req.user?.id;
-            const { deliveryId } = req.params;
+    static async replayDelivery(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { deliveryId } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('replayDelivery', req, { deliveryId });
 
-            if (!userId) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
+        try {
+            ServiceHelper.validateObjectId(deliveryId, 'deliveryId');
 
             const newDelivery = await webhookService.replayDelivery(deliveryId, userId);
 
             // Queue for immediate delivery
             await webhookDeliveryService.queueDelivery(newDelivery._id!.toString());
 
-            loggingService.info('Webhook delivery replayed successfully', {
-                requestId: req.headers['x-request-id'] as string,
-                userId,
+            ControllerHelper.logRequestSuccess('replayDelivery', req, startTime, {
                 originalDeliveryId: deliveryId,
                 newDeliveryId: newDelivery._id
             });
@@ -550,26 +513,22 @@ export class WebhookController {
                 deliveryId: newDelivery._id
             });
         } catch (error: any) {
-            loggingService.error('Replay webhook delivery failed', {
-                requestId: req.headers['x-request-id'] as string,
-                userId: req.user?.id,
-                hasUserId: !!req.user?.id,
-                deliveryId: req.params.deliveryId,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to replay delivery' 
-            });
+            ControllerHelper.handleError('replayDelivery', error, req, res, startTime, { deliveryId });
+            return res;
         }
     }
 
     /**
      * Get webhook statistics
      */
-    static async getWebhookStats(req: any, res: Response): Promise<Response> {
-        const { requestId, userId } = this.validateAuthentication(req, res);
-        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+    static async getWebhookStats(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        const { id } = req.params;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        const userId = req.userId!;
+        
+        ControllerHelper.logRequestStart('getWebhookStats', req, { webhookId: id });
 
         try {
             // Check circuit breaker
@@ -577,7 +536,7 @@ export class WebhookController {
                 return res.status(503).json({ error: 'Service temporarily unavailable' });
             }
 
-            const { id } = req.params;
+            ServiceHelper.validateObjectId(id, 'webhookId');
 
             // Add timeout handling
             const statsPromise = webhookService.getWebhookStats(id, userId);
@@ -591,28 +550,27 @@ export class WebhookController {
             // Reset failure count on success
             this.dbFailureCount = 0;
 
+            ControllerHelper.logRequestSuccess('getWebhookStats', req, startTime, { webhookId: id });
+
             return res.json({
                 success: true,
                 stats
             });
         } catch (error: any) {
             WebhookController.recordDbFailure();
-            loggingService.error('Get webhook stats failed', {
-                requestId,
-                userId,
-                webhookId: req.params.id,
-                error: error.message || 'Unknown error'
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch webhook statistics' 
-            });
+            ControllerHelper.handleError('getWebhookStats', error, req, res, startTime, { webhookId: id });
+            return res;
         }
     }
 
     /**
      * Get available webhook events
      */
-    static async getAvailableEvents(req: any, res: Response): Promise<Response> {
+    static async getAvailableEvents(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        ControllerHelper.logRequestStart('getAvailableEvents', req);
+
         try {
             const events = Object.entries(WEBHOOK_EVENTS).map(([key, value]) => ({
                 key,
@@ -623,6 +581,10 @@ export class WebhookController {
 
             const categories = [...new Set(events.map(e => e.category))];
 
+            ControllerHelper.logRequestSuccess('getAvailableEvents', req, startTime, {
+                total: events.length
+            });
+
             return res.json({
                 success: true,
                 events,
@@ -630,53 +592,34 @@ export class WebhookController {
                 total: events.length
             });
         } catch (error: any) {
-            loggingService.error('Get available webhook events failed', {
-                requestId: req.headers['x-request-id'] as string,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch available events' 
-            });
+            ControllerHelper.handleError('getAvailableEvents', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get queue statistics
      */
-    static async getQueueStats(req: any, res: Response): Promise<Response> {
+    static async getQueueStats(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
+        
+        ControllerHelper.logRequestStart('getQueueStats', req);
+
         try {
             const stats = await webhookDeliveryService.getQueueStats();
+
+            ControllerHelper.logRequestSuccess('getQueueStats', req, startTime);
 
             return res.json({
                 success: true,
                 queue: stats
             });
         } catch (error: any) {
-            loggingService.error('Get webhook queue stats failed', {
-                requestId: req.headers['x-request-id'] as string,
-                error: error.message || 'Unknown error',
-                stack: error.stack
-            });
-            return res.status(500).json({ 
-                error: 'Failed to fetch queue statistics' 
-            });
+            ControllerHelper.handleError('getQueueStats', error, req, res, startTime);
+            return res;
         }
     }
 
-    /**
-     * Authentication validation utility
-     */
-    private static validateAuthentication(req: any, res: Response): { requestId: string; userId: string } | { requestId: null; userId: null } {
-        const requestId = req.headers['x-request-id'] as string;
-        const userId = req.user?.id;
-
-        if (!userId) {
-            return { requestId: null, userId: null };
-        }
-
-        return { requestId, userId };
-    }
 
     /**
      * Webhook data validation utility

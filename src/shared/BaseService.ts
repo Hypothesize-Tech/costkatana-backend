@@ -1,10 +1,11 @@
 import { EventEmitter } from 'events';
 import { loggingService } from '../services/logging.service';
 import { LRUCache } from 'lru-cache';
+import { ServiceHelper } from '../utils/serviceHelper';
 
 /**
  * Base service class with common patterns and utilities
- * Provides standardized error handling, caching, and circuit breaker patterns
+ * Provides standardized error handling, caching, circuit breaker patterns, retry logic, and monitoring
  */
 export abstract class BaseService extends EventEmitter {
     protected readonly serviceName: string;
@@ -170,6 +171,143 @@ export abstract class BaseService extends EventEmitter {
             if (regex.test(key)) {
                 this.cache.delete(key);
             }
+        }
+    }
+
+    /**
+     * Execute operation with retry logic using ServiceHelper
+     * Provides exponential backoff with configurable retry attempts
+     * 
+     * @param operation - Async function to execute with retries
+     * @param operationName - Name of operation for logging
+     * @param options - Retry configuration options
+     * @returns Promise resolving to operation result
+     */
+    protected async executeWithRetry<T>(
+        operation: () => Promise<T>,
+        operationName: string,
+        options: {
+            maxRetries?: number;
+            delayMs?: number;
+            backoffMultiplier?: number;
+            shouldRetry?: (error: any) => boolean;
+        } = {}
+    ): Promise<T> {
+        const {
+            maxRetries = 3,
+            delayMs = 1000,
+            backoffMultiplier = 2,
+            shouldRetry
+        } = options;
+
+        return ServiceHelper.withRetry(operation, {
+            maxRetries,
+            delayMs,
+            backoffMultiplier,
+            shouldRetry,
+            onRetry: (error, attempt) => {
+                loggingService.warn(
+                    `Retry attempt ${attempt}/${maxRetries} for ${this.serviceName}.${operationName}`,
+                    {
+                        component: this.serviceName,
+                        operation: operationName,
+                        attempt,
+                        maxRetries,
+                        error: error instanceof Error ? error.message : String(error)
+                    }
+                );
+            }
+        });
+    }
+
+    /**
+     * Get value from cache
+     * 
+     * @param key - Cache key
+     * @returns Cached value or undefined if not found
+     */
+    protected cacheGet<T>(key: string): T | undefined {
+        if (!this.cache) {
+            loggingService.warn(`Cache not initialized for ${this.serviceName}`, {
+                component: this.serviceName,
+                operation: 'cacheGet'
+            });
+            return undefined;
+        }
+
+        const value = this.cache.get(key);
+        if (value !== undefined) {
+            loggingService.debug(`Cache hit for ${this.serviceName}`, {
+                component: this.serviceName,
+                key
+            });
+        }
+        return value as T | undefined;
+    }
+
+    /**
+     * Set value in cache
+     * 
+     * @param key - Cache key
+     * @param value - Value to cache
+     * @param ttl - Optional TTL override in milliseconds
+     */
+    protected cacheSet<T>(key: string, value: T, ttl?: number): void {
+        if (!this.cache) {
+            loggingService.warn(`Cache not initialized for ${this.serviceName}`, {
+                component: this.serviceName,
+                operation: 'cacheSet'
+            });
+            return;
+        }
+
+        if (ttl !== undefined) {
+            this.cache.set(key, value, { ttl });
+        } else {
+            this.cache.set(key, value);
+        }
+
+        loggingService.debug(`Cache set for ${this.serviceName}`, {
+            component: this.serviceName,
+            key,
+            ttl
+        });
+    }
+
+    /**
+     * Log operation with standardized metadata
+     * Provides consistent logging across all service operations
+     * 
+     * @param level - Log level (info, warn, error, debug)
+     * @param message - Log message
+     * @param operation - Operation name
+     * @param metadata - Additional metadata
+     */
+    protected logOperation(
+        level: 'info' | 'warn' | 'error' | 'debug',
+        message: string,
+        operation: string,
+        metadata?: Record<string, any>
+    ): void {
+        const logContext = {
+            component: this.serviceName,
+            operation,
+            ...metadata
+        };
+
+        switch (level) {
+            case 'info':
+                loggingService.info(message, logContext);
+                break;
+            case 'warn':
+                loggingService.warn(message, logContext);
+                break;
+            case 'error':
+                loggingService.error(message, logContext);
+                break;
+            case 'debug':
+                loggingService.debug(message, logContext);
+                break;
         }
     }
 

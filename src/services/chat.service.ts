@@ -1,7 +1,5 @@
-import { BedrockService } from './tracedBedrock.service';
-import { AWS_BEDROCK_PRICING } from '../utils/pricing/aws-bedrock';
-import { Conversation, IConversation, ChatMessage } from '../models';
-import { DocumentModel } from '../models/Document';
+import { Conversation, IConversation, ChatMessage } from '@models/index';
+import { DocumentModel } from '@models/Document';
 import { Types } from 'mongoose';
 import mongoose from 'mongoose';
 import { StateGraph, Annotation } from '@langchain/langgraph';
@@ -9,33 +7,26 @@ import { ChatBedrockConverse } from '@langchain/aws';
 import { BaseMessage, HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages';
 import { Tool } from '@langchain/core/tools';
 import { AgentExecutor } from 'langchain/agents';
-import { multiAgentFlowService } from './multiAgentFlow.service';
-import { loggingService } from './logging.service';
-import { IntegrationChatService, ParsedMention } from './integrationChat.service';
-import { MCPIntegrationHandler } from './mcpIntegrationHandler.service';
-import { GoogleService } from './google.service';
-import { TextExtractionService } from './textExtraction.service';
-import { IntegrationType } from '../mcp/types/permission.types';
-
-// Conversation Context Types
-export interface ConversationContext {
-    conversationId: string;
-    currentSubject?: string;
-    currentIntent?: string;
-    lastReferencedEntities: string[];
-    lastToolUsed?: string;
-    lastDomain?: string;
-    languageFramework?: string;
-    subjectConfidence: number;
-    timestamp: Date;
-}
-
-export interface CoreferenceResult {
-    resolved: boolean;
-    subject?: string;
-    confidence: number;
-    method: 'rule-based' | 'llm-fallback';
-}
+import { multiAgentFlowService } from '@services/multiAgentFlow.service';
+import { loggingService } from '@services/logging.service';
+import { IntegrationChatService, ParsedMention } from '@services/integrationChat.service';
+import { MCPIntegrationHandler } from '@services/mcpIntegrationHandler.service';
+import { IntegrationFormatter } from './chat/formatters';
+import { ModelRegistry, ModelMetadata, CostEstimator } from './chat/models';
+import { ContextManager, ConversationContext } from './chat/context';
+import { RouteDecider, IntegrationDetector, ConnectionChecker, ContextOptimizer } from './chat/routing';
+import { 
+    KnowledgeBaseHandler, 
+    WebScraperHandler, 
+    MultiAgentHandler, 
+    ConversationalFlowHandler, 
+    FallbackHandler,
+    HandlerRequest
+} from './chat/handlers';
+export type { ConversationContext, CoreferenceResult } from './chat/context';
+import { LangchainHelpers } from './chat/langchain/helpers';
+import { AttachmentProcessor } from './chat/attachments';
+import { AutonomousDetector, GovernedPlanMessageCreator } from './chat/autonomous';
 
 // Enhanced Langchain Multi-Agent State Management
 const LangchainChatState = Annotation.Root({
@@ -383,9 +374,6 @@ export interface ChatSendMessageResponse {
 }
 
 export class ChatService {
-    // Context management
-    private static contextCache = new Map<string, ConversationContext>();
-
     // Enhanced Langchain Multi-Agent System
     private static langchainGraph?: StateGraph<LangchainChatStateType>;
     private static langchainAgents: Map<string, AgentExecutor> = new Map();
@@ -793,17 +781,17 @@ export class ChatService {
             const coordinationAnalysis = response.content as string;
 
             // Determine user intent based on analysis
-            const userIntent = this.analyzeUserIntent(userMessage, coordinationAnalysis);
+            const userIntent = LangchainHelpers.analyzeUserIntent(userMessage, coordinationAnalysis);
 
             return {
                 currentAgent: 'coordinator',
                 userIntent,
                 contextData: {
                     coordinationAnalysis,
-                    complexity: this.assessComplexity(userMessage),
+                    complexity: LangchainHelpers.assessComplexity(userMessage),
                     requiresStrategy: userMessage.toLowerCase().includes('strategy') || userMessage.toLowerCase().includes('plan'),
-                    requiresInput: this.requiresUserInput(userMessage),
-                    integrationNeeds: this.identifyIntegrationNeeds(userMessage)
+                    requiresInput: LangchainHelpers.requiresUserInput(userMessage),
+                    integrationNeeds: LangchainHelpers.identifyIntegrationNeeds(userMessage)
                 },
                 conversationDepth: (state.conversationDepth || 0) + 1,
                 autonomousDecisions: [`Analyzed request: ${userIntent}`]
@@ -845,7 +833,7 @@ export class ChatService {
             const strategyContent = response.content as string;
 
             // Extract strategic questions (simplified extraction)
-            const questions = this.extractStrategicQuestions(strategyContent);
+            const questions = LangchainHelpers.extractStrategicQuestions(strategyContent);
             
             return {
                 currentAgent: 'strategy_formation',
@@ -854,7 +842,7 @@ export class ChatService {
                     responses: {},
                     currentQuestion: 0,
                     isComplete: false,
-                    adaptiveQuestions: this.generateAdaptiveQuestions(userMessage, state.contextData)
+                    adaptiveQuestions: LangchainHelpers.generateAdaptiveQuestions(userMessage, state.contextData)
                 },
                 autonomousDecisions: [
                     ...(state.autonomousDecisions || []),
@@ -888,7 +876,7 @@ export class ChatService {
             const userContext = state.contextData;
             
             // Determine if we need to generate options for IntegrationSelector
-            const needsOptions = this.shouldGenerateOptions(currentQuestion, userContext);
+            const needsOptions = LangchainHelpers.shouldGenerateOptions(currentQuestion, userContext);
             
             if (needsOptions) {
                 // Generate options for IntegrationSelector UI
@@ -910,7 +898,7 @@ export class ChatService {
                 const optionsContent = optionsResponse.content as string;
                 
                 // Parse options (in production, use proper JSON parsing)
-                const options = this.parseOptionsFromResponse(optionsContent);
+                const options = LangchainHelpers.parseOptionsFromResponse(optionsContent);
                 
                 // Create IntegrationSelector-compatible response
                 const sessionId = `${state.contextData.conversationId}_${Date.now()}`;
@@ -928,7 +916,7 @@ export class ChatService {
                         currentField: {
                             type: 'selection',
                             sessionId: sessionId,
-                            parameterName: this.extractParameterName(currentQuestion),
+                            parameterName: LangchainHelpers.extractParameterName(currentQuestion),
                             question: currentQuestion,
                             options: options,
                             allowCustom: true,
@@ -1374,16 +1362,16 @@ export class ChatService {
             };
 
             // Determine autonomous actions based on context
-            const autonomousActions = await this.determineAutonomousActions(autonomousContext);
+            const autonomousActions = await LangchainHelpers.determineAutonomousActions(autonomousContext);
             
             // Execute autonomous workflows
-            const executionResults = await this.executeAutonomousWorkflows(autonomousActions, state);
+            const executionResults = await LangchainHelpers.executeAutonomousWorkflows(autonomousActions, state);
 
             // Generate proactive insights
-            const proactiveInsights = this.generateProactiveInsights(state);
+            const proactiveInsights = LangchainHelpers.generateProactiveInsights(state);
             
             // Predict next user needs
-            const predictedNeeds = await this.predictUserNeeds(state);
+            const predictedNeeds = await LangchainHelpers.predictUserNeeds(state);
             
             // Generate autonomous response
             const autonomousPrompt = new HumanMessage(`Based on the analysis, generate intelligent autonomous actions:
@@ -1414,7 +1402,7 @@ export class ChatService {
                     ...proactiveInsights,
                     ...predictedNeeds.map(n => `Predicted need: ${n}`)
                 ],
-                taskPriority: this.calculateTaskPriority(state),
+                taskPriority: LangchainHelpers.calculateTaskPriority(state),
                 worldClassFeatures: {
                     ...state.worldClassFeatures,
                     emotionalIntelligence: true,
@@ -1568,529 +1556,7 @@ export class ChatService {
         return 'response_synthesis';
     }
 
-    // =================== HELPER METHODS ===================
-
-    private static analyzeUserIntent(message: string, _analysis: string): string {
-        const lowerMessage = message.toLowerCase();
-        
-        if (lowerMessage.includes('strategy') || lowerMessage.includes('plan')) {
-            return 'strategic_planning';
-        }
-        if (lowerMessage.includes('optimize') || lowerMessage.includes('improve')) {
-            return 'optimization_request';
-        }
-        if (lowerMessage.includes('integrate') || lowerMessage.includes('connect')) {
-            return 'integration_request';
-        }
-        if (lowerMessage.includes('analyze') || lowerMessage.includes('report')) {
-            return 'analytics_request';
-        }
-        if (lowerMessage.includes('automate') || lowerMessage.includes('workflow')) {
-            return 'automation_request';
-        }
-        
-        return 'general_assistance';
-    }
-
-    private static assessComplexity(message: string): 'low' | 'medium' | 'high' {
-        const wordCount = message.split(' ').length;
-        const hasMultipleQuestions = (message.match(/\?/g) || []).length > 1;
-        const hasIntegrationTerms = ['aws', 'google', 'github', 'integrate', 'connect'].some(term => 
-            message.toLowerCase().includes(term)
-        );
-        
-        if (wordCount > 100 || hasMultipleQuestions || hasIntegrationTerms) {
-            return 'high';
-        } else if (wordCount > 30) {
-            return 'medium';
-        }
-        return 'low';
-    }
-
-    private static requiresUserInput(message: string): boolean {
-        const inputIndicators = [
-            'how should', 'what would you', 'which option', 'help me choose',
-            'need to know', 'strategy', 'plan', 'configure', 'setup'
-        ];
-        return inputIndicators.some(indicator => message.toLowerCase().includes(indicator));
-    }
-
-    private static identifyIntegrationNeeds(message: string): string[] {
-        const integrations: string[] = [];
-        const lowerMessage = message.toLowerCase();
-        
-        if (lowerMessage.includes('aws') || lowerMessage.includes('bedrock') || lowerMessage.includes('cost')) {
-            integrations.push('aws');
-        }
-        if (lowerMessage.includes('google') || lowerMessage.includes('workspace') || lowerMessage.includes('gmail') || 
-            lowerMessage.includes('drive') || lowerMessage.includes('sheets')) {
-            integrations.push('google');
-        }
-        if (lowerMessage.includes('github') || lowerMessage.includes('repository') || lowerMessage.includes('code')) {
-            integrations.push('github');
-        }
-        if (lowerMessage.includes('vercel') || lowerMessage.includes('deployment')) {
-            integrations.push('vercel');
-        }
-        
-        return integrations;
-    }
-
-    private static extractStrategicQuestions(content: string): string[] {
-        // Simple extraction - in production, use more sophisticated parsing
-        const questions = content.split(/[.!?]/)
-            .filter(sentence => sentence.includes('?') || sentence.toLowerCase().includes('need to'))
-            .map(q => q.trim())
-            .filter(q => q.length > 10)
-            .slice(0, 5);
-            
-        return questions.length > 0 ? questions : [
-            'What is your primary goal with this request?',
-            'What timeline are you working with?',
-            'Are there any specific constraints or requirements?'
-        ];
-    }
-
-    private static generateAdaptiveQuestions(message: string, _context: any): string[] {
-        return [
-            `Based on "${message}", what specific outcomes are you looking for?`,
-            'Are there any additional requirements or constraints?',
-            'How would you measure success for this initiative?'
-        ];
-    }
-
-    private static generateProactiveInsights(state: LangchainChatStateType): string[] {
-        const insights = [];
-        
-        if (state.integrationContext?.aws) {
-            insights.push('Cost optimization opportunities identified in AWS usage');
-        }
-        if (state.integrationContext?.google) {
-            insights.push('Workflow automation potential detected in Google Workspace');
-        }
-        if (state.integrationContext?.github) {
-            insights.push('Development efficiency improvements available in GitHub workflows');
-        }
-        if ((state.conversationDepth || 0) > 3) {
-            insights.push('Complex multi-step workflow detected - automation recommended');
-        }
-        
-        return insights;
-    }
-
-    private static calculateTaskPriority(state: LangchainChatStateType): number {
-        const urgencyKeywords = ['urgent', 'asap', 'critical', 'emergency', 'immediately'];
-        const lastMessage = state.messages[state.messages.length - 1]?.content as string || '';
-        
-        if (urgencyKeywords.some(keyword => lastMessage.toLowerCase().includes(keyword))) {
-            return 10;
-        }
-        
-        const complexityBonus = state.contextData?.complexity === 'high' ? 3 : 
-                              state.contextData?.complexity === 'medium' ? 1 : 0;
-        const integrationBonus = Object.keys(state.integrationContext || {}).length;
-        
-        return Math.min((state.conversationDepth || 1) + complexityBonus + integrationBonus, 10);
-    }
-
-    /**
-     * Determine autonomous actions using AWS Bedrock Claude 3.5 Sonnet
-     * Production-quality AI-driven action determination
-     */
-    private static async determineAutonomousActions(context: any): Promise<Array<{
-        action: string;
-        priority: number;
-        reasoning: string;
-        parameters: any;
-    }>> {
-        try {
-            // Use Claude Opus 4.1 for complex reasoning about autonomous actions
-            const llm = new ChatBedrockConverse({
-                model: 'us.anthropic.claude-opus-4-1-20250805-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.7,
-                maxTokens: 2000,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            });
-
-            const analysisPrompt = new HumanMessage(`You are an autonomous AI decision-making system. Analyze the following context and determine what autonomous actions should be taken to help the user.
-
-Context:
-- User Intent: ${context.userIntent || 'Not specified'}
-- Conversation Depth: ${context.conversationDepth || 0}
-- Available Integrations: ${JSON.stringify(Object.keys(context.integrations || {}))}
-- Previous Decisions: ${JSON.stringify(context.previousDecisions?.slice(-3) || [])}
-- User Preferences: ${JSON.stringify(context.userPreferences || {})}
-
-Analyze and return a JSON array of autonomous actions. Each action should have:
-{
-  "action": "specific_action_name",
-  "priority": 1-10 (10 being highest),
-  "reasoning": "why this action is beneficial",
-  "parameters": { /* action-specific parameters */ }
-}
-
-Consider these action types:
-- enable_cortex_optimization: Enable AI cost optimization (40-75% savings)
-- analyze_usage_patterns: Analyze user's AI usage for insights
-- suggest_aws_integration: Recommend AWS connection for deployment
-- suggest_google_integration: Recommend Google Workspace automation
-- suggest_github_integration: Recommend GitHub workflow automation
-- suggest_workflow_automation: Create automation for repetitive tasks
-- optimize_model_selection: Suggest better models for user's use case
-- enable_semantic_cache: Enable caching for cost savings
-- configure_budget_alerts: Set up cost monitoring alerts
-- recommend_batch_processing: Suggest batching for efficiency
-
-Return ONLY the JSON array, no other text.`);
-
-            const response = await llm.invoke([analysisPrompt]);
-            const responseText = response.content.toString().trim();
-            
-            // Parse AI response
-            let actions: Array<{ action: string; priority: number; reasoning: string; parameters: any }> = [];
-            
-            try {
-                // Try to extract JSON from response
-                const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-                if (jsonMatch) {
-                    actions = JSON.parse(jsonMatch[0]);
-                }
-            } catch (parseError) {
-                loggingService.warn('Failed to parse AI action response, using fallback', {
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
-                });
-            }
-
-            // Validate and sanitize actions
-            actions = actions
-                .filter(a => a.action && typeof a.priority === 'number' && a.reasoning)
-                .sort((a, b) => b.priority - a.priority)
-                .slice(0, 5); // Top 5 actions
-
-            loggingService.info('AI determined autonomous actions', {
-                actionCount: actions.length,
-                topAction: actions[0]?.action
-            });
-
-            return actions;
-
-        } catch (error) {
-            loggingService.error('Failed to determine autonomous actions with AI', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            // Fallback: Return basic actions based on context
-            const fallbackActions = [];
-            
-            if (context.userIntent?.includes('cost') || context.userIntent?.includes('optimization')) {
-                fallbackActions.push({
-                    action: 'enable_cortex_optimization',
-                    priority: 9,
-                    reasoning: 'User interested in cost optimization - Cortex provides 40-75% savings',
-                    parameters: { autoEnable: false, notifyUser: true }
-                });
-            }
-            
-            if (!context.integrations?.aws && context.userIntent?.includes('deploy')) {
-                fallbackActions.push({
-                    action: 'suggest_aws_integration',
-                    priority: 7,
-                    reasoning: 'User wants deployment but AWS not connected',
-                    parameters: { showBenefits: true }
-                });
-            }
-            
-            return fallbackActions;
-        }
-    }
-
-    /**
-     * Execute autonomous workflows using AWS Bedrock Nova Pro
-     * Production-quality workflow execution with AI validation
-     */
-    private static async executeAutonomousWorkflows(
-        actions: Array<{ action: string; parameters: any }>,
-        state: LangchainChatStateType
-    ): Promise<any[]> {
-        const results = [];
-        
-        try {
-            // Use Nova Pro for fast execution coordination
-            const llm = new ChatBedrockConverse({
-                model: 'amazon.nova-pro-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.3,
-                maxTokens: 1500,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            });
-
-            for (const action of actions.slice(0, 3)) { // Execute top 3 actions
-                try {
-                    let executionResult: any = {
-                        action: action.action,
-                        success: false,
-                        message: '',
-                        impact: 'unknown'
-                    };
-
-                    // Execute specific action types
-                    switch (action.action) {
-                        case 'enable_cortex_optimization':
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                message: 'Cortex optimization recommended for 40-75% cost savings',
-                                impact: 'high',
-                                nextSteps: ['Enable in settings', 'Review optimization strategies', 'Monitor savings'],
-                                estimatedSavings: '40-75%'
-                            };
-                            break;
-
-                        case 'analyze_usage_patterns':
-                            // Use AI to analyze patterns
-                            const analysisPrompt = new HumanMessage(`Analyze AI usage patterns and provide insights:
-                            
-Context: ${JSON.stringify(state.contextData, null, 2)}
-Conversation Depth: ${state.conversationDepth}
-
-Provide 3-5 actionable insights about usage patterns, cost optimization, and efficiency improvements.
-Format as JSON array of strings.`);
-                            
-                            const analysisResponse = await llm.invoke([analysisPrompt]);
-                            const analysisText = analysisResponse.content.toString();
-                            
-                            let insights = ['Usage pattern analysis in progress'];
-                            try {
-                                const jsonMatch = analysisText.match(/\[[\s\S]*\]/);
-                                if (jsonMatch) {
-                                    insights = JSON.parse(jsonMatch[0]);
-                                }
-                            } catch (e) {
-                                // Use fallback insights
-                            }
-                            
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                insights: insights.slice(0, 5),
-                                message: `Analyzed usage patterns - ${insights.length} insights found`,
-                                impact: 'medium'
-                            };
-                            break;
-
-                        case 'suggest_workflow_automation':
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                workflow: {
-                                    name: 'AI Cost Optimization Workflow',
-                                    steps: 5,
-                                    estimatedSavings: '3 hours/week',
-                                    features: ['Automated reporting', 'Cost alerts', 'Usage optimization']
-                                },
-                                message: 'Workflow automation recommended for efficiency',
-                                impact: 'high'
-                            };
-                            break;
-
-                        case 'optimize_model_selection':
-                            // Use AI to suggest optimal models
-                            const modelPrompt = new HumanMessage(`Based on this chat mode and usage: ${state.contextData?.chatMode || 'balanced'}, recommend optimal AI models.
-                            
-Consider: cost, speed, quality balance.
-Return JSON object with: { recommended: [model names], reasoning: "why" }`);
-                            
-                            const modelResponse = await llm.invoke([modelPrompt]);
-                            const modelText = modelResponse.content.toString();
-                            
-                            let modelSuggestion = { 
-                                recommended: ['amazon.nova-pro-v1:0'], 
-                                reasoning: 'Balanced performance and cost' 
-                            };
-                            
-                            try {
-                                const jsonMatch = modelText.match(/\{[\s\S]*\}/);
-                                if (jsonMatch) {
-                                    modelSuggestion = JSON.parse(jsonMatch[0]);
-                                }
-                            } catch (e) {
-                                // Use fallback
-                            }
-                            
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                ...modelSuggestion,
-                                message: 'Model optimization suggestions generated',
-                                impact: 'medium'
-                            };
-                            break;
-
-                        case 'suggest_aws_integration':
-                        case 'suggest_google_integration':
-                        case 'suggest_github_integration':
-                            const integration = action.action.replace('suggest_', '').replace('_integration', '');
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                integration: integration.toUpperCase(),
-                                benefits: [
-                                    'Seamless automation',
-                                    'Enhanced productivity',
-                                    'Cost optimization',
-                                    'Intelligent workflows'
-                                ],
-                                message: `${integration.toUpperCase()} integration recommended for enhanced capabilities`,
-                                impact: 'high'
-                            };
-                            break;
-
-                        default:
-                            executionResult = {
-                                action: action.action,
-                                success: true,
-                                message: `Action ${action.action} identified for execution`,
-                                impact: 'low'
-                            };
-                    }
-
-                    results.push(executionResult);
-                    
-                } catch (actionError) {
-                    loggingService.warn('Action execution failed', {
-                        action: action.action,
-                        error: actionError instanceof Error ? actionError.message : String(actionError)
-                    });
-                    
-                    results.push({
-                        action: action.action,
-                        success: false,
-                        error: actionError instanceof Error ? actionError.message : 'Unknown error',
-                        impact: 'none'
-                    });
-                }
-            }
-
-            loggingService.info('Autonomous workflows executed', {
-                totalActions: actions.length,
-                executedActions: results.length,
-                successfulActions: results.filter(r => r.success).length
-            });
-
-        } catch (error) {
-            loggingService.error('Failed to execute autonomous workflows', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-
-        return results;
-    }
-
-    /**
-     * Predict user needs using AWS Bedrock Nova Pro
-     * Production-quality predictive analytics
-     */
-    private static async predictUserNeeds(state: LangchainChatStateType): Promise<string[]> {
-        try {
-            // Use Nova Pro for fast pattern analysis and prediction
-            const llm = new ChatBedrockConverse({
-                model: 'amazon.nova-pro-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0.6,
-                maxTokens: 1000,
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            });
-
-            const predictionPrompt = new HumanMessage(`You are a predictive AI assistant. Analyze the conversation and predict what the user might need next.
-
-Current Context:
-- User Intent: ${state.userIntent || 'Not specified'}
-- Conversation Depth: ${state.conversationDepth || 0}
-- Recent Topics: ${state.messages.slice(-3).map(m => m.content).join('; ')}
-- Autonomous Decisions Made: ${state.autonomousDecisions?.slice(-3).join('; ') || 'None'}
-- Time: ${new Date().getHours()}:00 (${new Date().toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false }).split(':')[0] >= '09' && new Date().toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false }).split(':')[0] <= '17' ? 'Business hours' : 'After hours'})
-
-Predict 3-5 things the user might need next. Consider:
-- Natural conversation flow
-- Common follow-up questions
-- Related tasks or actions
-- Time-based needs
-- Proactive assistance opportunities
-
-Return ONLY a JSON array of predicted needs as strings. Example: ["View cost breakdown", "Set up budget alerts", "Optimize model selection"]`);
-
-            const response = await llm.invoke([predictionPrompt]);
-            const responseText = response.content.toString().trim();
-            
-            let predictions: string[] = [];
-            
-            try {
-                const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-                if (jsonMatch) {
-                    predictions = JSON.parse(jsonMatch[0]);
-                }
-            } catch (parseError) {
-                loggingService.warn('Failed to parse AI predictions, using fallback', {
-                    error: parseError instanceof Error ? parseError.message : String(parseError)
-                });
-            }
-
-            // Validate and sanitize predictions
-            predictions = predictions
-                .filter(p => typeof p === 'string' && p.length > 5 && p.length < 100)
-                .slice(0, 5);
-
-            // Add time-based predictions
-            const hour = new Date().getHours();
-            if (hour >= 9 && hour <= 11 && !predictions.some(p => p.toLowerCase().includes('report'))) {
-                predictions.push('Review daily cost report');
-            }
-
-            loggingService.info('AI predicted user needs', {
-                predictionCount: predictions.length,
-                topPrediction: predictions[0]
-            });
-
-            return predictions.slice(0, 5);
-
-        } catch (error) {
-            loggingService.error('Failed to predict user needs with AI', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            // Fallback predictions based on context
-            const fallbackPredictions = [];
-            const userIntent = state.userIntent?.toLowerCase() || '';
-            
-            if (userIntent.includes('cost') || userIntent.includes('budget')) {
-                fallbackPredictions.push('View cost breakdown by service');
-                fallbackPredictions.push('Set up budget alerts');
-                fallbackPredictions.push('Explore optimization recommendations');
-            }
-            
-            if (userIntent.includes('integration')) {
-                fallbackPredictions.push('Check integration health');
-                fallbackPredictions.push('Discover new integration opportunities');
-            }
-            
-            if ((state.conversationDepth || 0) > 10) {
-                fallbackPredictions.push('Save conversation as workflow');
-                fallbackPredictions.push('Create automation from this chat');
-            }
-            
-            return fallbackPredictions.slice(0, 5);
-        }
-    }
+    // =================== HELPER METHODS (for Langchain Integration Agents) ===================
 
     /**
      * Get user preferences with AI-enhanced analysis using AWS Bedrock Nova Lite
@@ -2439,759 +1905,12 @@ Use the actual usage data to make intelligent inferences. Return ONLY the JSON o
         }
     }
 
-    // Static fallback models to prevent memory allocation on every error
-    private static readonly FALLBACK_MODELS = [
-        {
-            id: 'amazon.nova-micro-v1:0',
-            name: 'Nova Micro',
-            provider: 'Amazon',
-            description: 'Fast and cost-effective model for simple tasks',
-            capabilities: ['text', 'chat'],
-            pricing: { input: 0.035, output: 0.14, unit: 'Per 1M tokens' }
-        },
-        {
-            id: 'amazon.nova-lite-v1:0',
-            name: 'Nova Lite',
-            provider: 'Amazon',
-            description: 'Balanced performance and cost for general use',
-            capabilities: ['text', 'chat'],
-            pricing: { input: 0.06, output: 0.24, unit: 'Per 1M tokens' }
-        },
-        {
-            id: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
-            name: 'Claude 3.5 Haiku',
-            provider: 'Anthropic',
-            description: 'Fast and intelligent for quick responses',
-            capabilities: ['text', 'chat'],
-            pricing: { input: 1.0, output: 5.0, unit: 'Per 1M tokens' }
-        },
-        {
-            id: 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-            name: 'Claude 3.5 Sonnet',
-            provider: 'Anthropic',
-            description: 'Advanced reasoning and analysis capabilities',
-            capabilities: ['text', 'chat'],
-            pricing: { input: 3.0, output: 15.0, unit: 'Per 1M tokens' }
-        },
-        {
-            id: 'meta.llama3-1-8b-instruct-v1:0',
-            name: 'Llama 3.1 8B',
-            provider: 'Meta',
-            description: 'Good balance of performance and efficiency',
-            capabilities: ['text', 'chat'],
-            pricing: { input: 0.3, output: 0.6, unit: 'Per 1M tokens' }
-        }
-    ];
 
     // Circuit breaker for error handling
     private static errorCounts = new Map<string, number>();
     private static readonly MAX_ERRORS = 5;
     private static readonly ERROR_RESET_TIME = 5 * 60 * 1000; // 5 minutes
 
-    // Context Management Methods
-    private static buildConversationContext(
-        conversationId: string, 
-        userMessage: string, 
-        recentMessages: any[]
-    ): ConversationContext {
-        const existingContext = this.contextCache.get(conversationId);
-        
-        // Extract entities from current message and recent history
-        const entities = this.extractEntities(userMessage, recentMessages);
-        
-        // Determine current subject and intent
-        const { subject, intent, domain, confidence } = this.analyzeMessage(userMessage, recentMessages);
-        
-        const context: ConversationContext = {
-            conversationId,
-            currentSubject: subject || existingContext?.currentSubject,
-            currentIntent: intent,
-            lastReferencedEntities: [...(existingContext?.lastReferencedEntities || []), ...entities].slice(-10), // Keep last 10
-            lastToolUsed: existingContext?.lastToolUsed,
-            lastDomain: domain || existingContext?.lastDomain,
-            languageFramework: this.detectLanguageFramework(userMessage),
-            subjectConfidence: confidence,
-            timestamp: new Date()
-        };
-
-        // Cache the context
-        this.contextCache.set(conversationId, context);
-        
-        loggingService.info('🔍 Built conversation context', {
-            conversationId,
-            subject: context.currentSubject,
-            intent: context.currentIntent,
-            domain: context.lastDomain,
-            confidence: context.subjectConfidence,
-            entitiesCount: context.lastReferencedEntities.length
-        });
-
-        return context;
-    }
-
-    private static extractEntities(message: string, recentMessages: any[]): string[] {
-        const entities: string[] = [];
-        const text = `${message} ${recentMessages.map(m => m.content).join(' ')}`.toLowerCase();
-        
-        // Package entities
-        const packagePatterns = [
-            /cost-katana/g, /cost-katana-cli/g,
-            /npm\s+package/g, /pypi\s+package/g, /python\s+package/g,
-            /javascript\s+package/g, /typescript\s+package/g
-        ];
-        
-        packagePatterns.forEach(pattern => {
-            const matches = text.match(pattern);
-            if (matches) entities.push(...matches);
-        });
-
-        // Service entities
-        const servicePatterns = [
-            /costkatana/g, /cost katana/g, /backend/g, /api/g,
-            /claude/g, /gpt/g, /bedrock/g, /openai/g
-        ];
-        
-        servicePatterns.forEach(pattern => {
-            const matches = text.match(pattern);
-            if (matches) entities.push(...matches);
-        });
-
-        return [...new Set(entities)]; // Remove duplicates
-    }
-
-    private static analyzeMessage(message: string, recentMessages: any[]): {
-        subject?: string;
-        intent?: string;
-        domain?: string;
-        confidence: number;
-    } {
-        const lowerMessage = message.toLowerCase();
-        
-        // Intent detection
-        let intent = 'general';
-        if (lowerMessage.includes('how to') || lowerMessage.includes('integrate') || lowerMessage.includes('install')) {
-            intent = 'integration';
-        } else if (lowerMessage.includes('example') || lowerMessage.includes('code')) {
-            intent = 'example';
-        } else if (lowerMessage.includes('error') || lowerMessage.includes('issue') || lowerMessage.includes('problem')) {
-            intent = 'troubleshooting';
-        }
-
-        // Domain detection
-        let domain = 'general';
-        let subject: string | undefined;
-        let confidence = 0.5;
-
-        if (lowerMessage.includes('costkatana') || lowerMessage.includes('cost katana')) {
-            domain = 'costkatana';
-            confidence = 0.9;
-            
-            if (lowerMessage.includes('python') || lowerMessage.includes('pypi')) {
-                subject = 'cost-katana';
-            } else if (lowerMessage.includes('npm') || lowerMessage.includes('javascript') || lowerMessage.includes('typescript')) {
-                subject = 'cost-katana';
-            } else if (lowerMessage.includes('cli') || lowerMessage.includes('command')) {
-                subject = 'cost-katana-cli';
-            }
-        } else if (lowerMessage.includes('package') || lowerMessage.includes('npm') || lowerMessage.includes('pypi')) {
-            domain = 'packages';
-            confidence = 0.8;
-        } else if (lowerMessage.includes('cost') || lowerMessage.includes('billing') || lowerMessage.includes('pricing')) {
-            domain = 'billing';
-            confidence = 0.7;
-        }
-
-        // Check for coreference (this, that, it, the package, etc.)
-        const corefPatterns = [
-            /this\s+(package|tool|service|model)/g,
-            /that\s+(package|tool|service|model)/g,
-            /the\s+(package|tool|service|model)/g,
-            /\bit\b/g
-        ];
-        
-        const hasCoref = corefPatterns.some(pattern => pattern.test(lowerMessage));
-        if (hasCoref && recentMessages.length > 0) {
-            // Try to resolve from recent context
-            const recentContext = recentMessages.slice(-3).map(m => m.content).join(' ');
-            if (recentContext.includes('cost-katana') || recentContext.includes('python') || recentContext.includes('npm')) {
-                subject = 'cost-katana';
-            } else if (recentContext.includes('cost-katana-cli') || recentContext.includes('cli')) {
-                subject = 'cost-katana-cli';
-            }
-            confidence = Math.max(confidence, 0.6);
-        }
-
-        return { subject, intent, domain, confidence };
-    }
-
-    private static detectLanguageFramework(message: string): string | undefined {
-        const lowerMessage = message.toLowerCase();
-        
-        if (lowerMessage.includes('python') || lowerMessage.includes('pip') || lowerMessage.includes('pypi')) {
-            return 'python';
-        } else if (lowerMessage.includes('javascript') || lowerMessage.includes('typescript') || lowerMessage.includes('node') || lowerMessage.includes('npm')) {
-            return 'javascript';
-        } else if (lowerMessage.includes('react') || lowerMessage.includes('vue') || lowerMessage.includes('angular')) {
-            return 'frontend';
-        }
-        
-        return undefined;
-    }
-
-    private static async resolveCoreference(
-        message: string, 
-        context: ConversationContext, 
-        recentMessages: any[]
-    ): Promise<CoreferenceResult> {
-        const lowerMessage = message.toLowerCase();
-        
-        // Rule-based coreference resolution
-        const corefPatterns = [
-            { pattern: /this\s+(package|tool|service|model)/g, weight: 0.9 },
-            { pattern: /that\s+(package|tool|service|model)/g, weight: 0.8 },
-            { pattern: /the\s+(package|tool|service|model)/g, weight: 0.7 },
-            { pattern: /\bit\b/g, weight: 0.6 }
-        ];
-        
-        for (const { pattern, weight } of corefPatterns) {
-            if (pattern.test(lowerMessage)) {
-                if (context.currentSubject) {
-                    return {
-                        resolved: true,
-                        subject: context.currentSubject,
-                        confidence: weight * context.subjectConfidence,
-                        method: 'rule-based'
-                    };
-                }
-            }
-        }
-
-        // LLM fallback for ambiguous cases
-        if (context.subjectConfidence < 0.6) {
-            try {
-                const llm = new (await import('@langchain/aws')).ChatBedrockConverse({
-                    model: "global.anthropic.claude-haiku-4-5-20251001-v1:0",  // Using inference profile
-                    region: process.env.AWS_REGION ?? 'us-east-1',
-                    temperature: 0.1,
-                    maxTokens: 200,
-                });
-
-                const contextSummary = recentMessages.slice(-2).map(m => `${m.role}: ${m.content}`).join('\n');
-                const prompt = `Context: ${contextSummary}\n\nUser query: ${message}\n\nWhat is the user referring to with "this", "that", "it", or "the package"? Respond with just the entity name or "unclear".`;
-
-                const response = await llm.invoke([new (await import('@langchain/core/messages')).HumanMessage(prompt)]);
-                const resolvedSubject = response.content?.toString().trim().toLowerCase();
-
-                if (resolvedSubject && resolvedSubject !== 'unclear') {
-                    return {
-                        resolved: true,
-                        subject: resolvedSubject,
-                        confidence: 0.7,
-                        method: 'llm-fallback'
-                    };
-                }
-            } catch (error) {
-                loggingService.warn('LLM coreference resolution failed', { error: error instanceof Error ? error.message : String(error) });
-            }
-        }
-
-        return {
-            resolved: false,
-            confidence: 0.3,
-            method: 'rule-based'
-        };
-    }
-
-    /**
-     * AI-powered route decision using the AI Query Router
-     * Replaces regex-based routing with intelligent AI decisions
-     */
-    private static async decideRouteWithAI(
-        context: ConversationContext, 
-        message: string, 
-        userId: string,
-        useWebSearch?: boolean
-    ): Promise<'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper'> {
-        // If web search is explicitly enabled, force web scraper route
-        if (useWebSearch === true) {
-            loggingService.info('🌐 Web search explicitly enabled, routing to web scraper', {
-                query: message.substring(0, 100)
-            });
-            return 'web_scraper';
-        }
-
-        try {
-            // Import AI router dynamically to avoid circular dependencies
-            const { aiQueryRouter } = await import('./aiQueryRouter.service');
-            const { VercelConnection } = await import('../models');
-            const { GitHubConnection } = await import('../models/GitHubConnection');
-            const { GoogleConnection } = await import('../models/GoogleConnection');
-
-            // Check user's integration connections
-            const [vercelConn, githubConn, googleConn] = await Promise.all([
-                VercelConnection.findOne({ userId, isActive: true }).lean(),
-                GitHubConnection.findOne({ userId, isActive: true }).lean(),
-                GoogleConnection.findOne({ userId, isActive: true }).lean()
-            ]);
-
-            // Build router context
-            const routerContext = {
-                userId,
-                hasVercelConnection: !!vercelConn,
-                hasGithubConnection: !!githubConn,
-                hasGoogleConnection: !!googleConn,
-                conversationSubject: context.currentSubject
-            };
-
-            // Get AI routing decision
-            const decision = await aiQueryRouter.routeQuery(message, routerContext);
-
-            loggingService.info('🧠 AI Router decision', {
-                route: decision.route,
-                confidence: decision.confidence,
-                reasoning: decision.reasoning,
-                userId
-            });
-
-            // Map AI router routes to internal routes
-            switch (decision.route) {
-                case 'vercel_tools':
-                case 'github_tools':
-                case 'google_tools':
-                case 'multi_agent':
-                    // These go to conversational flow which uses the agent with appropriate tools
-                    return 'conversational_flow';
-                
-                case 'knowledge_base':
-                    return 'knowledge_base';
-                
-                case 'analytics':
-                case 'optimization':
-                    return 'multi_agent';
-                
-                case 'web_search':
-                    return 'web_scraper';
-                
-                case 'direct_response':
-                default:
-                    return 'conversational_flow';
-            }
-
-        } catch (error: any) {
-            loggingService.warn('AI Router failed, using legacy routing', {
-                error: error.message,
-                message: message.substring(0, 100)
-            });
-
-            // Fallback to legacy regex-based routing
-            return this.decideRouteLegacy(context, message, useWebSearch);
-        }
-    }
-
-    /**
-     * Legacy regex-based routing (fallback when AI router fails)
-     */
-    private static decideRouteLegacy(
-        context: ConversationContext, 
-        message: string, 
-        useWebSearch?: boolean
-    ): 'knowledge_base' | 'conversational_flow' | 'multi_agent' | 'web_scraper' {
-        const lowerMessage = message.toLowerCase();
-        
-        // If web search is explicitly enabled, force web scraper route
-        if (useWebSearch === true) {
-            return 'web_scraper';
-        }
-        
-        // Integration commands should go to conversational flow
-        if (message.includes('@vercel') || message.includes('@github') || message.includes('@google')) {
-            return 'conversational_flow';
-        }
-        
-        // High confidence CostKatana queries go to knowledge base
-        if (context.lastDomain === 'costkatana' && context.subjectConfidence > 0.7) {
-            return 'knowledge_base';
-        }
-        
-        // CostKatana specific queries
-        const costKatanaTerms = ['costkatana', 'cost katana', 'cortex', 'documentation', 'guide'];
-        if (costKatanaTerms.some(term => lowerMessage.includes(term))) {
-            return 'knowledge_base';
-        }
-        
-        // Web scraping for external content
-        if ((lowerMessage.includes('latest') || lowerMessage.includes('news')) &&
-            (lowerMessage.includes('search') || lowerMessage.includes('find'))) {
-            return 'web_scraper';
-        }
-        
-        // Analytics queries about user's own data
-        if (lowerMessage.includes('my cost') || lowerMessage.includes('my usage')) {
-            return 'multi_agent';
-        }
-        
-        // Default to conversational flow
-        return 'conversational_flow';
-    }
-
-    private static buildContextPreamble(context: ConversationContext, recentMessages: any[]): string {
-        const preamble = [];
-        
-        if (context.currentSubject) {
-            preamble.push(`Current subject: ${context.currentSubject}`);
-        }
-        
-        if (context.currentIntent) {
-            preamble.push(`Intent: ${context.currentIntent}`);
-        }
-        
-        if (context.lastReferencedEntities.length > 0) {
-            preamble.push(`Recent entities: ${context.lastReferencedEntities.slice(-3).join(', ')}`);
-        }
-        
-        if (recentMessages.length > 0) {
-            const recentContext = recentMessages.slice(-2).map(m => `${m.role}: ${m.content}`).join('\n');
-            preamble.push(`Recent conversation:\n${recentContext}`);
-        }
-        
-        return preamble.join('\n\n');
-    }
-
-    /**
-     * Get optimal context size based on message complexity
-     */
-    private static getOptimalContextSize(messageLength: number): number {
-        if (messageLength > 1000) return 5;  // Complex messages need less context
-        if (messageLength > 500) return 8;   // Medium messages
-        return 10; // Simple messages can handle more context
-    }
-
-    /**
-     * Get recent messages with optimized context sizing
-     */
-    private static async getOptimalContext(
-        conversationId: string, 
-        messageLength: number
-    ): Promise<any[]> {
-        const contextSize = this.getOptimalContextSize(messageLength);
-        
-        return ChatMessage.find(
-            { conversationId: new Types.ObjectId(conversationId) },
-            { content: 1, role: 1, createdAt: 1, _id: 0 } // Project only needed fields
-        )
-        .sort({ createdAt: -1 })
-        .limit(contextSize)
-        .lean()
-        .exec();
-    }
-
-    /**
-     * Detect if message requires integration tools
-     */
-    private static async detectIntegrationIntent(
-        message: string,
-        userId: string
-    ): Promise<{
-        needsIntegration: boolean;
-        integrations: IntegrationType[];
-        suggestedTools: string[];
-        confidence: number;
-    }> {
-        try {
-            // Use AI to analyze the message
-            const model = new ChatBedrockConverse({
-                model: 'anthropic.claude-3-haiku-20240307-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                credentials: {
-                    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-                    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-                },
-            });
-
-            const systemPrompt = `Analyze the user's message to determine if it requires integration tools.
-
-Integration keywords and patterns:
-- Vercel: deploy, deployment, hosting, vercel, build logs, environment variables
-- GitHub: pull request, PR, issue, branch, commit, repository, github, merge
-- Google: drive, docs, sheets, gmail, calendar, google workspace
-- MongoDB: database, collection, query, find, aggregate, insert, update, delete, mongodb
-- Slack: channel, message, slack, notify, send to slack
-- Discord: discord, server, channel, message
-- Jira: ticket, issue, jira, epic, sprint
-- Linear: linear, issue, project, cycle
-
-Return a JSON object with:
-{
-  "needsIntegration": boolean,
-  "integrations": ["vercel", "github", etc.],
-  "suggestedTools": ["vercel_deploy", "github_create_pr", etc.],
-  "confidence": 0.0-1.0
-}
-
-If no integration is needed, return needsIntegration: false with empty arrays.`;
-
-            const response = await model.invoke([
-                new SystemMessage(systemPrompt),
-                new HumanMessage(message),
-            ]);
-
-            try {
-                const result = JSON.parse(response.content.toString());
-                
-                loggingService.info('Integration intent detected', {
-                    userId,
-                    messagePreview: message.substring(0, 100),
-                    result,
-                });
-
-                return result;
-            } catch (parseError) {
-                // Fallback to keyword matching
-                return this.detectIntegrationIntentFallback(message);
-            }
-        } catch (error) {
-            loggingService.error('Failed to detect integration intent', {
-                userId,
-                error: error instanceof Error ? error.message : String(error),
-            });
-
-            // Fallback to keyword matching
-            return this.detectIntegrationIntentFallback(message);
-        }
-    }
-
-    /**
-     * Fallback method for detecting integration intent using keywords
-     */
-    private static detectIntegrationIntentFallback(message: string): {
-        needsIntegration: boolean;
-        integrations: IntegrationType[];
-        suggestedTools: string[];
-        confidence: number;
-    } {
-        const lowerMessage = message.toLowerCase();
-        const integrations: IntegrationType[] = [];
-        const suggestedTools: string[] = [];
-
-        // Check for Vercel keywords
-        if (lowerMessage.match(/\b(deploy|deployment|vercel|hosting|build\s+log)/)) {
-            integrations.push('vercel');
-            if (lowerMessage.includes('deploy')) suggestedTools.push('vercel_deploy_project');
-            if (lowerMessage.includes('log')) suggestedTools.push('vercel_get_deployment_logs');
-        }
-
-        // Check for GitHub keywords
-        if (lowerMessage.match(/\b(github|pull\s+request|pr|issue|branch|commit|repository|merge)/)) {
-            integrations.push('github');
-            if (lowerMessage.match(/\b(create|new)\s+(pull\s+request|pr)/)) suggestedTools.push('github_create_pr');
-            if (lowerMessage.match(/\b(create|new)\s+issue/)) suggestedTools.push('github_create_issue');
-            if (lowerMessage.match(/\blist\s+(pr|pull\s+request)/)) suggestedTools.push('github_list_prs');
-        }
-
-        // Check for Google keywords
-        if (lowerMessage.match(/\b(google|drive|docs|sheets|gmail|calendar|workspace)/)) {
-            integrations.push('google');
-            if (lowerMessage.includes('drive')) suggestedTools.push('google_drive_list_files');
-            if (lowerMessage.includes('sheet')) suggestedTools.push('google_sheets_read');
-            if (lowerMessage.includes('doc')) suggestedTools.push('google_docs_create');
-        }
-
-        // Check for MongoDB keywords
-        if (lowerMessage.match(/\b(mongodb|database|collection|query|find|aggregate|insert|update|delete)\b/)) {
-            integrations.push('mongodb');
-            if (lowerMessage.includes('find') || lowerMessage.includes('query')) suggestedTools.push('mongodb_find');
-            if (lowerMessage.includes('insert')) suggestedTools.push('mongodb_insert');
-            if (lowerMessage.includes('update')) suggestedTools.push('mongodb_update');
-            if (lowerMessage.includes('delete')) suggestedTools.push('mongodb_delete');
-            if (lowerMessage.includes('aggregate')) suggestedTools.push('mongodb_aggregate');
-        }
-
-        // Check for Slack keywords
-        if (lowerMessage.match(/\b(slack|channel|notify)/)) {
-            integrations.push('slack');
-            suggestedTools.push('slack_send_message');
-        }
-
-        // Check for Discord keywords
-        if (lowerMessage.match(/\b(discord|server)/)) {
-            integrations.push('discord');
-            suggestedTools.push('discord_send_message');
-        }
-
-        // Check for Jira keywords
-        if (lowerMessage.match(/\b(jira|ticket|epic|sprint)/)) {
-            integrations.push('jira');
-            if (lowerMessage.match(/\b(create|new)\s+(ticket|issue)/)) suggestedTools.push('jira_create_issue');
-        }
-
-        // Check for Linear keywords
-        if (lowerMessage.match(/\b(linear|cycle)/)) {
-            integrations.push('linear');
-            if (lowerMessage.match(/\b(create|new)\s+issue/)) suggestedTools.push('linear_create_issue');
-        }
-
-        return {
-            needsIntegration: integrations.length > 0,
-            integrations,
-            suggestedTools,
-            confidence: integrations.length > 0 ? 0.8 : 0.0,
-        };
-    }
-
-    /**
-     * Check if user has connected the required integration
-     */
-    private static async checkIntegrationConnection(
-        userId: string,
-        integration: IntegrationType
-    ): Promise<{
-        isConnected: boolean;
-        connectionId?: string;
-        connectionName?: string;
-    }> {
-        try {
-            switch (integration) {
-                case 'vercel': {
-                    const { VercelConnection } = await import('../models/VercelConnection');
-                    const connection = await VercelConnection.findOne({
-                        userId: new Types.ObjectId(userId),
-                        isActive: true,
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.userId?.toString() || 'Vercel',
-                    };
-                }
-
-                case 'github': {
-                    const { GitHubConnection } = await import('../models/GitHubConnection');
-                    const connection = await GitHubConnection.findOne({
-                        userId: new Types.ObjectId(userId),
-                        isActive: true,
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.userId?.toString() || 'GitHub',
-                    };
-                }
-
-                case 'google': {
-                    const { GoogleConnection } = await import('../models/GoogleConnection');
-                    const connection = await GoogleConnection.findOne({
-                        userId: new Types.ObjectId(userId),
-                        isActive: true,
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.userId?.toString() || 'Google',
-                    };
-                }
-
-                case 'mongodb': {
-                    const { MongoDBConnection } = await import('../models/MongoDBConnection');
-                    const connection = await MongoDBConnection.findOne({
-                        userId: new Types.ObjectId(userId),
-                        isActive: true,
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.alias || connection?.userId?.toString() || 'MongoDB',
-                    };
-                }
-
-                case 'slack': {
-                    const { Integration } = await import('../models/Integration');
-                    const connection = await Integration.findOne({
-                        userId: new Types.ObjectId(userId),
-                        type: { $in: ['slack_webhook', 'slack_oauth'] },
-                        status: 'active',
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.name,
-                    };
-                }
-
-                case 'discord': {
-                    const { Integration } = await import('../models/Integration');
-                    const connection = await Integration.findOne({
-                        userId: new Types.ObjectId(userId),
-                        type: { $in: ['discord_webhook', 'discord_oauth'] },
-                        status: 'active',
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.name,
-                    };
-                }
-
-                case 'jira': {
-                    const { Integration } = await import('../models/Integration');
-                    const connection = await Integration.findOne({
-                        userId: new Types.ObjectId(userId),
-                        type: 'jira_oauth',
-                        status: 'active',
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.name,
-                    };
-                }
-
-                case 'linear': {
-                    const { Integration } = await import('../models/Integration');
-                    const connection = await Integration.findOne({
-                        userId: new Types.ObjectId(userId),
-                        type: 'linear_oauth',
-                        status: 'active',
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.name,
-                    };
-                }
-
-                case 'aws': {
-                    const { AWSConnection } = await import('../models/AWSConnection');
-                    const connection = await AWSConnection.findOne({
-                        userId: new Types.ObjectId(userId),
-                    }).lean();
-                    
-                    return {
-                        isConnected: !!connection,
-                        connectionId: connection?._id?.toString(),
-                        connectionName: connection?.connectionName || connection?.awsAccountId || 'AWS',
-                    };
-                }
-
-                default:
-                    return { isConnected: false };
-            }
-        } catch (error) {
-            loggingService.error('Failed to check integration connection', {
-                userId,
-                integration,
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { isConnected: false };
-        }
-    }
 
     /**
      * Process message with circuit breaker pattern
@@ -3250,8 +1969,8 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; requiresIntegrationSelector?: boolean; integrationSelectorData?: any; mongodbIntegrationData?: any; formattedResult?: any; webSearchUsed?: boolean; aiWebSearchDecision?: any; metadata?: any }> {
         
-        // Use Langchain Multi-Agent System if explicitly requested or for complex queries
-        const shouldUseLangchain = request.useMultiAgent || this.shouldUseLangchainForQuery(request.message || '');
+        // Use Langchain Multi-Agent System only if explicitly requested
+        const shouldUseLangchain = request.useMultiAgent;
         
         if (shouldUseLangchain) {
             loggingService.info('🚀 Routing to Langchain Multi-Agent System', {
@@ -3299,14 +2018,14 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         }
         
         // Build conversation context
-        const context = this.buildConversationContext(
+        const context = ContextManager.buildContext(
             conversation._id.toString(),
             request.message || '',
             recentMessages
         );
         
         // Resolve coreference if needed
-            const corefResult = await this.resolveCoreference(request.message || '', context, recentMessages);
+            const corefResult = await ContextManager.resolveCoreference(request.message || '', context, recentMessages);
         let resolvedMessage = request.message;
         
         if (corefResult.resolved && corefResult.subject && request.message) {
@@ -3333,7 +2052,7 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
             });
         } else {
             // Use AI-powered routing instead of regex-based routing
-            route = await this.decideRouteWithAI(context, resolvedMessage || '', request.userId, request.useWebSearch);
+            route = await RouteDecider.decide(context, resolvedMessage || '', request.userId, request.useWebSearch);
         }
         
         loggingService.info('🎯 Route decision', {
@@ -3346,7 +2065,7 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         });
         
         // Build context preamble
-        const contextPreamble = this.buildContextPreamble(context, recentMessages);
+        const contextPreamble = ContextOptimizer.buildPreamble(context, recentMessages);
         
         // Route to appropriate handler
         switch (route) {
@@ -3362,242 +2081,19 @@ If no integration is needed, return needsIntegration: false with empty arrays.`;
         }
     }
 
-    /**
-     * Determine if Langchain should be used based on query complexity
-     */
-    private static shouldUseLangchainForQuery(message: string): boolean {
-        const lowerMessage = message.toLowerCase();
-        
-        // Use Langchain for strategy, planning, and complex coordination
-        const langchainKeywords = [
-            'strategy', 'plan', 'coordinate', 'integrate',
-            'automate', 'optimize', 'analyze', 'comprehensive',
-            'multi-step', 'workflow', 'autonomous', 'proactive'
-        ];
-        
-        // Check for integration mentions
-        const hasIntegrations = ['aws', 'google', 'github', 'vercel'].some(
-            service => lowerMessage.includes(service)
-        );
-        
-        // Check for complexity indicators
-        const isComplex = message.split(' ').length > 50 || 
-                         (message.match(/\?/g) || []).length > 2;
-        
-        return langchainKeywords.some(keyword => lowerMessage.includes(keyword)) || 
-               (hasIntegrations && isComplex);
-    }
-
     private static async handleKnowledgeBaseRoute(
         request: ChatSendMessageRequest,
         context: ConversationContext,
         contextPreamble: string,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
-        
-        loggingService.info('📚 Routing to knowledge base with Modular RAG', {
-            subject: context.currentSubject,
-            domain: context.lastDomain
-        });
-        
-        try {
-            // Check if message contains a link - if so, skip Google Drive files to avoid confusion
-            const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
-            const messageContainsLink = request.message && urlPattern.test(request.message);
-            
-            // Check for accessible Google Drive files (only if no link is present)
-            let googleDriveContext = '';
-            let accessibleFiles: any[] = [];
-            
-            if (!messageContainsLink) {
-                try {
-                    const { GoogleService } = await import('./google.service');
-                    const { GoogleConnection } = await import('../models/GoogleConnection');
-                    
-                    // Get user's Google connections
-                    const connections = await GoogleConnection.find({ 
-                        userId: request.userId, 
-                        isActive: true,
-                        healthStatus: 'healthy' // Only use healthy connections
-                    }).select('+accessToken +refreshToken');
-                    
-                    if (connections.length > 0) {
-                        // Get accessible files from the first active connection
-                        const connection = connections[0];
-                        
-                        // Validate that connection has required token
-                        if (!connection.accessToken) {
-                            loggingService.warn('Google connection missing access token', {
-                                connectionId: connection._id.toString(),
-                                userId: request.userId
-                            });
-                        } else {
-                            // Don't filter by fileType - get all accessible files (docs, sheets, drive)
-                            accessibleFiles = await GoogleService.getAccessibleFiles(
-                                request.userId,
-                                connection._id.toString()
-                            );
-                            
-                            if (accessibleFiles.length > 0) {
-                                // Try to read content from the most recently accessed Google Drive file
-                                const recentFiles = accessibleFiles.slice(0, 1); // Only the most recent file
-                                const fileContents: string[] = [];
-                                
-                                for (const file of recentFiles) {
-                                    try {
-                                        let content = '';
-                                        if (file.mimeType === 'application/vnd.google-apps.document') {
-                                            // Read Google Docs content
-                                            content = await GoogleService.readDocument(connection, file.id);
-                                        } else if (file.mimeType === 'application/vnd.google-apps.spreadsheet') {
-                                            // Read Google Sheets content (first sheet)
-                                            const sheetData = await GoogleService.readSpreadsheet(connection, file.id, 'Sheet1!A1:Z100');
-                                            if (Array.isArray(sheetData)) {
-                                                content = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
-                                            }
-                                        }
-                                        
-                                        if (content && content.length > 50) {
-                                            fileContents.push(`File: ${file.name}\nContent: ${content.substring(0, 2000)}...`);
-                                            loggingService.info('Added Google Drive file content to context', {
-                                                fileName: file.name,
-                                                fileId: file.id,
-                                                contentLength: content.length
-                                            });
-                                        }
-                                    } catch (error) {
-                                        loggingService.warn('Failed to read Google Drive file content', {
-                                            fileName: file.name,
-                                            fileId: file.id,
-                                            error: error instanceof Error ? error.message : String(error)
-                                        });
-                                    }
-                                }
-                                
-                                if (fileContents.length > 0) {
-                                    googleDriveContext = `\n\nSelected Google Drive file:\n${fileContents.join('\n\n')}`;
-                                }
-                            }
-                        }
-                    }
-                } catch (error) {
-                    loggingService.warn('Failed to load Google Drive context', {
-                        error: error instanceof Error ? error.message : String(error)
-                    });
-                }
-            } else {
-                loggingService.debug('Skipping Google Drive files - message contains link', {
-                    userId: request.userId,
-                    messagePreview: request.message?.substring(0, 100)
-                });
-            }
-
-            // Use new Modular RAG Orchestrator
-            const { modularRAGOrchestrator } = await import('../rag');
-            
-            // Build RAG context with Google Drive context
-            const ragContext: any = {
-                userId: request.userId,
-                conversationId: context.conversationId,
-                recentMessages: recentMessages.slice(-3).map(msg => ({
-                    role: msg.role,
-                    content: msg.content
-                })),
-                currentTopic: context.currentSubject,
-                googleDriveFiles: accessibleFiles,
-                additionalContext: googleDriveContext,
-            };
-
-            // Configure RAG based on query characteristics
-            const config: any = {};
-            if (request.documentIds && request.documentIds.length > 0) {
-                config.modules = {
-                    retrieve: {
-                        limit: 10,
-                        filters: {
-                            documentIds: request.documentIds,
-                        },
-                    },
-                };
-            }
-
-            // Execute modular RAG
-            const ragResult = await modularRAGOrchestrator.execute({
-                query: request.message || '',
-                context: ragContext,
-                config,
-            });
-
-            loggingService.info('📚 Modular RAG completed', {
-                success: ragResult.success,
-                pattern: ragResult.metadata.pattern,
-                documentsFound: ragResult.documents.length,
-                sources: ragResult.sources,
-                userId: request.userId,
-                hasGoogleDriveFiles: accessibleFiles.length > 0,
-            });
-
-            if (ragResult.success && ragResult.answer) {
-                // Enhance response with Google Drive context if available but no knowledge base results
-                let enhancedResponse = ragResult.answer;
-                if (ragResult.documents.length === 0 && googleDriveContext) {
-                    // If RAG found no documents but we have Google Drive files, create a response using that context
-                    const { BedrockService } = await import('./bedrock.service');
-                    
-                    const contextualPrompt = `Based on the following Google Drive files and the user's question, provide a helpful response:
-
-${googleDriveContext}
-
-User question: ${request.message}
-
-Please analyze the content from the Google Drive files above and provide a relevant answer to the user's question. If the files contain relevant information, use that in your response. If not, let the user know what the files contain instead.`;
-
-                    try {
-                        const contextualResponse = await BedrockService.invokeModel(
-                            contextualPrompt,
-                            request.modelId || 'anthropic.claude-3-5-sonnet-20240620-v1:0',
-                            {
-                                useSystemPrompt: false
-                            }
-                        );
-                        
-                        if (contextualResponse && typeof contextualResponse === 'string') {
-                            enhancedResponse = contextualResponse;
-                        }
-                    } catch (error) {
-                        loggingService.warn('Failed to generate contextual response with Google Drive files', {
-                            error: error instanceof Error ? error.message : String(error)
-                        });
-                    }
-                }
-
-                const optimizations = [
-                    'modular_rag',
-                    `pattern_${ragResult.metadata.pattern}`,
-                    ...ragResult.metadata.modulesUsed.map((m: string) => `module_${m}`),
-                    `retrieved_${ragResult.documents.length}_docs`,
-                ];
-
-                if (accessibleFiles.length > 0) {
-                    optimizations.push(`google_drive_files_${accessibleFiles.length}`);
-                }
-
-                return {
-                    response: enhancedResponse,
-                    agentPath: ['knowledge_base', 'modular_rag', ragResult.metadata.pattern],
-                    optimizationsApplied: optimizations,
-                    cacheHit: ragResult.metadata.cacheHit || false,
-                    riskLevel: 'low',
-                };
-            }
-        } catch (error) {
-            loggingService.warn('Modular RAG failed, falling back to conversational flow', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-        
-        // Fallback to conversational flow
-        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+        // Delegate to KnowledgeBaseHandler
+        return await KnowledgeBaseHandler.handle(
+            this.convertToHandlerRequest(request),
+            context,
+            contextPreamble,
+            recentMessages
+        );
     }
 
     private static async handleWebScraperRoute(
@@ -3606,199 +2102,13 @@ Please analyze the content from the Google Drive files above and provide a relev
         contextPreamble: string,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string; webSearchUsed?: boolean; quotaUsed?: number }> {
-        
-        loggingService.info('🌐 Routing to web scraper', {
-            subject: context.currentSubject,
-            domain: context.lastDomain,
-            useWebSearch: request.useWebSearch
-        });
-        
-        try {
-            const { WebSearchTool } = await import('../tools/webSearch.tool');
-            const { googleSearchService } = await import('./googleSearch.service');
-            const { ChatBedrockConverse } = await import('@langchain/aws');
-            
-            // Directly call web search tool to ensure web search is performed
-            const webSearchTool = new WebSearchTool();
-            const searchRequest = {
-                operation: 'search' as const,
-                query: request.message || '',
-                options: {
-                    deepContent: true,
-                    costDomains: true // Restrict to trusted cost/pricing domains
-                },
-                cache: {
-                    enabled: true,
-                    ttl: 3600 // 1 hour cache
-                }
-            };
-            
-            loggingService.info('🔍 Performing direct web search', {
-                query: request.message,
-                operation: 'search'
-            });
-            
-            const webSearchResultString = await webSearchTool._call(JSON.stringify(searchRequest));
-            const webSearchResult = JSON.parse(webSearchResultString);
-            
-            // Get quota status
-            let quotaUsed: number | undefined;
-            if (googleSearchService.isConfigured()) {
-                try {
-                    const quotaStatus = await googleSearchService.getQuotaStatus();
-                    quotaUsed = quotaStatus.count;
-                } catch (error) {
-                    loggingService.warn('Failed to get quota status', {
-                        error: error instanceof Error ? error.message : String(error)
-                    });
-                }
-            }
-            
-            if (!webSearchResult.success || !webSearchResult.data.searchResults || webSearchResult.data.searchResults.length === 0) {
-                loggingService.warn('Web search returned no results, falling back to conversational flow', {
-                    error: webSearchResult.error
-                });
-                return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
-            }
-            
-            // Assess query complexity to determine if we should use AI or return direct results
-            const queryComplexity = this.assessQueryComplexity(request.message || '');
-            const hasGoodSnippets = webSearchResult.data.searchResults.some((r: any) => 
-                r.snippet && r.snippet.length > 30
-            );
-            
-            // For simple factual queries with good snippets, return Google results directly (zero hallucination risk)
-            if (queryComplexity === 'simple' && hasGoodSnippets) {
-                loggingService.info('📊 Returning direct Google Search results (no AI interpretation)', {
-                    query: request.message,
-                    resultsCount: webSearchResult.data.searchResults.length,
-                    reason: 'Simple factual query with quality snippets'
-                });
-                
-                // Format Google results directly without AI processing
-                const directResponse = webSearchResult.data.searchResults
-                    .slice(0, 5)
-                    .map((result: any, index: number) => {
-                        let formatted = `**${index + 1}. ${result.title}**\n\n${result.snippet || 'No description available'}`;
-                        formatted += `\n\n🔗 Source: ${result.url}`;
-                        return formatted;
-                    })
-                    .join('\n\n---\n\n');
-                
-                const response = directResponse;
-                
-                return {
-                    response: response,
-                    agentThinking: {
-                        title: 'Web Search',
-                        summary: `Retrieved ${webSearchResult.data.searchResults.length} results from the web`,
-                        steps: [
-                            {
-                                step: 1,
-                                description: 'Web Search',
-                                reasoning: `Searched for: "${request.message}"`,
-                                outcome: `Found ${webSearchResult.data.searchResults.length} relevant results`
-                            },
-                            {
-                                step: 2,
-                                description: 'Results Compilation',
-                                reasoning: 'Compiled search results with source attribution',
-                                outcome: 'Direct search results with verified sources'
-                            }
-                        ]
-                    },
-                    agentPath: ['web_scraper', 'direct_results'],
-                    optimizationsApplied: ['web_search', 'direct_results'],
-                    cacheHit: false,
-                    riskLevel: 'low',
-                    webSearchUsed: true,
-                    quotaUsed
-                };
-            }
-            
-            // For complex queries, use AI with strong factual grounding
-            loggingService.info('🤖 Using AI to synthesize web search results', {
-                query: request.message,
-                queryComplexity,
-                reason: 'Complex query requires synthesis'
-            });
-            
-            const llm = new ChatBedrockConverse({
-                model: 'us.anthropic.claude-opus-4-1-20250805-v1:0',
-                region: process.env.AWS_REGION || 'us-east-1',
-                temperature: 0, 
-                maxTokens: 2000,
-            });
-            
-            // Build prompt with web search results
-            const searchResultsText = webSearchResult.data.searchResults
-                .map((result: any, index: number) => 
-                    `[${index + 1}] ${result.title}\nURL: ${result.url}\nContent: ${result.snippet || result.content || ''}`
-                )
-                .join('\n\n');
-            
-            const responsePrompt = `You are a factual AI assistant. The user asked: "${request.message}"
-
-Web search results from Google Custom Search API:
-
-${searchResultsText}
-
-CRITICAL ACCURACY RULES - FOLLOW EXACTLY:
-1. ONLY use information explicitly stated in the search results above
-2. If information is NOT in the results, clearly state "The searched sources do not contain information about [specific topic]"
-3. NEVER add information from your training data or make assumptions
-4. Always cite specific sources with URLs when stating facts
-5. If sources contradict each other, present both perspectives with their sources
-6. For pricing queries: Quote exact numbers if found, or explicitly state "Pricing information not available in sources"
-7. If you're uncertain, say so rather than guessing
-
-Based ONLY on the search results above, provide a factual answer:`;
-            
-            const llmResponse = await llm.invoke(responsePrompt);
-            const response = llmResponse.content.toString();
-            
-            loggingService.info('✅ Web search response generated', {
-                query: request.message,
-                resultsCount: webSearchResult.data.searchResults.length,
-                responseLength: response.length
-            });
-            
-            return {
-                response: response,
-                agentThinking: {
-                    title: 'Web Search Analysis',
-                    summary: `Searched the web for "${request.message}" and analyzed ${webSearchResult.data.searchResults.length} results.`,
-                    steps: [
-                        {
-                            step: 1,
-                            description: 'Web Search',
-                            reasoning: `Performed web search for: "${request.message}"`,
-                            outcome: `Found ${webSearchResult.data.searchResults.length} relevant results`
-                        },
-                        {
-                            step: 2,
-                            description: 'Content Analysis',
-                            reasoning: 'Analyzed search results and synthesized key information',
-                            outcome: 'Generated comprehensive response with source citations'
-                        }
-                    ]
-                },
-                agentPath: ['web_scraper', 'web_search_completed'],
-                optimizationsApplied: ['web_search', 'content_synthesis'],
-                cacheHit: false,
-                riskLevel: 'low',
-                webSearchUsed: true,
-                quotaUsed
-            };
-        } catch (error) {
-            loggingService.error('Web scraper routing failed', {
-                error: error instanceof Error ? error.message : String(error),
-                errorStack: error instanceof Error ? error.stack : undefined
-            });
-        }
-        
-        // Fallback to conversational flow
-        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+        // Delegate to WebScraperHandler
+        return await WebScraperHandler.handle(
+            this.convertToHandlerRequest(request),
+            context,
+            contextPreamble,
+            recentMessages
+        );
     }
 
 
@@ -3808,45 +2118,13 @@ Based ONLY on the search results above, provide a factual answer:`;
         contextPreamble: string,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
-        
-        loggingService.info('🤖 Routing to multi-agent', {
-            subject: context.currentSubject,
-            domain: context.lastDomain
-        });
-        
-        try {
-            const { multiAgentFlowService } = await import('./multiAgentFlow.service');
-            
-            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message}`;
-            
-            const result = await multiAgentFlowService.processMessage(
-                context.conversationId,
-                request.userId,
-                enhancedQuery,
-                {
-                    chatMode: 'balanced',
-                    costBudget: 0.10
-                }
-            );
-
-            if (result.response) {
-                return {
-                    response: result.response,
-                    agentThinking: result.thinking,
-                    agentPath: ['multi_agent'],
-                    optimizationsApplied: ['context_enhancement', 'multi_agent_routing'],
-                    cacheHit: false,
-                    riskLevel: result.riskLevel || 'medium'
-                };
-            }
-        } catch (error) {
-            loggingService.warn('Multi-agent routing failed, falling back to conversational flow', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-        
-        // Fallback to conversational flow
-        return await this.handleConversationalFlowRoute(request, context, contextPreamble, recentMessages);
+        // Delegate to MultiAgentHandler
+        return await MultiAgentHandler.handle(
+            this.convertToHandlerRequest(request),
+            context,
+            contextPreamble,
+            recentMessages
+        );
     }
 
     private static async handleConversationalFlowRoute(
@@ -3855,45 +2133,13 @@ Based ONLY on the search results above, provide a factual answer:`;
         contextPreamble: string,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
-        
-        loggingService.info('💬 Routing to conversational flow', {
-            subject: context.currentSubject,
-            domain: context.lastDomain
-        });
-        
-        try {
-            const { conversationalFlowService } = await import('./conversationFlow.service');
-            
-            const enhancedQuery = `${contextPreamble}\n\nUser query: ${request.message || ''}`;
-            
-            const result = await conversationalFlowService.processMessage(
-                context.conversationId,
-                request.userId,
-                enhancedQuery,
-                {
-                    previousMessages: [],
-                    selectedModel: request.modelId
-                }
-            );
-
-            if (result.response) {
-                return {
-                    response: result.response,
-                    agentThinking: result.thinking,
-                    agentPath: ['conversational_flow'],
-                    optimizationsApplied: ['context_enhancement', 'conversational_routing'],
-                    cacheHit: false,
-                    riskLevel: 'low'
-                };
-            }
-        } catch (error) {
-            loggingService.warn('Conversational flow failed, using direct Bedrock fallback', {
-                error: error instanceof Error ? error.message : String(error)
-            });
-        }
-        
-        // Final fallback to direct Bedrock
-        return this.directBedrockFallback(request, recentMessages);
+        // Delegate to ConversationalFlowHandler
+        return await ConversationalFlowHandler.handle(
+            this.convertToHandlerRequest(request),
+            context,
+            contextPreamble,
+            recentMessages
+        );
     }
 
     /**
@@ -3903,35 +2149,11 @@ Based ONLY on the search results above, provide a factual answer:`;
         request: ChatSendMessageRequest,
         recentMessages: any[]
     ): Promise<{ response: string; agentThinking?: any; agentPath: string[]; optimizationsApplied: string[]; cacheHit: boolean; riskLevel: string }> {
-        
-        // Build contextual prompt, but pass messages for intelligent handling
-        const contextualPrompt = this.buildContextualPrompt(recentMessages, request.message || '');
-        
-        // Enhanced: Pass context to BedrockService for ChatGPT-style conversation
-        const response = await BedrockService.invokeModel(
-            contextualPrompt,
-            request.modelId,
-            {
-                recentMessages: recentMessages,
-                useSystemPrompt: true
-            }
+        // Delegate to FallbackHandler
+        return await FallbackHandler.directBedrock(
+            this.convertToHandlerRequest(request),
+            recentMessages
         );
-        
-        // Track optimizations based on context usage
-        const optimizations = ['circuit_breaker'];
-        if (recentMessages && recentMessages.length > 0) {
-            optimizations.push('multi_turn_context');
-            optimizations.push('system_prompt');
-        }
-        
-        return {
-            response,
-            agentThinking: undefined,
-            agentPath: ['bedrock_direct'],
-            optimizationsApplied: optimizations,
-            cacheHit: false,
-            riskLevel: 'low'
-        };
     }
 
     /**
@@ -3988,7 +2210,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             });
 
             // 1. Detect which integrations are needed
-            const integrationIntent = await this.detectIntegrationIntent(
+            const integrationIntent = await IntegrationDetector.detect(
                 request.message || '',
                 request.userId
             );
@@ -4000,7 +2222,7 @@ Based ONLY on the search results above, provide a factual answer:`;
 
             // 2. Check if all required integrations are connected
             for (const integration of integrationIntent.integrations) {
-                const connectionStatus = await this.checkIntegrationConnection(
+                const connectionStatus = await ConnectionChecker.check(
                     request.userId,
                     integration
                 );
@@ -4152,7 +2374,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             switch (integration) {
                 case 'mongodb':
                     integrationData.mongodbIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatMongoDBResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatMongoDBResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
@@ -4161,56 +2383,56 @@ Based ONLY on the search results above, provide a factual answer:`;
                     // For GitHub, extract repositories array if it exists
                     const githubData = actualData?.repositories || actualData;
                     integrationData.githubIntegrationData = githubData;
-                    integrationData.formattedResult = await this.formatGitHubResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatGitHubResult({ 
                         metadata: mcpResult.metadata, 
                         data: githubData 
                     });
                     break;
                 case 'vercel':
                     integrationData.vercelIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatVercelResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatVercelResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'google':
                     integrationData.googleIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatGoogleResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatGoogleResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'slack':
                     integrationData.slackIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatSlackResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatSlackResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'discord':
                     integrationData.discordIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatDiscordResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatDiscordResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'jira':
                     integrationData.jiraIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatJiraResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatJiraResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'linear':
                     integrationData.linearIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatLinearResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatLinearResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
                     break;
                 case 'aws':
                     integrationData.awsIntegrationData = actualData;
-                    integrationData.formattedResult = await this.formatAWSResult({ 
+                    integrationData.formattedResult = await IntegrationFormatter.formatAWSResult({ 
                         metadata: mcpResult.metadata, 
                         data: actualData 
                     });
@@ -4282,574 +2504,6 @@ Based ONLY on the search results above, provide a factual answer:`;
             return this.directBedrockFallback(request, recentMessages);
         }
     }
-
-    /**
-     * Format MongoDB MCP result
-     */
-    private static async formatMongoDBResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            // Determine format type based on the operation
-            let formatType: 'table' | 'json' | 'schema' | 'stats' | 'text' = 'json';
-            
-            if (mcpResult.metadata?.operation === 'mongodb_find') {
-                formatType = 'table';
-            } else if (mcpResult.metadata?.operation === 'mongodb_analyze_schema') {
-                formatType = 'schema';
-            } else if (mcpResult.metadata?.operation === 'mongodb_get_stats') {
-                formatType = 'stats';
-            }
-
-            return {
-                type: formatType,
-                data: mcpResult.data,
-            };
-        } catch (error) {
-            loggingService.error('Failed to format MongoDB result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format GitHub MCP results for display
-     */
-    private static async formatGitHubResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            // Handle github_list_repos - GitHub API returns array directly
-            if (operation === 'github_list_repos') {
-                const repos = Array.isArray(data) ? data : (data?.repositories || []);
-                if (repos.length > 0) {
-                    return {
-                        type: 'list',
-                        data: {
-                            items: repos.map((repo: any) => {
-                                // Ensure we have a proper GitHub web URL
-                                let githubUrl = repo.html_url;
-                                if (!githubUrl && repo.url) {
-                                    // Convert API URL to web URL if needed
-                                    if (repo.url.includes('api.github.com')) {
-                                        githubUrl = repo.url.replace('api.github.com/repos', 'github.com');
-                                    } else if (!repo.url.startsWith('http')) {
-                                        // If it's a relative URL or just the repo path
-                                        githubUrl = `https://github.com/${repo.full_name || repo.name}`;
-                                    } else {
-                                        githubUrl = repo.url;
-                                    }
-                                } else if (!githubUrl) {
-                                    // Fallback to constructing URL from repo name
-                                    githubUrl = `https://github.com/${repo.full_name || repo.name}`;
-                                }
-                                
-                                return {
-                                    id: repo.id,
-                                    title: repo.full_name || repo.name,
-                                    description: repo.description || 'No description',
-                                    url: githubUrl, // Use the corrected web URL
-                                    html_url: githubUrl, // Also provide as html_url for consistency
-                                    metadata: {
-                                        language: repo.language,
-                                        stars: repo.stargazers_count,
-                                        private: repo.private,
-                                        updated: repo.updated_at,
-                                    },
-                                };
-                            }),
-                            count: repos.length,
-                            title: 'GitHub Repositories',
-                        },
-                    };
-                }
-            }
-
-            // Handle github_list_issues
-            if (operation === 'github_list_issues') {
-                const issues = Array.isArray(data) ? data : (data?.issues || []);
-                if (issues.length > 0) {
-                    return {
-                        type: 'list',
-                        data: {
-                            items: issues.map((issue: any) => ({
-                                id: issue.number,
-                                title: `#${issue.number}: ${issue.title}`,
-                                description: issue.body,
-                                url: issue.html_url,
-                                metadata: {
-                                    state: issue.state,
-                                    assignee: issue.assignee?.login,
-                                    labels: issue.labels?.map((l: any) => l.name).join(', '),
-                                },
-                            })),
-                            count: issues.length,
-                            title: 'GitHub Issues',
-                        },
-                    };
-                }
-            }
-
-            // Handle github_list_prs
-            if (operation === 'github_list_prs') {
-                const prs = Array.isArray(data) ? data : (data?.pullRequests || []);
-                if (prs.length > 0) {
-                    return {
-                        type: 'list',
-                        data: {
-                            items: prs.map((pr: any) => ({
-                                id: pr.number,
-                                title: `#${pr.number}: ${pr.title}`,
-                                description: pr.body,
-                                url: pr.html_url,
-                                metadata: {
-                                    state: pr.state,
-                                    mergeable: pr.mergeable_state,
-                                    head: pr.head?.ref,
-                                    base: pr.base?.ref,
-                                },
-                            })),
-                            count: prs.length,
-                            title: 'Pull Requests',
-                        },
-                    };
-                }
-            }
-
-            // Default format for other operations
-            return {
-                type: 'json',
-                data: mcpResult.data,
-            };
-        } catch (error) {
-            loggingService.error('Failed to format GitHub result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Vercel MCP results for display
-     */
-    private static async formatVercelResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'vercel_list_deployments' && data?.deployments) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.deployments.map((deployment: any) => ({
-                            id: deployment.uid,
-                            title: deployment.name,
-                            description: `${deployment.state} - ${deployment.target || 'production'}`,
-                            url: deployment.url,
-                            metadata: {
-                                state: deployment.state,
-                                created: deployment.created,
-                                creator: deployment.creator?.username,
-                            },
-                        })),
-                        count: data.count || data.deployments.length,
-                        title: 'Vercel Deployments',
-                    },
-                };
-            }
-
-            if (operation === 'vercel_list_projects' && data?.projects) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.projects.map((project: any) => ({
-                            id: project.id,
-                            title: project.name,
-                            description: project.framework || 'No framework',
-                            url: `https://vercel.com/${project.accountId}/${project.name}`,
-                            metadata: {
-                                framework: project.framework,
-                                updated: project.updatedAt,
-                            },
-                        })),
-                        count: data.count || data.projects.length,
-                        title: 'Vercel Projects',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Vercel result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Google MCP results for display
-     */
-    private static async formatGoogleResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'drive_list_files' && data?.files) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.files.map((file: any) => ({
-                            id: file.id,
-                            title: file.name,
-                            description: file.mimeType,
-                            url: file.webViewLink,
-                            metadata: {
-                                size: file.size,
-                                modified: file.modifiedTime,
-                                mimeType: file.mimeType,
-                            },
-                        })),
-                        count: data.count || data.files.length,
-                        title: 'Google Drive Files',
-                    },
-                };
-            }
-
-            if (operation === 'sheets_list_spreadsheets' && data?.spreadsheets) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.spreadsheets.map((sheet: any) => ({
-                            id: sheet.id,
-                            title: sheet.name,
-                            description: 'Google Spreadsheet',
-                            url: sheet.webViewLink,
-                            metadata: {
-                                modified: sheet.modifiedTime,
-                            },
-                        })),
-                        count: data.count || data.spreadsheets.length,
-                        title: 'Google Sheets',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Google result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Slack MCP results for display
-     */
-    private static async formatSlackResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'slack_list_channels' && data?.channels) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.channels.map((channel: any) => ({
-                            id: channel.id,
-                            title: `#${channel.name}`,
-                            description: channel.purpose?.value || 'No description',
-                            metadata: {
-                                members: channel.num_members,
-                                private: channel.is_private,
-                            },
-                        })),
-                        count: data.count || data.channels.length,
-                        title: 'Slack Channels',
-                    },
-                };
-            }
-
-            if (operation === 'slack_list_users' && data?.members) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.members.map((user: any) => ({
-                            id: user.id,
-                            title: user.real_name || user.name,
-                            description: user.profile?.title || 'Team member',
-                            metadata: {
-                                username: user.name,
-                                status: user.profile?.status_text,
-                            },
-                        })),
-                        count: data.count || data.members.length,
-                        title: 'Slack Users',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Slack result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Discord MCP results for display
-     */
-    private static async formatDiscordResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'discord_list_channels' && data?.channels) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.channels.map((channel: any) => ({
-                            id: channel.id,
-                            title: channel.name,
-                            description: channel.topic || 'No topic',
-                            metadata: {
-                                type: channel.type === 0 ? 'Text' : 'Voice',
-                                position: channel.position,
-                            },
-                        })),
-                        count: data.count || data.channels.length,
-                        title: 'Discord Channels',
-                    },
-                };
-            }
-
-            if (operation === 'discord_list_users' && data?.members) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.members.map((member: any) => ({
-                            id: member.user?.id,
-                            title: member.nick || member.user?.username,
-                            description: member.user?.discriminator ? `#${member.user.discriminator}` : 'Member',
-                            metadata: {
-                                roles: member.roles?.length || 0,
-                                joined: member.joined_at,
-                            },
-                        })),
-                        count: data.count || data.members.length,
-                        title: 'Discord Members',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Discord result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Jira MCP results for display
-     */
-    private static async formatJiraResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'jira_list_issues' && data?.issues) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.issues.map((issue: any) => ({
-                            id: issue.key,
-                            title: `${issue.key}: ${issue.fields?.summary}`,
-                            description: issue.fields?.description?.content?.[0]?.content?.[0]?.text || 'No description',
-                            url: issue.self,
-                            metadata: {
-                                status: issue.fields?.status?.name,
-                                priority: issue.fields?.priority?.name,
-                                assignee: issue.fields?.assignee?.displayName,
-                                type: issue.fields?.issuetype?.name,
-                            },
-                        })),
-                        count: data.total || data.issues.length,
-                        title: 'Jira Issues',
-                    },
-                };
-            }
-
-            if (operation === 'jira_list_projects' && data?.projects) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.projects.map((project: any) => ({
-                            id: project.id,
-                            title: `${project.key}: ${project.name}`,
-                            description: project.description || 'No description',
-                            metadata: {
-                                projectType: project.projectTypeKey,
-                                lead: project.lead?.displayName,
-                            },
-                        })),
-                        count: data.count || data.projects.length,
-                        title: 'Jira Projects',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Jira result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format Linear MCP results for display
-     */
-    private static async formatLinearResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'linear_list_issues' && data?.issues) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.issues.map((issue: any) => ({
-                            id: issue.id,
-                            title: issue.title,
-                            description: issue.description || 'No description',
-                            url: issue.url,
-                            metadata: {
-                                state: issue.state?.name,
-                                priority: issue.priority,
-                                assignee: issue.assignee?.name,
-                                team: issue.team?.name,
-                            },
-                        })),
-                        count: data.count || data.issues.length,
-                        title: 'Linear Issues',
-                    },
-                };
-            }
-
-            if (operation === 'linear_list_projects' && data?.projects) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.projects.map((project: any) => ({
-                            id: project.id,
-                            title: project.name,
-                            description: project.description || 'No description',
-                            metadata: {
-                                state: project.state,
-                                progress: project.progress,
-                            },
-                        })),
-                        count: data.count || data.projects.length,
-                        title: 'Linear Projects',
-                    },
-                };
-            }
-
-            if (operation === 'linear_list_teams' && data?.teams) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.teams.map((team: any) => ({
-                            id: team.id,
-                            title: `${team.key}: ${team.name}`,
-                            description: team.description || 'No description',
-                            metadata: {
-                                key: team.key,
-                            },
-                        })),
-                        count: data.count || data.teams.length,
-                        title: 'Linear Teams',
-                    },
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format Linear result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
-    /**
-     * Format AWS MCP results for display
-     */
-    private static async formatAWSResult(mcpResult: { metadata?: { operation?: string }; data?: unknown }): Promise<{ type: string; data: unknown }> {
-        try {
-            const operation = mcpResult.metadata?.operation;
-            const data = mcpResult.data as any;
-
-            if (operation === 'aws_list_ec2' && data?.instances) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.instances.map((instance: any) => ({
-                            id: instance.instanceId,
-                            title: instance.name || instance.instanceId,
-                            description: instance.instanceType,
-                            metadata: {
-                                state: instance.state,
-                                region: instance.region,
-                                publicIp: instance.publicIp,
-                            },
-                        })),
-                        count: data.count || data.instances.length,
-                        title: 'EC2 Instances',
-                    },
-                };
-            }
-
-            if (operation === 'aws_list_s3' && data?.buckets) {
-                return {
-                    type: 'list',
-                    data: {
-                        items: data.buckets.map((bucket: any) => ({
-                            id: bucket.name,
-                            title: bucket.name,
-                            description: `Created: ${bucket.creationDate}`,
-                            metadata: {
-                                region: bucket.region,
-                            },
-                        })),
-                        count: data.count || data.buckets.length,
-                        title: 'S3 Buckets',
-                    },
-                };
-            }
-
-            if (operation === 'aws_get_costs' && data?.costData) {
-                return {
-                    type: 'table',
-                    data: data.costData,
-                };
-            }
-
-            return { type: 'json', data: mcpResult.data };
-        } catch (error) {
-            loggingService.error('Failed to format AWS result', {
-                error: error instanceof Error ? error.message : String(error),
-            });
-            return { type: 'json', data: mcpResult.data };
-        }
-    }
-
 
 
     /**
@@ -4956,7 +2610,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     }
 
                     // Optimized: Get recent messages with dynamic context sizing
-                    recentMessages = await this.getOptimalContext(
+                    recentMessages = await ContextOptimizer.fetchOptimalContext(
                         conversation!._id.toString(), 
                         request.message?.length || 50
                     );
@@ -5003,7 +2657,7 @@ Based ONLY on the search results above, provide a factual answer:`;
 
                     // Process attachments if present
                     if (request.attachments && request.attachments.length > 0) {
-                        const { processedAttachments: processed, contextString } = await this.processAttachments(
+                        const { processedAttachments: processed, contextString } = await AttachmentProcessor.processAttachments(
                             request.attachments,
                             request.userId
                         );
@@ -5335,7 +2989,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             // Before any legacy chat agents (VercelChatAgent, MongoDBChatAgent, GitHubChatAgent)
             // ========================================
             try {
-                const integrationIntent = await this.detectIntegrationIntent(
+                const integrationIntent = await IntegrationDetector.detect(
                     actualMessage,
                     request.userId
                 );
@@ -5349,7 +3003,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     });
                     
                     // Build conversation context
-                    const context = this.buildConversationContext(
+                    const context = ContextManager.buildContext(
                         conversation!._id.toString(),
                         actualMessage,
                         recentMessages
@@ -5895,7 +3549,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     const latency = Date.now() - startTime;
                     const inputTokens = Math.ceil((request.message || '').length / 4);
                     const outputTokens = Math.ceil(vercelResponse.message.length / 4);
-                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+                    const cost = CostEstimator.estimateCost(request.modelId, inputTokens, outputTokens);
 
                     return {
                         messageId: new Types.ObjectId().toString(),
@@ -6019,7 +3673,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     const latency = Date.now() - startTime;
                     const inputTokens = Math.ceil((request.message || '').length / 4);
                     const outputTokens = Math.ceil(mongodbResponse.message.length / 4);
-                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+                    const cost = CostEstimator.estimateCost(request.modelId, inputTokens, outputTokens);
 
                     return {
                         messageId: new Types.ObjectId().toString(),
@@ -6128,7 +3782,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     const latency = Date.now() - startTime;
                     const inputTokens = Math.ceil((request.message || '').length / 4);
                     const outputTokens = Math.ceil(githubResponse.message.length / 4);
-                    const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+                    const cost = CostEstimator.estimateCost(request.modelId, inputTokens, outputTokens);
 
                     return {
                         messageId: new Types.ObjectId().toString(),
@@ -6167,7 +3821,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             // Check if this is an autonomous request before processing
             // BUT skip autonomous detection if useMultiAgent is explicitly true
             // (to allow autonomous web search feature to work)
-            const isAutonomousRequest = !request.useMultiAgent && await this.detectAutonomousRequest(finalMessage);
+            const isAutonomousRequest = !request.useMultiAgent && await AutonomousDetector.detect(finalMessage);
             
             if (isAutonomousRequest) {
                 loggingService.info('🤖 Autonomous request detected, initiating governed agent', {
@@ -6189,7 +3843,7 @@ Based ONLY on the search results above, provide a factual answer:`;
                     );
                     
                     // Create governed plan message
-                    const planMessage = await this.createGovernedPlanMessage(
+                    const planMessage = await GovernedPlanMessageCreator.createPlanMessage(
                         conversation!._id.toString(),
                         task.id,
                         request.userId
@@ -6259,7 +3913,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             // Calculate cost (rough estimation)
             const inputTokens = Math.ceil(actualMessage.length / 4);
             const outputTokens = Math.ceil(response.length / 4);
-            const cost = this.estimateCost(request.modelId, inputTokens, outputTokens);
+            const cost = CostEstimator.estimateCost(request.modelId, inputTokens, outputTokens);
 
             // Optimized: Save assistant response and update conversation in transaction
             const session2 = await mongoose.startSession();
@@ -6674,40 +4328,33 @@ Based ONLY on the search results above, provide a factual answer:`;
     }
 
     /**
-     * Assess query complexity to determine if direct results or AI synthesis is needed
+     * Convert ChatSendMessageRequest to HandlerRequest
      */
-    private static assessQueryComplexity(query: string): 'simple' | 'complex' {
-        // Simple factual queries that can be answered with direct search snippets
-        const simplePatterns = [
-            /^what is the (price|pricing|cost)/i,
-            /^how much (does|is|costs?)/i,
-            /^what (is|are) the (price|cost|fee)/i,
-            /pricing for/i,
-            /cost of/i,
-            /^when (was|is|did|does)/i,
-            /^who (is|was|are)/i,
-            /^where (is|was|are|can)/i,
-            /^what does .+ mean/i,
-            /^define /i,
-            /^what happened on/i,
-            /^when did/i
-        ];
-        
-        // Check if query matches simple patterns
-        const isSimple = simplePatterns.some(pattern => pattern.test(query));
-        
-        // Additional heuristics: short queries are often factual lookups
-        const wordCount = query.trim().split(/\s+/).length;
-        const isShortFactual = wordCount <= 8 && (
-            query.includes('?') || 
-            query.match(/^(what|when|where|who|how much|price|cost)/i)
-        );
-        
-        return (isSimple || isShortFactual) ? 'simple' : 'complex';
+    private static convertToHandlerRequest(request: ChatSendMessageRequest): HandlerRequest {
+        return {
+            userId: request.userId,
+            conversationId: request.conversationId || '',
+            message: request.message,
+            originalMessage: request.originalMessage,
+            modelId: request.modelId,
+            temperature: request.temperature,
+            maxTokens: request.maxTokens,
+            chatMode: request.chatMode,
+            useMultiAgent: request.useMultiAgent,
+            useWebSearch: request.useWebSearch,
+            documentIds: request.documentIds,
+            githubContext: request.githubContext,
+            vercelContext: request.vercelContext,
+            mongodbContext: request.mongodbContext,
+            templateId: request.templateId,
+            templateVariables: request.templateVariables,
+            attachments: request.attachments,
+            selectionResponse: request.selectionResponse
+        };
     }
 
     /**
-     * Get available models for chat
+     * Generate a simple, descriptive title from the first message
      */
     static getAvailableModels(): Array<{
         id: string;
@@ -6721,30 +4368,7 @@ Based ONLY on the search results above, provide a factual answer:`;
             unit: string;
         };
     }> {
-        try {
-            // Use AWS Bedrock pricing data directly to avoid circular dependencies
-            const models = AWS_BEDROCK_PRICING.map(pricing => ({
-                id: pricing.modelId,
-                name: this.getModelDisplayName(pricing.modelId),
-                provider: this.getModelProvider(pricing.modelId),
-                description: this.getModelDescription(pricing.modelId),
-                capabilities: pricing.capabilities || ['text', 'chat'],
-                pricing: {
-                    input: pricing.inputPrice,
-                    output: pricing.outputPrice,
-                    unit: pricing.unit
-                }
-            }));
-            
-            // Filter out models with invalid model IDs
-            return models.filter(model => model && model.id && typeof model.id === 'string' && model.id.trim() !== '');
-
-        } catch (error) {
-            loggingService.error('Error getting available models:', { error: error instanceof Error ? error.message : String(error) });
-            
-            // Optimized: Return static fallback models instead of creating new objects
-            return [...this.FALLBACK_MODELS]; // Shallow copy to prevent mutations
-        }
+        return ModelRegistry.getAvailableModels();
     }
 
     /**
@@ -6766,34 +4390,8 @@ Based ONLY on the search results above, provide a factual answer:`;
         } else if (firstSentence.length > 0) {
             return firstSentence;
         } else {
-            return `Chat with ${this.getModelDisplayName(modelId)}`;
+            return `Chat with ${ModelMetadata.getDisplayName(modelId)}`;
         }
-    }
-
-    /**
-     * Build contextual prompt from conversation history (LEGACY - kept for backward compatibility)
-     * @deprecated Use convertToMessagesArray instead for better multi-turn support
-     */
-    private static buildContextualPrompt(messages: any[], newMessage: string): string {
-        // Optimized: Use the messages as-is since they're already optimally sized
-        const recentMessages = messages.reverse(); // Reverse since we got them in desc order
-        
-        let prompt = '';
-        
-        if (recentMessages.length > 1) { // More than just the current user message
-            prompt += 'Previous conversation:\n\n';
-            recentMessages.forEach(msg => {
-                if (msg.role === 'user') {
-                    prompt += `Human: ${msg.content}\n\n`;
-                } else if (msg.role === 'assistant') {
-                    prompt += `Assistant: ${msg.content}\n\n`;
-                }
-            });
-        }
-        
-        prompt += `Human: ${newMessage}\n\nAssistant:`;
-        
-        return prompt;
     }
 
     /**
@@ -6898,726 +4496,4 @@ Based ONLY on the search results above, provide a factual answer:`;
         }
     }
 
-    /**
-     * Estimate cost for model usage
-     */
-    private static estimateCost(modelId: string, inputTokens: number, outputTokens: number): number {
-        const pricingMap: Record<string, { input: number; output: number }> = {
-            'amazon.nova-micro-v1:0': { input: 0.035, output: 0.14 },
-            'amazon.nova-lite-v1:0': { input: 0.06, output: 0.24 },
-            'amazon.nova-pro-v1:0': { input: 0.80, output: 3.20 },
-            'global.anthropic.claude-haiku-4-5-20251001-v1:0': { input: 1.0, output: 5.0 },
-            'anthropic.claude-sonnet-4-20250514-v1:0': { input: 3.0, output: 15.0 },
-        };
-
-        const pricing = pricingMap[modelId] || { input: 1.0, output: 5.0 }; // Default pricing
-        
-        const inputCost = (inputTokens / 1000000) * pricing.input;
-        const outputCost = (outputTokens / 1000000) * pricing.output;
-        
-        return inputCost + outputCost;
-    }
-
-    /**
-     * Get display name for model
-     */
-    private static getModelDisplayName(modelId: string): string {
-        // Handle null/undefined modelId
-        if (!modelId || typeof modelId !== 'string') {
-            return 'Unknown Model';
-        }
-
-        const nameMap: Record<string, string> = {
-            // === OpenAI GPT-5 Models (Latest) ===
-            'gpt-5': 'GPT-5',
-            'gpt-5-mini': 'GPT-5 Mini',
-            'gpt-5-nano': 'GPT-5 Nano',
-            'gpt-5-chat-latest': 'GPT-5 Chat Latest',
-            'gpt-5-chat': 'GPT-5 Chat Latest',
-            
-            // === AWS Models ===
-            'amazon.nova-micro-v1:0': 'Nova Micro',
-            'amazon.nova-lite-v1:0': 'Nova Lite', 
-            'amazon.nova-pro-v1:0': 'Nova Pro',
-            'amazon.titan-text-lite-v1': 'Titan Text Lite',
-            'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Claude 3.5 Haiku',
-            'anthropic.claude-sonnet-4-20250514-v1:0': 'Claude Sonnet 4',
-            'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Claude 3.5 Sonnet',
-            'anthropic.claude-opus-4-1-20250805-v1:0': 'Claude 4 Opus',
-            'meta.llama3-1-8b-instruct-v1:0': 'Llama 3.1 8B',
-            'meta.llama3-1-70b-instruct-v1:0': 'Llama 3.1 70B',
-            'meta.llama3-1-405b-instruct-v1:0': 'Llama 3.1 405B',
-            'meta.llama3-2-1b-instruct-v1:0': 'Llama 3.2 1B',
-            'meta.llama3-2-3b-instruct-v1:0': 'Llama 3.2 3B',
-            'mistral.mistral-7b-instruct-v0:2': 'Mistral 7B',
-            'mistral.mixtral-8x7b-instruct-v0:1': 'Mixtral 8x7B',
-            'mistral.mistral-large-2402-v1:0': 'Mistral Large',
-            'command-a-03-2025': 'Command A',
-            'command-r7b-12-2024': 'Command R7B',
-            'command-a-reasoning-08-2025': 'Command A Reasoning',
-            'command-a-vision-07-2025': 'Command A Vision',
-            'command-r-plus-04-2024': 'Command R+',
-            'command-r-08-2024': 'Command R',
-            'command-r-03-2024': 'Command R (03-2024)',
-            'command': 'Command',
-            'command-nightly': 'Command Nightly',
-            'command-light': 'Command Light',
-            'command-light-nightly': 'Command Light Nightly',
-            'ai21.jamba-instruct-v1:0': 'Jamba Instruct',
-            'ai21.j2-ultra-v1': 'Jurassic-2 Ultra',
-            'ai21.j2-mid-v1': 'Jurassic-2 Mid',
-            
-            // Google Gemini Models
-            'gemini-2.5-pro': 'Gemini 2.5 Pro',
-            'gemini-2.5-flash': 'Gemini 2.5 Flash',
-            'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
-            'gemini-2.5-flash-audio': 'Gemini 2.5 Flash Audio',
-            'gemini-2.5-flash-lite-audio-preview': 'Gemini 2.5 Flash Lite Audio Preview',
-            'gemini-2.5-flash-native-audio-output': 'Gemini 2.5 Flash Native Audio Output',
-            'gemini-2.0-flash': 'Gemini 2.0 Flash',
-            'gemini-2.0-flash-lite': 'Gemini 2.0 Flash Lite',
-            'gemini-2.0-flash-audio': 'Gemini 2.0 Flash Audio',
-            'gemini-1.5-pro': 'Gemini 1.5 Pro',
-            'gemini-1.5-flash': 'Gemini 1.5 Flash',
-            'gemini-1.5-flash-large-context': 'Gemini 1.5 Flash Large Context',
-            'gemini-1.5-flash-8b-large-context': 'Gemini 1.5 Flash 8B Large Context',
-            'gemini-1.5-pro-large-context': 'Gemini 1.5 Pro Large Context',
-            'gemini-1.0-pro': 'Gemini 1.0 Pro',
-            'gemini-1.0-pro-vision': 'Gemini 1.0 Pro Vision',
-            
-            // Google Gemma Models
-            'gemma-2': 'Gemma 2',
-            'gemma': 'Gemma',
-            'shieldgemma-2': 'ShieldGemma 2',
-            'paligemma': 'PaliGemma',
-            'codegemma': 'CodeGemma',
-            'txgemma': 'TxGemma',
-            'medgemma': 'MedGemma',
-            'medsiglip': 'MedSigLIP',
-            't5gemma': 'T5Gemma',
-            
-            // Google Specialized Models
-            'multimodal-embeddings': 'Multimodal Embeddings',
-            'imagen-4-generation': 'Imagen 4 Generation',
-            'imagen-4-fast-generation': 'Imagen 4 Fast Generation',
-            'imagen-4-ultra-generation': 'Imagen 4 Ultra Generation',
-            'imagen-3-generation': 'Imagen 3 Generation',
-            'imagen-3-editing-customization': 'Imagen 3 Editing & Customization',
-            'imagen-3-fast-generation': 'Imagen 3 Fast Generation',
-            'imagen-captioning-vqa': 'Imagen Captioning & VQA',
-            'veo-3': 'Veo 3',
-            'veo-3-fast': 'Veo 3 Fast',
-            'virtual-try-on': 'Virtual Try-On',
-            'veo-3-preview': 'Veo 3 Preview',
-            'veo-3-fast-preview': 'Veo 3 Fast Preview',
-            
-            // Mistral AI Models
-            // Premier Models
-            'mistral-medium-2508': 'Mistral Medium 3.1',
-            'mistral-medium-latest': 'Mistral Medium 3.1',
-            'magistral-medium-2507': 'Magistral Medium 1.1',
-            'magistral-medium-latest': 'Magistral Medium 1.1',
-            'codestral-2508': 'Codestral 2508',
-            'codestral-latest': 'Codestral 2508',
-            'voxtral-mini-2507': 'Voxtral Mini Transcribe',
-            'voxtral-mini-latest': 'Voxtral Mini Transcribe',
-            'devstral-medium-2507': 'Devstral Medium',
-            'devstral-medium-latest': 'Devstral Medium',
-            'mistral-ocr-2505': 'Mistral OCR 2505',
-            'mistral-ocr-latest': 'Mistral OCR 2505',
-            'mistral-large-2411': 'Mistral Large 2.1',
-            'mistral-large-latest': 'Mistral Large 2.1',
-            'pixtral-large-2411': 'Pixtral Large',
-            'pixtral-large-latest': 'Pixtral Large',
-            'mistral-small-2407': 'Mistral Small 2',
-            'mistral-embed': 'Mistral Embed',
-            'codestral-embed-2505': 'Codestral Embed',
-            'mistral-moderation-2411': 'Mistral Moderation 24.11',
-            'mistral-moderation-latest': 'Mistral Moderation 24.11',
-            
-            // Open Models
-            'magistral-small-2507': 'Magistral Small 1.1',
-            'magistral-small-latest': 'Magistral Small 1.1',
-            'voxtral-small-2507': 'Voxtral Small',
-            'voxtral-small-latest': 'Voxtral Small',
-            'mistral-small-2506': 'Mistral Small 3.2',
-            'devstral-small-2507': 'Devstral Small 1.1',
-            'devstral-small-latest': 'Devstral Small 1.1',
-            'mistral-small-2503': 'Mistral Small 3.1',
-            'mistral-small-2501': 'Mistral Small 3',
-            'devstral-small-2505': 'Devstral Small 1',
-            'pixtral-12b-2409': 'Pixtral 12B',
-            'pixtral-12b': 'Pixtral 12B',
-            'open-mistral-nemo-2407': 'Mistral NeMo 12B',
-            'open-mistral-nemo': 'Mistral NeMo 12B',
-            'mistral-nemo': 'Mistral NeMo',
-            'open-mistral-7b': 'Mistral 7B',
-            'open-mixtral-8x7b': 'Mixtral 8x7B',
-            'open-mixtral-8x22b': 'Mixtral 8x22B',
-            
-            // Grok AI Models
-            'grok-4-0709': 'Grok 4',
-            'grok-3': 'Grok 3',
-            'grok-3-mini': 'Grok 3 Mini',
-            'grok-2-image-1212': 'Grok 2 Image',
-            
-            // Meta Llama 4 Models
-            'llama-4-scout': 'Llama 4 Scout',
-            'llama-4-maverick': 'Llama 4 Maverick',
-            'llama-4-behemoth-preview': 'Llama 4 Behemoth Preview',
-        };
-
-        return nameMap[modelId] || modelId.split('.').pop()?.split('-')[0] || modelId;
-    }
-
-    /**
-     * Get provider for model
-     */
-    private static getModelProvider(modelId: string): string {
-        // Handle null/undefined modelId
-        if (!modelId || typeof modelId !== 'string') {
-            return 'Unknown';
-        }
-
-        if (modelId.startsWith('amazon.')) return 'Amazon';
-        if (modelId.startsWith('anthropic.')) return 'Anthropic';
-        if (modelId.startsWith('meta.')) return 'Meta';
-        if (modelId.startsWith('cohere.')) return 'Cohere';
-        if (modelId.startsWith('mistral.')) return 'Mistral AI';
-        if (modelId.startsWith('ai21.')) return 'AI21 Labs';
-        return 'Unknown';
-    }
-
-    /**
-     * Get description for model
-     */
-    private static getModelDescription(modelId: string): string {
-        // Handle null/undefined modelId
-        if (!modelId || typeof modelId !== 'string') {
-            return 'Unknown AI model';
-        }
-
-        const descriptionMap: Record<string, string> = {
-            // === OpenAI GPT-5 Models (Latest) ===
-            'gpt-5': 'OpenAI GPT-5 - Latest flagship model with advanced intelligence and reasoning capabilities',
-            'gpt-5-mini': 'OpenAI GPT-5 Mini - Efficient variant with balanced performance and cost',
-            'gpt-5-nano': 'OpenAI GPT-5 Nano - Fastest and most cost-effective GPT-5 variant',
-            'gpt-5-chat-latest': 'OpenAI GPT-5 Chat Latest - Latest chat model with advanced conversational capabilities',
-            'gpt-5-chat': 'OpenAI GPT-5 Chat Latest - Latest chat model with advanced conversational capabilities',
-            
-            // === AWS Models ===
-            'amazon.nova-micro-v1:0': 'Fast and cost-effective model for simple tasks',
-            'amazon.nova-lite-v1:0': 'Balanced performance and cost for general use',
-            'amazon.nova-pro-v1:0': 'High-performance model for complex tasks',
-            'amazon.titan-text-lite-v1': 'Lightweight text generation model',
-            'global.anthropic.claude-haiku-4-5-20251001-v1:0': 'Fast and intelligent for quick responses',
-            'anthropic.claude-3-5-sonnet-20240620-v1:0': 'Advanced reasoning and analysis capabilities',
-            'anthropic.claude-sonnet-4-20250514-v1:0': 'High-performance model with exceptional reasoning',
-            'anthropic.claude-opus-4-1-20250805-v1:0': 'Most powerful model for complex reasoning',
-            'meta.llama3-1-8b-instruct-v1:0': 'Good balance of performance and efficiency',
-            'meta.llama3-1-70b-instruct-v1:0': 'Large model for complex reasoning tasks',
-            'meta.llama3-1-405b-instruct-v1:0': 'Most capable Llama model for advanced tasks',
-            'meta.llama3-2-1b-instruct-v1:0': 'Compact, efficient model for basic tasks',
-            'meta.llama3-2-3b-instruct-v1:0': 'Efficient model for general tasks',
-            'mistral.mistral-7b-instruct-v0:2': 'Efficient open-source model',
-            'mistral.mixtral-8x7b-instruct-v0:1': 'High-quality mixture of experts model',
-            'mistral.mistral-large-2402-v1:0': 'Advanced reasoning and multilingual capabilities',
-            'command-a-03-2025': 'Most performant model to date, excelling at tool use, agents, RAG, and multilingual use cases',
-            'command-r7b-12-2024': 'Small, fast update delivered in December 2024, excels at RAG, tool use, and complex reasoning',
-            'command-a-reasoning-08-2025': 'First reasoning model, able to think before generating output for nuanced problem-solving and agent-based tasks in 23 languages',
-            'command-a-vision-07-2025': 'First model capable of processing images, excelling in enterprise use cases like charts, graphs, diagrams, table understanding, OCR, and object detection',
-            'command-r-plus-04-2024': 'Instruction-following conversational model for complex RAG workflows and multi-step tool use',
-            'command-r-08-2024': 'Update of Command R model delivered in August 2024',
-            'command-r-03-2024': 'Instruction-following conversational model for complex workflows like code generation, RAG, tool use, and agents',
-            
-            // Google Gemini Models
-            'gemini-2.5-pro': 'Our most advanced reasoning Gemini model, made to solve complex problems. Best for multimodal understanding, coding, and complex prompts',
-            'gemini-2.5-flash': 'Best model in terms of price-performance, offering well-rounded capabilities with Live API support and thinking process visibility',
-            'gemini-2.5-flash-lite': 'Most cost effective model that supports high throughput tasks with 1M token context window and multimodal input',
-            'gemini-2.5-flash-audio': 'Gemini 2.5 Flash model with audio input and output capabilities for multimodal interactions',
-            'gemini-2.5-flash-lite-audio-preview': 'Preview version of Gemini 2.5 Flash Lite with audio capabilities for testing and evaluation',
-            'gemini-2.5-flash-native-audio-output': 'Gemini 2.5 Flash model with native audio output generation capabilities',
-            'gemini-2.0-flash': 'Newest multimodal model with next generation features and improved capabilities',
-            'gemini-2.0-flash-lite': 'Gemini 2.0 Flash model optimized for cost efficiency and low latency',
-            'gemini-2.0-flash-audio': 'Gemini 2.0 Flash model with audio input and output capabilities',
-            'gemini-1.5-pro': 'Advanced model with long context window for complex reasoning and vision tasks',
-            'gemini-1.5-flash': 'Fast and efficient model with multimodal capabilities and 1M token context',
-            'gemini-1.5-flash-large-context': 'Gemini 1.5 Flash with extended context window for long-form content processing',
-            'gemini-1.5-flash-8b-large-context': '8B parameter version of Gemini 1.5 Flash with large context window',
-            'gemini-1.5-pro-large-context': 'Gemini 1.5 Pro with extended context window for complex long-form tasks',
-            'gemini-1.0-pro': 'Balanced model for general text generation and analysis tasks',
-            'gemini-1.0-pro-vision': 'Gemini 1.0 Pro with vision capabilities for multimodal understanding',
-            
-            // Google Gemma Models
-            'gemma-2': 'Latest open models designed for efficient execution on low-resource devices with multimodal input support',
-            'gemma': 'Third generation of open models featuring wide variety of tasks with text and image input',
-            'shieldgemma-2': 'Instruction tuned models for evaluating the safety of text and images against defined safety policies',
-            'paligemma': 'Open vision-language model that combines SigLIP and Gemma for multimodal tasks',
-            'codegemma': 'Powerful, lightweight open model for coding tasks like fill-in-the-middle completion and code generation',
-            'txgemma': 'Generates predictions and classifications based on therapeutic related data for medical AI applications',
-            'medgemma': 'Collection of Gemma 3 variants trained for performance on medical text and image comprehension',
-            'medsiglip': 'SigLIP variant trained to encode medical images and text into a common embedding space',
-            't5gemma': 'Family of lightweight yet powerful encoder-decoder research models from Google',
-            
-            // Google Specialized Models
-            'multimodal-embeddings': 'Generates vectors based on images and text for semantic search, classification, and clustering',
-            'imagen-4-generation': 'Use text prompts to generate novel images with higher quality than previous image generation models',
-            'imagen-4-fast-generation': 'Use text prompts to generate novel images with higher quality and lower latency',
-            'imagen-4-ultra-generation': 'Use text prompts to generate novel images with ultra quality and best prompt adherence',
-            'imagen-3-generation': 'Use text prompts to generate novel images with good quality and performance',
-            'imagen-3-editing-customization': 'Edit existing input images or parts of images with masks and generate new images based on reference context',
-            'imagen-3-fast-generation': 'Generate novel images with lower latency than other image generation models',
-            'imagen-captioning-vqa': 'Generate captions for images and answer visual questions for image understanding tasks',
-            'veo-3': 'Use text prompts and images to generate novel videos with higher quality than previous video generation models',
-            'veo-3-fast': 'Generate novel videos with higher quality and lower latency than previous video generation models',
-            'virtual-try-on': 'Generate images of people wearing clothing products for fashion and retail applications',
-            'veo-3-preview': 'Preview version of Veo 3 for testing and evaluation of video generation capabilities',
-            'veo-3-fast-preview': 'Preview version of Veo 3 Fast for testing fast video generation capabilities',
-            'command': 'Instruction-following conversational model for language tasks with high quality and reliability',
-            'command-nightly': 'Latest experimental version, not recommended for production use',
-            'command-light': 'Smaller, faster version of command, almost as capable but much faster',
-            'command-light-nightly': 'Latest experimental version of command-light, not recommended for production use',
-            'ai21.jamba-instruct-v1:0': 'Hybrid architecture for long context tasks',
-            'ai21.j2-ultra-v1': 'Large language model for complex tasks',
-            'ai21.j2-mid-v1': 'Mid-size model for balanced performance',
-            
-            // Mistral AI Models
-            // Premier Models
-            'mistral-medium-2508': 'Our frontier-class multimodal model released August 2025. Improving tone and performance.',
-            'mistral-medium-latest': 'Our frontier-class multimodal model released August 2025. Improving tone and performance.',
-            'magistral-medium-2507': 'Our frontier-class reasoning model released July 2025.',
-            'magistral-medium-latest': 'Our frontier-class reasoning model released July 2025.',
-            'codestral-2508': 'Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks.',
-            'codestral-latest': 'Our cutting-edge language model for coding released end of July 2025, specializes in low-latency, high-frequency tasks.',
-            'voxtral-mini-2507': 'An efficient audio input model, fine-tuned and optimized for transcription purposes only.',
-            'voxtral-mini-latest': 'An efficient audio input model, fine-tuned and optimized for transcription purposes only.',
-            'devstral-medium-2507': 'An enterprise grade text model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.',
-            'devstral-medium-latest': 'An enterprise grade text model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.',
-            'mistral-ocr-2505': 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.',
-            'mistral-ocr-latest': 'Our OCR service powering our Document AI stack that enables our users to extract interleaved text and images.',
-            'mistral-large-2411': 'Our top-tier large model for high-complexity tasks with the latest version released November 2024.',
-            'mistral-large-latest': 'Our top-tier large model for high-complexity tasks with the latest version released November 2024.',
-            'pixtral-large-2411': 'Our first frontier-class multimodal model released November 2024.',
-            'pixtral-large-latest': 'Our first frontier-class multimodal model released November 2024.',
-            'mistral-small-2407': 'Our updated small version, released September 2024.',
-            'mistral-embed': 'Our state-of-the-art semantic for extracting representation of text extracts.',
-            'codestral-embed-2505': 'Our state-of-the-art semantic for extracting representation of code extracts.',
-            'mistral-moderation-2411': 'Our moderation service that enables our users to detect harmful text content.',
-            'mistral-moderation-latest': 'Our moderation service that enables our users to detect harmful text content.',
-            
-            // Open Models
-            'magistral-small-2507': 'Our small reasoning model released July 2025.',
-            'magistral-small-latest': 'Our small reasoning model released July 2025.',
-            'voxtral-small-2507': 'Our first model with audio input capabilities for instruct use cases.',
-            'voxtral-small-latest': 'Our first model with audio input capabilities for instruct use cases.',
-            'mistral-small-2506': 'An update to our previous small model, released June 2025.',
-            'devstral-small-2507': 'An update to our open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.',
-            'devstral-small-latest': 'An update to our open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.',
-            'mistral-small-2503': 'A new leader in the small models category with image understanding capabilities, released March 2025.',
-            'mistral-small-2501': 'A new leader in the small models category, released January 2025.',
-            'devstral-small-2505': 'A 24B text model, open source model that excels at using tools to explore codebases, editing multiple files and power software engineering agents.',
-            'pixtral-12b-2409': 'A 12B model with image understanding capabilities in addition to text.',
-            'pixtral-12b': 'A 12B model with image understanding capabilities in addition to text.',
-            'open-mistral-nemo-2407': 'Our best multilingual open source model released July 2024.',
-            'open-mistral-nemo': 'Our best multilingual open source model released July 2024.',
-            'mistral-nemo': 'State-of-the-art Mistral model trained specifically for code tasks.',
-            'open-mistral-7b': 'A 7B transformer model, fast-deployed and easily customisable.',
-            'open-mixtral-8x7b': 'A 7B sparse Mixture-of-Experts (SMoE). Uses 12.9B active parameters out of 45B total.',
-            'open-mixtral-8x22b': 'Most performant open model. A 22B sparse Mixture-of-Experts (SMoE). Uses only 39B active parameters out of 141B.',
-            
-            // Grok AI Models
-            'grok-4-0709': 'Latest Grok 4 with reasoning, vision support coming soon. 2M TPM, 480 RPM rate limits',
-            'grok-3': 'Standard Grok 3 model. 600 RPM rate limits',
-            'grok-3-mini': 'Cost-effective Grok 3 Mini. 480 RPM rate limits',
-            'grok-2-image-1212': 'Grok 2 image generation model. $0.07 per image, 300 RPM rate limits',
-            
-            // Meta Llama 4 Models
-            'llama-4-scout': 'Class-leading natively multimodal model with superior text and visual intelligence, single H100 GPU efficiency, and 10M context window for seamless long document analysis',
-            'llama-4-maverick': 'Industry-leading natively multimodal model for image and text understanding with groundbreaking intelligence and fast responses at a low cost',
-            'llama-4-behemoth-preview': 'Early preview of the Llama 4 teacher model used to distill Llama 4 Scout and Llama 4 Maverick. Still in training phase',
-        };
-
-        return descriptionMap[modelId] || 'Advanced AI model for text generation and chat';
-    }
-
-    /**
-     * Process attachments - format file metadata for AI and fetch Google file content
-     * Frontend already provides instruction context about analyzing files
-     */
-    static async processAttachments(
-        attachments: Array<{
-            type: 'uploaded' | 'google';
-            fileId: string;
-            fileName: string;
-            fileSize: number;
-            mimeType: string;
-            fileType: string;
-            url: string;
-            googleFileId?: string;
-            connectionId?: string;
-            webViewLink?: string;
-            modifiedTime?: string;
-            createdTime?: string;
-        }>,
-        userId: string
-    ): Promise<{
-        processedAttachments: Array<{
-            type: 'uploaded' | 'google';
-            fileId: string;
-            fileName: string;
-            fileSize: number;
-            mimeType: string;
-            fileType: string;
-            url: string;
-            googleFileId?: string;
-            connectionId?: string;
-            webViewLink?: string;
-            modifiedTime?: string;
-            createdTime?: string;
-            extractedContent?: string;
-        }>;
-        contextString: string;
-    }> {
-        const processedAttachments = [];
-        const contentParts: string[] = [];
-
-        for (const attachment of attachments) {
-            try {
-                // Determine display file type
-                let displayFileType = attachment.fileType;
-                if (attachment.mimeType.includes('document')) {
-                    displayFileType = 'Google Docs';
-                } else if (attachment.mimeType.includes('spreadsheet')) {
-                    displayFileType = 'Google Sheets';
-                } else if (attachment.mimeType.includes('presentation')) {
-                    displayFileType = 'Google Slides';
-                } else if (attachment.mimeType === 'application/pdf') {
-                    displayFileType = 'PDF';
-                } else if (attachment.mimeType.includes('word')) {
-                    displayFileType = 'Word';
-                } else if (attachment.mimeType.includes('excel')) {
-                    displayFileType = 'Excel';
-                }
-
-                // Format file size
-                const formatFileSize = (bytes: number): string => {
-                    if (bytes < 1024) return `${bytes} B`;
-                    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-                    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-                };
-
-                // Extract file content based on type
-                let extractedContent = '';
-                
-                // Handle uploaded files (from chat or ingestion)
-                if (attachment.type === 'uploaded' && attachment.fileId) {
-                    try {
-                        const { UploadedFile } = await import('../models/UploadedFile');
-                        const uploadedFile = await UploadedFile.findById(attachment.fileId);
-                        
-                        if (uploadedFile) {
-                            // Check if we already have extracted text
-                            if (uploadedFile.extractedText && uploadedFile.extractedText.trim()) {
-                                extractedContent = uploadedFile.extractedText;
-                                
-                                loggingService.info('Retrieved uploaded file content from database', {
-                                    fileName: attachment.fileName,
-                                    fileId: attachment.fileId,
-                                    contentLength: extractedContent.length,
-                                    userId
-                                });
-                            } else {
-                                // Extract text from S3 file if not already extracted
-                                try {
-                                    const textExtractor = new TextExtractionService();
-                                    const extractionResult = await textExtractor.extractTextFromS3(
-                                        uploadedFile.s3Key,
-                                        uploadedFile.fileType,
-                                        uploadedFile.fileName
-                                    );
-                                    
-                                    if (extractionResult.success && extractionResult.text) {
-                                        extractedContent = extractionResult.text;
-                                        
-                                        // Save extracted text for future use
-                                        uploadedFile.extractedText = extractedContent;
-                                        await uploadedFile.save();
-                                        
-                                        loggingService.info('Extracted and saved uploaded file content', {
-                                            fileName: attachment.fileName,
-                                            fileId: attachment.fileId,
-                                            s3Key: uploadedFile.s3Key,
-                                            contentLength: extractedContent.length,
-                                            userId
-                                        });
-                                    } else {
-                                        loggingService.warn('Failed to extract text from uploaded file', {
-                                            fileName: attachment.fileName,
-                                            fileId: attachment.fileId,
-                                            error: extractionResult.error,
-                                            userId
-                                        });
-                                    }
-                                } catch (extractError) {
-                                    loggingService.error('Error extracting text from uploaded file', {
-                                        fileName: attachment.fileName,
-                                        fileId: attachment.fileId,
-                                        error: extractError instanceof Error ? extractError.message : String(extractError),
-                                        userId
-                                    });
-                                }
-                            }
-                        } else {
-                            loggingService.warn('Uploaded file not found in database', {
-                                fileId: attachment.fileId,
-                                fileName: attachment.fileName,
-                                userId
-                            });
-                        }
-                    } catch (error) {
-                        loggingService.error('Failed to fetch uploaded file', {
-                            fileName: attachment.fileName,
-                            fileId: attachment.fileId,
-                            error: error instanceof Error ? error.message : String(error),
-                            userId
-                        });
-                    }
-                }
-                // Handle Google Drive files
-                else if (attachment.type === 'google' && attachment.googleFileId && attachment.connectionId) {
-                    try {
-                        const { GoogleConnection } = await import('../models/GoogleConnection');
-                        const connection = await GoogleConnection.findById(attachment.connectionId);
-                        
-                        if (connection && connection.isActive) {
-                            if (attachment.mimeType === 'application/vnd.google-apps.document') {
-                                extractedContent = await GoogleService.readDocument(connection, attachment.googleFileId);
-                            } else if (attachment.mimeType === 'application/vnd.google-apps.spreadsheet') {
-                                const sheetData = await GoogleService.readSpreadsheet(connection, attachment.googleFileId, 'Sheet1!A1:Z100');
-                                if (Array.isArray(sheetData)) {
-                                    extractedContent = sheetData.map((row: any[]) => Array.isArray(row) ? row.join('\t') : '').join('\n') || '';
-                                }
-                            }
-                            
-                            loggingService.info('Retrieved Google file content for chat', {
-                                fileName: attachment.fileName,
-                                fileId: attachment.googleFileId,
-                                mimeType: attachment.mimeType,
-                                contentLength: extractedContent.length,
-                                userId
-                            });
-                        }
-                    } catch (error) {
-                        loggingService.warn('Failed to fetch Google file content', {
-                            fileName: attachment.fileName,
-                            fileId: attachment.googleFileId,
-                            error: error instanceof Error ? error.message : String(error),
-                            userId
-                        });
-                    }
-                }
-
-                // Create file metadata with optional content
-                const fileInfoLines = [
-                    `📎 **${attachment.fileName}**`,
-                    `   ${displayFileType} | ${formatFileSize(attachment.fileSize)}`,
-                    `   URL: ${attachment.url}`
-                ];
-
-                if (attachment.modifiedTime) {
-                    fileInfoLines.push(`   Modified: ${new Date(attachment.modifiedTime).toLocaleDateString()}`);
-                }
-
-                if (extractedContent && extractedContent.trim()) {
-                    // Truncate content if too long
-                    const maxContentLength = 3000;
-                    const truncatedContent = extractedContent.length > maxContentLength 
-                        ? extractedContent.substring(0, maxContentLength) + '...'
-                        : extractedContent;
-                    
-                    fileInfoLines.push('');
-                    fileInfoLines.push('📄 **File Content:**');
-                    fileInfoLines.push(truncatedContent);
-                }
-
-                const fileInfo = fileInfoLines.join('\n');
-                contentParts.push(fileInfo);
-
-                // Add extracted content to processed attachment
-                const processedAttachment = {
-                    ...attachment,
-                    ...(extractedContent && { extractedContent })
-                };
-                processedAttachments.push(processedAttachment);
-
-            } catch (error) {
-                loggingService.error('Failed to process attachment metadata', {
-                    attachment,
-                    error,
-                    userId
-                });
-                processedAttachments.push(attachment);
-            }
-        }
-
-        // Create enhanced context with file content
-        const contextString = contentParts.length > 0
-            ? `\n\n📁 **Attached Files:**\n\n${contentParts.join('\n\n')}\n`
-            : '';
-
-        return {
-            processedAttachments,
-            contextString,
-        };
-    }
-
-    /**
-     * Detect if a message requires autonomous agent workflow
-     */
-    static async detectAutonomousRequest(message: string): Promise<boolean> {
-        try {
-            // Keywords that indicate autonomous request
-            const autonomousKeywords = [
-                'create', 'build', 'deploy', 'develop', 'make', 'setup', 'implement',
-                'generate', 'scaffold', 'initialize', 'configure', 'establish',
-                'design', 'architect', 'construct', 'launch', 'ship', 'release',
-                'write', 'code', 'program'
-            ];
-            
-            const projectKeywords = [
-                'app', 'application', 'website', 'api', 'service', 'project',
-                'system', 'platform', 'solution', 'software', 'tool', 'product',
-                'todo', 'list', 'mern', 'react', 'node', 'fullstack', 'backend', 'frontend'
-            ];
-            
-            const messageLower = message.toLowerCase();
-            
-            // Check for autonomous keywords
-            const hasAutonomousKeyword = autonomousKeywords.some(keyword => 
-                messageLower.includes(keyword)
-            );
-            
-            // Check for project keywords
-            const hasProjectKeyword = projectKeywords.some(keyword => 
-                messageLower.includes(keyword)
-            );
-            
-            // More lenient heuristic: if we have an autonomous keyword, that's enough
-            // Or if we have specific patterns
-            if (hasAutonomousKeyword) {
-                loggingService.info('🤖 Autonomous request detected via keywords', {
-                    message: message.substring(0, 100),
-                    hasAutonomousKeyword,
-                    hasProjectKeyword
-                });
-                return true;
-            }
-            
-            // Check for specific patterns that indicate building something
-            const buildPatterns = [
-                /build\s+(?:a|an|the)?\s*\w+/i,
-                /create\s+(?:a|an|the)?\s*\w+/i,
-                /make\s+(?:a|an|me|the)?\s*\w+/i,
-                /develop\s+(?:a|an|the)?\s*\w+/i,
-                /deploy\s+(?:a|an|the|my)?\s*\w+/i,
-                /i\s+(?:want|need)\s+(?:to\s+)?(?:build|create|make)/i,
-                /(?:can|could)\s+you\s+(?:build|create|make)/i
-            ];
-            
-            const matchesPattern = buildPatterns.some(pattern => pattern.test(message));
-            if (matchesPattern) {
-                loggingService.info('🤖 Autonomous request detected via pattern', {
-                    message: message.substring(0, 100)
-                });
-                return true;
-            }
-            
-            // For edge cases, use AI for more sophisticated detection
-            const prompt = `Analyze if this message requires an autonomous agent workflow (creating projects, deploying code, building applications, etc.):
-            
-Message: "${message}"
-
-Respond with ONLY "true" or "false".`;
-            
-            const response = await BedrockService.invokeModel(
-                prompt,
-                'global.anthropic.claude-haiku-4-5-20251001-v1:0',
-                { recentMessages: [{ role: 'user', content: prompt }] }
-            );
-            
-            const result = response.trim().toLowerCase() === 'true';
-            
-            loggingService.info('🤖 Autonomous request detection result', {
-                message: message.substring(0, 100),
-                detected: result,
-                method: 'AI'
-            });
-            
-            return result;
-            
-        } catch (error) {
-            loggingService.error('Failed to detect autonomous request', {
-                error: error instanceof Error ? error.message : String(error),
-                message
-            });
-            return false;
-        }
-    }
-
-    /**
-     * Create a governed plan message in the chat
-     */
-    static async createGovernedPlanMessage(
-        conversationId: string,
-        taskId: string,
-        userId: string
-    ): Promise<any> {
-        try {
-            // Import GovernedTask model
-            const { GovernedTaskModel } = await import('./governedAgent.service');
-            
-            // Get task details
-            const task = await GovernedTaskModel.findById(taskId);
-            if (!task) {
-                throw new Error('Governed task not found');
-            }
-            
-            // Create the plan message
-            const planMessage = await ChatMessage.create({
-                conversationId: new Types.ObjectId(conversationId),
-                userId,
-                role: 'assistant',
-                content: `🤖 **Autonomous Agent Initiated**\n\nI'm creating a plan to: ${task.userRequest}\n\nYou can track the progress and interact with the plan here.`,
-                messageType: 'governed_plan',
-                governedTaskId: new Types.ObjectId(taskId),
-                planState: task.mode,
-                metadata: {
-                    tokenCount: 0,
-                    cost: 0,
-                    latency: 0
-                }
-            });
-            
-            // Update the task with chat context
-            task.chatId = new Types.ObjectId(conversationId);
-            task.parentMessageId = planMessage._id;
-            await task.save();
-            
-            // Update or create ChatTaskLink
-            const { ChatTaskLink } = await import('../models/ChatTaskLink');
-            const link = await (ChatTaskLink as any).findOrCreateByChatId(new Types.ObjectId(conversationId));
-            await link.addTask(new Types.ObjectId(taskId));
-            
-            return planMessage;
-            
-        } catch (error) {
-            loggingService.error('Failed to create governed plan message', {
-                error: error instanceof Error ? error.message : String(error),
-                conversationId,
-                taskId,
-                userId
-            });
-            throw error;
-        }
-    }
 }

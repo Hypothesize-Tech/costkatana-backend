@@ -1,29 +1,27 @@
 import { Request, Response } from 'express';
 import { UserTelemetryConfig } from '../models/UserTelemetryConfig';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Get all telemetry configurations for a user
  */
-export const getUserTelemetryConfigs = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
+export const getUserTelemetryConfigs = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getUserTelemetryConfigs', req);
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
 
         const configs = await UserTelemetryConfig.find({ userId, isActive: true })
             .select('-apiKey') // Don't expose API keys in list
             .sort({ createdAt: -1 });
 
-        loggingService.info('Retrieved user telemetry configs', {
-            component: 'UserTelemetryConfigController',
-            operation: 'getUserTelemetryConfigs',
-            userId,
+        ControllerHelper.logRequestSuccess('getUserTelemetryConfigs', req, startTime, {
             count: configs.length
         });
 
@@ -32,33 +30,25 @@ export const getUserTelemetryConfigs = async (req: Request, res: Response): Prom
             data: configs
         });
     } catch (error) {
-        loggingService.error('Failed to retrieve telemetry configs', {
-            component: 'UserTelemetryConfigController',
-            operation: 'getUserTelemetryConfigs',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to retrieve telemetry configurations'
-        });
+        ControllerHelper.handleError('getUserTelemetryConfigs', error, req, res, startTime);
+        return res;
     }
 };
 
 /**
  * Get a single telemetry configuration
  */
-export const getTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { configId } = req.params;
+export const getTelemetryConfig = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { configId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getTelemetryConfig', req, { configId });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
+        ServiceHelper.validateObjectId(configId, 'configId');
 
         const config = await UserTelemetryConfig.findOne({
             _id: configId,
@@ -78,46 +68,39 @@ export const getTelemetryConfig = async (req: Request, res: Response): Promise<R
             configData.authToken = '***' + configData.authToken.slice(-4);
         }
 
+        ControllerHelper.logRequestSuccess('getTelemetryConfig', req, startTime, { configId });
+
         return res.status(200).json({
             success: true,
             data: configData
         });
     } catch (error) {
-        loggingService.error('Failed to retrieve telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'getTelemetryConfig',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to retrieve configuration'
-        });
+        ControllerHelper.handleError('getTelemetryConfig', error, req, res, startTime, { configId });
+        return res;
     }
 };
 
 /**
  * Create a new telemetry configuration
  */
-export const createTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { 
-            endpointType, 
-            endpoint, 
-            authType, 
-            authToken, 
-            syncIntervalMinutes,
-            queryTimeRangeMinutes,
-            queryFilters 
-        } = req.body;
+export const createTelemetryConfig = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { 
+        endpointType, 
+        endpoint, 
+        authType, 
+        authToken, 
+        syncIntervalMinutes,
+        queryTimeRangeMinutes,
+        queryFilters 
+    } = req.body;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('createTelemetryConfig', req, { endpointType });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
 
         // Validate required fields
         if (!endpointType || !endpoint) {
@@ -169,19 +152,16 @@ export const createTelemetryConfig = async (req: Request, res: Response): Promis
 
         await config.save();
 
-        loggingService.info('Created telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'createTelemetryConfig',
-            userId,
-            endpointType,
-            configId: config._id
-        });
-
         // Mask auth token in response
         const responseData = config.toObject();
         if (responseData.authToken) {
             responseData.authToken = '***' + responseData.authToken.slice(-4);
         }
+
+        ControllerHelper.logRequestSuccess('createTelemetryConfig', req, startTime, {
+            configId: config._id,
+            endpointType
+        });
 
         return res.status(201).json({
             success: true,
@@ -189,34 +169,26 @@ export const createTelemetryConfig = async (req: Request, res: Response): Promis
             data: responseData
         });
     } catch (error) {
-        loggingService.error('Failed to create telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'createTelemetryConfig',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to create configuration'
-        });
+        ControllerHelper.handleError('createTelemetryConfig', error, req, res, startTime);
+        return res;
     }
 };
 
 /**
  * Update a telemetry configuration
  */
-export const updateTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { configId } = req.params;
-        const { endpoint, authToken, syncIntervalMinutes, isActive, syncEnabled } = req.body;
+export const updateTelemetryConfig = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { configId } = req.params;
+    const { endpoint, authToken, syncIntervalMinutes, isActive, syncEnabled } = req.body;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('updateTelemetryConfig', req, { configId });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
+        ServiceHelper.validateObjectId(configId, 'configId');
 
         const config = await UserTelemetryConfig.findOne({
             _id: configId,
@@ -239,18 +211,13 @@ export const updateTelemetryConfig = async (req: Request, res: Response): Promis
 
         await config.save();
 
-        loggingService.info('Updated telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'updateTelemetryConfig',
-            userId,
-            configId
-        });
-
         // Mask auth token in response
         const responseData = config.toObject();
         if (responseData.authToken) {
             responseData.authToken = '***' + responseData.authToken.slice(-4);
         }
+
+        ControllerHelper.logRequestSuccess('updateTelemetryConfig', req, startTime, { configId });
 
         return res.status(200).json({
             success: true,
@@ -258,33 +225,25 @@ export const updateTelemetryConfig = async (req: Request, res: Response): Promis
             data: responseData
         });
     } catch (error) {
-        loggingService.error('Failed to update telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'updateTelemetryConfig',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to update configuration'
-        });
+        ControllerHelper.handleError('updateTelemetryConfig', error, req, res, startTime, { configId });
+        return res;
     }
 };
 
 /**
  * Delete a telemetry configuration (soft delete)
  */
-export const deleteTelemetryConfig = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { configId } = req.params;
+export const deleteTelemetryConfig = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { configId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('deleteTelemetryConfig', req, { configId });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
+        ServiceHelper.validateObjectId(configId, 'configId');
 
         const config = await UserTelemetryConfig.findOne({
             _id: configId,
@@ -302,45 +261,31 @@ export const deleteTelemetryConfig = async (req: Request, res: Response): Promis
         config.isActive = false;
         await config.save();
 
-        loggingService.info('Deleted telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'deleteTelemetryConfig',
-            userId,
-            configId
-        });
+        ControllerHelper.logRequestSuccess('deleteTelemetryConfig', req, startTime, { configId });
 
         return res.status(200).json({
             success: true,
             message: 'Configuration deleted successfully'
         });
     } catch (error) {
-        loggingService.error('Failed to delete telemetry config', {
-            component: 'UserTelemetryConfigController',
-            operation: 'deleteTelemetryConfig',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to delete configuration'
-        });
+        ControllerHelper.handleError('deleteTelemetryConfig', error, req, res, startTime, { configId });
+        return res;
     }
 };
 
 /**
  * Test a telemetry endpoint connection
  */
-export const testTelemetryEndpoint = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { endpointType, endpoint, authToken } = req.body;
+export const testTelemetryEndpoint = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { endpointType, endpoint, authToken } = req.body;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('testTelemetryEndpoint', req, { endpointType });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
 
         if (!endpointType || !endpoint) {
             return res.status(400).json({
@@ -375,13 +320,9 @@ export const testTelemetryEndpoint = async (req: Request, res: Response): Promis
             const responseTime = Date.now() - startTime;
             const isSuccess = response.status >= 200 && response.status < 400;
 
-            loggingService.info('Tested telemetry endpoint', {
-                component: 'UserTelemetryConfigController',
-                operation: 'testTelemetryEndpoint',
-                userId,
+            ControllerHelper.logRequestSuccess('testTelemetryEndpoint', req, startTime, {
                 endpointType,
                 statusCode: response.status,
-                responseTime,
                 success: isSuccess
             });
 
@@ -407,33 +348,25 @@ export const testTelemetryEndpoint = async (req: Request, res: Response): Promis
             });
         }
     } catch (error) {
-        loggingService.error('Failed to test telemetry endpoint', {
-            component: 'UserTelemetryConfigController',
-            operation: 'testTelemetryEndpoint',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to test endpoint'
-        });
+        ControllerHelper.handleError('testTelemetryEndpoint', error, req, res, startTime);
+        return res;
     }
 };
 
 /**
  * Trigger a manual sync for a specific config
  */
-export const triggerManualSync = async (req: Request, res: Response): Promise<Response> => {
-    try {
-        const userId = (req as any).user?.id || (req as any).userId;
-        const { configId } = req.params;
+export const triggerManualSync = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+    const startTime = Date.now();
+    const { configId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return res;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('triggerManualSync', req, { configId });
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: 'Unauthorized'
-            });
-        }
+    try {
+        ServiceHelper.validateObjectId(configId, 'configId');
 
         const config = await UserTelemetryConfig.findOne({
             _id: configId,
@@ -452,10 +385,7 @@ export const triggerManualSync = async (req: Request, res: Response): Promise<Re
         const { TelemetryPollerService } = await import('../services/telemetryPoller.service');
         const result = await TelemetryPollerService.pollSingleEndpoint(config);
 
-        loggingService.info('Manual telemetry sync triggered', {
-            component: 'UserTelemetryConfigController',
-            operation: 'triggerManualSync',
-            userId,
+        ControllerHelper.logRequestSuccess('triggerManualSync', req, startTime, {
             configId,
             success: result.success
         });
@@ -466,16 +396,8 @@ export const triggerManualSync = async (req: Request, res: Response): Promise<Re
             data: result
         });
     } catch (error) {
-        loggingService.error('Failed to trigger manual sync', {
-            component: 'UserTelemetryConfigController',
-            operation: 'triggerManualSync',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to trigger sync'
-        });
+        ControllerHelper.handleError('triggerManualSync', error, req, res, startTime, { configId });
+        return res;
     }
 };
 

@@ -25,6 +25,7 @@ import {
 import { loggingService } from './logging.service';
 import { AgentDecisionAuditService } from './agentDecisionAudit.service';
 import mongoose from 'mongoose';
+import { BaseService } from '../shared/BaseService';
 
 /**
  * Capability-based routing request
@@ -67,7 +68,7 @@ export interface CapabilityRoutingResult extends ModelSelectionResult {
     decisionAuditId?: string;
 }
 
-export class CapabilityRouterService {
+export class CapabilityRouterService extends BaseService {
     private static instance: CapabilityRouterService;
     private registry: ModelCapabilityRegistry;
     private pricingRegistry: PricingRegistryService;
@@ -83,6 +84,11 @@ export class CapabilityRouterService {
     }>();
     
     private constructor() {
+        super('CapabilityRouterService', {
+            max: 500,
+            ttl: 300000 // 5 minutes
+        });
+        
         this.registry = ModelCapabilityRegistry.getInstance();
         this.pricingRegistry = PricingRegistryService.getInstance();
         this.decisionAudit = AgentDecisionAuditService.getInstance();

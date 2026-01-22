@@ -11,6 +11,8 @@ import { ToolRegistry } from '../mcp/registry/tool-registry';
 import { PermissionManager } from '../mcp/permissions/permission-manager';
 import { ConfirmationService } from '../mcp/permissions/confirmation-service';
 import { initializeMCP } from '../mcp/init';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // Global SSE transport instance
 let sseTransport: SSETransport | null = null;
@@ -43,15 +45,12 @@ export class MCPController {
   /**
    * SSE endpoint for web-based MCP clients
    */
-  static async connectSSE(req: any, res: Response): Promise<void> {
+  static async connectSSE(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
     try {
-      // Get userId from JWT authentication (set by authenticate middleware)
-      const userId = req.userId;
-
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return;
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('connectSSE', req);
 
       // Authenticate with userId
       const auth = await MCPAuthService.authenticate(userId);
@@ -68,21 +67,15 @@ export class MCPController {
       // Create connection
       const connectionId = sseTransport.createConnection(req, res, auth.userId);
 
-      loggingService.info('SSE connection established', {
+      ControllerHelper.logRequestSuccess('connectSSE', req, startTime, {
         connectionId,
-        userId: auth.userId,
+        userId: auth.userId
       });
 
       // Connection will remain open until client disconnects
     } catch (error) {
-      loggingService.error('SSE connection failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
       if (!res.headersSent) {
-        res.status(500).json({
-          error: error instanceof Error ? error.message : 'Connection failed',
-        });
+        ControllerHelper.handleError('connectSSE', error, req, res, startTime);
       }
     }
   }
@@ -120,14 +113,12 @@ export class MCPController {
   /**
    * List available tools
    */
-  static async listTools(req: any, res: Response): Promise<Response> {
+  static async listTools(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      // Get userId from JWT authentication (set by authenticate middleware)
-      const userId = req.userId;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ error: 'Authentication required' });
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('listTools', req);
 
       const auth = await MCPAuthService.authenticate(userId);
       if (!auth) {
@@ -137,6 +128,10 @@ export class MCPController {
       // Get tools filtered by user's integrations
       const tools = ToolRegistry.toMCPDefinitions(auth.integrations);
 
+      ControllerHelper.logRequestSuccess('listTools', req, startTime, {
+        toolsCount: tools.length
+      });
+
       return res.status(200).json({
         success: true,
         tools,
@@ -144,10 +139,7 @@ export class MCPController {
         integrations: auth.integrations,
       });
     } catch (error) {
-      loggingService.error('Failed to list tools', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
+      ControllerHelper.handleError('listTools', error, req, res, startTime);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to list tools',
       });
@@ -175,14 +167,12 @@ export class MCPController {
   /**
    * Get user permissions
    */
-  static async getUserPermissions(req: any, res: Response): Promise<Response> {
+  static async getUserPermissions(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      // Get userId from JWT authentication (set by authenticate middleware)
-      const userId = req.userId;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ error: 'Authentication required' });
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getUserPermissions', req);
 
       const auth = await MCPAuthService.authenticate(userId);
       if (!auth) {
@@ -191,16 +181,17 @@ export class MCPController {
 
       const permissions = await PermissionManager.getUserPermissions(auth.userId);
 
+      ControllerHelper.logRequestSuccess('getUserPermissions', req, startTime, {
+        permissionsCount: permissions.length
+      });
+
       return res.status(200).json({
         success: true,
         permissions,
         count: permissions.length,
       });
     } catch (error) {
-      loggingService.error('Failed to get user permissions', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
+      ControllerHelper.handleError('getUserPermissions', error, req, res, startTime);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to get permissions',
       });
@@ -249,13 +240,12 @@ export class MCPController {
   /**
    * Get MongoDB connections for the authenticated user
    */
-  static async getMongoDBConnections(req: any, res: Response): Promise<Response> {
+  static async getMongoDBConnections(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = req.userId;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ error: 'Authentication required' });
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getMongoDBConnections', req);
 
       const { MongoDBConnection } = await import('../models/MongoDBConnection');
       const connections = await MongoDBConnection.find({
@@ -263,16 +253,17 @@ export class MCPController {
         isActive: true,
       }).select('_id alias database metadata.environment metadata.provider createdAt lastUsed');
 
+      ControllerHelper.logRequestSuccess('getMongoDBConnections', req, startTime, {
+        connectionsCount: connections.length
+      });
+
       return res.status(200).json({
         success: true,
         connections,
         count: connections.length,
       });
     } catch (error) {
-      loggingService.error('Failed to get MongoDB connections', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
+      ControllerHelper.handleError('getMongoDBConnections', error, req, res, startTime);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to get connections',
       });
@@ -282,13 +273,12 @@ export class MCPController {
   /**
    * Get all integration connections for the authenticated user
    */
-  static async getAllConnections(req: any, res: Response): Promise<Response> {
+  static async getAllConnections(req: AuthenticatedRequest, res: Response): Promise<Response> {
+    const startTime = Date.now();
     try {
-      const userId = req.userId;
-
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
+      if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ error: 'Authentication required' });
+      const userId = req.userId!;
+      ControllerHelper.logRequestStart('getAllConnections', req);
 
       const connections: any = {};
 
@@ -383,16 +373,17 @@ export class MCPController {
         0
       );
 
+      ControllerHelper.logRequestSuccess('getAllConnections', req, startTime, {
+        totalCount
+      });
+
       return res.status(200).json({
         success: true,
         connections,
         totalCount,
       });
     } catch (error) {
-      loggingService.error('Failed to get all connections', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-
+      ControllerHelper.handleError('getAllConnections', error, req, res, startTime);
       return res.status(500).json({
         error: error instanceof Error ? error.message : 'Failed to get connections',
       });

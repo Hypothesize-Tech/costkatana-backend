@@ -6,6 +6,8 @@ import { RequestFeedbackService } from '../services/requestFeedback.service';
 import { loggingService } from '../services/logging.service';
 import { Usage, User } from '../models';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 const analyticsQuerySchema = z.object({
     startDate: z.string().optional(),
@@ -18,25 +20,23 @@ const analyticsQuerySchema = z.object({
 });
 
 export class AnalyticsController {
-    static async getAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const query = req.query;
+        ControllerHelper.logRequestStart('getAnalytics', req, {
+            queryParams: Object.keys(query),
+            hasStartDate: !!query.startDate,
+            hasEndDate: !!query.endDate,
+            period: query.period,
+            service: query.service,
+            model: query.model,
+            groupBy: query.groupBy,
+            projectId: query.projectId
+        });
 
         try {
-            loggingService.info('Analytics request initiated', {
-                userId,
-                queryParams: Object.keys(query),
-                hasStartDate: !!query.startDate,
-                hasEndDate: !!query.endDate,
-                period: query.period,
-                service: query.service,
-                model: query.model,
-                groupBy: query.groupBy,
-                projectId: query.projectId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const validatedQuery = analyticsQuerySchema.parse(query);
 
             const analytics = await AnalyticsService.getAnalytics({
@@ -50,22 +50,18 @@ export class AnalyticsController {
                 projectId: validatedQuery.projectId,
             }, { includeProjectBreakdown: true });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Analytics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getAnalytics', req, startTime, {
                 totalCost: analytics.summary.totalCost,
                 totalRequests: analytics.summary.totalRequests,
                 totalTokens: analytics.summary.totalTokens,
-                requestId: req.headers['x-request-id'] as string
+                hasProjectBreakdown: !!analytics.breakdown
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'analytics_retrieved',
                 category: 'data_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     totalCost: analytics.summary.totalCost,
@@ -80,46 +76,24 @@ export class AnalyticsController {
                 data: analytics,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Analytics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.error('Get analytics error:', { error: error instanceof Error ? error.message : String(error) });
-            next(error);
+            ControllerHelper.handleError('getAnalytics', error, req, res, startTime);
         }
     }
 
-    static async getComparativeAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getComparativeAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { period1Start, period1End, period2Start, period2End } = req.query;
+        ControllerHelper.logRequestStart('getComparativeAnalytics', req, {
+            period1Start,
+            period1End,
+            period2Start,
+            period2End
+        });
 
         try {
-            loggingService.info('Comparative analytics request initiated', {
-                userId,
-                period1Start,
-                period1End,
-                period2Start,
-                period2End,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!period1Start || !period1End || !period2Start || !period2End) {
-                loggingService.warn('Comparative analytics validation failed - missing period dates', {
-                    userId,
-                    period1Start,
-                    period1End,
-                    period2Start,
-                    period2End,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'All period dates are required',
@@ -139,21 +113,16 @@ export class AnalyticsController {
                 }
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Comparative analytics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getComparativeAnalytics', req, startTime, {
                 period1Duration: `${period1Start} to ${period1End}`,
-                period2Duration: `${period2Start} to ${period2End}`,
-                requestId: req.headers['x-request-id'] as string
+                period2Duration: `${period2Start} to ${period2End}`
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'comparative_analytics_retrieved',
                 category: 'data_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     period1Duration: `${period1Start} to ${period1End}`,
@@ -166,35 +135,22 @@ export class AnalyticsController {
                 data: comparison,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Comparative analytics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.error('Comparative analytics error:', error);
-            next(error);
+            ControllerHelper.handleError('getComparativeAnalytics', error, req, res, startTime);
         }
     }
 
-    static async exportAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async exportAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const format = (req.query.format as 'json' | 'csv') || 'json';
         const query = req.query;
+        ControllerHelper.logRequestStart('exportAnalytics', req, {
+            format,
+            queryParams: Object.keys(query)
+        });
 
         try {
-            loggingService.info('Analytics export request initiated', {
-                userId,
-                format,
-                queryParams: Object.keys(query),
-                requestId: req.headers['x-request-id'] as string
-            });
-
             const validatedQuery = analyticsQuerySchema.parse(query);
 
             const exportData = await AnalyticsService.exportAnalytics(
@@ -210,23 +166,19 @@ export class AnalyticsController {
                 format
             );
 
-            const duration = Date.now() - startTime;
             const filename = `analytics-export-${Date.now()}.${format}`;
 
-            loggingService.info('Analytics export completed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('exportAnalytics', req, startTime, {
                 format,
-                duration,
                 filename,
-                dataSize: exportData.length,
-                requestId: req.headers['x-request-id'] as string
+                dataSize: exportData.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'analytics_exported',
                 category: 'data_export',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     format,
@@ -244,33 +196,22 @@ export class AnalyticsController {
             res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
             res.send(exportData);
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Analytics export failed', {
-                userId,
-                format,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.handleError('exportAnalytics', error, req, res, startTime, {
+                format
             });
-
-            loggingService.error('Export analytics error:', error);
-            next(error);
         }
     }
 
-    static async getInsights(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getInsights(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const timeframe = (req.query.timeframe as string) || '30d';
+        ControllerHelper.logRequestStart('getInsights', req, {
+            timeframe
+        });
 
         try {
-            loggingService.info('Analytics insights request initiated', {
-                userId,
-                timeframe,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             let startDate: Date;
             const endDate = new Date();
@@ -312,23 +253,18 @@ export class AnalyticsController {
                 recommendations: analytics.trends.insights.slice(0, 5),
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Analytics insights retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getInsights', req, startTime, {
                 timeframe,
-                duration,
                 totalSpent: insights.summary.totalSpent,
                 totalCalls: insights.summary.totalCalls,
-                insightsCount: insights.recommendations.length,
-                requestId: req.headers['x-request-id'] as string
+                insightsCount: insights.recommendations.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'analytics_insights_retrieved',
                 category: 'data_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     timeframe,
@@ -343,34 +279,23 @@ export class AnalyticsController {
                 data: insights,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Analytics insights retrieval failed', {
-                userId,
-                timeframe,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.handleError('getInsights', error, req, res, startTime, {
+                timeframe
             });
-
-            loggingService.error('Get insights error:', error);
-            next(error);
         }
     }
 
-    static async getDashboardData(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getDashboardData(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const objectUserId = new mongoose.Types.ObjectId(userId);
         const { projectId } = req.query;
+        ControllerHelper.logRequestStart('getDashboardData', req, {
+            projectId: projectId || 'all'
+        });
 
         try {
-            loggingService.info('Dashboard data request initiated', {
-                userId,
-                projectId: projectId || 'all',
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Build base filter
             const baseFilter: any = { userId: objectUserId };
@@ -478,23 +403,18 @@ export class AnalyticsController {
                 insights: analytics.trends.insights.slice(0, 3),
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Dashboard data retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getDashboardData', req, startTime, {
                 projectId: projectId || 'all',
-                duration,
                 totalCost: dashboardData.overview.totalCost.value,
                 totalCalls: dashboardData.overview.totalCalls.value,
-                insightsCount: dashboardData.insights.length,
-                requestId: req.headers['x-request-id'] as string
+                insightsCount: dashboardData.insights.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'dashboard_data_retrieved',
                 category: 'dashboard_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     projectId: projectId || 'all',
@@ -509,26 +429,18 @@ export class AnalyticsController {
                 data: dashboardData,
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Dashboard data retrieval failed', {
-                userId,
-                projectId: projectId || 'all',
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.handleError('getDashboardData', error, req, res, startTime, {
+                projectId: projectId || 'all'
             });
-
-            loggingService.error('Get dashboard data error:', error);
-            next(error);
         }
     }
 
-    static async getProjectAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getProjectAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
+        ServiceHelper.validateObjectId(projectId, 'projectId');
         const {
             startDate,
             endDate,
@@ -536,18 +448,16 @@ export class AnalyticsController {
             model,
             groupBy = 'date'
         } = req.query;
+        ControllerHelper.logRequestStart('getProjectAnalytics', req, {
+            projectId,
+            startDate,
+            endDate,
+            service,
+            model,
+            groupBy
+        });
 
         try {
-            loggingService.info('Project analytics request initiated', {
-                userId,
-                projectId,
-                startDate,
-                endDate,
-                service,
-                model,
-                groupBy,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Verify user has access to project
             const { ProjectService } = await import('../services/project.service');
@@ -557,13 +467,6 @@ export class AnalyticsController {
                 project = await ProjectService.getProjectById(projectId, userId);
             } catch (error: any) {
                 if (error.message === 'Access denied' || error.message === 'Project not found') {
-                    loggingService.warn('Project analytics access denied', {
-                        userId,
-                        projectId,
-                        error: error.message,
-                        requestId: req.headers['x-request-id'] as string
-                    });
-
                     res.status(404).json({
                         success: false,
                         error: 'Project not found or access denied'
@@ -574,12 +477,6 @@ export class AnalyticsController {
             }
 
             if (!project) {
-                loggingService.warn('Project not found for analytics', {
-                    userId,
-                    projectId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(404).json({
                     success: false,
                     error: 'Project not found or access denied'
@@ -602,22 +499,17 @@ export class AnalyticsController {
                 groupBy: groupBy as string
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Project analytics retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getProjectAnalytics', req, startTime, {
                 projectId,
-                duration,
                 filters: Object.keys(filters),
-                groupBy,
-                requestId: req.headers['x-request-id'] as string
+                groupBy
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'project_analytics_retrieved',
                 category: 'project_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     projectId,
@@ -639,58 +531,38 @@ export class AnalyticsController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project analytics retrieval failed', {
-                userId,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.handleError('getProjectAnalytics', error, req, res, startTime, {
+                projectId
             });
-
-            loggingService.error('Get project analytics error:', error);
-            next(error);
         }
     }
 
-    static async getProjectComparison(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getProjectComparison(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const {
             projectIds,
             startDate,
             endDate,
             metric = 'cost'
         } = req.query;
+        ControllerHelper.logRequestStart('getProjectComparison', req, {
+            projectIds: Array.isArray(projectIds) ? projectIds.length : 1,
+            startDate,
+            endDate,
+            metric
+        });
 
         try {
-            loggingService.info('Project comparison request initiated', {
-                userId,
-                projectIds: Array.isArray(projectIds) ? projectIds.length : 1,
-                startDate,
-                endDate,
-                metric,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            // Log incoming request for debugging
-            loggingService.debug('getProjectComparison called with params:', req.query);
 
             // Handle array parameter from Express query parsing
             let projectIdsArray: string[] = [];
             if (Array.isArray(projectIds)) {
-                projectIdsArray = projectIds;
+                projectIdsArray = projectIds as string[];
             } else if (typeof projectIds === 'string') {
                 projectIdsArray = [projectIds];
             } else {
-                loggingService.warn('Project comparison validation failed - missing projectIds', {
-                    userId,
-                    projectIds,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'projectIds parameter is required'
@@ -699,18 +571,15 @@ export class AnalyticsController {
             }
 
             if (projectIdsArray.length === 0) {
-                loggingService.warn('Project comparison validation failed - empty projectIds array', {
-                    userId,
-                    projectIdsArray,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'At least one project ID is required'
                 });
                 return;
             }
+
+            // Validate all project IDs
+            projectIdsArray.forEach(id => ServiceHelper.validateObjectId(id, 'projectId'));
 
             // Verify user has access to all projects
             const { ProjectService } = await import('../services/project.service');
@@ -722,13 +591,6 @@ export class AnalyticsController {
             );
 
             if (validProjectIds.length === 0) {
-                loggingService.warn('Project comparison access denied - no accessible projects', {
-                    userId,
-                    requestedProjectIds: projectIdsArray,
-                    accessibleProjectIds,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(403).json({
                     success: false,
                     error: 'No accessible projects found'
@@ -742,22 +604,17 @@ export class AnalyticsController {
                 metric: metric as string
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Project comparison completed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getProjectComparison', req, startTime, {
                 requestedProjectIds: projectIdsArray.length,
                 validProjectIds: validProjectIds.length,
-                duration,
-                metric,
-                requestId: req.headers['x-request-id'] as string
+                metric
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'project_comparison_completed',
                 category: 'project_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     requestedProjectIds: projectIdsArray.length,
@@ -771,36 +628,25 @@ export class AnalyticsController {
                 data: comparison
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project comparison failed', {
-                userId,
-                projectIds: Array.isArray(projectIds) ? projectIds.length : 1,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.handleError('getProjectComparison', error, req, res, startTime, {
+                projectIds: Array.isArray(projectIds) ? projectIds.length : 1
             });
-
-            loggingService.error('Get project comparison error:', error);
-            next(error);
         }
     }
 
-    static async getRecentUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getRecentUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { limit, projectId, startDate, endDate } = req.query;
+        ControllerHelper.logRequestStart('getRecentUsage', req, {
+            limit: limit || 10,
+            projectId: projectId || 'all',
+            hasStartDate: !!startDate,
+            hasEndDate: !!endDate
+        });
 
         try {
-            loggingService.info('Recent usage request initiated', {
-                userId,
-                limit: limit || 10,
-                projectId: projectId || 'all',
-                hasStartDate: !!startDate,
-                hasEndDate: !!endDate,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const recentUsage = await AnalyticsService.getRecentUsage({
                 userId,
@@ -810,22 +656,17 @@ export class AnalyticsController {
                 endDate: endDate ? new Date(endDate as string) : undefined
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Recent usage retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getRecentUsage', req, startTime, {
                 limit: limit || 10,
                 projectId: projectId || 'all',
-                usageCount: recentUsage.length,
-                requestId: req.headers['x-request-id'] as string
+                usageCount: recentUsage.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'recent_usage_retrieved',
                 category: 'usage_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     limit: limit || 10,
@@ -839,20 +680,10 @@ export class AnalyticsController {
                 data: recentUsage
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Recent usage retrieval failed', {
-                userId,
+            ControllerHelper.handleError('getRecentUsage', error, req, res, startTime, {
                 limit: limit || 10,
-                projectId: projectId || 'all',
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                projectId: projectId || 'all'
             });
-
-            loggingService.error('Get recent usage error:', error);
-            next(error);
         }
     }
 
@@ -877,35 +708,28 @@ export class AnalyticsController {
      * Get feedback analytics with Return on AI Spend metrics
      * GET /api/analytics/feedback
      */
-    static async getFeedbackAnalytics(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getFeedbackAnalytics(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user!.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getFeedbackAnalytics', req);
 
         try {
-            loggingService.info('Feedback analytics request initiated', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
             
             const feedbackAnalytics = await RequestFeedbackService.getFeedbackAnalytics(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Feedback analytics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getFeedbackAnalytics', req, startTime, {
                 totalCost: feedbackAnalytics.totalCost,
                 averageRating: feedbackAnalytics.averageRating,
                 positiveCost: feedbackAnalytics.positiveCost,
-                negativeCost: feedbackAnalytics.negativeCost,
-                requestId: req.headers['x-request-id'] as string
+                negativeCost: feedbackAnalytics.negativeCost
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'feedback_analytics_retrieved',
                 category: 'feedback_analytics',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     totalCost: feedbackAnalytics.totalCost,
@@ -931,18 +755,7 @@ export class AnalyticsController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Feedback analytics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            loggingService.error('Get feedback analytics error:', error);
-            next(error);
+            ControllerHelper.handleError('getFeedbackAnalytics', error, req, res, startTime);
         }
     }
 

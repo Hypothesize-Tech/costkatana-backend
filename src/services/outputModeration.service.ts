@@ -18,7 +18,7 @@
  */
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { ServiceHelper } from '../utils/serviceHelper';
 import { AICostTrackingService } from './aiCostTracking.service';
 
 export interface OutputModerationResult {
@@ -286,7 +286,7 @@ Respond with JSON only:
         const estimatedInputTokens = Math.ceil(moderationPrompt.length / 4);
 
         try {
-            const response = await retryBedrockOperation(async () => {
+            const response = await ServiceHelper.withRetry(async () => {
                 // Format request body based on model type
                 let requestBody: any;
                 
@@ -314,7 +314,7 @@ Respond with JSON only:
                     contentType: 'application/json'
                 });
                 return this.bedrockClient.send(command);
-            });
+            }, { maxRetries: 2, delayMs: 500, backoffMultiplier: 1.5 });
 
             const responseBody = JSON.parse(new TextDecoder().decode(response.body));
             const responseText = responseBody.output?.message?.content?.[0]?.text || 

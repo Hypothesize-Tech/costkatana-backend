@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { TaggingService } from '../services/tagging.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class TaggingController {
     // Background processing queue
@@ -28,36 +30,20 @@ export class TaggingController {
      * Get comprehensive tag analytics
      * GET /api/tags/analytics
      */
-    static async getTagAnalytics(req: any, res: Response): Promise<void> {
+    static async getTagAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const {
-            startDate,
-            endDate,
-            tagFilter,
-            includeHierarchy = true,
-            includeRealTime = true
-        } = req.query;
-
         try {
-            loggingService.info('Tag analytics retrieval initiated', {
-                userId,
-                requestId,
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTagAnalytics', req);
+
+            const {
                 startDate,
                 endDate,
                 tagFilter,
-                includeHierarchy,
-                includeRealTime
-            });
-
-            if (!userId) {
-                loggingService.warn('Tag analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+                includeHierarchy = true,
+                includeRealTime = true
+            } = req.query;
 
             const options = {
                 startDate: startDate ? new Date(startDate as string) : undefined,
@@ -80,18 +66,14 @@ export class TaggingController {
             const analyticsPromise = TaggingService.getTagAnalytics(userId, options);
 
             const analytics = await Promise.race([analyticsPromise, timeoutPromise]);
-            const duration = Date.now() - startTime;
 
             const totalCost = analytics.reduce((sum, tag) => sum + tag.totalCost, 0);
             const totalCalls = analytics.reduce((sum, tag) => sum + tag.totalCalls, 0);
 
-            loggingService.info('Tag analytics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getTagAnalytics', req, startTime, {
                 totalTags: analytics.length,
                 totalCost,
-                totalCalls,
-                requestId
+                totalCalls
             });
 
             // Queue background business event logging
@@ -99,7 +81,7 @@ export class TaggingController {
                 loggingService.logBusiness({
                     event: 'tag_analytics_retrieved',
                     category: 'tagging',
-                    value: duration,
+                    value: Date.now() - startTime,
                     metadata: {
                         userId,
                         totalTags: analytics.length,
@@ -122,42 +104,19 @@ export class TaggingController {
             });
         } catch (error: any) {
             TaggingController.recordDbFailure();
-            const duration = Date.now() - startTime;
             
             if (error.message === 'Request timeout') {
-                loggingService.warn('Tag analytics retrieval timed out', {
-                    userId,
-                    requestId,
-                    duration
-                });
-                
                 res.status(408).json({ 
                     success: false,
                     message: 'Request timeout - analysis took too long. Please try with fewer tags or a smaller date range.' 
                 });
             } else if (error.message === 'Service temporarily unavailable') {
-                loggingService.warn('Tag analytics service unavailable', {
-                    userId,
-                    requestId,
-                    duration
-                });
-                
                 res.status(503).json({ 
                     success: false,
                     message: 'Service temporarily unavailable. Please try again later.' 
                 });
             } else {
-                loggingService.error('Tag analytics retrieval failed', {
-                    userId,
-                    requestId,
-                    error: error.message || 'Unknown error',
-                    duration
-                });
-                
-                res.status(500).json({ 
-                    success: false,
-                    message: 'Internal server error' 
-                });
+                ControllerHelper.handleError('getTagAnalytics', error, req, res, startTime);
             }
         }
     }
@@ -166,26 +125,14 @@ export class TaggingController {
      * Get real-time tag metrics
      * GET /api/tags/realtime
      */
-    static async getRealTimeMetrics(req: any, res: Response): Promise<void> {
+    static async getRealTimeMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { tags } = req.query;
-
         try {
-            loggingService.info('Real-time tag metrics retrieval initiated', {
-                userId,
-                requestId,
-                tags
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getRealTimeMetrics', req);
 
-            if (!userId) {
-                loggingService.warn('Real-time tag metrics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+            const { tags } = req.query;
 
             // Check circuit breaker before proceeding
             if (TaggingController.isDbCircuitBreakerOpen()) {
@@ -201,28 +148,21 @@ export class TaggingController {
 
             const metricsPromise = TaggingService.getRealTimeTagMetrics(userId, tagFilter);
             const metrics = await Promise.race([metricsPromise, timeoutPromise]);
-            const duration = Date.now() - startTime;
 
             const totalCurrentCost = metrics.reduce((sum, tag) => sum + tag.currentCost, 0);
             const totalProjectedDailyCost = metrics.reduce((sum, tag) => sum + tag.projectedDailyCost, 0);
 
-            loggingService.info('Real-time tag metrics retrieved successfully', {
-                userId,
-                duration,
-                tags,
-                hasTagFilter: !!tagFilter,
-                tagFilterCount: tagFilter?.length || 0,
+            ControllerHelper.logRequestSuccess('getRealTimeMetrics', req, startTime, {
                 totalTags: metrics.length,
                 totalCurrentCost,
-                totalProjectedDailyCost,
-                requestId
+                totalProjectedDailyCost
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'realtime_tag_metrics_retrieved',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     totalTags: metrics.length,
@@ -243,19 +183,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Real-time tag metrics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                tags,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('getRealTimeMetrics', error, req, res, startTime);
         }
     }
 
@@ -263,42 +191,22 @@ export class TaggingController {
      * Create tag hierarchy
      * POST /api/tags/hierarchy
      */
-    static async createTagHierarchy(req: any, res: Response): Promise<void> {
+    static async createTagHierarchy(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { name, parent, color, description } = req.body;
-
         try {
-            loggingService.info('Tag hierarchy creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                name,
-                hasName: !!name,
-                parent,
-                hasParent: !!parent,
-                color,
-                hasColor: !!color,
-                description,
-                hasDescription: !!description
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('createTagHierarchy', req);
 
-            if (!userId) {
-                loggingService.warn('Tag hierarchy creation failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
+            const { name, parent, color, description } = req.body;
+
+            if (!name) {
+                res.status(400).json({ message: 'Tag name is required' });
                 return;
             }
 
-            if (!name) {
-                loggingService.warn('Tag hierarchy creation failed - tag name is required', {
-                    userId,
-                    requestId
-                });
-                res.status(400).json({ message: 'Tag name is required' });
-                return;
+            if (parent) {
+                ServiceHelper.validateObjectId(parent, 'parent');
             }
 
             const hierarchy = await TaggingService.createTagHierarchy(userId, {
@@ -307,24 +215,16 @@ export class TaggingController {
                 color,
                 description
             });
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Tag hierarchy created successfully', {
-                userId,
-                duration,
-                name,
-                parent,
-                hasColor: !!color,
-                hasDescription: !!description,
-                hierarchyId: hierarchy?.id,
-                requestId
+            ControllerHelper.logRequestSuccess('createTagHierarchy', req, startTime, {
+                hierarchyId: hierarchy?.id
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'tag_hierarchy_created',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     name,
@@ -340,22 +240,7 @@ export class TaggingController {
                 message: 'Tag hierarchy created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Tag hierarchy creation failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                name,
-                parent,
-                color,
-                description,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('createTagHierarchy', error, req, res, startTime);
         }
     }
 
@@ -363,33 +248,17 @@ export class TaggingController {
      * Get tag suggestions
      * GET /api/tags/suggestions
      */
-    static async getTagSuggestions(req: any, res: Response): Promise<void> {
+    static async getTagSuggestions(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { service, model, prompt, projectId } = req.query;
-
         try {
-            loggingService.info('Tag suggestions retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                service,
-                hasService: !!service,
-                model,
-                hasModel: !!model,
-                hasPrompt: !!prompt,
-                promptLength: prompt ? (prompt as string).length : 0,
-                projectId,
-                hasProjectId: !!projectId
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTagSuggestions', req);
 
-            if (!userId) {
-                loggingService.warn('Tag suggestions retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
+            const { service, model, prompt, projectId } = req.query;
+
+            if (projectId) {
+                ServiceHelper.validateObjectId(projectId as string, 'projectId');
             }
 
             const suggestions = await TaggingService.getTagSuggestions(userId, {
@@ -398,24 +267,16 @@ export class TaggingController {
                 prompt: prompt as string,
                 projectId: projectId as string
             });
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Tag suggestions retrieved successfully', {
-                userId,
-                duration,
-                service,
-                model,
-                hasPrompt: !!prompt,
-                projectId,
-                totalSuggestions: suggestions.length,
-                requestId
+            ControllerHelper.logRequestSuccess('getTagSuggestions', req, startTime, {
+                totalSuggestions: suggestions.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'tag_suggestions_retrieved',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     service,
@@ -435,22 +296,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Tag suggestions retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                service,
-                model,
-                hasPrompt: !!prompt,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('getTagSuggestions', error, req, res, startTime);
         }
     }
 
@@ -458,58 +304,24 @@ export class TaggingController {
      * Create cost allocation rule
      * POST /api/tags/allocation-rules
      */
-    static async createCostAllocationRule(req: any, res: Response): Promise<void> {
+    static async createCostAllocationRule(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const {
-            name,
-            tagFilters,
-            allocationPercentage,
-            department,
-            team,
-            costCenter
-        } = req.body;
-
         try {
-            loggingService.info('Cost allocation rule creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                name,
-                hasName: !!name,
-                hasTagFilters: !!tagFilters,
-                tagFiltersCount: Array.isArray(tagFilters) ? tagFilters.length : 0,
-                allocationPercentage,
-                hasAllocationPercentage: allocationPercentage !== undefined,
-                department,
-                hasDepartment: !!department,
-                team,
-                hasTeam: !!team,
-                costCenter,
-                hasCostCenter: !!costCenter
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('createCostAllocationRule', req);
 
-            if (!userId) {
-                loggingService.warn('Cost allocation rule creation failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+            const {
+                name,
+                tagFilters,
+                allocationPercentage,
+                department,
+                team,
+                costCenter
+            } = req.body;
 
             // Validate required fields
             if (!name || !tagFilters || !allocationPercentage || !department || !team || !costCenter) {
-                loggingService.warn('Cost allocation rule creation failed - missing required fields', {
-                    userId,
-                    requestId,
-                    name: !!name,
-                    tagFilters: !!tagFilters,
-                    allocationPercentage: allocationPercentage !== undefined,
-                    department: !!department,
-                    team: !!team,
-                    costCenter: !!costCenter
-                });
                 res.status(400).json({
                     message: 'All fields are required: name, tagFilters, allocationPercentage, department, team, costCenter'
                 });
@@ -518,11 +330,6 @@ export class TaggingController {
 
             // Validate allocation percentage
             if (allocationPercentage < 0 || allocationPercentage > 100) {
-                loggingService.warn('Cost allocation rule creation failed - invalid allocation percentage', {
-                    userId,
-                    requestId,
-                    allocationPercentage
-                });
                 res.status(400).json({
                     message: 'Allocation percentage must be between 0 and 100'
                 });
@@ -537,26 +344,16 @@ export class TaggingController {
                 team,
                 costCenter
             });
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Cost allocation rule created successfully', {
-                userId,
-                duration,
-                name,
-                tagFiltersCount: Array.isArray(tagFilters) ? tagFilters.length : 0,
-                allocationPercentage,
-                department,
-                team,
-                costCenter,
-                ruleId: rule?.id,
-                requestId
+            ControllerHelper.logRequestSuccess('createCostAllocationRule', req, startTime, {
+                ruleId: rule?.id
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'cost_allocation_rule_created',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     name,
@@ -574,24 +371,7 @@ export class TaggingController {
                 message: 'Cost allocation rule created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Cost allocation rule creation failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                name,
-                tagFilters,
-                allocationPercentage,
-                department,
-                team,
-                costCenter,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('createCostAllocationRule', error, req, res, startTime);
         }
     }
 
@@ -599,38 +379,16 @@ export class TaggingController {
      * Get tag analytics by specific tags
      * POST /api/tags/analytics/batch
      */
-    static async getBatchTagAnalytics(req: any, res: Response): Promise<void> {
+    static async getBatchTagAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { tags, startDate, endDate } = req.body;
-
         try {
-            loggingService.info('Batch tag analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                hasTags: !!tags,
-                tagsCount: Array.isArray(tags) ? tags.length : 0,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getBatchTagAnalytics', req);
 
-            if (!userId) {
-                loggingService.warn('Batch tag analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+            const { tags, startDate, endDate } = req.body;
 
             if (!tags || !Array.isArray(tags)) {
-                loggingService.warn('Batch tag analytics retrieval failed - tags array is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({ message: 'Tags array is required' });
                 return;
             }
@@ -644,28 +402,22 @@ export class TaggingController {
             };
 
             const analytics = await TaggingService.getTagAnalytics(userId, options);
-            const duration = Date.now() - startTime;
 
             const totalCost = analytics.reduce((sum, tag) => sum + tag.totalCost, 0);
             const totalCalls = analytics.reduce((sum, tag) => sum + tag.totalCalls, 0);
 
-            loggingService.info('Batch tag analytics retrieved successfully', {
-                userId,
-                duration,
-                tagsCount: tags.length,
-                startDate,
-                endDate,
+            ControllerHelper.logRequestSuccess('getBatchTagAnalytics', req, startTime, {
+                requestedTags: tags.length,
                 foundTags: analytics.length,
                 totalCost,
-                totalCalls,
-                requestId
+                totalCalls
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'batch_tag_analytics_retrieved',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     requestedTags: tags.length,
@@ -688,21 +440,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Batch tag analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                tags,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('getBatchTagAnalytics', error, req, res, startTime);
         }
     }
 
@@ -710,33 +448,15 @@ export class TaggingController {
      * Get tag cost breakdown
      * GET /api/tags/:tag/breakdown
      */
-    static async getTagCostBreakdown(req: any, res: Response): Promise<void> {
+    static async getTagCostBreakdown(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { tag } = req.params;
-        const { startDate, endDate } = req.query;
-
         try {
-            loggingService.info('Tag cost breakdown retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                tag,
-                hasTag: !!tag,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTagCostBreakdown', req);
 
-            if (!userId) {
-                loggingService.warn('Tag cost breakdown retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+            const { tag } = req.params;
+            const { startDate, endDate } = req.query;
 
             const options = {
                 startDate: startDate ? new Date(startDate as string) : undefined,
@@ -745,46 +465,25 @@ export class TaggingController {
             };
 
             const analytics = await TaggingService.getTagAnalytics(userId, options);
-            const duration = Date.now() - startTime;
 
             if (analytics.length === 0) {
-                loggingService.warn('Tag cost breakdown retrieval failed - tag not found or no data available', {
-                    userId,
-                    requestId,
-                    tag,
-                    startDate,
-                    endDate
-                });
                 res.status(404).json({ message: 'Tag not found or no data available' });
                 return;
             }
 
             const tagData = analytics[0];
 
-            loggingService.info('Tag cost breakdown retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getTagCostBreakdown', req, startTime, {
                 tag,
-                startDate,
-                endDate,
                 totalCost: tagData.totalCost,
-                totalCalls: tagData.totalCalls,
-                totalTokens: tagData.totalTokens,
-                averageCost: tagData.averageCost,
-                trend: tagData.trend,
-                trendPercentage: tagData.trendPercentage,
-                hasServiceBreakdown: !!tagData.topServices,
-                hasModelBreakdown: !!tagData.topModels,
-                hasTimeSeriesData: !!tagData.timeSeriesData,
-                lastUsed: tagData.lastUsed,
-                requestId
+                totalCalls: tagData.totalCalls
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'tag_cost_breakdown_retrieved',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     tag,
@@ -814,21 +513,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Tag cost breakdown retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                tag,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('getTagCostBreakdown', error, req, res, startTime);
         }
     }
 
@@ -836,40 +521,16 @@ export class TaggingController {
      * Get tag comparison
      * POST /api/tags/compare
      */
-    static async compareTags(req: any, res: Response): Promise<void> {
+    static async compareTags(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId: any = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
-        const { tags, startDate, endDate } = req.body;
-
         try {
-            loggingService.info('Tag comparison initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                hasTags: !!tags,
-                tagsCount: Array.isArray(tags) ? tags.length : 0,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('compareTags', req);
 
-            if (!userId) {
-                loggingService.warn('Tag comparison failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({ message: 'Unauthorized' });
-                return;
-            }
+            const { tags, startDate, endDate } = req.body;
 
             if (!tags || !Array.isArray(tags) || tags.length < 2) {
-                loggingService.warn('Tag comparison failed - at least 2 tags are required for comparison', {
-                    userId,
-                    requestId,
-                    tags,
-                    tagsCount: Array.isArray(tags) ? tags.length : 0
-                });
                 res.status(400).json({ message: 'At least 2 tags are required for comparison' });
                 return;
             }
@@ -881,7 +542,6 @@ export class TaggingController {
             };
 
             const analytics = await TaggingService.getTagAnalytics(userId, options);
-            const duration = Date.now() - startTime;
 
             // Calculate comparison metrics
             const totalCost = analytics.reduce((sum, tag) => sum + tag.totalCost, 0);
@@ -907,27 +567,18 @@ export class TaggingController {
                 }
             };
 
-            loggingService.info('Tag comparison completed successfully', {
-                userId,
-                duration,
-                tagsCount: tags.length,
-                startDate,
-                endDate,
+            ControllerHelper.logRequestSuccess('compareTags', req, startTime, {
+                comparedTags: tags.length,
                 foundTags: analytics.length,
                 totalCost,
-                totalCalls,
-                averageCostPerTag,
-                mostExpensiveTag: mostExpensive?.tag,
-                mostUsedTag: mostUsed?.tag,
-                bestTrendTag: bestTrend?.tag,
-                requestId
+                totalCalls
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'tags_compared',
                 category: 'tagging',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     comparedTags: tags.length,
@@ -948,21 +599,7 @@ export class TaggingController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Tag comparison failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                tags,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({ message: 'Internal server error' });
+            ControllerHelper.handleError('compareTags', error, req, res, startTime);
         }
     }
 

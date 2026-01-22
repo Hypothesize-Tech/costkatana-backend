@@ -1,42 +1,30 @@
 import { Request, Response } from 'express';
 import { VercelService } from '../services/vercel.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class VercelController {
     /**
      * Initialize OAuth flow
      * GET /api/vercel/auth
      */
-    static async initiateOAuth(req: any, res: Response): Promise<void> {
+    static async initiateOAuth(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('initiateOAuth', req);
         try {
-            const userId = req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             const authUrl = await VercelService.initiateOAuth(userId);
 
-            loggingService.info('Vercel OAuth flow initiated', { userId });
+            ControllerHelper.logRequestSuccess('initiateOAuth', req, startTime, { hasAuthUrl: !!authUrl });
 
             res.json({
                 success: true,
                 data: { authUrl }
             });
         } catch (error: any) {
-            loggingService.error('Failed to initiate Vercel OAuth', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to initiate OAuth flow',
-                error: error.message
-            });
+            ControllerHelper.handleError('initiateOAuth', error, req, res, startTime);
         }
     }
 
@@ -51,17 +39,11 @@ export class VercelController {
      * - next: (optional) URL to redirect after setup
      * - state: (optional) Our state token if passed through
      */
-    static async handleOAuthCallback(req: any, res: Response): Promise<void> {
+    static async handleOAuthCallback(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('handleOAuthCallback', req);
         try {
             const { code, state, configurationId, teamId, next } = req.query;
-
-            loggingService.info('Vercel OAuth callback received', {
-                hasCode: !!code,
-                hasState: !!state,
-                hasConfigurationId: !!configurationId,
-                hasTeamId: !!teamId,
-                hasNext: !!next
-            });
 
             if (!code) {
                 const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
@@ -83,26 +65,16 @@ export class VercelController {
 
             const connection = await VercelService.handleCallback(code as string, state as string);
 
-            // Log audit event
-            loggingService.info('Vercel connection established', {
-                userId: connection.userId,
-                action: 'vercel.connect',
-                resourceType: 'vercel_connection',
-                resourceId: connection._id.toString(),
+            ControllerHelper.logRequestSuccess('handleOAuthCallback', req, startTime, {
+                connectionId: connection._id.toString(),
                 vercelUsername: connection.vercelUsername,
-                teamId: connection.teamId,
-                configurationId
+                teamId: connection.teamId
             });
 
             const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
             res.redirect(`${frontendUrl}/integrations?vercelConnected=true&message=${encodeURIComponent('Vercel account connected successfully!')}`);
         } catch (error: any) {
-            loggingService.error('Vercel OAuth callback failed', {
-                error: error.message,
-                stack: error.stack,
-                query: req.query
-            });
-
+            // Note: OAuth callbacks redirect, so we handle redirects in the catch block
             const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
             res.redirect(`${frontendUrl}/integrations?error=${encodeURIComponent(error.message || 'OAuth callback failed')}`);
         }
@@ -112,34 +84,22 @@ export class VercelController {
      * List user's Vercel connections
      * GET /api/vercel/connections
      */
-    static async listConnections(req: any, res: Response): Promise<void> {
+    static async listConnections(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('listConnections', req);
         try {
-            const userId = req.userId;
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             const connections = await VercelService.listConnections(userId);
+
+            ControllerHelper.logRequestSuccess('listConnections', req, startTime, { connectionsCount: connections.length });
 
             res.json({
                 success: true,
                 data: connections
             });
         } catch (error: any) {
-            loggingService.error('Failed to list Vercel connections', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to list connections',
-                error: error.message
-            });
+            ControllerHelper.handleError('listConnections', error, req, res, startTime);
         }
     }
 
@@ -147,44 +107,24 @@ export class VercelController {
      * Disconnect Vercel account
      * DELETE /api/vercel/connections/:id
      */
-    static async disconnectConnection(req: any, res: Response): Promise<void> {
+    static async disconnectConnection(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('disconnectConnection', req);
+        const { id } = req.params;
         try {
-            const userId = req.userId;
-            const { id } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             await VercelService.disconnectConnection(id, userId);
 
-            // Log audit event
-            loggingService.info('Vercel connection disconnected', {
-                userId,
-                action: 'vercel.disconnect',
-                resourceType: 'vercel_connection',
-                resourceId: id
-            });
+            ControllerHelper.logRequestSuccess('disconnectConnection', req, startTime, { connectionId: id });
 
             res.json({
                 success: true,
                 message: 'Vercel connection disconnected successfully'
             });
         } catch (error: any) {
-            loggingService.error('Failed to disconnect Vercel connection', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to disconnect connection',
-                error: error.message
-            });
+            ControllerHelper.handleError('disconnectConnection', error, req, res, startTime);
         }
     }
 
@@ -192,20 +132,15 @@ export class VercelController {
      * Get projects for a connection
      * GET /api/vercel/connections/:id/projects
      */
-    static async getProjects(req: any, res: Response): Promise<void> {
+    static async getProjects(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getProjects', req);
+        const { id } = req.params;
+        const refresh = req.query.refresh === 'true';
         try {
-            const userId = req.userId;
-            const { id } = req.params;
-            const refresh = req.query.refresh === 'true';
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -218,21 +153,14 @@ export class VercelController {
 
             const projects = await VercelService.getProjects(id, refresh);
 
+            ControllerHelper.logRequestSuccess('getProjects', req, startTime, { projectsCount: projects.length });
+
             res.json({
                 success: true,
                 data: projects
             });
         } catch (error: any) {
-            loggingService.error('Failed to get Vercel projects', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get projects',
-                error: error.message
-            });
+            ControllerHelper.handleError('getProjects', error, req, res, startTime);
         }
     }
 
@@ -240,19 +168,14 @@ export class VercelController {
      * Get project details
      * GET /api/vercel/connections/:id/projects/:projectId
      */
-    static async getProject(req: any, res: Response): Promise<void> {
+    static async getProject(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getProject', req);
+        const { id, projectId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -265,21 +188,14 @@ export class VercelController {
 
             const project = await VercelService.getProject(id, projectId);
 
+            ControllerHelper.logRequestSuccess('getProject', req, startTime, { hasProject: !!project });
+
             res.json({
                 success: true,
                 data: project
             });
         } catch (error: any) {
-            loggingService.error('Failed to get Vercel project', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get project',
-                error: error.message
-            });
+            ControllerHelper.handleError('getProject', error, req, res, startTime);
         }
     }
 
@@ -287,20 +203,15 @@ export class VercelController {
      * Get deployments for a project
      * GET /api/vercel/connections/:id/projects/:projectId/deployments
      */
-    static async getDeployments(req: any, res: Response): Promise<void> {
+    static async getDeployments(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getDeployments', req);
+        const { id, projectId } = req.params;
+        const limit = parseInt(req.query.limit as string) || 20;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-            const limit = parseInt(req.query.limit as string) || 20;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -313,21 +224,14 @@ export class VercelController {
 
             const deployments = await VercelService.getDeployments(id, projectId, limit);
 
+            ControllerHelper.logRequestSuccess('getDeployments', req, startTime, { deploymentsCount: deployments.length });
+
             res.json({
                 success: true,
                 data: deployments
             });
         } catch (error: any) {
-            loggingService.error('Failed to get Vercel deployments', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get deployments',
-                error: error.message
-            });
+            ControllerHelper.handleError('getDeployments', error, req, res, startTime);
         }
     }
 
@@ -335,20 +239,15 @@ export class VercelController {
      * Trigger a new deployment
      * POST /api/vercel/connections/:id/projects/:projectId/deploy
      */
-    static async triggerDeployment(req: any, res: Response): Promise<void> {
+    static async triggerDeployment(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('triggerDeployment', req);
+        const { id, projectId } = req.params;
+        const options = req.body;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-            const options = req.body;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -361,12 +260,8 @@ export class VercelController {
 
             const deployment = await VercelService.triggerDeployment(id, projectId, options);
 
-            // Log audit event
-            loggingService.info('Vercel deployment triggered', {
-                userId,
-                action: 'vercel.deploy',
-                resourceType: 'vercel_deployment',
-                resourceId: deployment.uid,
+            ControllerHelper.logRequestSuccess('triggerDeployment', req, startTime, {
+                deploymentId: deployment.uid,
                 projectId,
                 target: options?.target || 'preview'
             });
@@ -376,16 +271,7 @@ export class VercelController {
                 data: deployment
             });
         } catch (error: any) {
-            loggingService.error('Failed to trigger Vercel deployment', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to trigger deployment',
-                error: error.message
-            });
+            ControllerHelper.handleError('triggerDeployment', error, req, res, startTime);
         }
     }
 
@@ -393,19 +279,14 @@ export class VercelController {
      * Get deployment logs
      * GET /api/vercel/connections/:id/deployments/:deploymentId/logs
      */
-    static async getDeploymentLogs(req: any, res: Response): Promise<void> {
+    static async getDeploymentLogs(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getDeploymentLogs', req);
+        const { id, deploymentId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, deploymentId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -418,21 +299,14 @@ export class VercelController {
 
             const logs = await VercelService.getDeploymentLogs(id, deploymentId);
 
+            ControllerHelper.logRequestSuccess('getDeploymentLogs', req, startTime, { hasLogs: !!logs });
+
             res.json({
                 success: true,
                 data: logs
             });
         } catch (error: any) {
-            loggingService.error('Failed to get deployment logs', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get deployment logs',
-                error: error.message
-            });
+            ControllerHelper.handleError('getDeploymentLogs', error, req, res, startTime);
         }
     }
 
@@ -440,20 +314,14 @@ export class VercelController {
      * Rollback to a previous deployment
      * POST /api/vercel/connections/:id/deployments/:deploymentId/rollback
      */
-    static async rollbackDeployment(req: any, res: Response): Promise<void> {
+    static async rollbackDeployment(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('rollbackDeployment', req);
+        const { id, deploymentId } = req.params;
+        const { projectId } = req.body;
         try {
-            const userId = req.userId;
-            const { id, deploymentId } = req.params;
-            const { projectId } = req.body;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             if (!projectId) {
                 res.status(400).json({
                     success: false,
@@ -462,6 +330,7 @@ export class VercelController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -474,12 +343,8 @@ export class VercelController {
 
             const deployment = await VercelService.rollbackDeployment(id, projectId, deploymentId);
 
-            // Log audit event
-            loggingService.info('Vercel deployment rolled back', {
-                userId,
-                action: 'vercel.rollback',
-                resourceType: 'vercel_deployment',
-                resourceId: deploymentId,
+            ControllerHelper.logRequestSuccess('rollbackDeployment', req, startTime, {
+                deploymentId,
                 projectId
             });
 
@@ -488,16 +353,7 @@ export class VercelController {
                 data: deployment
             });
         } catch (error: any) {
-            loggingService.error('Failed to rollback deployment', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to rollback deployment',
-                error: error.message
-            });
+            ControllerHelper.handleError('rollbackDeployment', error, req, res, startTime);
         }
     }
 
@@ -505,19 +361,14 @@ export class VercelController {
      * Promote deployment to production
      * POST /api/vercel/connections/:id/deployments/:deploymentId/promote
      */
-    static async promoteDeployment(req: any, res: Response): Promise<void> {
+    static async promoteDeployment(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('promoteDeployment', req);
+        const { id, deploymentId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, deploymentId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -530,29 +381,14 @@ export class VercelController {
 
             const deployment = await VercelService.promoteDeployment(id, deploymentId);
 
-            // Log audit event
-            loggingService.info('Vercel deployment promoted', {
-                userId,
-                action: 'vercel.promote',
-                resourceType: 'vercel_deployment',
-                resourceId: deploymentId
-            });
+            ControllerHelper.logRequestSuccess('promoteDeployment', req, startTime, { deploymentId });
 
             res.json({
                 success: true,
                 data: deployment
             });
         } catch (error: any) {
-            loggingService.error('Failed to promote deployment', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to promote deployment',
-                error: error.message
-            });
+            ControllerHelper.handleError('promoteDeployment', error, req, res, startTime);
         }
     }
 
@@ -560,19 +396,14 @@ export class VercelController {
      * Get domains for a project
      * GET /api/vercel/connections/:id/projects/:projectId/domains
      */
-    static async getDomains(req: any, res: Response): Promise<void> {
+    static async getDomains(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getDomains', req);
+        const { id, projectId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -585,21 +416,14 @@ export class VercelController {
 
             const domains = await VercelService.getDomains(id, projectId);
 
+            ControllerHelper.logRequestSuccess('getDomains', req, startTime, { domainsCount: domains.length });
+
             res.json({
                 success: true,
                 data: domains
             });
         } catch (error: any) {
-            loggingService.error('Failed to get domains', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get domains',
-                error: error.message
-            });
+            ControllerHelper.handleError('getDomains', error, req, res, startTime);
         }
     }
 
@@ -607,20 +431,14 @@ export class VercelController {
      * Add domain to a project
      * POST /api/vercel/connections/:id/projects/:projectId/domains
      */
-    static async addDomain(req: any, res: Response): Promise<void> {
+    static async addDomain(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('addDomain', req);
+        const { id, projectId } = req.params;
+        const { domain } = req.body;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-            const { domain } = req.body;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             if (!domain) {
                 res.status(400).json({
                     success: false,
@@ -629,6 +447,7 @@ export class VercelController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -641,30 +460,14 @@ export class VercelController {
 
             const result = await VercelService.addDomain(id, projectId, domain);
 
-            // Log audit event
-            loggingService.info('Vercel domain added', {
-                userId,
-                action: 'vercel.domain.add',
-                resourceType: 'vercel_domain',
-                resourceId: domain,
-                projectId
-            });
+            ControllerHelper.logRequestSuccess('addDomain', req, startTime, { domain, projectId });
 
             res.json({
                 success: true,
                 data: result
             });
         } catch (error: any) {
-            loggingService.error('Failed to add domain', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to add domain',
-                error: error.message
-            });
+            ControllerHelper.handleError('addDomain', error, req, res, startTime);
         }
     }
 
@@ -672,19 +475,14 @@ export class VercelController {
      * Remove domain from a project
      * DELETE /api/vercel/connections/:id/projects/:projectId/domains/:domain
      */
-    static async removeDomain(req: any, res: Response): Promise<void> {
+    static async removeDomain(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('removeDomain', req);
+        const { id, projectId, domain } = req.params;
         try {
-            const userId = req.userId;
-            const { id, projectId, domain } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -697,30 +495,14 @@ export class VercelController {
 
             await VercelService.removeDomain(id, projectId, domain);
 
-            // Log audit event
-            loggingService.info('Vercel domain removed', {
-                userId,
-                action: 'vercel.domain.remove',
-                resourceType: 'vercel_domain',
-                resourceId: domain,
-                projectId
-            });
+            ControllerHelper.logRequestSuccess('removeDomain', req, startTime, { domain, projectId });
 
             res.json({
                 success: true,
                 message: 'Domain removed successfully'
             });
         } catch (error: any) {
-            loggingService.error('Failed to remove domain', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to remove domain',
-                error: error.message
-            });
+            ControllerHelper.handleError('removeDomain', error, req, res, startTime);
         }
     }
 
@@ -728,19 +510,14 @@ export class VercelController {
      * Get environment variables for a project
      * GET /api/vercel/connections/:id/projects/:projectId/env
      */
-    static async getEnvVars(req: any, res: Response): Promise<void> {
+    static async getEnvVars(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getEnvVars', req);
+        const { id, projectId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -753,21 +530,14 @@ export class VercelController {
 
             const envVars = await VercelService.getEnvVars(id, projectId);
 
+            ControllerHelper.logRequestSuccess('getEnvVars', req, startTime, { envVarsCount: envVars.length });
+
             res.json({
                 success: true,
                 data: envVars
             });
         } catch (error: any) {
-            loggingService.error('Failed to get environment variables', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get environment variables',
-                error: error.message
-            });
+            ControllerHelper.handleError('getEnvVars', error, req, res, startTime);
         }
     }
 
@@ -775,20 +545,14 @@ export class VercelController {
      * Set environment variable
      * POST /api/vercel/connections/:id/projects/:projectId/env
      */
-    static async setEnvVar(req: any, res: Response): Promise<void> {
+    static async setEnvVar(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('setEnvVar', req);
+        const { id, projectId } = req.params;
+        const { key, value, target, type } = req.body;
         try {
-            const userId = req.userId;
-            const { id, projectId } = req.params;
-            const { key, value, target, type } = req.body;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             if (!key || !value) {
                 res.status(400).json({
                     success: false,
@@ -797,6 +561,7 @@ export class VercelController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -809,31 +574,14 @@ export class VercelController {
 
             const envVar = await VercelService.setEnvVar(id, projectId, key, value, target, type);
 
-            // Log audit event (don't log the value for security)
-            loggingService.info('Vercel environment variable set', {
-                userId,
-                action: 'vercel.env.set',
-                resourceType: 'vercel_env',
-                resourceId: key,
-                projectId,
-                target
-            });
+            ControllerHelper.logRequestSuccess('setEnvVar', req, startTime, { key, projectId, target });
 
             res.json({
                 success: true,
                 data: { ...envVar, value: undefined } // Don't return value
             });
         } catch (error: any) {
-            loggingService.error('Failed to set environment variable', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to set environment variable',
-                error: error.message
-            });
+            ControllerHelper.handleError('setEnvVar', error, req, res, startTime);
         }
     }
 
@@ -841,19 +589,14 @@ export class VercelController {
      * Delete environment variable
      * DELETE /api/vercel/connections/:id/projects/:projectId/env/:envVarId
      */
-    static async deleteEnvVar(req: any, res: Response): Promise<void> {
+    static async deleteEnvVar(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('deleteEnvVar', req);
+        const { id, projectId, envVarId } = req.params;
         try {
-            const userId = req.userId;
-            const { id, projectId, envVarId } = req.params;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
+            ServiceHelper.validateObjectId(id, 'connectionId');
             // Verify connection belongs to user
             const connection = await VercelService.getConnection(id, userId);
             if (!connection) {
@@ -866,30 +609,14 @@ export class VercelController {
 
             await VercelService.deleteEnvVar(id, projectId, envVarId);
 
-            // Log audit event
-            loggingService.info('Vercel environment variable deleted', {
-                userId,
-                action: 'vercel.env.delete',
-                resourceType: 'vercel_env',
-                resourceId: envVarId,
-                projectId
-            });
+            ControllerHelper.logRequestSuccess('deleteEnvVar', req, startTime, { envVarId, projectId });
 
             res.json({
                 success: true,
                 message: 'Environment variable deleted successfully'
             });
         } catch (error: any) {
-            loggingService.error('Failed to delete environment variable', {
-                error: error.message,
-                stack: error.stack
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to delete environment variable',
-                error: error.message
-            });
+            ControllerHelper.handleError('deleteEnvVar', error, req, res, startTime);
         }
     }
 

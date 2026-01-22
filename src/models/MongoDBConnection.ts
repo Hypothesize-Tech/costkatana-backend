@@ -1,5 +1,5 @@
 import mongoose, { Schema, Document, Model } from 'mongoose';
-import CryptoJS from 'crypto-js';
+import { EncryptionService } from '../utils/encryption';
 import { loggingService } from '../services/logging.service';
 import { MongoClient } from 'mongodb';
 
@@ -151,9 +151,11 @@ MongoDBConnectionSchema.pre('save', function (next) {
 
 /**
  * Encrypt connection string before saving
+ * Uses AES-256-GCM for authenticated encryption
  */
 MongoDBConnectionSchema.methods.setConnectionString = function (plainConnectionString: string): void {
-    const encryptionKey = process.env.JWT_SECRET ;
+    // Validate encryption key
+    const encryptionKey = process.env.JWT_SECRET || process.env.ENCRYPTION_KEY;
     
     if (!encryptionKey || encryptionKey === 'default-key-change-me') {
         loggingService.error('MongoDB connection encryption key not configured', {
@@ -164,14 +166,16 @@ MongoDBConnectionSchema.methods.setConnectionString = function (plainConnectionS
         throw new Error('Encryption key not properly configured');
     }
 
-    this.connectionString = CryptoJS.AES.encrypt(plainConnectionString, encryptionKey).toString();
+    // Encrypt using centralized service (format: encrypted:iv:authTag)
+    this.connectionString = EncryptionService.encryptToCombinedFormat(plainConnectionString);
 };
 
 /**
  * Decrypt connection string
+ * Supports both new format (encrypted:iv:authTag) and legacy CryptoJS format
  */
 MongoDBConnectionSchema.methods.getDecryptedConnectionString = function (): string {
-    const encryptionKey = process.env.JWT_SECRET ?? '';
+    const encryptionKey = process.env.JWT_SECRET || process.env.ENCRYPTION_KEY || '';
     
     if (!encryptionKey || encryptionKey === 'default-key-change-me') {
         loggingService.error('MongoDB connection encryption key not configured', {
@@ -183,14 +187,31 @@ MongoDBConnectionSchema.methods.getDecryptedConnectionString = function (): stri
     }
 
     try {
-        const bytes = CryptoJS.AES.decrypt(this.connectionString, encryptionKey);
-        const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+        // Check if it's in the new format (contains colons for encrypted:iv:authTag)
+        const parts = this.connectionString.split(':');
         
-        if (!decrypted) {
-            throw new Error('Failed to decrypt connection string');
+        if (parts.length === 3) {
+            // New format: use EncryptionService
+            return EncryptionService.decryptFromCombinedFormat(this.connectionString);
+        } else {
+            // Legacy CryptoJS format: decrypt using CryptoJS for backward compatibility
+            // Import CryptoJS dynamically only when needed for legacy data
+            const CryptoJS = require('crypto-js');
+            const bytes = CryptoJS.AES.decrypt(this.connectionString, encryptionKey);
+            const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+            
+            if (!decrypted) {
+                throw new Error('Failed to decrypt connection string (legacy format)');
+            }
+            
+            loggingService.info('Decrypted legacy CryptoJS format, consider re-encrypting', {
+                component: 'MongoDBConnection',
+                operation: 'getDecryptedConnectionString',
+                connectionId: this._id
+            });
+            
+            return decrypted;
         }
-        
-        return decrypted;
     } catch (error) {
         loggingService.error('Failed to decrypt MongoDB connection string', {
             component: 'MongoDBConnection',

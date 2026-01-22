@@ -2,6 +2,9 @@ import { loggingService } from '../services/logging.service';
 
 /**
  * AWS Bedrock specific retry configuration
+ * @deprecated Use RetryWithBackoff and RetryConfigs from retryWithBackoff.ts instead
+ * @see RetryWithBackoff
+ * @see RetryConfigs
  */
 export interface BedrockRetryConfig {
     maxRetries: number;
@@ -52,6 +55,9 @@ export const DEFAULT_BEDROCK_RETRY_CONFIG: BedrockRetryConfig = {
 
 /**
  * Enhanced exponential backoff with jitter for AWS Bedrock
+ * @deprecated Use RetryWithBackoff.createBedrockRetry() or ServiceHelper.withRetry() instead
+ * @see RetryWithBackoff.createBedrockRetry
+ * @see ServiceHelper.withRetry
  */
 export class BedrockRetry {
     private config: BedrockRetryConfig;
@@ -231,12 +237,15 @@ export class BedrockRetry {
 
 /**
  * Convenience function for one-off retry operations
+ * @deprecated Use ServiceHelper.withRetry() or RetryWithBackoff.execute() instead
+ * @see ServiceHelper.withRetry
+ * @see RetryWithBackoff.execute
  */
 export async function retryBedrockOperation<T>(
-    operation: () => Promise<T>,
-    config: Partial<BedrockRetryConfig> = {},
-    context: { modelId?: string; operation?: string; requestId?: string } = {}
+  operation: () => Promise<T>,
+  config: Partial<BedrockRetryConfig> = {},
+  context: { modelId?: string; operation?: string; requestId?: string } = {}
 ): Promise<T> {
-    const retry = new BedrockRetry(config);
-    return retry.execute(operation, context);
-} 
+  const retry = new BedrockRetry(config);
+  return retry.execute(operation, context);
+}

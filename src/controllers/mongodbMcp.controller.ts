@@ -3,6 +3,8 @@ import { loggingService } from '../services/logging.service';
 import { MongoDBConnection, IMongoDBConnection } from '../models/MongoDBConnection';
 import { MongoDBMCPService } from '../services/mongodbMcp.service';
 import { circuitBreaker } from '../middleware/mongodbMcp.middleware';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * MongoDB MCP Controller
@@ -107,14 +109,9 @@ export const handleMongoDBMCPToolCall = async (req: Request, res: Response): Pro
 
         const duration = Date.now() - startTime;
 
-        loggingService.info('MongoDB MCP tool call completed', {
-            component: 'mongodbMcpController',
-            operation: 'handleMongoDBMCPToolCall',
+        ControllerHelper.logRequestSuccess('handleMongoDBMCPToolCall', req as AuthenticatedRequest, startTime, {
             toolName,
-            userId: context.userId,
-            connectionId: context.connectionId,
-            duration,
-            success: !result.isError,
+            connectionId: context.connectionId
         });
 
         // Return JSON-RPC response
@@ -125,19 +122,13 @@ export const handleMongoDBMCPToolCall = async (req: Request, res: Response): Pro
         });
     } catch (error) {
         const context = req.mongodbMcpContext;
-        const duration = Date.now() - startTime;
-
+        
         // Record failure in circuit breaker
         if (context?.connectionId) {
             circuitBreaker.recordFailure(context.connectionId);
         }
 
-        loggingService.error('MongoDB MCP tool call failed', {
-            component: 'mongodbMcpController',
-            operation: 'handleMongoDBMCPToolCall',
-            error: error instanceof Error ? error.message : String(error),
-            duration,
-        });
+        ControllerHelper.handleError('handleMongoDBMCPToolCall', error, req as AuthenticatedRequest, res, startTime);
 
         res.status(500).json({
             jsonrpc: '2.0',
@@ -188,13 +179,20 @@ export const listMongoDBMCPTools = async (_req: Request, res: Response): Promise
  * Get user's MongoDB connections
  * GET /api/mcp/mongodb/connections
  */
-export const getUserMongoDBConnections = async (req: Request, res: Response): Promise<void> => {
+export const getUserMongoDBConnections = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
     try {
-        const userId = (req as any).userId || (req as any).user?.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserMongoDBConnections', req);
 
         const connections = await MongoDBConnection.find({
             userId,
         }).select('-connectionString').sort({ lastUsed: -1, createdAt: -1 });
+
+        ControllerHelper.logRequestSuccess('getUserMongoDBConnections', req, startTime, {
+            count: connections.length
+        });
 
         res.json({
             success: true,
@@ -202,16 +200,7 @@ export const getUserMongoDBConnections = async (req: Request, res: Response): Pr
             data: connections,
         });
     } catch (error) {
-        loggingService.error('Failed to get MongoDB connections', {
-            component: 'mongodbMcpController',
-            operation: 'getUserMongoDBConnections',
-            error: error instanceof Error ? error.message : String(error),
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to retrieve connections',
-        });
+        ControllerHelper.handleError('getUserMongoDBConnections', error, req, res, startTime);
     }
 };
 
@@ -647,10 +636,15 @@ export const updateMongoDBConnection = async (req: Request, res: Response): Prom
  * Delete MongoDB connection
  * DELETE /api/mcp/mongodb/connections/:connectionId
  */
-export const deleteMongoDBConnection = async (req: Request, res: Response): Promise<void> => {
+export const deleteMongoDBConnection = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
     try {
-        const userId = (req as any).userId || (req as any).user?.id;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('deleteMongoDBConnection', req);
+
         const connectionId = req.params.connectionId;
+        ServiceHelper.validateObjectId(connectionId, 'connectionId');
 
         const connection = await MongoDBConnection.findOneAndDelete({
             _id: connectionId,
@@ -665,13 +659,6 @@ export const deleteMongoDBConnection = async (req: Request, res: Response): Prom
             return;
         }
 
-        loggingService.info('MongoDB connection deleted', {
-            component: 'mongodbMcpController',
-            operation: 'deleteMongoDBConnection',
-            userId,
-            connectionId,
-        });
-
         // Clear MCP service cache
         const cacheKey = `${userId}:${connectionId}`;
         const cachedService = mcpServiceCache.get(cacheKey);
@@ -680,21 +667,14 @@ export const deleteMongoDBConnection = async (req: Request, res: Response): Prom
             mcpServiceCache.delete(cacheKey);
         }
 
+        ControllerHelper.logRequestSuccess('deleteMongoDBConnection', req, startTime);
+
         res.json({
             success: true,
             message: 'MongoDB connection deleted successfully',
         });
     } catch (error) {
-        loggingService.error('Failed to delete MongoDB connection', {
-            component: 'mongodbMcpController',
-            operation: 'deleteMongoDBConnection',
-            error: error instanceof Error ? error.message : String(error),
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to delete connection',
-        });
+        ControllerHelper.handleError('deleteMongoDBConnection', error, req, res, startTime);
     }
 };
 

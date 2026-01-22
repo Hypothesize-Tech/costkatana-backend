@@ -2,6 +2,8 @@ import { Response } from 'express';
 import { LLMSecurityService } from '../services/llmSecurity.service';
 import { PromptFirewallService } from '../services/promptFirewall.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class SecurityController {
     // Background processing queue
@@ -27,31 +29,14 @@ export class SecurityController {
     /**
      * Get security analytics dashboard
      */
-    static async getSecurityAnalytics(req: any, res: Response): Promise<void> {
+    static async getSecurityAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getSecurityAnalytics', req);
         const { startDate, endDate } = req.query;
 
         try {
-            loggingService.info('Security analytics retrieval initiated', {
-                userId,
-                requestId,
-                startDate,
-                endDate
-            });
-
-            if (!userId) {
-                loggingService.warn('Security analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             let timeRange: { start: Date; end: Date } | undefined;
             if (startDate && endDate) {
                 timeRange = {
@@ -61,15 +46,13 @@ export class SecurityController {
             }
 
             const analytics = await LLMSecurityService.getSecurityAnalytics(userId, timeRange);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Security analytics retrieved successfully', {
-                userId,
-                duration,
-                requestId
+            ControllerHelper.logRequestSuccess('getSecurityAnalytics', req, startTime, {
+                hasTimeRange: !!timeRange
             });
 
             // Queue background business event logging
+            const duration = Date.now() - startTime;
             SecurityController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'security_analytics_retrieved',
@@ -89,55 +72,23 @@ export class SecurityController {
 
         } catch (error: any) {
             SecurityController.recordServiceFailure();
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Security analytics retrieval failed', {
-                userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve security analytics'
-            });
+            ControllerHelper.handleError('getSecurityAnalytics', error, req, res, startTime);
         }
     }
 
     /**
      * Get security metrics summary
      */
-    static async getSecurityMetrics(req: any, res: Response): Promise<void> {
+    static async getSecurityMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getSecurityMetrics', req);
 
         try {
-            loggingService.info('Security metrics retrieval initiated', {
-                userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Security metrics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             const metrics = await LLMSecurityService.getSecurityMetricsSummary(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Security metrics retrieved successfully', {
-                userId,
-                duration,
-                requestId
-            });
+            ControllerHelper.logRequestSuccess('getSecurityMetrics', req, startTime);
 
             res.json({
                 success: true,
@@ -146,29 +97,18 @@ export class SecurityController {
 
         } catch (error: any) {
             SecurityController.recordServiceFailure();
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Security metrics retrieval failed', {
-                userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve security metrics'
-            });
+            ControllerHelper.handleError('getSecurityMetrics', error, req, res, startTime);
         }
     }
 
     /**
      * Test security check manually
      */
-    static async testSecurityCheck(req: any, res: Response): Promise<void> {
+    static async testSecurityCheck(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('testSecurityCheck', req);
         const { prompt, retrievedChunks, toolCalls, provenanceSource } = req.body;
 
         try {
@@ -181,28 +121,7 @@ export class SecurityController {
                 return;
             }
 
-            loggingService.info('Security check test initiated', {
-                userId,
-                requestId,
-                promptLength: prompt?.length || 0
-            });
-
-            if (!userId) {
-                loggingService.warn('Security check test failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             if (!prompt) {
-                loggingService.warn('Security check test failed - prompt is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({
                     success: false,
                     message: 'Prompt is required for security testing'
@@ -230,17 +149,15 @@ export class SecurityController {
             );
 
             const securityCheck = await Promise.race([securityCheckPromise, timeoutPromise]);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Security check test completed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('testSecurityCheck', req, startTime, {
                 testRequestId,
                 securityResult: securityCheck.result,
-                requestId
+                hasHumanReview: !!securityCheck.humanReviewId
             });
 
             // Queue background business event logging
+            const duration = Date.now() - startTime;
             SecurityController.queueBackgroundOperation(async () => {
                 loggingService.logBusiness({
                     event: 'security_check_tested',
@@ -267,57 +184,25 @@ export class SecurityController {
 
         } catch (error: any) {
             SecurityController.recordServiceFailure();
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Security check test failed', {
-                userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to perform security test'
-            });
+            ControllerHelper.handleError('testSecurityCheck', error, req, res, startTime);
         }
     }
 
     /**
      * Get pending human reviews
      */
-    static async getPendingReviews(req: any, res: Response): Promise<void> {
+    static async getPendingReviews(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getPendingReviews', req);
 
         try {
-            loggingService.info('Pending reviews retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Pending reviews retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             const pendingReviews = LLMSecurityService.getPendingReviews(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Pending reviews retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getPendingReviews', req, startTime, {
                 pendingReviewsCount: Array.isArray(pendingReviews) ? pendingReviews.length : 0,
-                hasPendingReviews: !!pendingReviews && (Array.isArray(pendingReviews) ? pendingReviews.length > 0 : true),
-                requestId
+                hasPendingReviews: !!pendingReviews && (Array.isArray(pendingReviews) ? pendingReviews.length > 0 : true)
             });
 
             res.json({
@@ -326,63 +211,23 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Pending reviews retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve pending reviews'
-            });
+            ControllerHelper.handleError('getPendingReviews', error, req, res, startTime);
         }
     }
 
     /**
      * Review a security request (approve/deny)
      */
-    static async reviewSecurityRequest(req: any, res: Response): Promise<void> {
+    static async reviewSecurityRequest(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('reviewSecurityRequest', req);
         const { reviewId } = req.params;
         const { decision, comments } = req.body;
 
         try {
-            loggingService.info('Security request review initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                reviewId,
-                hasReviewId: !!reviewId,
-                decision,
-                hasDecision: !!decision,
-                hasComments: !!comments
-            });
-
-            if (!userId) {
-                loggingService.warn('Security request review failed - user not authenticated', {
-                    requestId,
-                    reviewId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required for reviews'
-                });
-                return;
-            }
-
             if (!reviewId) {
-                loggingService.warn('Security request review failed - review ID is required', {
-                    userId,
-                    requestId
-                });
                 res.status(400).json({
                     success: false,
                     message: 'Review ID is required'
@@ -391,19 +236,14 @@ export class SecurityController {
             }
 
             if (!decision || !['approved', 'denied'].includes(decision)) {
-                loggingService.warn('Security request review failed - invalid decision', {
-                    userId,
-                    requestId,
-                    reviewId,
-                    decision,
-                    decisionValid: ['approved', 'denied'].includes(decision)
-                });
                 res.status(400).json({
                     success: false,
                     message: 'Valid decision (approved/denied) is required'
                 });
                 return;
             }
+
+            ServiceHelper.validateObjectId(reviewId, 'reviewId');
 
             const success = await LLMSecurityService.reviewRequest(
                 reviewId,
@@ -413,12 +253,6 @@ export class SecurityController {
             );
 
             if (!success) {
-                loggingService.warn('Security request review failed - review not found or already processed', {
-                    userId,
-                    requestId,
-                    reviewId,
-                    decision
-                });
                 res.status(404).json({
                     success: false,
                     message: 'Review request not found or already processed'
@@ -427,14 +261,10 @@ export class SecurityController {
             }
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Security request reviewed successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('reviewSecurityRequest', req, startTime, {
                 reviewId,
                 decision,
-                hasComments: !!comments,
-                requestId
+                hasComments: !!comments
             });
 
             // Log business event
@@ -456,22 +286,9 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Security request review failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
+            ControllerHelper.handleError('reviewSecurityRequest', error, req, res, startTime, {
                 reviewId,
-                decision,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to process security review'
+                decision
             });
         }
     }
@@ -479,34 +296,14 @@ export class SecurityController {
     /**
      * Get firewall analytics (from the original service)
      */
-    static async getFirewallAnalytics(req: any, res: Response): Promise<void> {
+    static async getFirewallAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getFirewallAnalytics', req);
         const { startDate, endDate } = req.query;
 
         try {
-            loggingService.info('Firewall analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
-
-            if (!userId) {
-                loggingService.warn('Firewall analytics retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             let dateRange: { start: Date; end: Date } | undefined;
             if (startDate && endDate) {
                 dateRange = {
@@ -516,16 +313,10 @@ export class SecurityController {
             }
 
             const analytics = await PromptFirewallService.getFirewallAnalytics(userId, dateRange);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Firewall analytics retrieved successfully', {
-                userId,
-                duration,
-                startDate,
-                endDate,
+            ControllerHelper.logRequestSuccess('getFirewallAnalytics', req, startTime, {
                 hasDateRange: !!dateRange,
-                hasAnalytics: !!analytics,
-                requestId
+                hasAnalytics: !!analytics
             });
 
             res.json({
@@ -534,68 +325,28 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Firewall analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve firewall analytics'
-            });
+            ControllerHelper.handleError('getFirewallAnalytics', error, req, res, startTime);
         }
     }
 
     /**
      * Update firewall configuration
      */
-    static async updateFirewallConfig(req: any, res: Response): Promise<void> {
+    static async updateFirewallConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('updateFirewallConfig', req);
         const config = req.body;
 
         try {
-            loggingService.info('Firewall configuration update initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                hasConfig: !!config,
-                configKeys: Object.keys(config || {})
-            });
-
-            if (!userId) {
-                loggingService.warn('Firewall configuration update failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             // Validate configuration
             const validConfig = PromptFirewallService.parseConfigFromHeaders(config);
 
-            // In a real implementation, you'd save this per-user config to database
-            // For now, we'll just return the parsed config
             const duration = Date.now() - startTime;
-
-            loggingService.info('Firewall configuration updated successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('updateFirewallConfig', req, startTime, {
                 hasValidConfig: !!validConfig,
-                configKeys: Object.keys(validConfig || {}),
-                requestId
+                configKeys: Object.keys(validConfig || {})
             });
 
             // Log business event
@@ -618,21 +369,8 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Firewall configuration update failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                hasConfig: !!config,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to update firewall configuration'
+            ControllerHelper.handleError('updateFirewallConfig', error, req, res, startTime, {
+                hasConfig: !!config
             });
         }
     }
@@ -640,39 +378,19 @@ export class SecurityController {
     /**
      * Get current firewall configuration
      */
-    static async getFirewallConfig(req: any, res: Response): Promise<void> {
+    static async getFirewallConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getFirewallConfig', req);
 
         try {
-            loggingService.info('Firewall configuration retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('Firewall configuration retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             // In a real implementation, you'd fetch user-specific config from database
             const config = PromptFirewallService.getDefaultConfig();
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Firewall configuration retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getFirewallConfig', req, startTime, {
                 hasConfig: !!config,
-                configKeys: Object.keys(config || {}),
-                requestId
+                configKeys: Object.keys(config || {})
             });
 
             res.json({
@@ -681,65 +399,29 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Firewall configuration retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve firewall configuration'
-            });
+            ControllerHelper.handleError('getFirewallConfig', error, req, res, startTime);
         }
     }
 
     /**
      * Get top risky prompts (for security analysis)
      */
-    static async getTopRiskyPrompts(req: any, res: Response): Promise<void> {
+    static async getTopRiskyPrompts(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getTopRiskyPrompts', req);
         const limit = parseInt(req.query.limit as string) || 20;
 
         try {
-            loggingService.info('Top risky prompts retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                limit,
-                hasLimit: !!req.query.limit
-            });
-
-            if (!userId) {
-                loggingService.warn('Top risky prompts retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
-
             const analytics = await LLMSecurityService.getSecurityAnalytics(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Top risky prompts retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getTopRiskyPrompts', req, startTime, {
                 limit,
                 hasAnalytics: !!analytics,
                 topRiskyPatternsCount: analytics?.topRiskyPatterns?.length || 0,
                 topRiskySourcesCount: analytics?.topRiskySources?.length || 0,
-                hasThreatDistribution: !!analytics?.threatDistribution,
-                requestId
+                hasThreatDistribution: !!analytics?.threatDistribution
             });
 
             res.json({
@@ -752,57 +434,21 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Top risky prompts retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                limit,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve risky prompts analysis'
-            });
+            ControllerHelper.handleError('getTopRiskyPrompts', error, req, res, startTime, { limit });
         }
     }
 
     /**
      * Export security report
      */
-    static async exportSecurityReport(req: any, res: Response): Promise<void> {
+    static async exportSecurityReport(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('exportSecurityReport', req);
         const { format = 'json', startDate, endDate } = req.query;
 
         try {
-            loggingService.info('Security report export initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                format,
-                hasFormat: !!format,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
-
-            if (!userId) {
-                loggingService.warn('Security report export failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-                return;
-            }
 
             let timeRange: { start: Date; end: Date } | undefined;
             if (startDate && endDate) {
@@ -839,7 +485,7 @@ export class SecurityController {
             if (analytics.status === 'rejected') {
                 loggingService.warn('Failed to get security analytics, using defaults', {
                     userId,
-                    requestId,
+                    requestId: req.headers['x-request-id'] as string,
                     error: analytics.reason?.message || 'Unknown error'
                 });
             }
@@ -847,7 +493,7 @@ export class SecurityController {
             if (metrics.status === 'rejected') {
                 loggingService.warn('Failed to get security metrics, using defaults', {
                     userId,
-                    requestId,
+                    requestId: req.headers['x-request-id'] as string,
                     error: metrics.reason?.message || 'Unknown error'
                 });
             }
@@ -879,12 +525,9 @@ export class SecurityController {
             }
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Security report exported successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('exportSecurityReport', req, startTime, {
                 format,
-                requestId
+                hasTimeRange: !!timeRange
             });
 
             // Queue background business event logging
@@ -902,24 +545,10 @@ export class SecurityController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Security report export failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
+            ControllerHelper.handleError('exportSecurityReport', error, req, res, startTime, {
                 format,
                 startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-            
-            res.status(500).json({
-                success: false,
-                message: 'Failed to export security report',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+                endDate
             });
         }
     }

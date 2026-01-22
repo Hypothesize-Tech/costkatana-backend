@@ -4,48 +4,34 @@ import { memoryService } from '../services/memory.service';
 import { userPreferenceService } from '../services/userPreference.service';
 import { vectorMemoryService } from '../services/vectorMemory.service';
 import { UserMemory, ConversationMemory, UserPreference } from '../models/Memory';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class MemoryController {
     /**
      * Get user memory insights
      */
-    static async getMemoryInsights(req: Request, res: Response): Promise<Response> {
+    static async getMemoryInsights(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getMemoryInsights', req);
         const { userId } = req.params;
 
         try {
-            loggingService.info('Memory insights retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('Memory insights retrieval failed - missing user ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('Memory insights retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
+            ServiceHelper.validateObjectId(userId, 'userId');
             const insights = await memoryService.getUserMemoryInsights(userId);
-
             const duration = Date.now() - startTime;
 
-            loggingService.info('Memory insights retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getMemoryInsights', req, startTime, {
                 insightsCount: insights.length,
-                hasInsights: !!insights && insights.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasInsights: !!insights && insights.length > 0
             });
 
             // Log business event
@@ -69,28 +55,18 @@ export class MemoryController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Memory insights retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve memory insights'
-            });
+            ControllerHelper.handleError('getMemoryInsights', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get user preferences with parallel data fetching
      */
-    static async getUserPreferences(req: Request, res: Response): Promise<Response> {
+    static async getUserPreferences(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getUserPreferences', req);
         const { userId } = req.params;
 
         try {
@@ -173,52 +149,32 @@ export class MemoryController {
     /**
      * Update user preferences
      */
-    static async updateUserPreferences(req: Request, res: Response): Promise<Response> {
+    static async updateUserPreferences(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('updateUserPreferences', req);
         const { userId } = req.params;
         const updates = req.body;
 
         try {
-            loggingService.info('User preferences update initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasUpdates: !!updates,
-                updateKeys: updates ? Object.keys(updates) : [],
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('User preferences update failed - missing user ID', {
-                    hasUpdates: !!updates,
-                    updateKeys: updates ? Object.keys(updates) : [],
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('User preferences update processing started', {
-                userId,
-                hasUpdates: !!updates,
-                updateKeys: updates ? Object.keys(updates) : [],
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             await userPreferenceService.updatePreferences(userId, updates);
             const updatedPreferences = await userPreferenceService.getUserPreferences(userId);
 
             const duration = Date.now() - startTime;
 
-            loggingService.info('User preferences updated successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('updateUserPreferences', req, startTime, {
                 hasUpdates: !!updates,
                 updateKeys: updates ? Object.keys(updates) : [],
-                duration,
-                hasUpdatedPreferences: !!updatedPreferences,
-                requestId: req.headers['x-request-id'] as string
+                hasUpdatedPreferences: !!updatedPreferences
             });
 
             // Log business event
@@ -240,64 +196,30 @@ export class MemoryController {
                 data: updatedPreferences
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User preferences update failed', {
-                userId,
-                hasUpdates: !!updates,
-                updateKeys: updates ? Object.keys(updates) : [],
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to update user preferences'
-            });
+            ControllerHelper.handleError('updateUserPreferences', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get conversation history with memory context
      */
-    static async getConversationHistory(req: Request, res: Response): Promise<Response> {
+    static async getConversationHistory(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getConversationHistory', req);
         const { userId } = req.params;
         const { limit = 20, page = 1, includeArchived = false } = req.query;
 
         try {
-            loggingService.info('Conversation history retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                limit: Number(limit),
-                page: Number(page),
-                includeArchived: Boolean(includeArchived),
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('Conversation history retrieval failed - missing user ID', {
-                    limit: Number(limit),
-                    page: Number(page),
-                    includeArchived: Boolean(includeArchived),
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('Conversation history retrieval processing started', {
-                userId,
-                limit: Number(limit),
-                page: Number(page),
-                includeArchived: Boolean(includeArchived),
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             const skip = (Number(page) - 1) * Number(limit);
             const query: any = { userId };
@@ -316,17 +238,13 @@ export class MemoryController {
             const totalCount = await ConversationMemory.countDocuments(query);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Conversation history retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getConversationHistory', req, startTime, {
                 limit: Number(limit),
                 page: Number(page),
                 includeArchived: Boolean(includeArchived),
-                duration,
                 conversationsCount: conversations.length,
                 totalCount,
-                hasConversations: !!conversations && conversations.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasConversations: !!conversations && conversations.length > 0
             });
 
             // Log business event
@@ -358,66 +276,30 @@ export class MemoryController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Conversation history retrieval failed', {
-                userId,
-                limit: Number(limit),
-                page: Number(page),
-                includeArchived: Boolean(includeArchived),
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve conversation history'
-            });
+            ControllerHelper.handleError('getConversationHistory', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get similar conversations
      */
-    static async getSimilarConversations(req: Request, res: Response): Promise<Response> {
+    static async getSimilarConversations(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getSimilarConversations', req);
         const { userId } = req.params;
         const { query, limit = 5 } = req.query;
 
         try {
-            loggingService.info('Similar conversations retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                query: query as string,
-                hasQuery: !!query,
-                limit: Number(limit),
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId || !query) {
-                loggingService.warn('Similar conversations retrieval failed - missing required fields', {
-                    userId,
-                    hasUserId: !!userId,
-                    query: query as string,
-                    hasQuery: !!query,
-                    limit: Number(limit),
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID and query are required'
                 });
             }
 
-            loggingService.info('Similar conversations retrieval processing started', {
-                userId,
-                query: query as string,
-                limit: Number(limit),
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             const similarConversations = await memoryService.getSimilarConversations(
                 userId, 
@@ -426,15 +308,11 @@ export class MemoryController {
             );
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Similar conversations retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getSimilarConversations', req, startTime, {
                 query: query as string,
                 limit: Number(limit),
-                duration,
                 similarConversationsCount: similarConversations.length,
-                hasSimilarConversations: !!similarConversations && similarConversations.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasSimilarConversations: !!similarConversations && similarConversations.length > 0
             });
 
             // Log business event
@@ -460,63 +338,30 @@ export class MemoryController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Similar conversations retrieval failed', {
-                userId,
-                query: query as string,
-                hasQuery: !!query,
-                limit: Number(limit),
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve similar conversations'
-            });
+            ControllerHelper.handleError('getSimilarConversations', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get personalized recommendations
      */
-    static async getPersonalizedRecommendations(req: Request, res: Response): Promise<Response> {
+    static async getPersonalizedRecommendations(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getPersonalizedRecommendations', req);
         const { userId } = req.params;
         const { query } = req.query;
 
         try {
-            loggingService.info('Personalized recommendations retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                query: query as string,
-                hasQuery: !!query,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId || !query) {
-                loggingService.warn('Personalized recommendations retrieval failed - missing required fields', {
-                    userId,
-                    hasUserId: !!userId,
-                    query: query as string,
-                    hasQuery: !!query,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID and query are required'
                 });
             }
 
-            loggingService.info('Personalized recommendations retrieval processing started', {
-                userId,
-                query: query as string,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             const recommendations = await memoryService.getPersonalizedRecommendations(
                 userId, 
@@ -524,14 +369,10 @@ export class MemoryController {
             );
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Personalized recommendations retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getPersonalizedRecommendations', req, startTime, {
                 query: query as string,
-                duration,
                 recommendationsCount: recommendations.length,
-                hasRecommendations: !!recommendations && recommendations.length > 0,
-                requestId: req.headers['x-request-id'] as string
+                hasRecommendations: !!recommendations && recommendations.length > 0
             });
 
             // Log business event
@@ -556,62 +397,31 @@ export class MemoryController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Personalized recommendations retrieval failed', {
-                userId,
-                query: query as string,
-                hasQuery: !!query,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve personalized recommendations'
-            });
+            ControllerHelper.handleError('getPersonalizedRecommendations', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Archive conversation
      */
-    static async archiveConversation(req: Request, res: Response): Promise<Response> {
+    static async archiveConversation(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('archiveConversation', req);
         const { conversationId } = req.params;
         const { userId } = req.body;
 
         try {
-            loggingService.info('Conversation archiving initiated', {
-                userId,
-                hasUserId: !!userId,
-                conversationId,
-                hasConversationId: !!conversationId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!conversationId || !userId) {
-                loggingService.warn('Conversation archiving failed - missing required fields', {
-                    userId,
-                    hasUserId: !!userId,
-                    conversationId,
-                    hasConversationId: !!conversationId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'Conversation ID and User ID are required'
                 });
             }
 
-            loggingService.info('Conversation archiving processing started', {
-                userId,
-                conversationId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(conversationId, 'conversationId');
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             const conversation = await ConversationMemory.findOneAndUpdate(
                 { _id: conversationId, userId },
@@ -620,12 +430,6 @@ export class MemoryController {
             );
 
             if (!conversation) {
-                loggingService.warn('Conversation archiving failed - conversation not found', {
-                    userId,
-                    conversationId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(404).json({
                     success: false,
                     message: 'Conversation not found'
@@ -633,14 +437,10 @@ export class MemoryController {
             }
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Conversation archived successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('archiveConversation', req, startTime, {
                 conversationId,
-                duration,
                 hasConversation: !!conversation,
-                isArchived: conversation.isArchived,
-                requestId: req.headers['x-request-id'] as string
+                isArchived: conversation.isArchived
             });
 
             // Log business event
@@ -662,62 +462,31 @@ export class MemoryController {
                 data: conversation
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Conversation archiving failed', {
-                userId,
-                conversationId,
-                hasConversationId: !!conversationId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to archive conversation'
-            });
+            ControllerHelper.handleError('archiveConversation', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Delete conversation
      */
-    static async deleteConversation(req: Request, res: Response): Promise<Response> {
+    static async deleteConversation(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('deleteConversation', req);
         const { conversationId } = req.params;
         const { userId } = req.body;
 
         try {
-            loggingService.info('Conversation deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                conversationId,
-                hasConversationId: !!conversationId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!conversationId || !userId) {
-                loggingService.warn('Conversation deletion failed - missing required fields', {
-                    userId,
-                    hasUserId: !!userId,
-                    conversationId,
-                    hasConversationId: !!conversationId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'Conversation ID and User ID are required'
                 });
             }
 
-            loggingService.info('Conversation deletion processing started', {
-                userId,
-                conversationId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(conversationId, 'conversationId');
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             const conversation = await ConversationMemory.findOneAndDelete({
                 _id: conversationId,
@@ -725,12 +494,6 @@ export class MemoryController {
             });
 
             if (!conversation) {
-                loggingService.warn('Conversation deletion failed - conversation not found', {
-                    userId,
-                    conversationId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(404).json({
                     success: false,
                     message: 'Conversation not found'
@@ -741,14 +504,10 @@ export class MemoryController {
             await vectorMemoryService.clearUserVectors(userId);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Conversation deleted successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('deleteConversation', req, startTime, {
                 conversationId,
-                duration,
                 hasConversation: !!conversation,
-                vectorStorageCleared: true,
-                requestId: req.headers['x-request-id'] as string
+                vectorStorageCleared: true
             });
 
             // Log business event
@@ -769,64 +528,34 @@ export class MemoryController {
                 message: 'Conversation deleted successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Conversation deletion failed', {
-                userId,
-                conversationId,
-                hasConversationId: !!conversationId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to delete conversation'
-            });
+            ControllerHelper.handleError('deleteConversation', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Reset user preferences
      */
-    static async resetPreferences(req: Request, res: Response): Promise<Response> {
+    static async resetPreferences(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('resetPreferences', req);
         const { userId } = req.params;
 
         try {
-            loggingService.info('User preferences reset initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('User preferences reset failed - missing user ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('User preferences reset processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             await userPreferenceService.resetPreferences(userId);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('User preferences reset successfully', {
-                userId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('resetPreferences', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
@@ -843,62 +572,34 @@ export class MemoryController {
                 message: 'User preferences reset successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User preferences reset failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to reset user preferences'
-            });
+            ControllerHelper.handleError('resetPreferences', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Clear all user memory (GDPR compliance)
      */
-    static async clearUserMemory(req: Request, res: Response): Promise<Response> {
+    static async clearUserMemory(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('clearUserMemory', req);
         const { userId } = req.params;
 
         try {
-            loggingService.info('User memory clearing initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('User memory clearing failed - missing user ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('User memory clearing processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             await memoryService.clearUserMemory(userId);
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('User memory cleared successfully', {
-                userId,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('clearUserMemory', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
@@ -915,52 +616,29 @@ export class MemoryController {
                 message: 'All user memory cleared successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User memory clearing failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to clear user memory'
-            });
+            ControllerHelper.handleError('clearUserMemory', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Export user memory data (GDPR compliance)
      */
-    static async exportUserData(req: Request, res: Response): Promise<Response> {
+    static async exportUserData(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('exportUserData', req);
         const { userId } = req.params;
 
         try {
-            loggingService.info('User data export initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('User data export failed - missing user ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('User data export processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             // Use streaming approach for large datasets and parallel fetching
             const [preferences, insights, vectorStorageStats] = await Promise.all([
@@ -998,20 +676,16 @@ export class MemoryController {
                 }
             };
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('User data exported successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('exportUserData', req, startTime, {
                 hasPreferences: !!preferences,
                 conversationsCount: conversations.length,
                 memoriesCount: memories.length,
                 insightsCount: insights.length,
-                hasVectorStorageStats: !!vectorMemoryService.getStorageStats(),
-                requestId: req.headers['x-request-id'] as string
+                hasVectorStorageStats: !!vectorMemoryService.getStorageStats()
             });
 
             // Log business event
+            const duration = Date.now() - startTime;
             loggingService.logBusiness({
                 event: 'user_data_exported',
                 category: 'memory_operations',
@@ -1031,52 +705,29 @@ export class MemoryController {
                 data: exportData
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User data export failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to export user data'
-            });
+            ControllerHelper.handleError('exportUserData', error, req, res, startTime);
+            return res;
         }
     }
 
     /**
      * Get memory storage statistics
      */
-    static async getStorageStats(req: Request, res: Response): Promise<Response> {
+    static async getStorageStats(req: AuthenticatedRequest, res: Response): Promise<Response> {
         const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return res;
+        ControllerHelper.logRequestStart('getStorageStats', req);
         const { userId } = req.params;
 
         try {
-            loggingService.info('Memory storage statistics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             if (!userId) {
-                loggingService.warn('Memory storage statistics retrieval failed - missing user ID', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 return res.status(400).json({
                     success: false,
                     message: 'User ID is required'
                 });
             }
 
-            loggingService.info('Memory storage statistics retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ServiceHelper.validateObjectId(userId, 'userId');
 
             // Use aggregation for better performance and parallel execution
             const [storageStats, vectorStats] = await Promise.all([
@@ -1102,15 +753,11 @@ export class MemoryController {
             const memorySize = memoryStats[0]?.totalSize || 0;
 
             const duration = Date.now() - startTime;
-
-            loggingService.info('Memory storage statistics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getStorageStats', req, startTime, {
                 conversationCount,
                 memoryCount,
                 hasPreferences: !!preferenceExists,
-                hasVectorStats: !!vectorStats,
-                requestId: req.headers['x-request-id'] as string
+                hasVectorStats: !!vectorStats
             });
 
             // Log business event
@@ -1144,20 +791,8 @@ export class MemoryController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Memory storage statistics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to retrieve storage statistics'
-            });
+            ControllerHelper.handleError('getStorageStats', error, req, res, startTime);
+            return res;
         }
     }
 }

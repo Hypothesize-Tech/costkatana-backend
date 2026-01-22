@@ -3,6 +3,8 @@ import { ingestionService, UploadProgress } from '../services/ingestion.service'
 import { DocumentModel } from '../models/Document';
 import { loggingService } from '../services/logging.service';
 import { S3Service } from '../services/s3.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 
 // Allowed file types for document upload
@@ -97,17 +99,13 @@ function validateFileUpload(fileName: string, fileSize: number, mimeType: string
 /**
  * Trigger manual ingestion (admin only)
  */
-export const triggerIngestion = async (req: any, res: Response): Promise<void> => {
-    try {
-        const { type, userId, since } = req.body as { type?: string; userId?: string; since?: string };
+export const triggerIngestion = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const { type, userId, since } = req.body as { type?: string; userId?: string; since?: string };
+    
+    ControllerHelper.logRequestStart('triggerIngestion', req, { type });
 
-        loggingService.info('Manual ingestion triggered', {
-            component: 'IngestionController',
-            operation: 'triggerIngestion',
-            type,
-            userId,
-            triggeredBy: req.userId
-        });
+    try {
 
         let result;
 
@@ -156,17 +154,15 @@ export const triggerIngestion = async (req: any, res: Response): Promise<void> =
  * Upload custom document (with S3 storage)
  * Expects base64 encoded file in request body
  */
-export const uploadDocument = async (req: any, res: Response): Promise<void> => {
-    try {
-        const userId = req.userId;
+export const uploadDocument = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('uploadDocument', req);
 
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
+    try {
 
         const { fileName, fileData, mimeType, projectId, tags, description } = req.body as {
             fileName?: string;
@@ -432,10 +428,14 @@ export const getUserDocuments = async (req: any, res: Response): Promise<void> =
  * Check document ingestion status by documentId
  * Returns whether the document exists and how many chunks were created
  */
-export const checkDocumentStatus = async (req: any, res: Response): Promise<void> => {
+export const checkDocumentStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId ?? undefined;
+    const { documentId } = req.params as { documentId: string };
+    
+    ControllerHelper.logRequestStart('checkDocumentStatus', req, { documentId });
+
     try {
-        const userId = req.userId;
-        const { documentId } = req.params as { documentId: string };
 
         if (!userId) {
             res.status(401).json({
@@ -495,6 +495,11 @@ export const checkDocumentStatus = async (req: any, res: Response): Promise<void
             'metadata.documentId': documentId
         }).select('metadata status createdAt ingestedAt');
 
+        ControllerHelper.logRequestSuccess('checkDocumentStatus', req, startTime, {
+            documentId,
+            totalChunks
+        });
+
         res.json({
             success: true,
             data: {
@@ -518,43 +523,23 @@ export const checkDocumentStatus = async (req: any, res: Response): Promise<void
         });
 
     } catch (error) {
-        loggingService.error('Check document status failed', {
-            component: 'IngestionController',
-            operation: 'checkDocumentStatus',
-            userId: req.userId,
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to check document status',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('checkDocumentStatus', error, req, res, startTime, { documentId });
     }
 };
 
 /**
  * Get document preview
  */
-export const getDocumentPreview = async (req: any, res: Response): Promise<void> => {
+export const getDocumentPreview = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const { documentId } = req.params as { documentId: string };
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getDocumentPreview', req, { documentId });
+
     try {
-        const userId = req.userId;
-        const { documentId } = req.params as { documentId: string };
-
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
-
-        loggingService.info('Fetching document preview', {
-            component: 'IngestionController',
-            operation: 'getDocumentPreview',
-            userId,
-            documentId
-        });
 
         // Get ALL chunks of the document for complete preview
         const chunks = await DocumentModel.find({
@@ -627,6 +612,11 @@ export const getDocumentPreview = async (req: any, res: Response): Promise<void>
             .map(chunk => chunk.content)
             .join('\n\n');
 
+        ControllerHelper.logRequestSuccess('getDocumentPreview', req, startTime, {
+            documentId,
+            previewChunks: chunks.length
+        });
+
         res.json({
             success: true,
             data: {
@@ -640,28 +630,20 @@ export const getDocumentPreview = async (req: any, res: Response): Promise<void>
         });
 
     } catch (error) {
-        loggingService.error('Get document preview failed', {
-            component: 'IngestionController',
-            operation: 'getDocumentPreview',
-            userId: req.userId,
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get document preview',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('getDocumentPreview', error, req, res, startTime, { documentId });
     }
 };
 
 /**
  * Get ingestion job status
  */
-export const getJobStatus = async (req: any, res: Response): Promise<void> => {
-    try {
-        const { jobId } = req.params as { jobId: string };
+export const getJobStatus = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const { jobId } = req.params as { jobId: string };
+    
+    ControllerHelper.logRequestStart('getJobStatus', req, { jobId });
 
+    try {
         const job = ingestionService.getJobStatus(jobId);
 
         if (!job) {
@@ -672,67 +654,52 @@ export const getJobStatus = async (req: any, res: Response): Promise<void> => {
             return;
         }
 
+        ControllerHelper.logRequestSuccess('getJobStatus', req, startTime, { jobId });
+
         res.json({
             success: true,
             data: job
         });
     } catch (error) {
-        loggingService.error('Get job status failed', {
-            component: 'IngestionController',
-            operation: 'getJobStatus',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get job status',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('getJobStatus', error, req, res, startTime, { jobId });
     }
 };
 
 /**
  * Get ingestion statistics
  */
-export const getStats = async (req: any, res: Response): Promise<void> => {
-    try {
-        const userId = req.userId;
+export const getStats = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const userId = req.userId;
+    
+    ControllerHelper.logRequestStart('getStats', req);
 
+    try {
         const stats = await ingestionService.getStats(userId ?? undefined);
+
+        ControllerHelper.logRequestSuccess('getStats', req, startTime);
 
         res.json({
             success: true,
             data: stats
         });
     } catch (error) {
-        loggingService.error('Get ingestion stats failed', {
-            component: 'IngestionController',
-            operation: 'getStats',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to get statistics',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('getStats', error, req, res, startTime);
     }
 };
 
 /**
  * List user's uploaded documents
  */
-export const listDocuments = async (req: any, res: Response): Promise<void> => {
-    try {
-        const userId = req.userId;
+export const listDocuments = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('listDocuments', req, { query: req.query });
 
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
+    try {
 
         const { limit = 20, skip = 0, source } = req.query as { 
             limit?: string | number; 
@@ -757,6 +724,11 @@ export const listDocuments = async (req: any, res: Response): Promise<void> => {
 
         const total = await DocumentModel.countDocuments(query);
 
+        ControllerHelper.logRequestSuccess('listDocuments', req, startTime, {
+            total,
+            count: documents.length
+        });
+
         res.json({
             success: true,
             data: {
@@ -767,40 +739,30 @@ export const listDocuments = async (req: any, res: Response): Promise<void> => {
             }
         });
     } catch (error) {
-        loggingService.error('List documents failed', {
-            component: 'IngestionController',
-            operation: 'listDocuments',
-            userId: req.userId,
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to list documents',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('listDocuments', error, req, res, startTime);
     }
 };
 
 /**
  * Delete document
  */
-export const deleteDocument = async (req: any, res: Response): Promise<void> => {
-    try {
-        const userId = req.userId;
-        const { id } = req.params as { id: string };
+export const deleteDocument = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const { id } = req.params as { id: string };
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('deleteDocument', req, { documentId: id });
 
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
+    try {
+        ServiceHelper.validateObjectId(id, 'documentId');
 
         const success = await ingestionService.deleteDocument(id, userId ?? '');
 
         if (success) {
+            ControllerHelper.logRequestSuccess('deleteDocument', req, startTime, { documentId: id });
+
             res.json({
                 success: true,
                 message: 'Document deleted successfully'
@@ -812,32 +774,19 @@ export const deleteDocument = async (req: any, res: Response): Promise<void> => 
             });
         }
     } catch (error) {
-        loggingService.error('Delete document failed', {
-            component: 'IngestionController',
-            operation: 'deleteDocument',
-            userId: req.userId,
-            documentId: req.params.id,
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Failed to delete document',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('deleteDocument', error, req, res, startTime, { documentId: id });
     }
 };
 
 /**
  * Reindex all documents (admin only)
  */
-export const reindexAll = async (req: any, res: Response): Promise<void> => {
+export const reindexAll = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    
+    ControllerHelper.logRequestStart('reindexAll', req);
+
     try {
-        loggingService.info('Full reindex initiated', {
-            component: 'IngestionController',
-            operation: 'reindexAll',
-            triggeredBy: req.userId
-        });
 
         // Start all ingestion tasks
         const results = await Promise.allSettled([
@@ -865,42 +814,33 @@ export const reindexAll = async (req: any, res: Response): Promise<void> => {
             }
         });
 
+        ControllerHelper.logRequestSuccess('reindexAll', req, startTime, {
+            summaryCount: summary.length
+        });
+
         res.json({
             success: true,
             message: 'Reindex completed',
             data: summary
         });
     } catch (error) {
-        loggingService.error('Reindex failed', {
-            component: 'IngestionController',
-            operation: 'reindexAll',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
-        res.status(500).json({
-            success: false,
-            message: 'Reindex failed',
-            error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        ControllerHelper.handleError('reindexAll', error, req, res, startTime);
     }
 };
 
 /**
  * SSE endpoint for upload progress tracking
  */
-export const getUploadProgress = async (req: any, res: Response): Promise<void> => {
+export const getUploadProgress = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const startTime = Date.now();
+    const { uploadId } = req.params as { uploadId: string };
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getUploadProgress', req, { uploadId });
+
     try {
-        const userId = req.userId;
-        const { uploadId } = req.params as { uploadId: string };
-
-        if (!userId) {
-            res.status(401).json({
-                success: false,
-                message: 'Authentication required'
-            });
-            return;
-        }
-
         if (!uploadId) {
             res.status(400).json({
                 success: false,
@@ -992,26 +932,10 @@ export const getUploadProgress = async (req: any, res: Response): Promise<void> 
             });
         });
 
-        loggingService.info('SSE connection established for upload progress', {
-            component: 'IngestionController',
-            operation: 'getUploadProgress',
-            userId,
-            uploadId
-        });
-
+        // SSE connection established - logging handled by event handlers
     } catch (error) {
-        loggingService.error('Upload progress SSE failed', {
-            component: 'IngestionController',
-            operation: 'getUploadProgress',
-            error: error instanceof Error ? error.message : String(error)
-        });
-
         if (!res.headersSent) {
-            res.status(500).json({
-                success: false,
-                message: 'Failed to establish progress stream',
-                error: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('getUploadProgress', error, req, res, startTime, { uploadId });
         }
     }
 };

@@ -3,6 +3,8 @@ import { Response } from 'express';
 import { TelemetryService } from '../services/telemetry.service';
 import { loggingService } from '../services/logging.service';
 import { trace } from '@opentelemetry/api';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class TelemetryController {
   // Background processing queue
@@ -27,8 +29,11 @@ export class TelemetryController {
   /**
    * Get telemetry data with filters
    */
-  static async getTelemetry(req: any, res: Response) {
+  static async getTelemetry(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getTelemetry', req);
     const requestId = req.headers['x-request-id'] as string;
     const {
       tenant_id,
@@ -100,17 +105,14 @@ export class TelemetryController {
         sort_by: sort_by as string,
         sort_order: sort_order as 'asc' | 'desc'
       });
-      const duration = Date.now() - startTime;
-
-      loggingService.info('Telemetry query completed successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('getTelemetry', req, startTime, {
         tenant_id,
         workspace_id,
         resultsCount: results?.data?.length || 0
       });
 
       // Queue background business event logging
+      const duration = Date.now() - startTime;
       TelemetryController.queueBackgroundOperation(async () => {
         loggingService.logBusiness({
           event: 'telemetry_queried',
@@ -139,12 +141,11 @@ export class TelemetryController {
       });
     } catch (error: any) {
       TelemetryController.recordDbFailure();
-      const duration = Date.now() - startTime;
       
       if (error.message === 'Service temporarily unavailable') {
         loggingService.warn('Telemetry service unavailable', {
           requestId,
-          duration
+          duration: Date.now() - startTime
         });
         
         res.status(503).json({
@@ -155,18 +156,9 @@ export class TelemetryController {
         return;
       }
       
-      loggingService.error('Telemetry query failed', {
-        requestId,
+      ControllerHelper.handleError('getTelemetry', error, req, res, startTime, {
         tenant_id,
-        workspace_id,
-        error: error.message || 'Unknown error',
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get telemetry data',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        workspace_id
       });
     }
   }
@@ -174,22 +166,15 @@ export class TelemetryController {
   /**
    * Get trace details
    */
-  static async getTraceDetails(req: any, res: Response): Promise<void> {
+  static async getTraceDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getTraceDetails', req);
     const { traceId } = req.params;
 
     try {
-      loggingService.info('Trace details retrieval initiated', {
-        requestId,
-        traceId,
-        hasTraceId: !!traceId
-      });
-      
       if (!traceId) {
-        loggingService.warn('Trace details retrieval failed - trace ID is required', {
-          requestId
-        });
         res.status(400).json({
           success: false,
           error: 'Trace ID is required'
@@ -200,9 +185,7 @@ export class TelemetryController {
       const traceDetails = await TelemetryService.getTraceDetails(traceId);
       const duration = Date.now() - startTime;
       
-      loggingService.info('Trace details retrieved successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('getTraceDetails', req, startTime, {
         traceId,
         hasTraceDetails: !!traceDetails
       });
@@ -223,20 +206,8 @@ export class TelemetryController {
         ...traceDetails
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Trace details retrieval failed', {
-        requestId,
-        traceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get trace details',
-        message: error instanceof Error ? error.message : 'Unknown error'
+      ControllerHelper.handleError('getTraceDetails', error, req, res, startTime, {
+        traceId
       });
     }
   }
@@ -244,8 +215,11 @@ export class TelemetryController {
   /**
    * Get performance metrics
    */
-  static async getMetrics(req: any, res: Response) {
+  static async getMetrics(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getMetrics', req);
     const requestId = req.headers['x-request-id'] as string;
     const { tenant_id, workspace_id, timeframe } = req.query;
 
@@ -265,11 +239,9 @@ export class TelemetryController {
         workspace_id: workspace_id as string,
         timeframe: timeframe as string || '1h'
       });
-      const duration = Date.now() - startTime;
 
-      loggingService.info('Performance metrics retrieved successfully', {
-        requestId,
-        duration,
+      const duration = Date.now() - startTime;
+      ControllerHelper.logRequestSuccess('getMetrics', req, startTime, {
         tenant_id,
         workspace_id,
         timeframe: timeframe as string || '1h',
@@ -294,22 +266,10 @@ export class TelemetryController {
         metrics
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Performance metrics retrieval failed', {
-        requestId,
+      ControllerHelper.handleError('getMetrics', error, req, res, startTime, {
         tenant_id,
         workspace_id,
-        timeframe: timeframe as string || '1h',
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get metrics data',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        timeframe: timeframe as string || '1h'
       });
     }
   }
@@ -317,26 +277,20 @@ export class TelemetryController {
   /**
    * Get service dependencies
    */
-  static async getServiceDependencies(req: any, res: Response) {
+  static async getServiceDependencies(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getServiceDependencies', req);
     const { timeframe } = req.query;
 
     try {
-      loggingService.info('Service dependencies retrieval initiated', {
-        requestId,
-        timeframe: timeframe as string || '1h',
-        hasTimeframe: !!timeframe
-      });
-
       const dependencies = await TelemetryService.getServiceDependencies(
         timeframe as string || '1h'
       );
       const duration = Date.now() - startTime;
 
-      loggingService.info('Service dependencies retrieved successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('getServiceDependencies', req, startTime, {
         timeframe: timeframe as string || '1h',
         hasDependencies: !!dependencies
       });
@@ -357,20 +311,8 @@ export class TelemetryController {
         ...dependencies
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Service dependencies retrieval failed', {
-        requestId,
-        timeframe: timeframe as string || '1h',
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get service dependencies',
-        message: error instanceof Error ? error.message : 'Unknown error'
+      ControllerHelper.handleError('getServiceDependencies', error, req, res, startTime, {
+        timeframe: timeframe as string || '1h'
       });
     }
   }
@@ -378,8 +320,9 @@ export class TelemetryController {
   /**
    * Check telemetry health
    */
-  static async checkTelemetryHealth(_req: any, res: Response) {
+  static async checkTelemetryHealth(_req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    ControllerHelper.logRequestStart('checkTelemetryHealth', _req);
     const requestId = _req?.headers?.['x-request-id'] as string;
 
     try {
@@ -456,10 +399,7 @@ export class TelemetryController {
       };
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Telemetry health check completed successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('checkTelemetryHealth', _req, startTime, {
         collectorStatus,
         totalSpans: telemetryStats.total_spans,
         recentSpans: telemetryStats.recent_spans,
@@ -504,14 +444,12 @@ export class TelemetryController {
         }
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
       loggingService.error('Telemetry health check failed', {
         requestId,
         hasRequestId: !!requestId,
         error: error.message || 'Unknown error',
         stack: error.stack,
-        duration
+        duration: Date.now() - startTime
       });
       
       res.status(500).json({
@@ -525,8 +463,11 @@ export class TelemetryController {
   /**
    * Get telemetry dashboard data
    */
-  static async getDashboard(req: any, res: Response) {
+  static async getDashboard(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getDashboard', req);
     const requestId = req.headers['x-request-id'] as string;
     const { tenant_id, workspace_id } = req.query;
 
@@ -566,10 +507,7 @@ export class TelemetryController {
       } = dashboardData;
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Telemetry dashboard retrieved successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('getDashboard', req, startTime, {
         tenant_id,
         workspace_id,
         hasLast5min: !!last5min,
@@ -617,21 +555,9 @@ export class TelemetryController {
         }
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Telemetry dashboard retrieval failed', {
-        requestId,
+      ControllerHelper.handleError('getDashboard', error, req, res, startTime, {
         tenant_id,
-        workspace_id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get dashboard data',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        workspace_id
       });
     }
   }
@@ -639,8 +565,11 @@ export class TelemetryController {
   /**
    * Get enrichment statistics
    */
-  static async getEnrichmentStats(req: any, res: Response) {
+  static async getEnrichmentStats(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getEnrichmentStats', req);
     const requestId = req.headers['x-request-id'] as string;
     const { timeframe } = req.query;
 
@@ -654,11 +583,9 @@ export class TelemetryController {
       const stats = await TelemetryService.getEnrichmentStats(
         timeframe as string || '1h'
       );
-      const duration = Date.now() - startTime;
 
-      loggingService.info('Enrichment statistics retrieved successfully', {
-        requestId,
-        duration,
+      const duration = Date.now() - startTime;
+      ControllerHelper.logRequestSuccess('getEnrichmentStats', req, startTime, {
         timeframe: timeframe as string || '1h',
         hasStats: !!stats
       });
@@ -679,20 +606,8 @@ export class TelemetryController {
         enrichment_stats: stats
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Enrichment statistics retrieval failed', {
-        requestId,
-        timeframe: timeframe as string || '1h',
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get enrichment statistics',
-        message: error instanceof Error ? error.message : 'Unknown error'
+      ControllerHelper.handleError('getEnrichmentStats', error, req, res, startTime, {
+        timeframe: timeframe as string || '1h'
       });
     }
   }
@@ -700,8 +615,11 @@ export class TelemetryController {
   /**
    * Get enriched spans with AI insights
    */
-  static async getEnrichedSpans(req: any, res: Response) {
+  static async getEnrichedSpans(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getEnrichedSpans', req);
     const requestId = req.headers['x-request-id'] as string;
     const { tenant_id, workspace_id, timeframe, limit } = req.query;
 
@@ -724,11 +642,9 @@ export class TelemetryController {
         timeframe: timeframe as string || '1h',
         limit: limit ? Number(limit) : 50
       });
-      const duration = Date.now() - startTime;
 
-      loggingService.info('Enriched spans retrieved successfully', {
-        requestId,
-        duration,
+      const duration = Date.now() - startTime;
+      ControllerHelper.logRequestSuccess('getEnrichedSpans', req, startTime, {
         tenant_id,
         workspace_id,
         timeframe: timeframe as string || '1h',
@@ -757,23 +673,11 @@ export class TelemetryController {
         count: spans.length
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Enriched spans retrieval failed', {
-        requestId,
+      ControllerHelper.handleError('getEnrichedSpans', error, req, res, startTime, {
         tenant_id,
         workspace_id,
         timeframe: timeframe as string || '1h',
-        limit: limit ? Number(limit) : 50,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get enriched spans',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        limit: limit ? Number(limit) : 50
       });
     }
   }
@@ -781,8 +685,9 @@ export class TelemetryController {
   /**
    * Get span processor health and buffer stats
    */
-  static async getProcessorHealth(_req: any, res: Response) {
+  static async getProcessorHealth(_req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    ControllerHelper.logRequestStart('getProcessorHealth', _req);
     const requestId = _req?.headers?.['x-request-id'] as string;
 
     try {
@@ -794,11 +699,7 @@ export class TelemetryController {
       // This would need to be implemented to access the processor instance
       // For now, return basic health info
       const duration = Date.now() - startTime;
-
-      loggingService.info('Processor health check completed successfully', {
-        requestId,
-        duration
-      });
+      ControllerHelper.logRequestSuccess('getProcessorHealth', _req, startTime);
 
       // Log business event
       loggingService.logBusiness({
@@ -825,29 +726,18 @@ export class TelemetryController {
         }
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Processor health check failed', {
-        requestId,
-        hasRequestId: !!requestId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get processor health',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getProcessorHealth', error, _req, res, startTime);
     }
   }
 
   /**
    * Enhanced dashboard with enrichment data
    */
-  static async getEnhancedDashboard(req: any, res: Response) {
+  static async getEnhancedDashboard(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('getEnhancedDashboard', req);
     const requestId = req.headers['x-request-id'] as string;
     const { tenant_id, workspace_id } = req.query;
 
@@ -892,10 +782,7 @@ export class TelemetryController {
       });
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Enhanced telemetry dashboard retrieved successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('getEnhancedDashboard', req, startTime, {
         tenant_id,
         workspace_id,
         hasStandardDashboard: !!standardDashboard,
@@ -937,21 +824,9 @@ export class TelemetryController {
         }
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Enhanced telemetry dashboard retrieval failed', {
-        requestId,
+      ControllerHelper.handleError('getEnhancedDashboard', error, req, res, startTime, {
         tenant_id,
-        workspace_id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get enhanced dashboard data',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        workspace_id
       });
     }
   }
@@ -959,8 +834,11 @@ export class TelemetryController {
   /**
    * Manually trigger span enrichment (for testing/admin purposes)
    */
-  static async triggerEnrichment(req: any, res: Response) {
+  static async triggerEnrichment(req: AuthenticatedRequest, res: Response) {
     const startTime = Date.now();
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    ControllerHelper.logRequestStart('triggerEnrichment', req);
     const requestId = req.headers['x-request-id'] as string;
     const { timeframe = '24h' } = req.query;
 
@@ -985,10 +863,7 @@ export class TelemetryController {
       });
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Manual span enrichment triggered successfully', {
-        requestId,
-        duration,
+      ControllerHelper.logRequestSuccess('triggerEnrichment', req, startTime, {
         timeframe
       });
 
@@ -1008,20 +883,8 @@ export class TelemetryController {
         timeframe
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Manual span enrichment trigger failed', {
-        requestId,
-        timeframe,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        error: 'Failed to trigger enrichment',
-        message: error instanceof Error ? error.message : 'Unknown error'
+      ControllerHelper.handleError('triggerEnrichment', error, req, res, startTime, {
+        timeframe
       });
     }
   }

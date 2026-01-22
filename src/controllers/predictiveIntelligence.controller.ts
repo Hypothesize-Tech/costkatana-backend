@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { PredictiveCostIntelligenceService } from '../services/predictiveCostIntelligence.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class PredictiveIntelligenceController {
     // Background processing queue
@@ -24,15 +26,15 @@ export class PredictiveIntelligenceController {
      * Get comprehensive predictive intelligence analysis
      * GET /api/predictive-intelligence
      */
-    static async getPredictiveIntelligence(req: any, res: Response): Promise<Response> {
+    static async getPredictiveIntelligence(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getPredictiveIntelligence', req);
 
             const {
                 scope = 'user',
@@ -50,11 +52,19 @@ export class PredictiveIntelligenceController {
                 });
             }
 
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+
             if (scope === 'team' && !scopeId) {
                 return res.status(400).json({
                     success: false,
                     message: 'Team ID required when scope is team'
                 });
+            }
+
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
             }
 
             // Validate timeHorizon
@@ -95,6 +105,8 @@ export class PredictiveIntelligenceController {
             // Reset failure count on success
             PredictiveIntelligenceController.serviceFailureCount = 0;
 
+            ControllerHelper.logRequestSuccess('getPredictiveIntelligence', req, startTime);
+
             return res.json({
                 success: true,
                 data: intelligenceData,
@@ -103,11 +115,6 @@ export class PredictiveIntelligenceController {
 
         } catch (error: any) {
             PredictiveIntelligenceController.recordServiceFailure();
-            loggingService.error('Error getting predictive intelligence:', { 
-                error: error.message,
-                userId: req.user?.id,
-                failureCount: PredictiveIntelligenceController.serviceFailureCount
-            });
             
             if (error.message === 'Request timeout') {
                 return res.status(408).json({
@@ -120,6 +127,7 @@ export class PredictiveIntelligenceController {
                     message: 'Service temporarily unavailable. Please try again later.'
                 });
             } else {
+                ControllerHelper.handleError('getPredictiveIntelligence', error, req, res, startTime);
                 return res.status(500).json({
                     success: false,
                     message: 'Failed to generate predictive intelligence',
@@ -133,15 +141,15 @@ export class PredictiveIntelligenceController {
      * Get proactive alerts only
      * GET /api/predictive-intelligence/alerts
      */
-    static async getProactiveAlerts(req: any, res: Response): Promise<Response> {
+    static async getProactiveAlerts(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getProactiveAlerts', req);
 
             const {
                 scope = 'user',
@@ -149,6 +157,13 @@ export class PredictiveIntelligenceController {
                 severity,
                 limit = 10
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -174,6 +189,10 @@ export class PredictiveIntelligenceController {
                 alerts = alerts.slice(0, parsedLimit);
             }
 
+            ControllerHelper.logRequestSuccess('getProactiveAlerts', req, startTime, {
+                alertsCount: alerts.length
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -185,7 +204,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting proactive alerts:', error);
+            ControllerHelper.handleError('getProactiveAlerts', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve proactive alerts',
@@ -198,21 +217,28 @@ export class PredictiveIntelligenceController {
      * Get budget exceedance projections
      * GET /api/predictive-intelligence/budget-projections
      */
-    static async getBudgetProjections(req: any, res: Response): Promise<Response> {
+    static async getBudgetProjections(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getBudgetProjections', req);
 
             const {
                 scope = 'user',
                 scopeId,
                 daysAhead = 30
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -230,6 +256,10 @@ export class PredictiveIntelligenceController {
             // Sort by urgency (days until exceedance)
             budgetProjections.sort((a, b) => a.daysUntilExceedance - b.daysUntilExceedance);
 
+            ControllerHelper.logRequestSuccess('getBudgetProjections', req, startTime, {
+                projectionsCount: budgetProjections.length
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -245,7 +275,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting budget projections:', error);
+            ControllerHelper.handleError('getBudgetProjections', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve budget projections',
@@ -258,15 +288,15 @@ export class PredictiveIntelligenceController {
      * Get optimization recommendations with intelligence
      * GET /api/predictive-intelligence/optimizations
      */
-    static async getIntelligentOptimizations(req: any, res: Response): Promise<Response> {
+    static async getIntelligentOptimizations(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getIntelligentOptimizations', req);
 
             const {
                 scope = 'user',
@@ -275,6 +305,13 @@ export class PredictiveIntelligenceController {
                 difficulty,
                 type
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -309,6 +346,10 @@ export class PredictiveIntelligenceController {
             const totalPotentialSavings = optimizations.reduce((sum, opt) => sum + opt.potentialSavings, 0);
             const avgConfidence = optimizations.reduce((sum, opt) => sum + opt.confidenceLevel, 0) / optimizations.length;
 
+            ControllerHelper.logRequestSuccess('getIntelligentOptimizations', req, startTime, {
+                optimizationsCount: optimizations.length
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -325,7 +366,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting intelligent optimizations:', error);
+            ControllerHelper.handleError('getIntelligentOptimizations', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve intelligent optimizations',
@@ -338,15 +379,15 @@ export class PredictiveIntelligenceController {
      * Get scenario simulations for planning
      * GET /api/predictive-intelligence/scenarios
      */
-    static async getScenarioSimulations(req: any, res: Response): Promise<Response> {
+    static async getScenarioSimulations(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getScenarioSimulations', req);
 
             const {
                 scope = 'user',
@@ -354,6 +395,13 @@ export class PredictiveIntelligenceController {
                 timeHorizon = 90,
                 timeframe
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -378,6 +426,10 @@ export class PredictiveIntelligenceController {
             const optimizedTotal = scenarios.reduce((sum, s) => sum + s.projectedCosts.optimized, 0);
             const totalSavings = scenarios.reduce((sum, s) => sum + s.projectedCosts.savings, 0);
 
+            ControllerHelper.logRequestSuccess('getScenarioSimulations', req, startTime, {
+                scenariosCount: scenarios.length
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -398,7 +450,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting scenario simulations:', error);
+            ControllerHelper.handleError('getScenarioSimulations', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve scenario simulations',
@@ -411,20 +463,27 @@ export class PredictiveIntelligenceController {
      * Get token trends and prompt growth analysis
      * GET /api/predictive-intelligence/token-trends
      */
-    static async getTokenTrends(req: any, res: Response): Promise<Response> {
+    static async getTokenTrends(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTokenTrends', req);
 
             const {
                 scope = 'user',
                 scopeId
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -439,6 +498,8 @@ export class PredictiveIntelligenceController {
 
             const tokenTrends = intelligenceData.historicalTokenTrends;
             const promptGrowth = intelligenceData.promptLengthGrowth;
+
+            ControllerHelper.logRequestSuccess('getTokenTrends', req, startTime);
 
             return res.json({
                 success: true,
@@ -457,7 +518,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting token trends:', error);
+            ControllerHelper.handleError('getTokenTrends', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve token trends',
@@ -470,20 +531,27 @@ export class PredictiveIntelligenceController {
      * Get model switching patterns and predictions
      * GET /api/predictive-intelligence/model-patterns
      */
-    static async getModelPatterns(req: any, res: Response): Promise<Response> {
+    static async getModelPatterns(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getModelPatterns', req);
 
             const {
                 scope = 'user',
                 scopeId
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -509,6 +577,8 @@ export class PredictiveIntelligenceController {
                 modelPatterns.modelPreferences[0]
             );
 
+            ControllerHelper.logRequestSuccess('getModelPatterns', req, startTime);
+
             return res.json({
                 success: true,
                 data: {
@@ -530,7 +600,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting model patterns:', error);
+            ControllerHelper.handleError('getModelPatterns', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve model patterns',
@@ -543,20 +613,27 @@ export class PredictiveIntelligenceController {
      * Get cross-platform insights
      * GET /api/predictive-intelligence/cross-platform
      */
-    static async getCrossPlatformInsights(req: any, res: Response): Promise<Response> {
+    static async getCrossPlatformInsights(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getCrossPlatformInsights', req);
 
             const {
                 scope = 'user',
                 scopeId
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -582,6 +659,10 @@ export class PredictiveIntelligenceController {
                 crossPlatformInsights[0]
             );
 
+            ControllerHelper.logRequestSuccess('getCrossPlatformInsights', req, startTime, {
+                platformsCount: crossPlatformInsights.length
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -600,7 +681,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting cross-platform insights:', error);
+            ControllerHelper.handleError('getCrossPlatformInsights', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve cross-platform insights',
@@ -613,20 +694,27 @@ export class PredictiveIntelligenceController {
      * Get predictive intelligence summary dashboard
      * GET /api/predictive-intelligence/dashboard
      */
-    static async getDashboardSummary(req: any, res: Response): Promise<Response> {
+    static async getDashboardSummary(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ 
-                    success: false, 
-                    message: 'Authentication required' 
-                });
-            }
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({ 
+                success: false, 
+                message: 'Authentication required' 
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getDashboardSummary', req);
 
             const {
                 scope = 'user',
                 scopeId
             } = req.query;
+
+            if (scope === 'project' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
+            if (scope === 'team' && scopeId) {
+                ServiceHelper.validateObjectId(scopeId as string, 'scopeId');
+            }
 
             const intelligenceData = await PredictiveCostIntelligenceService.generatePredictiveIntelligence(
                 userId,
@@ -685,6 +773,8 @@ export class PredictiveIntelligenceController {
                 }
             };
 
+            ControllerHelper.logRequestSuccess('getDashboardSummary', req, startTime);
+
             return res.json({
                 success: true,
                 data: summary,
@@ -692,7 +782,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
-            loggingService.error('Error getting dashboard summary:', error);
+            ControllerHelper.handleError('getDashboardSummary', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve dashboard summary',
@@ -705,17 +795,17 @@ export class PredictiveIntelligenceController {
      * POST /api/predictive-intelligence/auto-optimize/:alertId
      * Auto-optimize an alert or optimization opportunity
      */
-    static async autoOptimize(req: any, res: Response): Promise<Response> {
+    static async autoOptimize(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = req.user?.id;
-            const { alertId } = req.params;
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({
+                success: false,
+                message: 'Authentication required'
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('autoOptimize', req);
 
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    message: 'Authentication required'
-                });
-            }
+            const { alertId } = req.params;
 
             if (!alertId) {
                 return res.status(400).json({
@@ -723,8 +813,6 @@ export class PredictiveIntelligenceController {
                     message: 'Alert ID is required'
                 });
             }
-
-            loggingService.info(`Auto-optimizing alert ${alertId} for user ${userId}`);
 
             // For demonstration purposes, we'll simulate different types of auto-optimizations
             let optimizationResult;
@@ -743,6 +831,14 @@ export class PredictiveIntelligenceController {
                 optimizationResult = await PredictiveIntelligenceController.handleGenericOptimization(alertId, userId);
             }
 
+            ControllerHelper.logRequestSuccess('autoOptimize', req, startTime, {
+                alertId
+            });
+
+            ControllerHelper.logRequestSuccess('autoOptimize', req, startTime, {
+                alertId
+            });
+
             return res.status(200).json({
                 success: true,
                 message: 'Auto-optimization completed successfully',
@@ -757,6 +853,7 @@ export class PredictiveIntelligenceController {
             });
 
         } catch (error: any) {
+            ControllerHelper.handleError('autoOptimize', error, req, res, startTime);
             loggingService.error('Error in auto-optimization:', error);
             return res.status(500).json({
                 success: false,

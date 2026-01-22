@@ -4,7 +4,8 @@ import { StateGraph, Annotation } from "@langchain/langgraph";
 import { BaseMessage, HumanMessage, AIMessage } from "@langchain/core/messages";
 import { BaseCallbackHandler } from "@langchain/core/callbacks/base";
 import { langSmithService } from './langsmith.service';
-import { RetryWithBackoff, RetryConfigs } from '../utils/retryWithBackoff';
+import { RetryWithBackoff, RetryConfigs } from '@utils/retryWithBackoff';
+import { TokenEstimator } from '@utils/tokenEstimator';
 import { WebSearchTool } from '../tools/webSearch.tool';
 import { TrendingDetectorService } from './trendingDetector.service';
 import { memoryService, MemoryContext, MemoryService } from './memory.service';
@@ -2137,8 +2138,8 @@ Sources: ${combinedContent.map((item, index) => `${index + 1}. ${item.source}`).
     }
 
     private estimateTokens(text: string): number {
-        // Simple token estimation - roughly 4 characters per token
-        return Math.ceil(text.length / 4);
+        // Use centralized token estimation utility
+        return TokenEstimator.estimate(text);
     }
 
     private getStrategyPrompt(chatMode: 'fastest' | 'cheapest' | 'balanced'): string {

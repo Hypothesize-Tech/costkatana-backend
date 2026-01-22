@@ -5,6 +5,8 @@ import { OptimizationOutcome } from '../models/OptimizationOutcome';
 import { optimizationFeedbackLoop } from '../services/optimizationFeedbackLoop.service';
 import { loggingService } from '../services/logging.service';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // ============================================================================
 // BRAIN CONTROLLER
@@ -61,7 +63,10 @@ export class BrainController {
      * Get global resource metrics
      * GET /api/brain/global-metrics
      */
-    static async getGlobalMetrics(req: Request, res: Response): Promise<void> {
+    static async getGlobalMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getGlobalMetrics', req);
+
         try {
             const state = costKatanaBrain.getGlobalResourceState();
             
@@ -81,6 +86,13 @@ export class BrainController {
                 ? flows.filter(f => f.userId === userId)
                 : flows;
 
+            ControllerHelper.logRequestSuccess('getGlobalMetrics', req, startTime, {
+                activeUsers,
+                activeProjects,
+                totalFlows: flows.length,
+                filteredByUserId: !!userId
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -95,15 +107,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get global metrics', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve global metrics'
-            });
+            ControllerHelper.handleError('getGlobalMetrics', error, req, res, startTime);
         }
     }
 
@@ -169,9 +173,13 @@ export class BrainController {
      * Get user-specific interventions
      * GET /api/brain/interventions/:userId
      */
-    static async getUserInterventions(req: Request, res: Response): Promise<void> {
+    static async getUserInterventions(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { userId } = req.params;
+        ControllerHelper.logRequestStart('getUserInterventions', req);
+
         try {
-            const userId = req.params.userId;
+            ServiceHelper.validateObjectId(userId, 'User ID');
             const limit = parseInt(req.query.limit as string) || 20;
 
             const interventions = await InterventionLog.find({ 
@@ -180,6 +188,11 @@ export class BrainController {
                 .sort({ timestamp: -1 })
                 .limit(limit)
                 .lean();
+
+            ControllerHelper.logRequestSuccess('getUserInterventions', req, startTime, {
+                userId,
+                interventionsCount: interventions.length
+            });
 
             res.json({
                 success: true,
@@ -190,16 +203,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get user interventions', {
-                component: 'BrainController',
-                userId: req.params.userId,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve user interventions'
-            });
+            ControllerHelper.handleError('getUserInterventions', error, req, res, startTime);
         }
     }
 
@@ -207,9 +211,13 @@ export class BrainController {
      * Get budget forecast for user
      * GET /api/brain/budget/forecast/:userId
      */
-    static async getBudgetForecast(req: Request, res: Response): Promise<void> {
+    static async getBudgetForecast(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { userId } = req.params;
+        ControllerHelper.logRequestStart('getBudgetForecast', req);
+
         try {
-            const userId = req.params.userId;
+            ServiceHelper.validateObjectId(userId, 'User ID');
 
             // Get user's active flows
             const userFlows = costKatanaBrain.getActiveFlowsByUser(userId);
@@ -226,6 +234,12 @@ export class BrainController {
                 : 1;
             const estimatedFlowsRemaining = Math.floor(remaining / (avgFlowCost || 1));
             const hoursUntilExhaustion = estimatedFlowsRemaining * 0.5; // Assume 30 min per flow
+
+            ControllerHelper.logRequestSuccess('getBudgetForecast', req, startTime, {
+                userId,
+                activeFlows: userFlows.length,
+                utilizationPercent: parseFloat(utilizationPercent.toFixed(2))
+            });
 
             res.json({
                 success: true,
@@ -246,16 +260,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get budget forecast', {
-                component: 'BrainController',
-                userId: req.params.userId,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve budget forecast'
-            });
+            ControllerHelper.handleError('getBudgetForecast', error, req, res, startTime);
         }
     }
 
@@ -263,9 +268,13 @@ export class BrainController {
      * Get burn rate for user
      * GET /api/brain/budget/burn-rate/:userId
      */
-    static async getBurnRate(req: Request, res: Response): Promise<void> {
+    static async getBurnRate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        const { userId } = req.params;
+        ControllerHelper.logRequestStart('getBurnRate', req);
+
         try {
-            const userId = req.params.userId;
+            ServiceHelper.validateObjectId(userId, 'User ID');
 
             // Get user's active flows
             const userFlows = costKatanaBrain.getActiveFlowsByUser(userId);
@@ -279,6 +288,12 @@ export class BrainController {
             const burnRatePerMinute = totalCost / avgDurationMinutes;
             const burnRatePerHour = burnRatePerMinute * 60;
             const burnRatePerDay = burnRatePerHour * 24;
+
+            ControllerHelper.logRequestSuccess('getBurnRate', req, startTime, {
+                userId,
+                activeFlows: userFlows.length,
+                totalCost
+            });
 
             res.json({
                 success: true,
@@ -302,16 +317,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get burn rate', {
-                component: 'BrainController',
-                userId: req.params.userId,
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve burn rate'
-            });
+            ControllerHelper.handleError('getBurnRate', error, req, res, startTime);
         }
     }
 
@@ -319,7 +325,10 @@ export class BrainController {
      * Get learning statistics
      * GET /api/brain/learning/stats
      */
-    static async getLearningStats(req: Request, res: Response): Promise<void> {
+    static async getLearningStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getLearningStats', req);
+
         try {
             // Get optimization outcomes from last 30 days
             const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -328,6 +337,7 @@ export class BrainController {
             const userId = req.query.userId as string;
             const matchStage: any = { timestamp: { $gte: thirtyDaysAgo } };
             if (userId) {
+                ServiceHelper.validateObjectId(userId, 'User ID');
                 matchStage.userId = new mongoose.Types.ObjectId(userId);
             }
             
@@ -375,6 +385,11 @@ export class BrainController {
                     : '0.0'
             };
 
+            ControllerHelper.logRequestSuccess('getLearningStats', req, startTime, {
+                totalOptimizations: overall.totalOptimizations,
+                filteredByUserId: !!userId
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -389,15 +404,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get learning stats', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve learning statistics'
-            });
+            ControllerHelper.handleError('getLearningStats', error, req, res, startTime);
         }
     }
 
@@ -405,7 +412,10 @@ export class BrainController {
      * Get optimization recommendations
      * GET /api/brain/learning/recommendations/:context
      */
-    static async getRecommendations(req: Request, res: Response): Promise<void> {
+    static async getRecommendations(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('getRecommendations', req);
+
         try {
             const context = {
                 promptComplexity: parseFloat(req.query.complexity as string) || 0.5,
@@ -417,6 +427,9 @@ export class BrainController {
             const recommendation = await optimizationFeedbackLoop.getOptimizationRecommendation(context);
 
             if (!recommendation) {
+                ControllerHelper.logRequestSuccess('getRecommendations', req, startTime, {
+                    hasRecommendation: false
+                });
                 res.json({
                     success: true,
                     data: null,
@@ -424,6 +437,11 @@ export class BrainController {
                 });
                 return;
             }
+
+            ControllerHelper.logRequestSuccess('getRecommendations', req, startTime, {
+                hasRecommendation: true,
+                taskType: context.taskType
+            });
 
             res.json({
                 success: true,
@@ -435,15 +453,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get recommendations', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve recommendations'
-            });
+            ControllerHelper.handleError('getRecommendations', error, req, res, startTime);
         }
     }
 
@@ -451,7 +461,10 @@ export class BrainController {
      * Submit feedback for optimization
      * POST /api/brain/learning/feedback
      */
-    static async submitFeedback(req: Request, res: Response): Promise<void> {
+    static async submitFeedback(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('submitFeedback', req);
+
         try {
             const {
                 optimizationId,
@@ -468,6 +481,13 @@ export class BrainController {
                     error: 'Missing required fields: userId, action'
                 });
                 return;
+            }
+
+            if (userId) {
+                ServiceHelper.validateObjectId(userId, 'User ID');
+            }
+            if (optimizationId) {
+                ServiceHelper.validateObjectId(optimizationId, 'Optimization ID');
             }
 
             // Record the optimization outcome with all signals
@@ -490,6 +510,12 @@ export class BrainController {
                 suggestedModel
             );
 
+            ControllerHelper.logRequestSuccess('submitFeedback', req, startTime, {
+                userId,
+                action,
+                hasOptimizationId: !!optimizationId
+            });
+
             res.json({
                 success: true,
                 message: 'Feedback recorded successfully',
@@ -502,15 +528,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to submit feedback', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to submit feedback'
-            });
+            ControllerHelper.handleError('submitFeedback', error, req, res, startTime);
         }
     }
 
@@ -522,19 +540,18 @@ export class BrainController {
      * Get user's own active flows
      * GET /api/brain/user/active-flows
      */
-    static async getUserActiveFlows(req: Request, res: Response): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async getUserActiveFlows(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserActiveFlows', req);
 
+        try {
             const flows = costKatanaBrain.getActiveFlowsByUser(userId);
+            
+            ControllerHelper.logRequestSuccess('getUserActiveFlows', req, startTime, {
+                flowsCount: flows.length
+            });
             
             res.json({
                 success: true,
@@ -546,15 +563,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get user active flows', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve active flows'
-            });
+            ControllerHelper.handleError('getUserActiveFlows', error, req, res, startTime);
         }
     }
 
@@ -562,18 +571,13 @@ export class BrainController {
      * Get user's own metrics
      * GET /api/brain/user/metrics
      */
-    static async getUserMetrics(req: Request, res: Response): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async getUserMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserMetrics', req);
 
+        try {
             const userFlows = costKatanaBrain.getActiveFlowsByUser(userId);
             
             // Calculate user-specific metrics
@@ -596,6 +600,11 @@ export class BrainController {
             const avgDurationMinutes = (totalDuration / userFlows.length / 60000) || 1;
             const costBurnRate = totalEstimatedCost / avgDurationMinutes;
 
+            ControllerHelper.logRequestSuccess('getUserMetrics', req, startTime, {
+                totalActiveFlows: userFlows.length,
+                totalEstimatedCost
+            });
+
             res.json({
                 success: true,
                 data: {
@@ -611,15 +620,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('Failed to get user metrics', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve metrics'
-            });
+            ControllerHelper.handleError('getUserMetrics', error, req, res, startTime);
         }
     }
 
@@ -627,32 +628,19 @@ export class BrainController {
      * Get user's budget forecast
      * GET /api/brain/user/budget/forecast
      */
-    static async getUserBudgetForecast(req: Request, res: Response): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async getUserBudgetForecast(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserBudgetForecast', req);
 
+        try {
             // Use existing getBudgetForecast logic
             req.params.userId = userId;
             await BrainController.getBudgetForecast(req, res);
 
         } catch (error) {
-            loggingService.error('Failed to get user budget forecast', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve budget forecast'
-            });
+            ControllerHelper.handleError('getUserBudgetForecast', error, req, res, startTime);
         }
     }
 
@@ -660,32 +648,19 @@ export class BrainController {
      * Get user's burn rate
      * GET /api/brain/user/budget/burn-rate
      */
-    static async getUserBurnRate(req: Request, res: Response): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async getUserBurnRate(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserBurnRate', req);
 
+        try {
             // Use existing getBurnRate logic
             req.params.userId = userId;
             await BrainController.getBurnRate(req, res);
 
         } catch (error) {
-            loggingService.error('Failed to get user burn rate', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve burn rate'
-            });
+            ControllerHelper.handleError('getUserBurnRate', error, req, res, startTime);
         }
     }
 
@@ -693,32 +668,19 @@ export class BrainController {
      * Get user's learning stats
      * GET /api/brain/user/learning/stats
      */
-    static async getUserLearningStats(req: Request, res: Response): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async getUserLearningStats(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserLearningStats', req);
 
+        try {
             // Add userId filter to query
             req.query.userId = userId;
             await BrainController.getLearningStats(req, res);
 
         } catch (error) {
-            loggingService.error('Failed to get user learning stats', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to retrieve learning statistics'
-            });
+            ControllerHelper.handleError('getUserLearningStats', error, req, res, startTime);
         }
     }
 
@@ -726,18 +688,13 @@ export class BrainController {
      * SSE stream for user's events only
      * GET /api/brain/user/stream
      */
-    static async streamUserEvents(req: Request, res: Response, next: NextFunction): Promise<void> {
-        try {
-            const userId = (req as any).user?.id;
-            
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+    static async streamUserEvents(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('streamUserEvents', req);
 
+        try {
             // Set SSE headers
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
@@ -807,10 +764,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('User SSE stream error', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('streamUserEvents', error, req, res, startTime);
             next(error);
         }
     }
@@ -823,7 +777,10 @@ export class BrainController {
      * Server-Sent Events stream for real-time Brain updates (Admin only)
      * GET /api/brain/admin/stream
      */
-    static async streamBrainEvents(req: Request, res: Response, next: NextFunction): Promise<void> {
+    static async streamBrainEvents(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        ControllerHelper.logRequestStart('streamBrainEvents', req);
+
         try {
             // Set SSE headers
             res.setHeader('Content-Type', 'text/event-stream');
@@ -882,10 +839,7 @@ export class BrainController {
             });
 
         } catch (error) {
-            loggingService.error('SSE stream error', {
-                component: 'BrainController',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('streamBrainEvents', error, req, res, startTime);
             next(error);
         }
     }

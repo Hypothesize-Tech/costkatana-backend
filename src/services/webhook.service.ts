@@ -14,8 +14,9 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Handlebars from 'handlebars';
 import mongoose from 'mongoose';
+import { BaseService } from '../shared/BaseService';
 
-export class WebhookService {
+export class WebhookService extends BaseService {
     private static instance: WebhookService;
     
     // Template compilation cache
@@ -28,12 +29,41 @@ export class WebhookService {
     private static signatureCache = new Map<string, string>();
     
     // Circuit breaker for database operations
-    private static dbFailureCount: number = 0;
+    private static dbFailureCount = 0;
+    private static lastDbFailureTime = 0;
     private static readonly MAX_DB_FAILURES = 5;
-    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 300000; // 5 minutes
-    private static lastDbFailureTime: number = 0;
+    private static readonly DB_CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
+    
+    /**
+     * Check if DB circuit breaker is open
+     */
+    private static isDbCircuitBreakerOpen(): boolean {
+        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
+            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
+            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
+                return true;
+            } else {
+                // Reset circuit breaker
+                this.dbFailureCount = 0;
+                return false;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Record DB failure for circuit breaker
+     */
+    private static recordDbFailure(): void {
+        this.dbFailureCount++;
+        this.lastDbFailureTime = Date.now();
+    }
 
     private constructor() {
+        super('WebhookService', {
+            max: 1000,
+            ttl: 300000 // 5 minutes
+        });
         this.registerHandlebarsHelpers();
     }
 
@@ -257,10 +287,7 @@ export class WebhookService {
                 result.status === 'fulfilled' && result.value !== null
             ).length;
 
-            // Reset failure count on success
-            WebhookService.dbFailureCount = 0;
-
-            loggingService.info('Event processed for webhooks', { 
+            this.logOperation('info', 'Event processed for webhooks', 'processEvent', {
                 eventId: eventData.eventId,
                 webhookCount: webhooks.length,
                 successfulDeliveries
@@ -825,9 +852,6 @@ export class WebhookService {
                 return result;
             };
 
-            // Reset failure count on success
-            WebhookService.dbFailureCount = 0;
-
             return {
                 webhook: {
                     id: webhook._id,
@@ -889,28 +913,6 @@ export class WebhookService {
         } catch (error) {
             loggingService.error('Error updating webhook stats', { error, webhookId });
         }
-    }
-
-    /**
-     * Circuit breaker utilities for database operations
-     */
-    private static isDbCircuitBreakerOpen(): boolean {
-        if (this.dbFailureCount >= this.MAX_DB_FAILURES) {
-            const timeSinceLastFailure = Date.now() - this.lastDbFailureTime;
-            if (timeSinceLastFailure < this.DB_CIRCUIT_BREAKER_RESET_TIME) {
-                return true;
-            } else {
-                // Reset circuit breaker
-                this.dbFailureCount = 0;
-                return false;
-            }
-        }
-        return false;
-    }
-
-    private static recordDbFailure(): void {
-        this.dbFailureCount++;
-        this.lastDbFailureTime = Date.now();
     }
 
     /**
@@ -1073,14 +1075,15 @@ export class WebhookService {
      * Cleanup method for graceful shutdown
      */
     static cleanup(): void {
-        // Reset circuit breaker state
-        this.dbFailureCount = 0;
-        this.lastDbFailureTime = 0;
-        
         // Clear caches
         this.templateCache.clear();
         this.encryptionCache.clear();
         this.signatureCache.clear();
+        
+        // Call base service shutdown
+        if (this.instance) {
+            this.instance.shutdown();
+        }
     }
 }
 

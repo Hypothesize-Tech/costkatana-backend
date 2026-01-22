@@ -5,6 +5,8 @@ import { UploadedFile } from '../models/UploadedFile';
 import { loggingService } from '../services/logging.service';
 import { ChatMessage } from '../models/ChatMessage';
 import { ingestionService } from '../services/ingestion.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
@@ -21,20 +23,20 @@ class FileUploadController {
     /**
      * Upload a file
      */
-    async uploadFile(req: Request, res: Response): Promise<Response> {
+    async uploadFile(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({
+                success: false,
+                error: 'Unauthorized',
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('uploadFile', req);
+
             if (!req.file) {
                 return res.status(400).json({
                     success: false,
                     error: 'No file provided',
-                });
-            }
-
-            const userId = (req as any).user?._id || (req as any).user?.id;
-            if (!userId) {
-                return res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized',
                 });
             }
 
@@ -104,13 +106,10 @@ class FileUploadController {
                     }
                 );
 
-                loggingService.info('🟢 File ingested successfully for RAG search', {
+                ControllerHelper.logRequestSuccess('uploadFile', req, startTime, {
+                    fileId: uploadedFile._id,
                     documentId,
-                    fileName: originalname,
-                    chunksCreated: ingestionResult.documentsIngested,
-                    duration: ingestionResult.duration,
-                    success: ingestionResult.success,
-                    errors: ingestionResult.errors,
+                    chunksCreated: ingestionResult.documentsIngested
                 });
 
                 return res.status(200).json({
@@ -129,14 +128,13 @@ class FileUploadController {
                     },
                 });
             } catch (ingestionError) {
-                loggingService.error('File ingestion failed, but file upload succeeded', {
-                    error: ingestionError,
+                // Return success for upload but indicate ingestion failure
+                ControllerHelper.logRequestSuccess('uploadFile', req, startTime, {
+                    fileId: uploadedFile._id,
                     documentId,
-                    fileName: originalname,
-                    userId,
+                    ingested: false
                 });
 
-                // Return success for upload but indicate ingestion failure
                 return res.status(200).json({
                     success: true,
                     data: {
@@ -154,11 +152,7 @@ class FileUploadController {
                 });
             }
         } catch (error) {
-            loggingService.error('File upload failed', {
-                error,
-                userId: (req as any).user?._id,
-            });
-
+            ControllerHelper.handleError('uploadFile', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'File upload failed',
@@ -170,10 +164,18 @@ class FileUploadController {
     /**
      * Delete a file
      */
-    async deleteFile(req: Request, res: Response): Promise<Response> {
+    async deleteFile(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({
+                success: false,
+                error: 'Unauthorized',
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('deleteFile', req);
+
             const { fileId } = req.params;
-            const userId = (req as any).user?._id || (req as any).user?.id;
+            ServiceHelper.validateObjectId(fileId, 'fileId');
 
             const file = await UploadedFile.findOne({
                 _id: fileId,
@@ -193,10 +195,8 @@ class FileUploadController {
             // Delete from database
             await UploadedFile.deleteOne({ _id: fileId });
 
-            loggingService.info('File deleted successfully', {
-                fileId,
-                fileName: file.fileName,
-                userId,
+            ControllerHelper.logRequestSuccess('deleteFile', req, startTime, {
+                fileId
             });
 
             return res.status(200).json({
@@ -204,11 +204,7 @@ class FileUploadController {
                 message: 'File deleted successfully',
             });
         } catch (error) {
-            loggingService.error('Failed to delete file', {
-                error,
-                fileId: req.params.fileId,
-            });
-
+            ControllerHelper.handleError('deleteFile', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to delete file',
@@ -219,13 +215,21 @@ class FileUploadController {
     /**
      * Get user's uploaded files
      */
-    async getUserFiles(req: Request, res: Response): Promise<Response> {
+    async getUserFiles(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = (req as any).user?._id || (req as any).user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({
+                success: false,
+                error: 'Unauthorized',
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getUserFiles', req);
+
             const { conversationId } = req.query;
 
             const query: any = { userId };
             if (conversationId) {
+                ServiceHelper.validateObjectId(conversationId as string, 'conversationId');
                 query.conversationId = conversationId;
             }
 
@@ -251,16 +255,16 @@ class FileUploadController {
                 })
             );
 
+            ControllerHelper.logRequestSuccess('getUserFiles', req, startTime, {
+                filesCount: filesWithUrls.length
+            });
+
             return res.status(200).json({
                 success: true,
                 data: filesWithUrls,
             });
         } catch (error) {
-            loggingService.error('Failed to get user files', {
-                error,
-                userId: (req as any).user?._id,
-            });
-
+            ControllerHelper.handleError('getUserFiles', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to get user files',
@@ -271,9 +275,16 @@ class FileUploadController {
     /**
      * Get ALL user's files from all sources (uploaded, Google Drive, and documents)
      */
-    async getAllUserFiles(req: Request, res: Response): Promise<Response> {
+    async getAllUserFiles(req: AuthenticatedRequest, res: Response): Promise<Response> {
+        const startTime = Date.now();
         try {
-            const userId = (req as any).user?._id || (req as any).user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return res.status(401).json({
+                success: false,
+                error: 'Unauthorized',
+            });
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getAllUserFiles', req);
+
             const { conversationId } = req.query;
 
             const allFiles: any[] = [];
@@ -281,6 +292,7 @@ class FileUploadController {
             // 1. Get uploaded files
             const uploadQuery: any = { userId };
             if (conversationId) {
+                ServiceHelper.validateObjectId(conversationId as string, 'conversationId');
                 uploadQuery.conversationId = conversationId;
             }
 
@@ -368,16 +380,16 @@ class FileUploadController {
             // Sort all files by uploadedAt descending
             allFiles.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
 
+            ControllerHelper.logRequestSuccess('getAllUserFiles', req, startTime, {
+                filesCount: allFiles.length
+            });
+
             return res.status(200).json({
                 success: true,
                 data: allFiles,
             });
         } catch (error) {
-            loggingService.error('Failed to get all user files', {
-                error,
-                userId: (req as any).user?._id,
-            });
-
+            ControllerHelper.handleError('getAllUserFiles', error, req, res, startTime);
             return res.status(500).json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to get all user files',

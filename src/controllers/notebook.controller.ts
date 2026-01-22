@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { notebookService } from '../services/notebook.service';
 import { aiInsightsService } from '../services/aiInsights.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class NotebookController {
   // Background processing queue for non-critical operations
@@ -10,28 +12,15 @@ export class NotebookController {
   /**
    * Get all notebooks
    */
-  static async getNotebooks(_req: Request, res: Response): Promise<Response> {
+  static async getNotebooks(_req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
+    
+    ControllerHelper.logRequestStart('getNotebooks', _req);
 
     try {
-      loggingService.info('Notebooks retrieval initiated', {
-        requestId: _req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Notebooks retrieval processing started', {
-        requestId: _req.headers['x-request-id'] as string
-      });
-
       const notebooks = await notebookService.getNotebooks();
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Notebooks retrieved successfully', {
-        duration,
-        notebooksCount: notebooks.length,
-        hasNotebooks: !!notebooks && notebooks.length > 0,
-        requestId: _req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -44,24 +33,17 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getNotebooks', _req, startTime, {
+        notebooksCount: notebooks.length
+      });
+
       return res.json({
         success: true,
         notebooks
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebooks retrieval failed', {
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: _req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to get notebooks'
-      });
+      ControllerHelper.handleError('getNotebooks', error, _req, res, startTime);
+      return res;
     }
   }
 
@@ -147,44 +129,19 @@ export class NotebookController {
   /**
    * Create new notebook
    */
-  static async createNotebook(req: Request, res: Response): Promise<Response> {
+  static async createNotebook(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { title, description, template_type } = req.body;
+    
+    ControllerHelper.logRequestStart('createNotebook', req, { title, template_type });
 
     try {
-      loggingService.info('Notebook creation initiated', {
-        title,
-        hasTitle: !!title,
-        description,
-        hasDescription: !!description,
-        templateType: template_type,
-        hasTemplateType: !!template_type,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       if (!title) {
-        loggingService.warn('Notebook creation failed - title is required', {
-          description,
-          hasDescription: !!description,
-          templateType: template_type,
-          hasTemplateType: !!template_type,
-          requestId: req.headers['x-request-id'] as string
-        });
-
         return res.status(400).json({
           success: false,
           error: 'Title is required'
         });
       }
-
-      loggingService.info('Notebook creation processing started', {
-        title,
-        description,
-        hasDescription: !!description,
-        templateType: template_type,
-        hasTemplateType: !!template_type,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       const notebook = await notebookService.createNotebook(
         title,
@@ -193,18 +150,6 @@ export class NotebookController {
       );
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Notebook created successfully', {
-        title,
-        description,
-        hasDescription: !!description,
-        templateType: template_type,
-        hasTemplateType: !!template_type,
-        duration,
-        hasNotebook: !!notebook,
-        notebookId: (notebook as any)?.id || (notebook as any)?._id,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -222,30 +167,17 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('createNotebook', req, startTime, {
+        notebookId: (notebook as any)?.id || (notebook as any)?._id
+      });
+
       return res.status(201).json({
         success: true,
         notebook
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebook creation failed', {
-        title,
-        hasTitle: !!title,
-        description,
-        hasDescription: !!description,
-        templateType: template_type,
-        hasTemplateType: !!template_type,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to create notebook'
-      });
+      ControllerHelper.handleError('createNotebook', error, req, res, startTime);
+      return res;
     }
   }
 
@@ -344,33 +276,18 @@ export class NotebookController {
   /**
    * Delete notebook
    */
-  static async deleteNotebook(req: Request, res: Response): Promise<Response> {
+  static async deleteNotebook(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { id } = req.params;
+    
+    ControllerHelper.logRequestStart('deleteNotebook', req, { notebookId: id });
 
     try {
-      loggingService.info('Notebook deletion initiated', {
-        notebookId: id,
-        hasNotebookId: !!id,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Notebook deletion processing started', {
-        notebookId: id,
-        requestId: req.headers['x-request-id'] as string
-      });
+      ServiceHelper.validateObjectId(id, 'notebookId');
 
       const deleted = await notebookService.deleteNotebook(id);
       
       if (!deleted) {
-        const duration = Date.now() - startTime;
-
-        loggingService.warn('Notebook deletion failed - notebook not found', {
-          notebookId: id,
-          duration,
-          requestId: req.headers['x-request-id'] as string
-        });
-
         return res.status(404).json({
           success: false,
           error: 'Notebook not found'
@@ -378,13 +295,6 @@ export class NotebookController {
       }
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Notebook deleted successfully', {
-        notebookId: id,
-        duration,
-        deleted,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -397,59 +307,35 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('deleteNotebook', req, startTime, {
+        notebookId: id
+      });
+
       return res.json({
         success: true,
         message: 'Notebook deleted successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebook deletion failed', {
-        notebookId: id,
-        hasNotebookId: !!id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to delete notebook'
-      });
+      ControllerHelper.handleError('deleteNotebook', error, req, res, startTime, { notebookId: id });
+      return res;
     }
   }
 
   /**
    * Execute notebook
    */
-  static async executeNotebook(req: Request, res: Response): Promise<Response> {
+  static async executeNotebook(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { id } = req.params;
+    
+    ControllerHelper.logRequestStart('executeNotebook', req, { notebookId: id });
 
     try {
-      loggingService.info('Notebook execution initiated', {
-        notebookId: id,
-        hasNotebookId: !!id,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Notebook execution processing started', {
-        notebookId: id,
-        requestId: req.headers['x-request-id'] as string
-      });
+      ServiceHelper.validateObjectId(id, 'notebookId');
 
       const execution = await notebookService.executeNotebook(id);
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Notebook executed successfully', {
-        notebookId: id,
-        duration,
-        hasExecution: !!execution,
-        executionId: (execution as any)?.id || (execution as any)?._id,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -463,59 +349,36 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('executeNotebook', req, startTime, {
+        notebookId: id,
+        executionId: (execution as any)?.id || (execution as any)?._id
+      });
+
       return res.json({
         success: true,
         execution
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebook execution failed', {
-        notebookId: id,
-        hasNotebookId: !!id,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to execute notebook'
-      });
+      ControllerHelper.handleError('executeNotebook', error, req, res, startTime, { notebookId: id });
+      return res;
     }
   }
 
   /**
    * Get execution results
    */
-    static async getExecution(req: Request, res: Response): Promise<Response> {
+    static async getExecution(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { executionId } = req.params;
+    
+    ControllerHelper.logRequestStart('getExecution', req, { executionId });
 
     try {
-      loggingService.info('Notebook execution results retrieval initiated', {
-        executionId,
-        hasExecutionId: !!executionId,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Notebook execution results retrieval processing started', {
-        executionId,
-        requestId: req.headers['x-request-id'] as string
-      });
+      ServiceHelper.validateObjectId(executionId, 'executionId');
 
       const execution = await notebookService.getExecution(executionId);
       
       if (!execution) {
-        const duration = Date.now() - startTime;
-
-        loggingService.warn('Notebook execution results retrieval failed - execution not found', {
-          executionId,
-          duration,
-          requestId: req.headers['x-request-id'] as string
-        });
-
         return res.status(404).json({
           success: false,
           error: 'Execution not found'
@@ -523,13 +386,6 @@ export class NotebookController {
       }
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Notebook execution results retrieved successfully', {
-        executionId,
-        duration,
-        hasExecution: !!execution,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -542,43 +398,29 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getExecution', req, startTime, {
+        executionId
+      });
+
       return res.json({
         success: true,
         execution
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebook execution results retrieval failed', {
-        executionId,
-        hasExecutionId: !!executionId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to get execution'
-      });
+      ControllerHelper.handleError('getExecution', error, req, res, startTime, { executionId });
+      return res;
     }
   }
 
   /**
    * Get notebook templates
    */
-  static async getTemplates(_req: Request, res: Response): Promise<Response> {
+  static async getTemplates(_req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
+    
+    ControllerHelper.logRequestStart('getTemplates', _req);
 
     try {
-      loggingService.info('Notebook templates retrieval initiated', {
-        requestId: _req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Notebook templates retrieval processing started', {
-        requestId: _req.headers['x-request-id'] as string
-      });
 
       const templates = [
         {
@@ -609,13 +451,6 @@ export class NotebookController {
 
       const duration = Date.now() - startTime;
 
-      loggingService.info('Notebook templates retrieved successfully', {
-        duration,
-        templatesCount: templates.length,
-        hasTemplates: !!templates && templates.length > 0,
-        requestId: _req.headers['x-request-id'] as string
-      });
-
       // Log business event
       loggingService.logBusiness({
         event: 'notebook_templates_retrieved',
@@ -627,45 +462,30 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getTemplates', _req, startTime, {
+        templatesCount: templates.length
+      });
+
       return res.json({
         success: true,
         templates
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Notebook templates retrieval failed', {
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: _req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to get templates'
-      });
+      ControllerHelper.handleError('getTemplates', error, _req, res, startTime);
+      return res;
     }
   }
 
   /**
    * Get AI insights
    */
-  static async getAIInsights(req: Request, res: Response): Promise<Response> {
+  static async getAIInsights(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { timeframe = '24h' } = req.query;
+    
+    ControllerHelper.logRequestStart('getAIInsights', req, { timeframe: timeframe as string });
 
     try {
-      loggingService.info('AI insights retrieval initiated', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('AI insights retrieval processing started', {
-        timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Use Promise.race for timeout protection
       const insightsPromise = aiInsightsService.generateInsights(timeframe as string);
@@ -693,14 +513,6 @@ export class NotebookController {
 
       const duration = Date.now() - startTime;
 
-      loggingService.info('AI insights retrieved successfully', {
-        timeframe,
-        duration,
-        hasInsights: !!insights,
-        insightsCount: Array.isArray(insights) ? insights.length : 0,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       // Queue business event logging as background operation
       this.queueBackgroundOperation(async () => {
         loggingService.logBusiness({
@@ -715,59 +527,33 @@ export class NotebookController {
         });
       });
 
+      ControllerHelper.logRequestSuccess('getAIInsights', req, startTime, {
+        timeframe: timeframe as string
+      });
+
       return res.json({
         success: true,
         insights
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('AI insights retrieval failed', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to generate AI insights'
-      });
+      ControllerHelper.handleError('getAIInsights', error, req, res, startTime);
+      return res;
     }
   }
 
   /**
    * Get anomaly detection results
    */
-  static async getAnomalies(req: Request, res: Response): Promise<Response> {
+  static async getAnomalies(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { timeframe = '24h' } = req.query;
+    
+    ControllerHelper.logRequestStart('getAnomalies', req, { timeframe: timeframe as string });
 
     try {
-      loggingService.info('Anomaly detection results retrieval initiated', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Anomaly detection results retrieval processing started', {
-        timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       const anomalies = await aiInsightsService.detectAnomalies(timeframe as string);
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Anomaly detection results retrieved successfully', {
-        timeframe,
-        duration,
-        hasAnomalies: !!anomalies,
-        anomaliesCount: Array.isArray(anomalies) ? anomalies.length : 0,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -781,59 +567,33 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getAnomalies', req, startTime, {
+        anomaliesCount: Array.isArray(anomalies) ? anomalies.length : 0
+      });
+
       return res.json({
         success: true,
         anomalies
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Anomaly detection results retrieval failed', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to detect anomalies'
-      });
+      ControllerHelper.handleError('getAnomalies', error, req, res, startTime);
+      return res;
     }
   }
 
   /**
    * Get cost optimization recommendations
    */
-  static async getOptimizations(req: Request, res: Response): Promise<Response> {
+  static async getOptimizations(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { timeframe = '24h' } = req.query;
+    
+    ControllerHelper.logRequestStart('getOptimizations', req, { timeframe: timeframe as string });
 
     try {
-      loggingService.info('Cost optimization recommendations retrieval initiated', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Cost optimization recommendations retrieval processing started', {
-        timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       const optimizations = await aiInsightsService.generateOptimizations(timeframe as string);
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Cost optimization recommendations retrieved successfully', {
-        timeframe,
-        duration,
-        hasOptimizations: !!optimizations,
-        optimizationsCount: Array.isArray(optimizations) ? optimizations.length : 0,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -847,59 +607,33 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getOptimizations', req, startTime, {
+        optimizationsCount: Array.isArray(optimizations) ? optimizations.length : 0
+      });
+
       return res.json({
         success: true,
         optimizations
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cost optimization recommendations retrieval failed', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to generate optimizations'
-      });
+      ControllerHelper.handleError('getOptimizations', error, req, res, startTime);
+      return res;
     }
   }
 
   /**
    * Get predictive forecasts
    */
-  static async getForecasts(req: Request, res: Response): Promise<Response> {
+  static async getForecasts(req: AuthenticatedRequest, res: Response): Promise<Response> {
     const startTime = Date.now();
     const { timeframe = '24h' } = req.query;
+    
+    ControllerHelper.logRequestStart('getForecasts', req, { timeframe: timeframe as string });
 
     try {
-      loggingService.info('Predictive forecasts retrieval initiated', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      loggingService.info('Predictive forecasts retrieval processing started', {
-        timeframe,
-        requestId: req.headers['x-request-id'] as string
-      });
-
       const forecasts = await aiInsightsService.generateForecasts(timeframe as string);
 
       const duration = Date.now() - startTime;
-
-      loggingService.info('Predictive forecasts retrieved successfully', {
-        timeframe,
-        duration,
-        hasForecasts: !!forecasts,
-        forecastsCount: Array.isArray(forecasts) ? forecasts.length : 0,
-        requestId: req.headers['x-request-id'] as string
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -913,26 +647,17 @@ export class NotebookController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getForecasts', req, startTime, {
+        forecastsCount: Array.isArray(forecasts) ? forecasts.length : 0
+      });
+
       return res.json({
         success: true,
         forecasts
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Predictive forecasts retrieval failed', {
-        timeframe,
-        hasTimeframe: !!timeframe,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration,
-        requestId: req.headers['x-request-id'] as string
-      });
-
-      return res.status(500).json({
-        success: false,
-        error: 'Failed to generate forecasts'
-      });
+      ControllerHelper.handleError('getForecasts', error, req, res, startTime);
+      return res;
     }
   }
 

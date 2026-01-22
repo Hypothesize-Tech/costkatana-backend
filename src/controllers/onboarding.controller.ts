@@ -5,6 +5,8 @@ import { loggingService } from '../services/logging.service';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret';
 
@@ -33,17 +35,10 @@ export class OnboardingController {
     static async generateMagicLink(req: Request, res: Response): Promise<void> {
         const startTime = Date.now();
         const { email, name, source = 'ChatGPT' } = req.body;
+        
+        ControllerHelper.logRequestStart('generateMagicLink', req as AuthenticatedRequest, { email, source });
 
         try {
-            loggingService.info('Magic link generation initiated', {
-                email,
-                hasEmail: !!email,
-                name,
-                hasName: !!name,
-                source,
-                hasSource: !!source,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (!email) {
                 loggingService.warn('Magic link generation failed - email is required', {
@@ -90,29 +85,24 @@ export class OnboardingController {
             const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000';
             const magicLink = `${frontendUrl}/connect/chatgpt?token=${token}&data=${encodedData}`;
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Magic link generated successfully', {
+            ControllerHelper.logRequestSuccess('generateMagicLink', req as AuthenticatedRequest, startTime, {
                 email,
                 sessionId,
                 source,
-                duration,
-                hasMagicLink: !!magicLink,
-                frontendUrl,
-                requestId: req.headers['x-request-id'] as string
+                hasMagicLink: !!magicLink
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'magic_link_generated',
                 category: 'onboarding_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     email,
                     sessionId,
                     source,
                     hasMagicLink: !!magicLink,
-                    frontendUrl
+                    frontendUrl: process.env.FRONTEND_URL?.replace(/\/$/, '') || 'http://localhost:3000'
                 }
             });
 
@@ -133,25 +123,9 @@ export class OnboardingController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Magic link generation failed', {
+            ControllerHelper.handleError('generateMagicLink', error, req as AuthenticatedRequest, res, startTime, {
                 email,
-                hasEmail: !!email,
-                name,
-                hasName: !!name,
-                source,
-                hasSource: !!source,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to generate magic link',
-                message: error instanceof Error ? error.message : 'Unknown error'
+                source
             });
         }
     }
@@ -159,14 +133,13 @@ export class OnboardingController {
     static async completeMagicLink(req: Request, res: Response): Promise<void> {
         const startTime = Date.now();
         const { token, data } = req.query;
+        
+        ControllerHelper.logRequestStart('completeMagicLink', req as AuthenticatedRequest, {
+            hasToken: !!token,
+            hasData: !!data
+        });
 
         try {
-            loggingService.info('Magic link completion initiated', {
-                hasToken: !!token,
-                hasData: !!data,
-                tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (!token || !data) {
                 loggingService.warn('Magic link completion failed - invalid magic link format', {
@@ -616,24 +589,20 @@ export class OnboardingController {
                 });
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Magic link onboarding completed successfully', { 
-                email, 
-                userId: cleanedUser._id.toString(), 
+            ControllerHelper.logRequestSuccess('completeMagicLink', req as AuthenticatedRequest, startTime, {
+                email,
+                userId: cleanedUser._id.toString(),
                 projectId: defaultProject._id,
                 isNewUser,
-                duration,
                 source,
-                hasApiKey: !!(apiKey || (cleanedUser.dashboardApiKeys && cleanedUser.dashboardApiKeys.length > 0)),
-                requestId: req.headers['x-request-id'] as string
+                hasApiKey: !!(apiKey || (cleanedUser.dashboardApiKeys && cleanedUser.dashboardApiKeys.length > 0))
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'magic_link_onboarding_completed',
                 category: 'onboarding_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     email,
                     userId: cleanedUser._id.toString(),
@@ -817,22 +786,9 @@ export class OnboardingController {
             res.send(successHtml);
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Magic link onboarding completion failed', {
+            ControllerHelper.handleError('completeMagicLink', error, req as AuthenticatedRequest, res, startTime, {
                 hasToken: !!token,
-                hasData: !!data,
-                tokenPreview: token ? token.toString().substring(0, 10) + '...' : 'none',
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to complete onboarding',
-                message: error instanceof Error ? error.message : 'Unknown error'
+                hasData: !!data
             });
         }
     }
@@ -840,13 +796,12 @@ export class OnboardingController {
     static async verifyMagicLink(req: Request, res: Response): Promise<void> {
         const startTime = Date.now();
         const { token } = req.params;
+        
+        ControllerHelper.logRequestStart('verifyMagicLink', req as AuthenticatedRequest, {
+            hasToken: !!token
+        });
 
         try {
-            loggingService.info('Magic link verification initiated', {
-                hasToken: !!token,
-                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
-                requestId: req.headers['x-request-id'] as string
-            });
 
             if (!token) {
                 loggingService.warn('Magic link verification failed - token is required', {
@@ -868,23 +823,17 @@ export class OnboardingController {
 
             // For now, return success if token exists
             // In production, you'd verify against stored tokens
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Magic link verified successfully', {
-                hasToken: !!token,
-                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('verifyMagicLink', req as AuthenticatedRequest, startTime, {
+                hasToken: !!token
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'magic_link_verified',
                 category: 'onboarding_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
-                    hasToken: !!token,
-                    tokenPreview: token ? token.substring(0, 10) + '...' : 'none'
+                    hasToken: !!token
                 }
             });
 
@@ -894,21 +843,8 @@ export class OnboardingController {
             });
 
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Magic link verification failed', {
-                hasToken: !!token,
-                tokenPreview: token ? token.substring(0, 10) + '...' : 'none',
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to verify magic link',
-                message: error instanceof Error ? error.message : 'Unknown error'
+            ControllerHelper.handleError('verifyMagicLink', error, req as AuthenticatedRequest, res, startTime, {
+                hasToken: !!token
             });
         }
     }

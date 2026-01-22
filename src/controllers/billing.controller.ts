@@ -5,19 +5,30 @@ import { PaymentMethod } from '../models/PaymentMethod';
 import { paymentGatewayManager } from '../services/paymentGateway/paymentGatewayManager.service';
 import { loggingService } from '../services/logging.service';
 import { convertToSmallestUnit } from '../utils/currencyConverter';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class BillingController {
     /**
      * Get billing history (invoices)
      * GET /api/billing/invoices
      */
-    static async getInvoices(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getInvoices(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getInvoices', req);
         try {
-            const userId = req.user!.id;
             const limit = parseInt(req.query.limit as string) || 10;
             const offset = parseInt(req.query.offset as string) || 0;
 
             const { invoices, total } = await SubscriptionService.getBillingHistory(userId, limit, offset);
+
+            ControllerHelper.logRequestSuccess('getInvoices', req, startTime, {
+                total,
+                limit,
+                offset
+            });
 
             res.json({
                 success: true,
@@ -32,23 +43,22 @@ export class BillingController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Get invoices failed', {
-                userId: req.user!.id,
-                error: error.message,
-            });
-            next(error);
+            ControllerHelper.handleError('getInvoices', error, req, res, startTime);
         }
-        return;
     }
 
     /**
      * Get single invoice
      * GET /api/billing/invoices/:invoiceId
      */
-    static async getInvoice(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getInvoice(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getInvoice', req);
         try {
-            const userId = req.user!.id;
             const { invoiceId } = req.params;
+            ServiceHelper.validateObjectId(invoiceId, 'invoiceId');
 
             const invoice = await Invoice.findOne({
                 _id: invoiceId,
@@ -63,55 +73,59 @@ export class BillingController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getInvoice', req, startTime, {
+                invoiceId
+            });
+
             res.json({
                 success: true,
                 data: invoice,
             });
         } catch (error: any) {
-            loggingService.error('Get invoice failed', {
-                userId: req.user!.id,
-                invoiceId: req.params.invoiceId,
-                error: error.message,
+            ControllerHelper.handleError('getInvoice', error, req, res, startTime, {
+                invoiceId: req.params.invoiceId
             });
-            next(error);
         }
-        return;
     }
 
     /**
      * Get payment methods
      * GET /api/billing/payment-methods
      */
-    static async getPaymentMethods(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getPaymentMethods(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getPaymentMethods', req);
         try {
-            const userId = req.user!.id;
-
             const paymentMethods = await PaymentMethod.find({
                 userId,
                 isActive: true,
             }).sort({ isDefault: -1, createdAt: -1 });
+
+            ControllerHelper.logRequestSuccess('getPaymentMethods', req, startTime, {
+                count: paymentMethods.length
+            });
 
             res.json({
                 success: true,
                 data: paymentMethods,
             });
         } catch (error: any) {
-            loggingService.error('Get payment methods failed', {
-                userId: req.user!.id,
-                error: error.message,
-            });
-            next(error);
+            ControllerHelper.handleError('getPaymentMethods', error, req, res, startTime);
         }
-        return;
     }
 
     /**
      * Add payment method
      * POST /api/billing/payment-methods
      */
-    static async addPaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async addPaymentMethod(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('addPaymentMethod', req);
         try {
-            const userId = req.user!.id;
             const { gateway, type, cardDetails, upiDetails, bankAccountDetails, paypalEmail, setAsDefault } = req.body;
 
             if (!['stripe', 'razorpay', 'paypal'].includes(gateway)) {
@@ -213,29 +227,37 @@ export class BillingController {
                 );
             }
 
+            ControllerHelper.logRequestSuccess('addPaymentMethod', req, startTime, {
+                paymentMethodId: paymentMethod._id,
+                gateway,
+                type
+            });
+
             res.json({
                 success: true,
                 message: 'Payment method added successfully',
                 data: paymentMethod,
             });
         } catch (error: any) {
-            loggingService.error('Add payment method failed', {
-                userId: req.user!.id,
-                error: error.message,
+            ControllerHelper.handleError('addPaymentMethod', error, req, res, startTime, {
+                gateway: req.body.gateway,
+                type: req.body.type
             });
-            next(error);
         }
-        return;
     }
 
     /**
      * Update payment method
      * PUT /api/billing/payment-methods/:paymentMethodId
      */
-    static async updatePaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async updatePaymentMethod(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('updatePaymentMethod', req);
         try {
-            const userId = req.user!.id;
             const { paymentMethodId } = req.params;
+            ServiceHelper.validateObjectId(paymentMethodId, 'paymentMethodId');
             const { setAsDefault } = req.body;
 
             const paymentMethod = await PaymentMethod.findOne({
@@ -270,30 +292,34 @@ export class BillingController {
 
             await paymentMethod.save();
 
+            ControllerHelper.logRequestSuccess('updatePaymentMethod', req, startTime, {
+                paymentMethodId
+            });
+
             res.json({
                 success: true,
                 message: 'Payment method updated successfully',
                 data: paymentMethod,
             });
         } catch (error: any) {
-            loggingService.error('Update payment method failed', {
-                userId: req.user!.id,
-                paymentMethodId: req.params.paymentMethodId,
-                error: error.message,
+            ControllerHelper.handleError('updatePaymentMethod', error, req, res, startTime, {
+                paymentMethodId: req.params.paymentMethodId
             });
-            next(error);
         }
-        return;
     }
 
     /**
      * Remove payment method
      * DELETE /api/billing/payment-methods/:paymentMethodId
      */
-    static async removePaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async removePaymentMethod(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('removePaymentMethod', req);
         try {
-            const userId = req.user!.id;
             const { paymentMethodId } = req.params;
+            ServiceHelper.validateObjectId(paymentMethodId, 'paymentMethodId');
 
             const paymentMethod = await PaymentMethod.findOne({
                 _id: paymentMethodId,
@@ -336,28 +362,31 @@ export class BillingController {
             paymentMethod.recurringStatus = 'cancelled';
             await paymentMethod.save();
 
+            ControllerHelper.logRequestSuccess('removePaymentMethod', req, startTime, {
+                paymentMethodId
+            });
+
             res.json({
                 success: true,
                 message: 'Payment method removed successfully',
             });
         } catch (error: any) {
-            loggingService.error('Remove payment method failed', {
-                userId: req.user!.id,
-                paymentMethodId: req.params.paymentMethodId,
-                error: error.message,
+            ControllerHelper.handleError('removePaymentMethod', error, req, res, startTime, {
+                paymentMethodId: req.params.paymentMethodId
             });
-            next(error);
         }
-        return;
     }
 
     /**
      * Get upcoming invoice preview
      * GET /api/billing/invoices/upcoming
      */
-    static async getUpcomingInvoice(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUpcomingInvoice(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUpcomingInvoice', req);
         try {
-            const userId = req.user!.id;
 
             const subscription = await SubscriptionService.getSubscriptionByUserId(userId);
             if (!subscription) {
@@ -435,22 +464,20 @@ export class BillingController {
                 },
             });
         } catch (error: any) {
-            loggingService.error('Get upcoming invoice failed', {
-                userId: req.user!.id,
-                error: error.message,
-            });
-            next(error);
+            ControllerHelper.handleError('getUpcomingInvoice', error, req, res, startTime);
         }
-        return;
     }
 
     /**
      * Create Razorpay order for payment method collection
      * POST /api/billing/payment-methods/razorpay/create-order
      */
-    static async createRazorpayPaymentMethodOrder(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async createRazorpayPaymentMethodOrder(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createRazorpayPaymentMethodOrder', req);
         try {
-            const userId = req.user!.id;
             const { amount, currency } = req.body;
 
             // Default to minimal amount if not provided
@@ -595,9 +622,12 @@ export class BillingController {
      * Save Razorpay payment method after successful checkout
      * POST /api/billing/payment-methods/razorpay/save
      */
-    static async saveRazorpayPaymentMethod(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async saveRazorpayPaymentMethod(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('saveRazorpayPaymentMethod', req);
         try {
-            const userId = req.user!.id;
             const { paymentId, orderId, signature, setAsDefault } = req.body;
 
             if (!paymentId || !orderId || !signature) {
@@ -709,7 +739,7 @@ export class BillingController {
             } else {
                 // Create new payment method
                 paymentMethod = new PaymentMethod(paymentMethodData);
-                paymentMethod.userId = userId;
+                paymentMethod.userId = userId as any;
                 await paymentMethod.save();
             }
 
@@ -753,7 +783,11 @@ export class BillingController {
      * Get payment gateway configuration (public keys only)
      * GET /api/billing/payment-config
      */
-    static async getPaymentConfig(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getPaymentConfig(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
+        const startTime = Date.now();
+        // This endpoint may not require auth, but we'll check if userId exists
+        const userId = req.userId;
+        ControllerHelper.logRequestStart('getPaymentConfig', req);
         try {
             const config: Record<string, any> = {};
 
@@ -795,18 +829,17 @@ export class BillingController {
                 };
             }
 
+            ControllerHelper.logRequestSuccess('getPaymentConfig', req, startTime, {
+                gatewaysConfigured: Object.keys(config).length
+            });
+
             res.json({
                 success: true,
                 data: config,
             });
         } catch (error: any) {
-            loggingService.error('Get payment config failed', {
-                userId: req.user?.id,
-                error: error.message,
-            });
-            next(error);
+            ControllerHelper.handleError('getPaymentConfig', error, req, res, startTime);
         }
-        return;
     }
 }
 

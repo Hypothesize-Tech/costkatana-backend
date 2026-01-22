@@ -1,7 +1,8 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.middleware';
-import { validateRequest } from '../middleware/validation.middleware';
-import { body, param } from 'express-validator';
+import { authenticate } from '@middleware/auth.middleware';
+import { validateRequest } from '@middleware/validation.middleware';
+import { body } from 'express-validator';
+import { chatValidators, governedValidators } from '@middleware/validators/chat.validators';
 import {
     sendMessage,
     getConversationHistory,
@@ -69,10 +70,7 @@ router.delete('/conversations/:conversationId', authenticate, deleteConversation
 // Rename a conversation
 router.put(
     '/conversations/:id/rename',
-    [
-        param('id').isMongoId().withMessage('Invalid conversation ID'),
-        body('title').notEmpty().trim().isLength({ min: 1, max: 200 }).withMessage('Title must be between 1 and 200 characters')
-    ],
+    [chatValidators.conversationId, chatValidators.titleBody],
     validateRequest,
     authenticate,
     renameConversation
@@ -81,10 +79,7 @@ router.put(
 // Archive/unarchive a conversation
 router.put(
     '/conversations/:id/archive',
-    [
-        param('id').isMongoId().withMessage('Invalid conversation ID'),
-        body('archived').isBoolean().withMessage('archived must be a boolean')
-    ],
+    [chatValidators.conversationId, chatValidators.archivedBody],
     validateRequest,
     authenticate,
     archiveConversation
@@ -93,10 +88,7 @@ router.put(
 // Pin/unpin a conversation
 router.put(
     '/conversations/:id/pin',
-    [
-        param('id').isMongoId().withMessage('Invalid conversation ID'),
-        body('pinned').isBoolean().withMessage('pinned must be a boolean')
-    ],
+    [chatValidators.conversationId, chatValidators.pinnedBody],
     validateRequest,
     authenticate,
     pinConversation
@@ -126,9 +118,7 @@ router.get('/integrations/:type/:entityId/subentities', authenticate, Integratio
 // Classify a chat message to determine if governed agent should be used
 router.post(
     '/classify',
-    [
-        body('message').notEmpty().isString().withMessage('Message is required')
-    ],
+    [chatValidators.messageBody],
     validateRequest,
     authenticate,
     ChatGovernedAgentController.classifyMessage
@@ -137,10 +127,7 @@ router.post(
 // Initiate governed agent task from chat
 router.post(
     '/governed/initiate',
-    [
-        body('message').notEmpty().isString().withMessage('Message is required'),
-        body('conversationId').optional().isMongoId().withMessage('Invalid conversationId')
-    ],
+    governedValidators.initiateChat,
     validateRequest,
     authenticate,
     ChatGovernedAgentController.initiateFromChat
@@ -163,10 +150,7 @@ router.post(
 // Submit clarifying answers
 router.post(
     '/governed/:taskId/submit-answers',
-    [
-        param('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('answers').isObject().withMessage('Answers must be an object')
-    ],
+    governedValidators.submitAnswers,
     validateRequest,
     authenticate,
     ChatGovernedAgentController.submitClarifyingAnswers
@@ -182,10 +166,7 @@ router.post(
 // Request changes to the plan
 router.post(
     '/governed/:taskId/request-changes',
-    [
-        param('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('feedback').notEmpty().isString().withMessage('Feedback is required')
-    ],
+    governedValidators.requestChanges,
     validateRequest,
     authenticate,
     ChatGovernedAgentController.requestPlanChanges
@@ -201,10 +182,7 @@ router.post(
 // Navigate to a specific mode
 router.post(
     '/governed/:taskId/navigate',
-    [
-        param('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('mode').notEmpty().isString().withMessage('Mode is required')
-    ],
+    governedValidators.navigateMode,
     validateRequest,
     authenticate,
     ChatGovernedAgentController.navigateToMode
@@ -213,11 +191,7 @@ router.post(
 // Plan modification endpoints
 router.post(
     '/:chatId/plan/modify',
-    [
-        param('chatId').isMongoId().withMessage('Invalid chatId'),
-        body('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('modifications').isObject().withMessage('Modifications object is required')
-    ],
+    governedValidators.modifyPlan,
     validateRequest,
     authenticate,
     modifyPlan
@@ -226,11 +200,7 @@ router.post(
 // Ask question about plan
 router.post(
     '/:chatId/plan/question',
-    [
-        param('chatId').isMongoId().withMessage('Invalid chatId'),
-        body('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('question').notEmpty().isString().withMessage('Question is required')
-    ],
+    governedValidators.questionPlan,
     validateRequest,
     authenticate,
     askAboutPlan
@@ -239,11 +209,7 @@ router.post(
 // Request code changes
 router.post(
     '/:chatId/plan/:taskId/redeploy',
-    [
-        param('chatId').isMongoId().withMessage('Invalid chatId'),
-        param('taskId').isMongoId().withMessage('Invalid taskId'),
-        body('changeRequest').notEmpty().isString().withMessage('Change request is required')
-    ],
+    governedValidators.redeployTask,
     validateRequest,
     authenticate,
     requestCodeChanges
@@ -252,9 +218,7 @@ router.post(
 // Get all plans in a chat
 router.get(
     '/:chatId/plans',
-    [
-        param('chatId').isMongoId().withMessage('Invalid chatId')
-    ],
+    [chatValidators.chatIdParam],
     validateRequest,
     authenticate,
     getChatPlans
@@ -263,9 +227,7 @@ router.get(
 // Stream chat-wide updates
 router.get(
     '/:chatId/stream',
-    [
-        param('chatId').isMongoId().withMessage('Invalid chatId')
-    ],
+    [chatValidators.chatIdParam],
     validateRequest,
     authenticate,
     streamChatUpdates

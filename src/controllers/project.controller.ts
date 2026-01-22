@@ -2,204 +2,105 @@ import { Response } from 'express';
 import { ProjectService } from '../services/project.service';
 import { ApprovalRequest } from '../models/ApprovalRequest';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class ProjectController {
     /**
      * Create a new project
      */
-    static async createProject(req: any, res: Response): Promise<void> {
+    static async createProject(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('createProject', req);
 
         try {
-            loggingService.info('Project creation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectName: req.body?.name,
-                hasProjectName: !!req.body?.name,
-                projectDescription: req.body?.description,
-                hasProjectDescription: !!req.body?.description,
-                projectTags: req.body?.tags,
-                hasProjectTags: !!req.body?.tags,
-                budgetAmount: req.body?.budget?.amount,
-                hasBudgetAmount: !!req.body?.budget?.amount,
-                budgetPeriod: req.body?.budget?.period,
-                hasBudgetPeriod: !!req.body?.budget?.period,
-                alertsCount: req.body?.budget?.alerts?.length || 0,
-                settingsKeys: Object.keys(req.body?.settings || {})
-            });
-
-            if (!userId) {
-                loggingService.warn('Project creation failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
-
             const projectData = req.body;
             const project = await ProjectService.createProject(userId, projectData);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project created successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('createProject', req, startTime, {
                 projectId: project._id,
-                hasProjectId: !!project._id,
                 projectName: project.name,
-                hasProjectName: !!project.name,
-                requestId
+                budgetAmount: projectData.budget?.amount
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_created',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'project_created',
+                'project',
+                userId,
+                undefined,
+                {
                     projectId: project._id,
                     projectName: project.name,
                     budgetAmount: projectData.budget?.amount,
                     budgetPeriod: projectData.budget?.period
                 }
-            });
+            );
 
+            // Keep existing response format (backward compatibility)
             res.status(201).json({
                 success: true,
                 data: project,
                 message: 'Project created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project creation failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to create project'
-            });
+            ControllerHelper.handleError('createProject', error, req, res, startTime);
         }
     }
 
     /**
      * Get all projects for the authenticated user
      */
-    static async getUserProjects(req: any, res: Response): Promise<void> {
+    static async getUserProjects(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('getUserProjects', req);
 
         try {
-            loggingService.info('User projects retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('User projects retrieval failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
-
             const projects = await ProjectService.getUserProjects(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('User projects retrieved successfully', {
-                userId,
-                duration,
-                projectsCount: projects.length,
-                hasProjects: !!projects && projects.length > 0,
-                requestId
+            ControllerHelper.logRequestSuccess('getUserProjects', req, startTime, {
+                projectsCount: projects.length
             });
 
+            // Keep existing response format (backward compatibility)
             res.json({
                 success: true,
                 data: projects
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User projects retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get projects'
-            });
+            ControllerHelper.handleError('getUserProjects', error, req, res, startTime);
         }
     }
 
     /**
      * Get project analytics
      */
-    static async getProjectAnalytics(req: any, res: Response): Promise<void> {
+    static async getProjectAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
         const { period } = req.query;
+        ControllerHelper.logRequestStart('getProjectAnalytics', req);
 
         try {
-            loggingService.info('Project analytics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId,
-                period,
-                hasPeriod: !!period
-            });
-
-            if (!userId) {
-                loggingService.warn('Project analytics retrieval failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const analytics = await ProjectService.getProjectAnalytics(
                 projectId,
                 period as string
             );
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project analytics retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getProjectAnalytics', req, startTime, {
                 projectId,
-                period,
-                hasAnalytics: !!analytics,
-                requestId
+                period
             });
 
             res.json({
@@ -207,86 +108,45 @@ export class ProjectController {
                 data: analytics
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project analytics retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                period,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get analytics'
-            });
+            ControllerHelper.handleError('getProjectAnalytics', error, req, res, startTime);
         }
     }
 
     /**
      * Update project settings
      */
-    static async updateProject(req: any, res: Response): Promise<void> {
+    static async updateProject(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
         const updates = req.body;
+        ControllerHelper.logRequestStart('updateProject', req);
 
         try {
-            loggingService.info('Project update initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId,
-                updateKeys: Object.keys(updates || {}),
-                hasUpdates: !!updates && Object.keys(updates).length > 0
-            });
-
-            if (!userId) {
-                loggingService.warn('Project update failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const project = await ProjectService.updateProject(
                 projectId,
                 updates,
                 userId
             );
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project updated successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('updateProject', req, startTime, {
                 projectId,
-                updateKeys: Object.keys(updates || {}),
-                hasProject: !!project,
-                requestId
+                updateKeys: Object.keys(updates || {})
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_updated',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'project_updated',
+                'project',
+                userId,
+                Date.now() - startTime,
+                {
                     projectId,
                     updateKeys: Object.keys(updates || {})
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -294,57 +154,23 @@ export class ProjectController {
                 message: 'Project updated successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project update failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to update project'
-            });
+            ControllerHelper.handleError('updateProject', error, req, res, startTime);
         }
     }
 
     /**
      * Get pending approval requests for a project
      */
-    static async getApprovalRequests(req: any, res: Response): Promise<void> {
+    static async getApprovalRequests(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
         const { status } = req.query;
+        ControllerHelper.logRequestStart('getApprovalRequests', req);
 
         try {
-            loggingService.info('Approval requests retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId,
-                status,
-                hasStatus: !!status
-            });
-
-            if (!userId) {
-                loggingService.warn('Approval requests retrieval failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const filter: any = { projectId };
             if (status) {
@@ -354,16 +180,11 @@ export class ProjectController {
             const requests = await ApprovalRequest.find(filter)
                 .populate('requesterId', 'name email')
                 .sort({ createdAt: -1 });
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Approval requests retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getApprovalRequests', req, startTime, {
                 projectId,
                 status,
-                requestsCount: requests.length,
-                hasRequests: !!requests && requests.length > 0,
-                requestId
+                requestsCount: requests.length
             });
 
             res.json({
@@ -371,68 +192,26 @@ export class ProjectController {
                 data: requests
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Approval requests retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                status,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get approval requests'
-            });
+            ControllerHelper.handleError('getApprovalRequests', error, req, res, startTime);
         }
     }
 
     /**
      * Approve or reject an approval request
      */
-    static async handleApprovalRequest(req: any, res: Response): Promise<void> {
+    static async handleApprovalRequest(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { requestId: approvalRequestId } = req.params;
         const { action, comments, conditions } = req.body;
+        ControllerHelper.logRequestStart('handleApprovalRequest', req);
 
         try {
-            loggingService.info('Approval request handling initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                approvalRequestId,
-                hasApprovalRequestId: !!approvalRequestId,
-                action,
-                hasAction: !!action,
-                hasComments: !!comments,
-                hasConditions: !!conditions
-            });
-
-            if (!userId) {
-                loggingService.warn('Approval request handling failed - user not authenticated', {
-                    requestId,
-                    approvalRequestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(approvalRequestId, 'Approval Request ID');
 
             const request = await ApprovalRequest.findById(approvalRequestId);
             if (!request) {
-                loggingService.warn('Approval request handling failed - request not found', {
-                    userId,
-                    requestId,
-                    approvalRequestId
-                });
                 res.status(404).json({
                     success: false,
                     error: 'Approval request not found'
@@ -441,12 +220,6 @@ export class ProjectController {
             }
 
             if (request.status !== 'pending') {
-                loggingService.warn('Approval request handling failed - request already processed', {
-                    userId,
-                    requestId,
-                    approvalRequestId,
-                    currentStatus: request.status
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Request has already been processed'
@@ -459,12 +232,6 @@ export class ProjectController {
             } else if (action === 'reject') {
                 await (request as any).reject(userId, comments);
             } else {
-                loggingService.warn('Approval request handling failed - invalid action', {
-                    userId,
-                    requestId,
-                    approvalRequestId,
-                    action
-                });
                 res.status(400).json({
                     success: false,
                     error: 'Invalid action'
@@ -472,29 +239,23 @@ export class ProjectController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Approval request handled successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('handleApprovalRequest', req, startTime, {
                 approvalRequestId,
-                action,
-                requestId
+                action
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'approval_request_processed',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'approval_request_processed',
+                'project',
+                userId,
+                Date.now() - startTime,
+                {
                     approvalRequestId,
                     action,
                     comments: !!comments,
                     conditions: !!conditions
                 }
-            });
+            );
 
             res.json({
                 success: true,
@@ -502,62 +263,23 @@ export class ProjectController {
                 message: `Request ${action}d successfully`
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Approval request handling failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                approvalRequestId,
-                action,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to process approval'
-            });
+            ControllerHelper.handleError('handleApprovalRequest', error, req, res, startTime);
         }
     }
 
     /**
      * Get cost allocation breakdown
      */
-    static async getCostAllocation(req: any, res: Response): Promise<void> {
+    static async getCostAllocation(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
         const { groupBy, startDate, endDate } = req.query;
+        ControllerHelper.logRequestStart('getCostAllocation', req);
 
         try {
-            loggingService.info('Cost allocation retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId,
-                groupBy,
-                hasGroupBy: !!groupBy,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
-
-            if (!userId) {
-                loggingService.warn('Cost allocation retrieval failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const allocation = await ProjectService.getCostAllocation(
                 projectId,
@@ -567,17 +289,10 @@ export class ProjectController {
                     endDate: endDate ? new Date(endDate as string) : undefined
                 }
             );
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Cost allocation retrieved successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('getCostAllocation', req, startTime, {
                 projectId,
-                groupBy,
-                startDate,
-                endDate,
-                hasAllocation: !!allocation,
-                requestId
+                groupBy
             });
 
             res.json({
@@ -585,363 +300,164 @@ export class ProjectController {
                 data: allocation
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Cost allocation retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                groupBy,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to get cost allocation'
-            });
+            ControllerHelper.handleError('getCostAllocation', error, req, res, startTime);
         }
     }
 
     /**
      * Get a specific project by ID
      */
-    static async getProject(req: any, res: Response): Promise<void> {
+    static async getProject(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
         const { projectId } = req.params;
+        ControllerHelper.logRequestStart('getProject', req);
 
         try {
-            loggingService.info('Project retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId
-            });
-
-            if (!userId) {
-                loggingService.warn('Project retrieval failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            // Validate MongoDB ObjectId
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const project = await ProjectService.getProjectById(projectId, userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project retrieved successfully', {
-                userId,
-                duration,
-                projectId,
-                hasProject: !!project,
-                requestId
+            ControllerHelper.logRequestSuccess('getProject', req, startTime, {
+                projectId
             });
 
+            // Keep existing response format (backward compatibility)
             res.json({
                 success: true,
                 data: project
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project retrieval failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            if (error.message === 'Project not found' || error.message === 'Access denied') {
-                res.status(404).json({
-                    success: false,
-                    error: error.message
-                });
-            } else {
-                res.status(500).json({
-                    success: false,
-                    error: error.message || 'Failed to get project'
-                });
-            }
+            ControllerHelper.handleError('getProject', error, req, res, startTime);
         }
     }
 
     /**
      * Delete a project
      */
-    static async deleteProject(req: any, res: Response): Promise<void> {
+    static async deleteProject(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) {
+            return;
+        }
+        const userId = req.userId!;
         const { projectId } = req.params;
+        ControllerHelper.logRequestStart('deleteProject', req);
 
         try {
-            loggingService.info('Project deletion initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId
-            });
-
-            if (!userId) {
-                loggingService.warn('Project deletion failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            // Validate MongoDB ObjectId
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             await ProjectService.deleteProject(projectId, userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project deleted successfully', {
+            ControllerHelper.logRequestSuccess('deleteProject', req, startTime, {
+                projectId
+            });
+
+            ControllerHelper.logBusinessEvent(
+                'project_deleted',
+                'project',
                 userId,
-                duration,
-                projectId,
-                requestId
-            });
+                undefined,
+                { projectId }
+            );
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_deleted',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
-                    projectId
-                }
-            });
-
+            // Keep existing response format (backward compatibility)
             res.json({
                 success: true,
                 message: 'Project deleted successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project deletion failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            if (error.message === 'Project not found' || error.message === 'Access denied') {
-                res.status(404).json({
-                    success: false,
-                    error: error.message
-                });
-            } else {
-                res.status(500).json({
-                    success: false,
-                    error: error.message || 'Failed to delete project'
-                });
-            }
+            ControllerHelper.handleError('deleteProject', error, req, res, startTime);
         }
     }
 
     /**
      * Recalculate all user project spending
      */
-    static async recalculateUserProjectSpending(req: any, res: Response): Promise<void> {
+    static async recalculateUserProjectSpending(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+        ControllerHelper.logRequestStart('recalculateUserProjectSpending', req);
 
         try {
-            loggingService.info('User project spending recalculation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId
-            });
-
-            if (!userId) {
-                loggingService.warn('User project spending recalculation failed - user not authenticated', {
-                    requestId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
-
             // Recalculate spending for all user projects
             await ProjectService.recalculateUserProjectSpending(userId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('User project spending recalculated successfully', {
+            ControllerHelper.logRequestSuccess('recalculateUserProjectSpending', req, startTime);
+
+            ControllerHelper.logBusinessEvent(
+                'user_project_spending_recalculated',
+                'project',
                 userId,
-                duration,
-                requestId
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'user_project_spending_recalculated',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId
-                }
-            });
+                Date.now() - startTime,
+                {}
+            );
 
             res.json({
                 success: true,
                 message: 'All project spending recalculated successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('User project spending recalculation failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to recalculate project spending'
-            });
+            ControllerHelper.handleError('recalculateUserProjectSpending', error, req, res, startTime);
         }
     }
 
     /**
      * Recalculate project spending from Usage data
      */
-    static async recalculateProjectSpending(req: any, res: Response): Promise<void> {
+    static async recalculateProjectSpending(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
+        ControllerHelper.logRequestStart('recalculateProjectSpending', req);
 
         try {
-            loggingService.info('Project spending recalculation initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId
-            });
-
-            if (!userId) {
-                loggingService.warn('Project spending recalculation failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             // Recalculate spending
             await ProjectService.recalculateProjectSpending(projectId);
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project spending recalculated successfully', {
+            ControllerHelper.logRequestSuccess('recalculateProjectSpending', req, startTime, {
+                projectId
+            });
+
+            ControllerHelper.logBusinessEvent(
+                'project_spending_recalculated',
+                'project',
                 userId,
-                duration,
-                projectId,
-                requestId
-            });
-
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_spending_recalculated',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
-                    projectId
-                }
-            });
+                Date.now() - startTime,
+                { projectId }
+            );
 
             res.json({
                 success: true,
                 message: 'Project spending recalculated successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project spending recalculation failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(400).json({
-                success: false,
-                error: error.message || 'Failed to recalculate project spending'
-            });
+            ControllerHelper.handleError('recalculateProjectSpending', error, req, res, startTime);
         }
     }
 
     /**
      * Export project data
      */
-    static async exportProjectData(req: any, res: Response): Promise<void> {
+    static async exportProjectData(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-        const requestId = req.headers['x-request-id'] as string;
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
         const { projectId } = req.params;
         const { format, startDate, endDate } = req.query;
+        ControllerHelper.logRequestStart('exportProjectData', req);
 
         try {
-            loggingService.info('Project data export initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                hasProjectId: !!projectId,
-                format,
-                hasFormat: !!format,
-                startDate,
-                hasStartDate: !!startDate,
-                endDate,
-                hasEndDate: !!endDate
-            });
-
-            if (!userId) {
-                loggingService.warn('Project data export failed - user not authenticated', {
-                    requestId,
-                    projectId
-                });
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
+            ServiceHelper.validateObjectId(projectId, 'Project ID');
 
             const data = await ProjectService.exportProjectData(
                 projectId,
@@ -951,32 +467,24 @@ export class ProjectController {
                     endDate: endDate ? new Date(endDate as string) : undefined
                 }
             );
-            const duration = Date.now() - startTime;
 
-            loggingService.info('Project data exported successfully', {
-                userId,
-                duration,
+            ControllerHelper.logRequestSuccess('exportProjectData', req, startTime, {
                 projectId,
-                format,
-                startDate,
-                endDate,
-                hasData: !!data,
-                requestId
+                format
             });
 
-            // Log business event
-            loggingService.logBusiness({
-                event: 'project_data_exported',
-                category: 'project',
-                value: duration,
-                metadata: {
-                    userId,
+            ControllerHelper.logBusinessEvent(
+                'project_data_exported',
+                'project',
+                userId,
+                Date.now() - startTime,
+                {
                     projectId,
                     format,
                     startDate: !!startDate,
                     endDate: !!endDate
                 }
-            });
+            );
 
             if (format === 'csv') {
                 res.setHeader('Content-Type', 'text/csv');
@@ -988,25 +496,7 @@ export class ProjectController {
 
             res.send(data);
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Project data export failed', {
-                userId,
-                hasUserId: !!userId,
-                requestId,
-                projectId,
-                format,
-                startDate,
-                endDate,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration
-            });
-
-            res.status(500).json({
-                success: false,
-                error: error.message || 'Failed to export data'
-            });
+            ControllerHelper.handleError('exportProjectData', error, req, res, startTime);
         }
     }
 } 

@@ -3,6 +3,8 @@ import { intelligenceService } from '../services/intelligence.service';
 import { qualityService } from '../services/quality.service';
 import { Usage, User } from '../models';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class IntelligenceController {
     /**
@@ -89,38 +91,15 @@ export class IntelligenceController {
     /**
      * Get tips for a specific usage
      */
-    static async getTipsForUsage(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getTipsForUsage(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { usageId } = req.params;
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Usage-specific tips retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                usageId,
-                hasUsageId: !!usageId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getTipsForUsage', req);
 
-            if (!userId) {
-                loggingService.warn('Usage-specific tips retrieval failed - authentication required', {
-                    usageId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
-
-            loggingService.info('Usage-specific tips retrieval processing started', {
-                userId,
-                usageId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            const { usageId } = req.params;
+            ServiceHelper.validateObjectId(usageId, 'usageId');
 
             // Parallel database queries for better performance
             const [usage, user] = await Promise.all([
@@ -129,12 +108,6 @@ export class IntelligenceController {
             ]);
 
             if (!usage) {
-                loggingService.warn('Usage-specific tips retrieval failed - usage not found', {
-                    userId,
-                    usageId,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(404).json({
                     success: false,
                     error: 'Usage not found'
@@ -147,23 +120,16 @@ export class IntelligenceController {
                 user: user as any
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Usage-specific tips retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getTipsForUsage', req, startTime, {
                 usageId,
-                duration,
-                tipsCount: tips.length,
-                hasTips: !!tips && tips.length > 0,
-                hasUser: !!user,
-                requestId: req.headers['x-request-id'] as string
+                tipsCount: tips.length
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'usage_specific_tips_retrieved',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     usageId,
@@ -178,49 +144,24 @@ export class IntelligenceController {
                 data: tips
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Usage-specific tips retrieval failed', {
-                userId,
-                usageId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('getTipsForUsage', error, req, res, startTime);
         }
     }
 
     /**
      * Track tip interaction
      */
-    static async trackTipInteraction(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async trackTipInteraction(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { tipId } = req.params;
-        const { interaction } = req.body;
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Tip interaction tracking initiated', {
-                userId,
-                hasUserId: !!userId,
-                tipId,
-                hasTipId: !!tipId,
-                interaction,
-                hasInteraction: !!interaction,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('trackTipInteraction', req);
+
+            const { tipId } = req.params;
+            const { interaction } = req.body;
 
             if (!['display', 'click', 'dismiss', 'success'].includes(interaction)) {
-                loggingService.warn('Tip interaction tracking failed - invalid interaction type', {
-                    userId,
-                    tipId,
-                    interaction,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Invalid interaction type'
@@ -228,30 +169,18 @@ export class IntelligenceController {
                 return;
             }
 
-            loggingService.info('Tip interaction tracking processing started', {
-                userId,
-                tipId,
-                interaction,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await intelligenceService.trackTipInteraction(tipId, interaction, userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Tip interaction tracked successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('trackTipInteraction', req, startTime, {
                 tipId,
-                interaction,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                interaction
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'tip_interaction_tracked',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     tipId,
@@ -264,66 +193,29 @@ export class IntelligenceController {
                 message: 'Interaction tracked'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Tip interaction tracking failed', {
-                userId,
-                tipId,
-                interaction,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('trackTipInteraction', error, req, res, startTime);
         }
     }
 
     /**
      * Score response quality
      */
-    static async scoreResponseQuality(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async scoreResponseQuality(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { prompt, response, expectedOutput, method } = req.body;
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Response quality scoring initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasPrompt: !!prompt,
-                hasResponse: !!response,
-                hasExpectedOutput: !!expectedOutput,
-                method: method || 'hybrid',
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('scoreResponseQuality', req);
+
+            const { prompt, response, expectedOutput, method } = req.body;
 
             if (!prompt || !response) {
-                loggingService.warn('Response quality scoring failed - missing required fields', {
-                    userId,
-                    hasPrompt: !!prompt,
-                    hasResponse: !!response,
-                    expectedOutput,
-                    method: method || 'hybrid',
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'Prompt and response are required'
                 });
                 return;
             }
-
-            loggingService.info('Response quality scoring processing started', {
-                userId,
-                hasPrompt: !!prompt,
-                hasResponse: !!response,
-                hasExpectedOutput: !!expectedOutput,
-                method: method || 'hybrid',
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const assessment = await qualityService.scoreResponse(
                 prompt,
@@ -332,24 +224,13 @@ export class IntelligenceController {
                 method || 'hybrid'
             );
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Response quality scoring completed successfully', {
-                userId,
-                hasPrompt: !!prompt,
-                hasResponse: !!response,
-                hasExpectedOutput: !!expectedOutput,
-                method: method || 'hybrid',
-                duration,
-                hasAssessment: !!assessment,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('scoreResponseQuality', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'response_quality_scored',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasPrompt: !!prompt,
@@ -365,84 +246,29 @@ export class IntelligenceController {
                 data: assessment
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Response quality scoring failed', {
-                userId,
-                hasPrompt: !!prompt,
-                hasResponse: !!response,
-                hasExpectedOutput: !!expectedOutput,
-                method: method || 'hybrid',
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('scoreResponseQuality', error, req, res, startTime);
         }
     }
 
     /**
      * Compare quality of original vs optimized response
      */
-    static async compareQuality(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async compareQuality(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { prompt, originalResponse, optimizedResponse, costSavings } = req.body;
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Quality comparison initiated', {
-                userId,
-                hasUserId: !!userId,
-                hasPrompt: !!prompt,
-                hasOriginalResponse: !!originalResponse,
-                hasOptimizedResponse: !!optimizedResponse,
-                hasCostSavings: !!costSavings,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('compareQuality', req);
 
-            if (!userId) {
-                loggingService.warn('Quality comparison failed - authentication required', {
-                    hasPrompt: !!prompt,
-                    hasOriginalResponse: !!originalResponse,
-                    hasOptimizedResponse: !!optimizedResponse,
-                    hasCostSavings: !!costSavings,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
+            const { prompt, originalResponse, optimizedResponse, costSavings } = req.body;
 
             if (!prompt || !originalResponse || !optimizedResponse || !costSavings) {
-                loggingService.warn('Quality comparison failed - missing required fields', {
-                    userId,
-                    hasPrompt: !!prompt,
-                    hasOriginalResponse: !!originalResponse,
-                    hasOptimizedResponse: !!optimizedResponse,
-                    hasCostSavings: !!costSavings,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'All fields are required'
                 });
                 return;
             }
-
-            loggingService.info('Quality comparison processing started', {
-                userId,
-                hasPrompt: !!prompt,
-                hasOriginalResponse: !!originalResponse,
-                hasOptimizedResponse: !!optimizedResponse,
-                hasCostSavings: !!costSavings,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             const comparison = await qualityService.compareQuality(
                 prompt,
@@ -461,27 +287,16 @@ export class IntelligenceController {
                 optimizationType: ['manual_comparison']
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Quality comparison completed successfully', {
-                userId,
-                hasPrompt: !!prompt,
-                hasOriginalResponse: !!originalResponse,
-                hasOptimizedResponse: !!optimizedResponse,
-                hasCostSavings: !!costSavings,
-                duration,
-                hasComparison: !!comparison,
-                hasQualityScore: !!qualityScore,
+            ControllerHelper.logRequestSuccess('compareQuality', req, startTime, {
                 originalScore: comparison.originalScore,
-                optimizedScore: comparison.optimizedScore,
-                requestId: req.headers['x-request-id'] as string
+                optimizedScore: comparison.optimizedScore
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'quality_comparison_completed',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasPrompt: !!prompt,
@@ -503,71 +318,29 @@ export class IntelligenceController {
                 }
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Quality comparison failed', {
-                userId,
-                hasPrompt: !!prompt,
-                hasOriginalResponse: !!originalResponse,
-                hasOptimizedResponse: !!optimizedResponse,
-                hasCostSavings: !!costSavings,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('compareQuality', error, req, res, startTime);
         }
     }
 
     /**
      * Get quality statistics for user
      */
-    static async getQualityStats(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getQualityStats(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Quality statistics retrieval initiated', {
-                userId,
-                hasUserId: !!userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                loggingService.warn('Quality statistics retrieval failed - authentication required', {
-                    requestId: req.headers['x-request-id'] as string
-                });
-
-                res.status(401).json({
-                    success: false,
-                    error: 'Unauthorized'
-                });
-                return;
-            }
-
-            loggingService.info('Quality statistics retrieval processing started', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getQualityStats', req);
 
             const stats = await qualityService.getUserQualityStats(userId);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Quality statistics retrieved successfully', {
-                userId,
-                duration,
-                hasStats: !!stats,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('getQualityStats', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'quality_statistics_retrieved',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     hasStats: !!stats
@@ -579,53 +352,25 @@ export class IntelligenceController {
                 data: stats
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Quality statistics retrieval failed', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('getQualityStats', error, req, res, startTime);
         }
     }
 
     /**
      * Update user feedback for quality score
      */
-    static async updateQualityFeedback(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async updateQualityFeedback(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const { scoreId } = req.params;
-        const { rating, isAcceptable, comment } = req.body;
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Quality feedback update initiated', {
-                userId,
-                hasUserId: !!userId,
-                scoreId,
-                hasScoreId: !!scoreId,
-                rating,
-                hasRating: !!rating,
-                isAcceptable,
-                hasIsAcceptable: typeof isAcceptable === 'boolean',
-                hasComment: !!comment,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('updateQualityFeedback', req);
+
+            const { scoreId } = req.params;
+            ServiceHelper.validateObjectId(scoreId, 'scoreId');
+            const { rating, isAcceptable, comment } = req.body;
 
             if (typeof isAcceptable !== 'boolean') {
-                loggingService.warn('Quality feedback update failed - invalid isAcceptable field', {
-                    userId,
-                    scoreId,
-                    rating,
-                    isAcceptable,
-                    hasComment: !!comment,
-                    requestId: req.headers['x-request-id'] as string
-                });
-
                 res.status(400).json({
                     success: false,
                     error: 'isAcceptable is required'
@@ -633,38 +378,21 @@ export class IntelligenceController {
                 return;
             }
 
-            loggingService.info('Quality feedback update processing started', {
-                userId,
-                scoreId,
-                rating,
-                isAcceptable,
-                hasComment: !!comment,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await qualityService.updateUserFeedback(scoreId, {
                 rating,
                 isAcceptable,
                 comment
             });
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Quality feedback updated successfully', {
-                userId,
-                scoreId,
-                rating,
-                isAcceptable,
-                hasComment: !!comment,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('updateQualityFeedback', req, startTime, {
+                scoreId
             });
 
             // Log business event
             loggingService.logBusiness({
                 event: 'quality_feedback_updated',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     scoreId,
@@ -679,62 +407,30 @@ export class IntelligenceController {
                 message: 'Feedback updated'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Quality feedback update failed', {
-                userId,
-                scoreId,
-                rating,
-                isAcceptable,
-                hasComment: !!comment,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('updateQualityFeedback', error, req, res, startTime);
         }
     }
 
     /**
      * Initialize default tips (admin only)
      */
-    static async initializeTips(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async initializeTips(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
-        const userId = req.user?.id;
-
         try {
-            loggingService.info('Default tips initialization initiated', {
-                userId,
-                hasUserId: !!userId,
-                userRole: req.user?.role,
-                requestId: req.headers['x-request-id'] as string
-            });
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('initializeTips', req);
 
             // This should be restricted to admin users in production
-            loggingService.info('Default tips initialization processing started', {
-                userId,
-                userRole: req.user?.role,
-                requestId: req.headers['x-request-id'] as string
-            });
-
             await intelligenceService.initializeDefaultTips();
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Default tips initialized successfully', {
-                userId,
-                userRole: req.user?.role,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
+            ControllerHelper.logRequestSuccess('initializeTips', req, startTime);
 
             // Log business event
             loggingService.logBusiness({
                 event: 'default_tips_initialized',
                 category: 'intelligence_operations',
-                value: duration,
+                value: Date.now() - startTime,
                 metadata: {
                     userId,
                     userRole: req.user?.role
@@ -746,18 +442,7 @@ export class IntelligenceController {
                 message: 'Default tips initialized'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-            
-            loggingService.error('Default tips initialization failed', {
-                userId,
-                userRole: req.user?.role,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            next(error);
+            ControllerHelper.handleError('initializeTips', error, req, res, startTime);
         }
     }
 }

@@ -18,8 +18,9 @@
  */
 import { loggingService } from './logging.service';
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
-import { retryBedrockOperation } from '../utils/bedrockRetry';
+import { ServiceHelper } from '../utils/serviceHelper';
 import { HTMLSecurityService } from './htmlSecurity.service';
+import { BaseService } from '../shared/BaseService';
 
 export interface ThreatDetectionResult {
     isBlocked: boolean;
@@ -55,8 +56,14 @@ export interface FirewallAnalytics {
     savingsByThreatType: Record<string, number>;
 }
 
-export class PromptFirewallService {
+export class PromptFirewallService extends BaseService {
     private static bedrockClient: BedrockRuntimeClient;
+    
+    // Circuit breaker for external services
+    private static serviceFailureCount = 0;
+    private static lastServiceFailureTime = 0;
+    private static readonly MAX_SERVICE_FAILURES = 5;
+    private static readonly CIRCUIT_BREAKER_RESET_TIME = 5 * 60 * 1000; // 5 minutes
     
     // Pre-compiled regex patterns for better performance
     private static readonly INJECTION_PATTERNS = [
@@ -108,12 +115,6 @@ export class PromptFirewallService {
         /dangerous\s+content/i,
         /malicious\s+content/i
     ];
-
-    // Circuit breaker for external services
-    private static serviceFailureCount: number = 0;
-    private static readonly MAX_SERVICE_FAILURES = 3;
-    private static readonly CIRCUIT_BREAKER_RESET_TIME = 180000; // 3 minutes
-    private static lastServiceFailureTime: number = 0;
 
     // Whitelisted integration patterns - these are legitimate platform commands
     private static readonly INTEGRATION_PATTERNS = [
@@ -374,18 +375,12 @@ export class PromptFirewallService {
                 };
 
                 const command = new InvokeModelCommand(input);
-                const response = await retryBedrockOperation(
+                const response = await ServiceHelper.withRetry(
                     () => this.bedrockClient.send(command),
                     {
                         maxRetries: 2,
-                        baseDelay: 500,
-                        maxDelay: 5000,
-                        backoffMultiplier: 1.5,
-                        jitterFactor: 0.2
-                    },
-                    {
-                        modelId: 'meta.llama3-2-1b-instruct-v1:0',
-                        operation: 'promptGuard'
+                        delayMs: 500,
+                        backoffMultiplier: 1.5
                     }
                 );
                 
@@ -638,18 +633,12 @@ JSON Response:`;
         };
 
         const command = new InvokeModelCommand(input);
-        const response = await retryBedrockOperation(
+        const response = await ServiceHelper.withRetry(
             () => this.bedrockClient.send(command),
             {
                 maxRetries: 2,
-                baseDelay: 500,
-                maxDelay: 5000,
-                backoffMultiplier: 1.5,
-                jitterFactor: 0.2
-            },
-            {
-                modelId,
-                operation: 'aiThreatDetection'
+                delayMs: 500,
+                backoffMultiplier: 1.5
             }
         );
         

@@ -1,44 +1,51 @@
 import { Response, NextFunction } from 'express';
 import { AdminUserAnalyticsService, AdminUserAnalyticsFilters } from '../services/adminUserAnalytics.service';
-import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class AdminUserAnalyticsController {
     /**
      * Get all users spending summary
      * GET /api/admin/users/spending
      */
-    static async getAllUsersSpending(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getAllUsersSpending(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            ControllerHelper.logRequestStart('getAllUsersSpending', req);
+
             const filters: AdminUserAnalyticsFilters = {};
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
             if (req.query.service) {
-                filters.service = req.query.service;
+                filters.service = req.query.service as string;
             }
             if (req.query.model) {
-                filters.model = req.query.model;
+                filters.model = req.query.model as string;
             }
             if (req.query.projectId) {
-                filters.projectId = req.query.projectId;
+                ServiceHelper.validateObjectId(req.query.projectId as string, 'projectId');
+                filters.projectId = req.query.projectId as string;
             }
             if (req.query.workflowId) {
-                filters.workflowId = req.query.workflowId;
+                ServiceHelper.validateObjectId(req.query.workflowId as string, 'workflowId');
+                filters.workflowId = req.query.workflowId as string;
             }
             if (req.query.userId) {
-                filters.userId = req.query.userId;
+                ServiceHelper.validateObjectId(req.query.userId as string, 'userId');
+                filters.userId = req.query.userId as string;
             }
             if (req.query.minCost) {
-                filters.minCost = parseFloat(req.query.minCost);
+                filters.minCost = parseFloat(req.query.minCost as string);
             }
             if (req.query.maxCost) {
-                filters.maxCost = parseFloat(req.query.maxCost);
+                filters.maxCost = parseFloat(req.query.maxCost as string);
             }
 
             const usersSpending = await AdminUserAnalyticsService.getAllUsersSpending(filters);
@@ -57,14 +64,8 @@ export class AdminUserAnalyticsController {
                 });
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Admin users spending retrieved', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'getAllUsersSpending',
-                adminUserId: req.user?.id,
-                userCount: filteredResults.length,
-                duration
+            ControllerHelper.logRequestSuccess('getAllUsersSpending', req, startTime, {
+                userCount: filteredResults.length
             });
 
             res.json({
@@ -76,13 +77,7 @@ export class AdminUserAnalyticsController {
                 }
             });
         } catch (error) {
-            loggingService.error('Error getting all users spending:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'getAllUsersSpending',
-                adminUserId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('getAllUsersSpending', error, req, res, startTime);
         }
     }
 
@@ -90,9 +85,13 @@ export class AdminUserAnalyticsController {
      * Get detailed spending for a specific user
      * GET /api/admin/users/:userId/spending
      */
-    static async getUserDetailedSpending(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUserDetailedSpending(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const adminUserId = req.userId!;
+            ControllerHelper.logRequestStart('getUserDetailedSpending', req);
+
             const { userId } = req.params;
 
             if (!userId) {
@@ -103,23 +102,26 @@ export class AdminUserAnalyticsController {
                 return;
             }
 
+            ServiceHelper.validateObjectId(userId, 'userId');
+
             const filters: AdminUserAnalyticsFilters = {};
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
             if (req.query.service) {
-                filters.service = req.query.service;
+                filters.service = req.query.service as string;
             }
             if (req.query.model) {
-                filters.model = req.query.model;
+                filters.model = req.query.model as string;
             }
             if (req.query.projectId) {
-                filters.projectId = req.query.projectId;
+                ServiceHelper.validateObjectId(req.query.projectId as string, 'projectId');
+                filters.projectId = req.query.projectId as string;
             }
 
             const userSpending = await AdminUserAnalyticsService.getUserDetailedSpending(userId, filters);
@@ -132,14 +134,8 @@ export class AdminUserAnalyticsController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('User detailed spending retrieved', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'getUserDetailedSpending',
-                adminUserId: req.user?.id,
-                userId,
-                duration
+            ControllerHelper.logRequestSuccess('getUserDetailedSpending', req, startTime, {
+                userId
             });
 
             res.json({
@@ -147,14 +143,7 @@ export class AdminUserAnalyticsController {
                 data: userSpending
             });
         } catch (error) {
-            loggingService.error('Error getting user detailed spending:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'getUserDetailedSpending',
-                adminUserId: req.user?.id,
-                userId: req.params.userId
-            });
-            next(error);
+            ControllerHelper.handleError('getUserDetailedSpending', error, req, res, startTime);
         }
     }
 
@@ -162,9 +151,13 @@ export class AdminUserAnalyticsController {
      * Get users filtered by service
      * GET /api/admin/users/spending/by-service/:service
      */
-    static async getUsersByService(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getUsersByService(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const adminUserId = req.userId!;
+            ControllerHelper.logRequestStart('getUsersByService', req);
+
             const { service } = req.params;
 
             if (!service) {
@@ -179,23 +172,17 @@ export class AdminUserAnalyticsController {
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
 
             const usersSpending = await AdminUserAnalyticsService.getUsersByService(service, filters);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Users by service retrieved', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'getUsersByService',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('getUsersByService', req, startTime, {
                 service,
-                userCount: usersSpending.length,
-                duration
+                userCount: usersSpending.length
             });
 
             res.json({
@@ -207,14 +194,7 @@ export class AdminUserAnalyticsController {
                 }
             });
         } catch (error) {
-            loggingService.error('Error getting users by service:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'getUsersByService',
-                adminUserId: req.user?.id,
-                service: req.params.service
-            });
-            next(error);
+            ControllerHelper.handleError('getUsersByService', error, req, res, startTime);
         }
     }
 
@@ -222,44 +202,44 @@ export class AdminUserAnalyticsController {
      * Get spending trends
      * GET /api/admin/users/spending/trends
      */
-    static async getSpendingTrends(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getSpendingTrends(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const adminUserId = req.userId!;
+            ControllerHelper.logRequestStart('getSpendingTrends', req);
+
             const timeRange = (req.query.timeRange || 'daily') as 'daily' | 'weekly' | 'monthly';
 
             const filters: AdminUserAnalyticsFilters = {};
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
             if (req.query.service) {
-                filters.service = req.query.service;
+                filters.service = req.query.service as string;
             }
             if (req.query.model) {
-                filters.model = req.query.model;
+                filters.model = req.query.model as string;
             }
             if (req.query.projectId) {
-                filters.projectId = req.query.projectId;
+                ServiceHelper.validateObjectId(req.query.projectId as string, 'projectId');
+                filters.projectId = req.query.projectId as string;
             }
             if (req.query.userId) {
-                filters.userId = req.query.userId;
+                ServiceHelper.validateObjectId(req.query.userId as string, 'userId');
+                filters.userId = req.query.userId as string;
             }
 
             const trends = await AdminUserAnalyticsService.getSpendingTrends(timeRange, filters);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Spending trends retrieved', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'getSpendingTrends',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('getSpendingTrends', req, startTime, {
                 timeRange,
-                dataPoints: trends.length,
-                duration
+                dataPoints: trends.length
             });
 
             res.json({
@@ -271,13 +251,7 @@ export class AdminUserAnalyticsController {
                 }
             });
         } catch (error) {
-            loggingService.error('Error getting spending trends:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'getSpendingTrends',
-                adminUserId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('getSpendingTrends', error, req, res, startTime);
         }
     }
 
@@ -285,45 +259,36 @@ export class AdminUserAnalyticsController {
      * Get platform summary statistics
      * GET /api/admin/users/spending/summary
      */
-    static async getPlatformSummary(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async getPlatformSummary(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const adminUserId = req.userId!;
+            ControllerHelper.logRequestStart('getPlatformSummary', req);
+
             const filters: AdminUserAnalyticsFilters = {};
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
             if (req.query.service) {
-                filters.service = req.query.service;
+                filters.service = req.query.service as string;
             }
 
             const summary = await AdminUserAnalyticsService.getPlatformSummary(filters);
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('Platform summary retrieved', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'getPlatformSummary',
-                adminUserId: req.user?.id,
-                duration
-            });
+            ControllerHelper.logRequestSuccess('getPlatformSummary', req, startTime);
 
             res.json({
                 success: true,
                 data: summary
             });
         } catch (error) {
-            loggingService.error('Error getting platform summary:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'getPlatformSummary',
-                adminUserId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('getPlatformSummary', error, req, res, startTime);
         }
     }
 
@@ -331,25 +296,29 @@ export class AdminUserAnalyticsController {
      * Export user spending data
      * GET /api/admin/users/spending/export
      */
-    static async exportUserSpending(req: any, res: Response, next: NextFunction): Promise<void> {
+    static async exportUserSpending(req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> {
         const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const adminUserId = req.userId!;
+            ControllerHelper.logRequestStart('exportUserSpending', req);
+
             const format = (req.query.format || 'json') as 'json' | 'csv';
 
             const filters: AdminUserAnalyticsFilters = {};
 
             // Parse query parameters
             if (req.query.startDate) {
-                filters.startDate = new Date(req.query.startDate);
+                filters.startDate = new Date(req.query.startDate as string);
             }
             if (req.query.endDate) {
-                filters.endDate = new Date(req.query.endDate);
+                filters.endDate = new Date(req.query.endDate as string);
             }
             if (req.query.service) {
-                filters.service = req.query.service;
+                filters.service = req.query.service as string;
             }
             if (req.query.model) {
-                filters.model = req.query.model;
+                filters.model = req.query.model as string;
             }
 
             const usersSpending = await AdminUserAnalyticsService.getAllUsersSpending(filters);
@@ -394,24 +363,12 @@ export class AdminUserAnalyticsController {
                 });
             }
 
-            const duration = Date.now() - startTime;
-
-            loggingService.info('User spending data exported', {
-                component: 'AdminUserAnalyticsController',
-                operation: 'exportUserSpending',
-                adminUserId: req.user?.id,
+            ControllerHelper.logRequestSuccess('exportUserSpending', req, startTime, {
                 format,
-                recordCount: usersSpending.length,
-                duration
+                recordCount: usersSpending.length
             });
         } catch (error) {
-            loggingService.error('Error exporting user spending:', {
-                error: error instanceof Error ? error.message : String(error),
-                component: 'AdminUserAnalyticsController',
-                operation: 'exportUserSpending',
-                adminUserId: req.user?.id
-            });
-            next(error);
+            ControllerHelper.handleError('exportUserSpending', error, req, res, startTime);
         }
     }
 }

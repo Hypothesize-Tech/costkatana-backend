@@ -5,6 +5,8 @@ import { PromptTemplate } from '../models/PromptTemplate';
 import { Activity } from '../models/Activity';
 import { loggingService } from '../services/logging.service';
 import mongoose from 'mongoose';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class ReferenceImageController {
     /**
@@ -340,19 +342,16 @@ export class ReferenceImageController {
      * Manually trigger feature extraction
      * POST /api/templates/:templateId/reference-image/extract
      */
-    static async triggerExtraction(req: any, res: Response): Promise<void> {
+    static async triggerExtraction(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const { templateId } = req.params;
-            const { forceRefresh } = req.body;
-            const userId = req.user?._id || req.user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('triggerExtraction', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
+            const { forceRefresh } = req.body;
 
             const template = await PromptTemplate.findById(templateId);
             if (!template) {
@@ -390,14 +389,6 @@ export class ReferenceImageController {
                 return;
             }
 
-            loggingService.info('Manually triggering feature extraction', {
-                component: 'ReferenceImageController',
-                operation: 'triggerExtraction',
-                templateId,
-                userId,
-                forceRefresh
-            });
-
             // Trigger extraction (don't await)
             ReferenceImageAnalysisService.retryExtraction(templateId, userId)
                 .catch(error => {
@@ -407,6 +398,11 @@ export class ReferenceImageController {
                         templateId
                     });
                 });
+
+            ControllerHelper.logRequestSuccess('triggerExtraction', req, startTime, {
+                templateId,
+                forceRefresh
+            });
 
             res.status(202).json({
                 success: true,
@@ -418,17 +414,7 @@ export class ReferenceImageController {
             });
 
         } catch (error) {
-            loggingService.error('Error triggering extraction', {
-                component: 'ReferenceImageController',
-                operation: 'triggerExtraction',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to trigger extraction',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('triggerExtraction', error, req, res, startTime);
         }
     }
 
@@ -436,18 +422,15 @@ export class ReferenceImageController {
      * Get extraction status
      * GET /api/templates/:templateId/reference-image/status
      */
-    static async getExtractionStatus(req: any, res: Response): Promise<void> {
+    static async getExtractionStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const { templateId } = req.params;
-            const userId = req.user?._id || req.user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getExtractionStatus', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const template = await PromptTemplate.findById(templateId);
             if (!template) {
@@ -466,6 +449,11 @@ export class ReferenceImageController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getExtractionStatus', req, startTime, {
+                templateId,
+                status: template.referenceImage.extractedFeatures?.status || 'pending'
+            });
+
             res.status(200).json({
                 success: true,
                 data: {
@@ -479,17 +467,7 @@ export class ReferenceImageController {
             });
 
         } catch (error) {
-            loggingService.error('Error getting extraction status', {
-                component: 'ReferenceImageController',
-                operation: 'getExtractionStatus',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get extraction status',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getExtractionStatus', error, req, res, startTime);
         }
     }
 
@@ -497,25 +475,15 @@ export class ReferenceImageController {
      * Stream extraction status updates via SSE
      * GET /api/templates/:templateId/reference-image/stream
      */
-    static async streamExtractionStatus(req: any, res: Response): Promise<void> {
+    static async streamExtractionStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('streamExtractionStatus', req);
+
             const { templateId } = req.params;
-            const userId = req.user?._id || req.user?.id;
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
-
-            loggingService.info('Initializing SSE connection for extraction status', {
-                component: 'ReferenceImageController',
-                operation: 'streamExtractionStatus',
-                templateId,
-                userId
-            });
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             // Verify template exists
             const template = await PromptTemplate.findById(templateId);
@@ -582,12 +550,6 @@ export class ReferenceImageController {
                         extractionEmitter.off('status_update', statusUpdateHandler);
                         res.end();
 
-                        loggingService.info('SSE connection closed - extraction finished', {
-                            component: 'ReferenceImageController',
-                            operation: 'streamExtractionStatus',
-                            templateId,
-                            finalStatus: data.status
-                        });
                     }
                 }
             };
@@ -598,12 +560,6 @@ export class ReferenceImageController {
             req.on('close', () => {
                 clearInterval(heartbeatInterval);
                 extractionEmitter.off('status_update', statusUpdateHandler);
-                loggingService.info('SSE connection closed by client', {
-                    component: 'ReferenceImageController',
-                    operation: 'streamExtractionStatus',
-                    templateId,
-                    userId
-                });
             });
 
             // Set timeout to auto-close after 5 minutes
@@ -623,18 +579,9 @@ export class ReferenceImageController {
             });
 
         } catch (error) {
-            loggingService.error('SSE stream error', {
-                component: 'ReferenceImageController',
-                operation: 'streamExtractionStatus',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
             // Only send JSON error if headers haven't been sent
             if (!res.headersSent) {
-                res.status(500).json({
-                    success: false,
-                    message: 'SSE stream error'
-                });
+                ControllerHelper.handleError('streamExtractionStatus', error, req, res, startTime);
             }
         }
     }
@@ -643,18 +590,15 @@ export class ReferenceImageController {
      * Get extracted features
      * GET /api/templates/:templateId/reference-image/features
      */
-    static async getExtractedFeatures(req: any, res: Response): Promise<void> {
+    static async getExtractedFeatures(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const { templateId } = req.params;
-            const userId = req.user?._id || req.user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getExtractedFeatures', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const template = await PromptTemplate.findById(templateId);
             if (!template) {
@@ -673,23 +617,17 @@ export class ReferenceImageController {
                 return;
             }
 
+            ControllerHelper.logRequestSuccess('getExtractedFeatures', req, startTime, {
+                templateId
+            });
+
             res.status(200).json({
                 success: true,
                 data: template.referenceImage.extractedFeatures
             });
 
         } catch (error) {
-            loggingService.error('Error getting extracted features', {
-                component: 'ReferenceImageController',
-                operation: 'getExtractedFeatures',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get extracted features',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getExtractedFeatures', error, req, res, startTime);
         }
     }
 
@@ -697,18 +635,15 @@ export class ReferenceImageController {
      * Delete reference image
      * DELETE /api/templates/:templateId/reference-image
      */
-    static async deleteReferenceImage(req: any, res: Response): Promise<void> {
+    static async deleteReferenceImage(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const { templateId } = req.params;
-            const userId = req.user?._id || req.user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('deleteReferenceImage', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const template = await PromptTemplate.findById(templateId);
             if (!template) {
@@ -745,23 +680,17 @@ export class ReferenceImageController {
             template.referenceImage = undefined;
             await template.save();
 
+            ControllerHelper.logRequestSuccess('deleteReferenceImage', req, startTime, {
+                templateId
+            });
+
             res.status(200).json({
                 success: true,
                 message: 'Reference image deleted successfully'
             });
 
         } catch (error) {
-            loggingService.error('Error deleting reference image', {
-                component: 'ReferenceImageController',
-                operation: 'deleteReferenceImage',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to delete reference image',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('deleteReferenceImage', error, req, res, startTime);
         }
     }
 
@@ -769,18 +698,15 @@ export class ReferenceImageController {
      * Get cost savings statistics
      * GET /api/templates/:templateId/cost-savings
      */
-    static async getCostSavings(req: any, res: Response): Promise<void> {
+    static async getCostSavings(req: AuthenticatedRequest, res: Response): Promise<void> {
+        const startTime = Date.now();
         try {
-            const { templateId } = req.params;
-            const userId = req.user?._id || req.user?.id;
+            if (!ControllerHelper.requireAuth(req, res)) return;
+            const userId = req.userId!;
+            ControllerHelper.logRequestStart('getCostSavings', req);
 
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    message: 'Unauthorized'
-                });
-                return;
-            }
+            const { templateId } = req.params;
+            ServiceHelper.validateObjectId(templateId, 'templateId');
 
             const template = await PromptTemplate.findById(templateId);
             if (!template) {
@@ -812,6 +738,11 @@ export class ReferenceImageController {
                 ? ((usage.totalCostSaved - extractionCost.totalCost) / extractionCost.totalCost) * 100 
                 : 0;
 
+            ControllerHelper.logRequestSuccess('getCostSavings', req, startTime, {
+                templateId,
+                netSavings: usage.totalCostSaved - extractionCost.totalCost
+            });
+
             res.status(200).json({
                 success: true,
                 data: {
@@ -842,17 +773,7 @@ export class ReferenceImageController {
             });
 
         } catch (error) {
-            loggingService.error('Error getting cost savings', {
-                component: 'ReferenceImageController',
-                operation: 'getCostSavings',
-                error: error instanceof Error ? error.message : String(error)
-            });
-
-            res.status(500).json({
-                success: false,
-                message: 'Failed to get cost savings',
-                error: error instanceof Error ? error.message : String(error)
-            });
+            ControllerHelper.handleError('getCostSavings', error, req, res, startTime);
         }
     }
 }

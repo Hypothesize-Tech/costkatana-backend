@@ -2,34 +2,30 @@ import {  Response } from 'express';
 import { OnboardingService } from '../services/onboarding.service';
 import { ProjectService } from '../services/project.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
 
 export class OnboardingApiController {
     /**
      * Get onboarding status
      */
-    static async getOnboardingStatus(req: any, res: Response): Promise<void> {
+    static async getOnboardingStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('getOnboardingStatus', req);
 
         try {
-            loggingService.info('Getting onboarding status', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const status = await OnboardingService.getOnboardingStatus(userId);
 
             if (!status) {
                 // Initialize onboarding if it doesn't exist
                 const initStatus = await OnboardingService.initializeOnboarding(userId);
+                ControllerHelper.logRequestSuccess('getOnboardingStatus', req, startTime, {
+                    initialized: true
+                });
                 res.json({
                     success: true,
                     data: initStatus
@@ -37,13 +33,9 @@ export class OnboardingApiController {
                 return;
             }
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Onboarding status retrieved successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('getOnboardingStatus', req, startTime, {
                 currentStep: status.currentStep,
-                completed: status.completed,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                completed: status.completed
             });
 
             res.json({
@@ -51,53 +43,27 @@ export class OnboardingApiController {
                 data: status
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error getting onboarding status', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to get onboarding status',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('getOnboardingStatus', error, req, res, startTime);
         }
     }
 
     /**
      * Initialize onboarding
      */
-    static async initializeOnboarding(req: any, res: Response): Promise<void> {
+    static async initializeOnboarding(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('initializeOnboarding', req);
 
         try {
-            loggingService.info('Initializing onboarding', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const status = await OnboardingService.initializeOnboarding(userId);
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Onboarding initialized successfully', {
-                userId,
-                currentStep: status.currentStep,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+            ControllerHelper.logRequestSuccess('initializeOnboarding', req, startTime, {
+                currentStep: status.currentStep
             });
 
             res.json({
@@ -105,47 +71,23 @@ export class OnboardingApiController {
                 data: status
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error initializing onboarding', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to initialize onboarding',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('initializeOnboarding', error, req, res, startTime);
         }
     }
 
     /**
      * Complete onboarding step
      */
-    static async completeStep(req: any, res: Response): Promise<void> {
+    static async completeStep(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
         const { stepId, data } = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('completeStep', req, { stepId });
 
         try {
-            loggingService.info('Completing onboarding step', {
-                userId,
-                stepId,
-                hasData: !!data,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             if (!stepId) {
                 res.status(400).json({
@@ -157,14 +99,10 @@ export class OnboardingApiController {
 
             const status = await OnboardingService.completeStep(userId, stepId);
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Onboarding step completed successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('completeStep', req, startTime, {
                 stepId,
                 currentStep: status.currentStep,
-                completed: status.completed,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                completed: status.completed
             });
 
             res.json({
@@ -172,48 +110,25 @@ export class OnboardingApiController {
                 data: status
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error completing onboarding step', {
-                userId,
-                stepId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to complete onboarding step',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('completeStep', error, req, res, startTime, { stepId });
         }
     }
 
     /**
      * Create project during onboarding
      */
-    static async createProject(req: any, res: Response): Promise<void> {
+    static async createProject(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
         const projectData = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('createProject', req, {
+            projectName: projectData?.name
+        });
 
         try {
-            loggingService.info('Creating project during onboarding', {
-                userId,
-                projectName: projectData?.name,
-                budgetAmount: projectData?.budget?.amount,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             if (!projectData?.name) {
                 res.status(400).json({
@@ -225,13 +140,9 @@ export class OnboardingApiController {
 
             const project = await OnboardingService.createProject(userId, projectData);
 
-            const duration = Date.now() - startTime;
-            loggingService.info('Project created during onboarding successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('createProject', req, startTime, {
                 projectId: project._id,
-                projectName: project.name,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                projectName: project.name
             });
 
             res.json({
@@ -240,48 +151,25 @@ export class OnboardingApiController {
                 message: 'Project created successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error creating project during onboarding', {
-                userId,
-                projectData,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to create project',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('createProject', error, req, res, startTime);
         }
     }
 
     /**
      * Execute LLM query during onboarding
      */
-    static async executeLlmQuery(req: any, res: Response): Promise<void> {
+    static async executeLlmQuery(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
         const queryData = req.body;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('executeLlmQuery', req, {
+            model: queryData?.model
+        });
 
         try {
-            loggingService.info('Executing LLM query during onboarding', {
-                userId,
-                model: queryData?.model,
-                queryLength: queryData?.query?.length,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             if (!queryData?.query || !queryData?.model) {
                 res.status(400).json({
@@ -309,14 +197,10 @@ export class OnboardingApiController {
                 userId
             });
 
-            const duration = Date.now() - startTime;
-            loggingService.info('LLM query executed during onboarding successfully', {
-                userId,
+            ControllerHelper.logRequestSuccess('executeLlmQuery', req, startTime, {
                 model: queryData.model,
                 tokens: response.tokens,
-                cost: response.cost,
-                duration,
-                requestId: req.headers['x-request-id'] as string
+                cost: response.cost
             });
 
             res.json({
@@ -325,55 +209,26 @@ export class OnboardingApiController {
                 message: 'LLM query executed successfully'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error executing LLM query during onboarding', {
-                userId,
-                queryData,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to execute LLM query',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('executeLlmQuery', error, req, res, startTime);
         }
     }
 
     /**
      * Complete onboarding
      */
-    static async completeOnboarding(req: any, res: Response): Promise<void> {
+    static async completeOnboarding(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('completeOnboarding', req);
 
         try {
-            loggingService.info('Completing onboarding', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const status = await OnboardingService.completeOnboarding(userId);
 
             const duration = Date.now() - startTime;
-            loggingService.info('Onboarding completed successfully', {
-                userId,
-                completedAt: status.completedAt,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -386,60 +241,36 @@ export class OnboardingApiController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('completeOnboarding', req, startTime, {
+                completedAt: status.completedAt
+            });
+
             res.json({
                 success: true,
                 data: status,
                 message: 'Onboarding completed successfully!'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error completing onboarding', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to complete onboarding',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('completeOnboarding', error, req, res, startTime);
         }
     }
 
     /**
      * Skip onboarding
      */
-    static async skipOnboarding(req: any, res: Response): Promise<void> {
+    static async skipOnboarding(req: AuthenticatedRequest, res: Response): Promise<void> {
         const startTime = Date.now();
-        const userId = (req as any).user?.id;
+        
+        if (!ControllerHelper.requireAuth(req, res)) return;
+        const userId = req.userId!;
+
+        ControllerHelper.logRequestStart('skipOnboarding', req);
 
         try {
-            loggingService.info('Skipping onboarding', {
-                userId,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            if (!userId) {
-                res.status(401).json({
-                    success: false,
-                    error: 'User not authenticated'
-                });
-                return;
-            }
 
             const status = await OnboardingService.skipOnboarding(userId);
 
             const duration = Date.now() - startTime;
-            loggingService.info('Onboarding skipped successfully', {
-                userId,
-                skippedAt: status.skippedAt,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
 
             // Log business event
             loggingService.logBusiness({
@@ -452,27 +283,17 @@ export class OnboardingApiController {
                 }
             });
 
+            ControllerHelper.logRequestSuccess('skipOnboarding', req, startTime, {
+                skippedAt: status.skippedAt
+            });
+
             res.json({
                 success: true,
                 data: status,
                 message: 'Onboarding skipped successfully!'
             });
         } catch (error: any) {
-            const duration = Date.now() - startTime;
-
-            loggingService.error('Error skipping onboarding', {
-                userId,
-                error: error.message || 'Unknown error',
-                stack: error.stack,
-                duration,
-                requestId: req.headers['x-request-id'] as string
-            });
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to skip onboarding',
-                message: error instanceof Error ? error.message : 'Unknown error'
-            });
+            ControllerHelper.handleError('skipOnboarding', error, req, res, startTime);
         }
     }
 }

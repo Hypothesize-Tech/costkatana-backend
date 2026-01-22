@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import { UnexplainedCostService } from '../services/unexplainedCost.service';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 export class UnexplainedCostController {
   private static service = UnexplainedCostService.getInstance();
@@ -41,25 +43,15 @@ export class UnexplainedCostController {
    * Analyze unexplained costs for a specific timeframe
    * GET /api/unexplained-costs/analyze
    */
-  static async analyzeUnexplainedCosts(req: any, res: Response): Promise<void> {
+  static async analyzeUnexplainedCosts(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('analyzeUnexplainedCosts', req, { query: req.query });
 
     try {
-      loggingService.info('Unexplained cost analysis initiated', {
-        requestId,
-        userId
-      });
-
-      // Validate authentication
-      if (!userId) {
-        loggingService.warn('Unexplained cost analysis failed - authentication required', {
-          requestId
-        });
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
-      }
 
       // Check circuit breakers
       if (UnexplainedCostController.isAiCircuitBreakerOpen() || UnexplainedCostController.isDbCircuitBreakerOpen()) {
@@ -72,11 +64,8 @@ export class UnexplainedCostController {
       const cacheKey = `${userId}-${workspaceId}-${timeframe}`;
       const cachedResult = UnexplainedCostController.getCachedAnalysis(cacheKey);
       if (cachedResult) {
-        const duration = Date.now() - startTime;
-        loggingService.info('Unexplained cost analysis completed from cache', {
-          requestId,
-          duration,
-          userId
+        ControllerHelper.logRequestSuccess('analyzeUnexplainedCosts', req, startTime, {
+          cached: true
         });
 
         res.json({
@@ -99,18 +88,11 @@ export class UnexplainedCostController {
       );
 
       const analysis = await Promise.race([analysisPromise, timeoutPromise]);
-      const duration = Date.now() - startTime;
 
       // Cache the result for reuse
       UnexplainedCostController.setCachedAnalysis(cacheKey, analysis);
 
-      loggingService.info('Unexplained cost analysis completed successfully', {
-        requestId,
-        duration,
-        userId,
-        totalCost: analysis.total_cost,
-        deviationPercentage: analysis.deviation_percentage
-      });
+      const duration = Date.now() - startTime;
 
       // Queue background business event logging
       UnexplainedCostController.queueBackgroundOperation(async () => {
@@ -131,6 +113,11 @@ export class UnexplainedCostController {
         });
       });
 
+      ControllerHelper.logRequestSuccess('analyzeUnexplainedCosts', req, startTime, {
+        totalCost: analysis.total_cost,
+        deviationPercentage: analysis.deviation_percentage
+      });
+
       res.json({
         success: true,
         data: analysis,
@@ -139,15 +126,8 @@ export class UnexplainedCostController {
     } catch (error: any) {
       UnexplainedCostController.recordAiFailure();
       UnexplainedCostController.recordDbFailure();
-      const duration = Date.now() - startTime;
       
       if (error.message === 'Service temporarily unavailable' || error.message === 'Analysis timeout') {
-        loggingService.warn('Unexplained cost service unavailable', {
-          requestId,
-          duration,
-          error: error.message
-        });
-        
         res.status(503).json({
           success: false,
           error: 'Service temporarily unavailable',
@@ -156,18 +136,7 @@ export class UnexplainedCostController {
         return;
       }
       
-      loggingService.error('Unexplained cost analysis failed', {
-        requestId,
-        userId,
-        error: error.message || 'Unknown error',
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to analyze unexplained costs',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('analyzeUnexplainedCosts', error, req, res, startTime);
     }
   }
 
@@ -175,40 +144,20 @@ export class UnexplainedCostController {
    * Generate daily cost report with explanations
    * GET /api/unexplained-costs/daily-report
    */
-  static async generateDailyCostReport(req: any, res: Response): Promise<void> {
+  static async generateDailyCostReport(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('generateDailyCostReport', req, { query: req.query });
 
     try {
-      loggingService.info('Daily cost report generation initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId
-      });
-
-      if (!userId) {
-        loggingService.warn('Daily cost report generation failed - authentication required', {
-          requestId
-        });
-
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
-      }
 
       const { date, workspaceId = 'default' } = req.query;
       const reportDate = date ? (date as string) : new Date().toISOString().split('T')[0];
 
-      loggingService.info('Daily cost report generation parameters received', {
-        requestId,
-        userId,
-        date,
-        reportDate,
-        workspaceId,
-        hasDate: !!date,
-        hasWorkspaceId: !!workspaceId,
-        isDefaultDate: !date
-      });
+      // Daily cost report generation parameters received
 
       const report = await UnexplainedCostController.service.generateDailyCostReport(
         userId,
@@ -216,18 +165,6 @@ export class UnexplainedCostController {
         reportDate
       );
       const duration = Date.now() - startTime;
-
-      loggingService.info('Daily cost report generated successfully', {
-        requestId,
-        duration,
-        userId,
-        date,
-        reportDate,
-        workspaceId,
-        hasReport: !!report,
-        reportType: typeof report,
-        reportKeys: report ? Object.keys(report) : []
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -243,30 +180,18 @@ export class UnexplainedCostController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('generateDailyCostReport', req, startTime, {
+        date: reportDate,
+        workspaceId
+      });
+
       res.json({
         success: true,
         data: report,
         message: 'Daily cost report generated successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Daily cost report generation failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        date: req.query?.date,
-        workspaceId: req.query?.workspaceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to generate daily cost report',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('generateDailyCostReport', error, req, res, startTime);
     }
   }
 
@@ -274,57 +199,28 @@ export class UnexplainedCostController {
    * Get cost attribution breakdown for a specific trace
    * GET /api/unexplained-costs/trace/:traceId
    */
-  static async getTraceCostAttribution(req: any, res: Response): Promise<void> {
+  static async getTraceCostAttribution(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    const { traceId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getTraceCostAttribution', req, { traceId });
 
     try {
-      loggingService.info('Trace cost attribution retrieval initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        traceId: req.params.traceId
-      });
-
-      if (!userId) {
-        loggingService.warn('Trace cost attribution retrieval failed - authentication required', {
-          requestId,
-          traceId: req.params.traceId
-        });
-
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
+      if (traceId) {
+        ServiceHelper.validateObjectId(traceId, 'traceId');
       }
-
-      const { traceId } = req.params;
       const { workspaceId = 'default' } = req.query;
 
-      loggingService.info('Trace cost attribution retrieval parameters received', {
-        requestId,
-        userId,
-        traceId,
-        workspaceId,
-        hasTraceId: !!traceId,
-        hasWorkspaceId: !!workspaceId
-      });
+      // Trace cost attribution retrieval parameters received
 
       const traceData = await UnexplainedCostController.service.getTraceCostAttribution(
         userId,
         traceId,
       );
       const duration = Date.now() - startTime;
-
-      loggingService.info('Trace cost attribution retrieved successfully', {
-        requestId,
-        duration,
-        userId,
-        traceId,
-        workspaceId,
-        hasTraceData: !!traceData,
-        traceDataType: typeof traceData,
-        traceDataKeys: traceData ? Object.keys(traceData) : []
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -334,10 +230,12 @@ export class UnexplainedCostController {
         metadata: {
           userId,
           traceId,
-          workspaceId,
+          workspaceId: req.query?.workspaceId,
           hasTraceData: !!traceData
         }
       });
+
+      ControllerHelper.logRequestSuccess('getTraceCostAttribution', req, startTime, { traceId });
 
       res.json({
         success: true,
@@ -345,24 +243,7 @@ export class UnexplainedCostController {
         message: 'Trace cost attribution retrieved successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Trace cost attribution retrieval failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        traceId: req.params.traceId,
-        workspaceId: req.query?.workspaceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get trace cost attribution',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getTraceCostAttribution', error, req, res, startTime, { traceId });
     }
   }
 
@@ -370,26 +251,15 @@ export class UnexplainedCostController {
    * Get cost optimization recommendations
    * GET /api/unexplained-costs/recommendations
    */
-  static async getCostOptimizationRecommendations(req: any, res: Response): Promise<void> {
+  static async getCostOptimizationRecommendations(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getCostOptimizationRecommendations', req, { query: req.query });
 
     try {
-      loggingService.info('Cost optimization recommendations retrieval initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId
-      });
-
-      if (!userId) {
-        loggingService.warn('Cost optimization recommendations retrieval failed - authentication required', {
-          requestId
-        });
-
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
-      }
 
       const { timeframe = '7d', workspaceId = 'default' } = req.query;
 
@@ -412,30 +282,16 @@ export class UnexplainedCostController {
         analysis = await Promise.race([analysisPromise, timeoutPromise]);
         UnexplainedCostController.setCachedAnalysis(cacheKey, analysis);
       }
-      const duration = Date.now() - startTime;
 
       const totalPotentialSavings = analysis.optimization_recommendations?.reduce(
         (sum: number, rec: any) => sum + rec.potential_savings, 0
       ) || 0;
 
-      loggingService.info('Cost optimization recommendations retrieved successfully', {
-        requestId,
-        duration,
-        userId,
-        timeframe,
-        workspaceId,
-        recommendationCount: analysis.optimization_recommendations?.length || 0,
-        totalPotentialSavings,
-        costDriverCount: analysis.cost_drivers?.length || 0,
-        hasRecommendations: !!(analysis.optimization_recommendations?.length),
-        hasCostDrivers: !!(analysis.cost_drivers?.length)
-      });
-
       // Log business event
       loggingService.logBusiness({
         event: 'cost_optimization_recommendations_retrieved',
         category: 'cost_optimization',
-        value: duration,
+        value: Date.now() - startTime,
         metadata: {
           userId,
           timeframe,
@@ -444,6 +300,11 @@ export class UnexplainedCostController {
           totalPotentialSavings,
           costDriverCount: analysis.cost_drivers?.length || 0
         }
+      });
+
+      ControllerHelper.logRequestSuccess('getCostOptimizationRecommendations', req, startTime, {
+        recommendationCount: analysis.optimization_recommendations?.length || 0,
+        totalPotentialSavings
       });
 
       res.json({
@@ -457,24 +318,7 @@ export class UnexplainedCostController {
         message: 'Cost optimization recommendations retrieved successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cost optimization recommendations retrieval failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        timeframe: req.query?.timeframe,
-        workspaceId: req.query?.workspaceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get cost optimization recommendations',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getCostOptimizationRecommendations', error, req, res, startTime);
     }
   }
 
@@ -482,26 +326,15 @@ export class UnexplainedCostController {
    * Get cost anomaly alerts
    * GET /api/unexplained-costs/anomalies
    */
-  static async getCostAnomalies(req: any, res: Response): Promise<void> {
+  static async getCostAnomalies(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getCostAnomalies', req, { query: req.query });
 
     try {
-      loggingService.info('Cost anomalies retrieval initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId
-      });
-
-      if (!userId) {
-        loggingService.warn('Cost anomalies retrieval failed - authentication required', {
-          requestId
-        });
-
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
-      }
 
       const { timeframe = '24h', workspaceId = 'default' } = req.query;
 
@@ -537,23 +370,6 @@ export class UnexplainedCostController {
         }));
       const duration = Date.now() - startTime;
 
-      loggingService.info('Cost anomalies retrieved successfully', {
-        requestId,
-        duration,
-        userId,
-        timeframe,
-        workspaceId,
-        anomalyCount: anomalies.length,
-        totalAnomalyScore: analysis.anomaly_score,
-        totalCost: analysis.total_cost,
-        expectedCost: analysis.expected_cost,
-        deviationPercentage: analysis.deviation_percentage,
-        hasAnomalies: anomalies.length > 0,
-        highSeverityCount: anomalies.filter((a: any) => a.severity === 'high').length,
-        mediumSeverityCount: anomalies.filter((a: any) => a.severity === 'medium').length,
-        lowSeverityCount: anomalies.filter((a: any) => a.severity === 'low').length
-      });
-
       // Log business event
       loggingService.logBusiness({
         event: 'cost_anomalies_retrieved',
@@ -572,6 +388,11 @@ export class UnexplainedCostController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getCostAnomalies', req, startTime, {
+        anomalyCount: anomalies.length,
+        totalAnomalyScore: analysis.anomaly_score
+      });
+
       res.json({
         success: true,
         data: {
@@ -585,24 +406,7 @@ export class UnexplainedCostController {
         message: 'Cost anomalies retrieved successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cost anomalies retrieval failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        timeframe: req.query?.timeframe,
-        workspaceId: req.query?.workspaceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get cost anomalies',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getCostAnomalies', error, req, res, startTime);
     }
   }
 
@@ -610,37 +414,19 @@ export class UnexplainedCostController {
    * Get historical cost trends and patterns
    * GET /api/unexplained-costs/trends
    */
-  static async getCostTrends(req: any, res: Response): Promise<void> {
+  static async getCostTrends(req: AuthenticatedRequest, res: Response): Promise<void> {
     const startTime = Date.now();
-    const requestId = req.headers['x-request-id'] as string;
-    const userId = req.user?.id;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getCostTrends', req, { query: req.query });
 
     try {
-      loggingService.info('Cost trends retrieval initiated', {
-        requestId,
-        userId,
-        hasUserId: !!userId
-      });
-
-      if (!userId) {
-        loggingService.warn('Cost trends retrieval failed - authentication required', {
-          requestId
-        });
-
-        res.status(401).json({ message: 'Unauthorized' });
-        return;
-      }
 
       const { period = '30d', workspaceId = 'default' } = req.query;
 
-      loggingService.info('Cost trends retrieval parameters received', {
-        requestId,
-        userId,
-        period,
-        workspaceId,
-        hasPeriod: !!period,
-        hasWorkspaceId: !!workspaceId
-      });
+      // Cost trends retrieval parameters received
 
       const trendsData = await UnexplainedCostController.service.getCostTrends(
         userId,
@@ -648,17 +434,6 @@ export class UnexplainedCostController {
         workspaceId as string
       );
       const duration = Date.now() - startTime;
-
-      loggingService.info('Cost trends retrieved successfully', {
-        requestId,
-        duration,
-        userId,
-        period,
-        workspaceId,
-        hasTrendsData: !!trendsData,
-        trendsDataType: typeof trendsData,
-        trendsDataKeys: trendsData ? Object.keys(trendsData) : []
-      });
 
       // Log business event
       loggingService.logBusiness({
@@ -673,30 +448,15 @@ export class UnexplainedCostController {
         }
       });
 
+      ControllerHelper.logRequestSuccess('getCostTrends', req, startTime, { period, workspaceId });
+
       res.json({
         success: true,
         data: trendsData,
         message: 'Cost trends retrieved successfully'
       });
     } catch (error: any) {
-      const duration = Date.now() - startTime;
-      
-      loggingService.error('Cost trends retrieval failed', {
-        requestId,
-        userId,
-        hasUserId: !!userId,
-        period: req.query?.period,
-        workspaceId: req.query?.workspaceId,
-        error: error.message || 'Unknown error',
-        stack: error.stack,
-        duration
-      });
-      
-      res.status(500).json({
-        success: false,
-        message: 'Failed to get cost trends',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
+      ControllerHelper.handleError('getCostTrends', error, req, res, startTime);
     }
   }
 
@@ -705,7 +465,6 @@ export class UnexplainedCostController {
    */
   private static validateAuthentication(userId: string, requestId: string, res: Response): boolean {
     if (!userId) {
-      loggingService.warn('Authentication required', { requestId });
       res.status(401).json({ message: 'Unauthorized' });
       return false;
     }

@@ -7,6 +7,8 @@ import { AgentIdentity } from '../models/AgentIdentity';
 import { AgentDecisionAudit } from '../models/AgentDecisionAudit';
 import { AgentExecution } from '../models/AgentExecution';
 import { loggingService } from '../services/logging.service';
+import { ControllerHelper, AuthenticatedRequest } from '@utils/controllerHelper';
+import { ServiceHelper } from '@utils/serviceHelper';
 
 /**
  * Agent Governance Controller
@@ -16,13 +18,15 @@ export class AgentGovernanceController {
   /**
    * Create new agent identity
    */
-  static async createAgentIdentity(req: Request, res: Response): Promise<void> {
+  static async createAgentIdentity(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('createAgentIdentity', req);
+
     try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
 
       const {
         agentName,
@@ -65,11 +69,8 @@ export class AgentGovernanceController {
         description
       });
 
-      loggingService.info('Agent identity created via API', {
-        component: 'AgentGovernanceController',
-        operation: 'createAgentIdentity',
-        agentId: identity.agentId,
-        userId
+      ControllerHelper.logRequestSuccess('createAgentIdentity', req, startTime, {
+        agentId: identity.agentId
       });
 
       res.status(201).json({
@@ -90,25 +91,22 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to create agent identity', {
-        component: 'AgentGovernanceController',
-        operation: 'createAgentIdentity',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to create agent identity' });
+      ControllerHelper.handleError('createAgentIdentity', error, req, res, startTime);
     }
   }
 
   /**
    * List agent identities
    */
-  static async listAgentIdentities(req: Request, res: Response): Promise<void> {
+  static async listAgentIdentities(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('listAgentIdentities', req, { query: req.query });
+
     try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
 
       const { workspaceId, organizationId, status, agentType } = req.query;
 
@@ -118,6 +116,10 @@ export class AgentGovernanceController {
         organizationId: organizationId as string,
         status: status as string,
         agentType: agentType as string
+      });
+
+      ControllerHelper.logRequestSuccess('listAgentIdentities', req, startTime, {
+        count: agents.length
       });
 
       res.json({
@@ -140,33 +142,31 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to list agent identities', {
-        component: 'AgentGovernanceController',
-        operation: 'listAgentIdentities',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to list agent identities' });
+      ControllerHelper.handleError('listAgentIdentities', error, req, res, startTime);
     }
   }
 
   /**
    * Get agent identity details
    */
-  static async getAgentIdentity(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async getAgentIdentity(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAgentIdentity', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
 
       const agent = await AgentIdentity.findOne({ agentId, userId });
       if (!agent) {
         res.status(404).json({ error: 'Agent not found' });
         return;
       }
+
+      ControllerHelper.logRequestSuccess('getAgentIdentity', req, startTime, { agentId });
 
       res.json({
         success: true,
@@ -175,27 +175,23 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get agent identity', {
-        component: 'AgentGovernanceController',
-        operation: 'getAgentIdentity',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get agent identity' });
+      ControllerHelper.handleError('getAgentIdentity', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Update agent identity
    */
-  static async updateAgentIdentity(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async updateAgentIdentity(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('updateAgentIdentity', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
       const updates = req.body;
 
       const agent = await AgentIdentity.findOne({ agentId, userId });
@@ -231,12 +227,7 @@ export class AgentGovernanceController {
 
       await agent.save();
 
-      loggingService.info('Agent identity updated', {
-        component: 'AgentGovernanceController',
-        operation: 'updateAgentIdentity',
-        agentId,
-        userId
-      });
+      ControllerHelper.logRequestSuccess('updateAgentIdentity', req, startTime, { agentId });
 
       res.json({
         success: true,
@@ -245,27 +236,23 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to update agent identity', {
-        component: 'AgentGovernanceController',
-        operation: 'updateAgentIdentity',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to update agent identity' });
+      ControllerHelper.handleError('updateAgentIdentity', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Revoke agent (kill-switch)
    */
-  static async revokeAgent(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async revokeAgent(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('revokeAgent', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
       const { reason } = req.body;
 
       // Verify ownership
@@ -278,40 +265,30 @@ export class AgentGovernanceController {
       // Revoke agent
       await agentIdentityService.revokeAgent(agentId, reason || 'Revoked by user');
 
-      loggingService.warn('Agent revoked via API', {
-        component: 'AgentGovernanceController',
-        operation: 'revokeAgent',
-        agentId,
-        userId,
-        reason
-      });
+      ControllerHelper.logRequestSuccess('revokeAgent', req, startTime, { agentId });
 
       res.json({
         success: true,
         message: 'Agent revoked successfully'
       });
     } catch (error) {
-      loggingService.error('Failed to revoke agent', {
-        component: 'AgentGovernanceController',
-        operation: 'revokeAgent',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to revoke agent' });
+      ControllerHelper.handleError('revokeAgent', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Emergency kill-switch
    */
-  static async emergencyKillSwitch(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async emergencyKillSwitch(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('emergencyKillSwitch', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
       const { reason } = req.body;
 
       // Verify ownership
@@ -328,40 +305,30 @@ export class AgentGovernanceController {
         userId
       );
 
-      loggingService.warn('Emergency kill-switch activated via API', {
-        component: 'AgentGovernanceController',
-        operation: 'emergencyKillSwitch',
-        agentId,
-        userId,
-        reason
-      });
+      ControllerHelper.logRequestSuccess('emergencyKillSwitch', req, startTime, { agentId });
 
       res.json({
         success: true,
         message: 'Emergency kill-switch activated - agent revoked and all executions terminated'
       });
     } catch (error) {
-      loggingService.error('Failed to activate emergency kill-switch', {
-        component: 'AgentGovernanceController',
-        operation: 'emergencyKillSwitch',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to activate emergency kill-switch' });
+      ControllerHelper.handleError('emergencyKillSwitch', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Get agent decision history
    */
-  static async getAgentDecisions(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async getAgentDecisions(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAgentDecisions', req, { agentId, query: req.query });
 
-      const { agentId } = req.params;
+    try {
       const { limit, startDate, endDate, decisionType, riskLevel } = req.query;
 
       // Verify ownership
@@ -398,6 +365,11 @@ export class AgentGovernanceController {
         .populate('userId', 'name email')
         .lean();
 
+      ControllerHelper.logRequestSuccess('getAgentDecisions', req, startTime, {
+        agentId,
+        count: decisions.length
+      });
+
       res.json({
         success: true,
         data: {
@@ -406,27 +378,23 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get agent decisions', {
-        component: 'AgentGovernanceController',
-        operation: 'getAgentDecisions',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get agent decisions' });
+      ControllerHelper.handleError('getAgentDecisions', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Get agent execution history
    */
-  static async getAgentExecutions(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async getAgentExecutions(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAgentExecutions', req, { agentId, query: req.query });
 
-      const { agentId } = req.params;
+    try {
       const { limit, status } = req.query;
 
       // Verify ownership
@@ -445,6 +413,11 @@ export class AgentGovernanceController {
         .sort({ queuedAt: -1 })
         .limit(limit ? parseInt(limit as string) : 50);
 
+      ControllerHelper.logRequestSuccess('getAgentExecutions', req, startTime, {
+        agentId,
+        count: executions.length
+      });
+
       res.json({
         success: true,
         data: {
@@ -453,27 +426,23 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get agent executions', {
-        component: 'AgentGovernanceController',
-        operation: 'getAgentExecutions',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get agent executions' });
+      ControllerHelper.handleError('getAgentExecutions', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Get agent rate limit status
    */
-  static async getAgentRateLimitStatus(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async getAgentRateLimitStatus(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAgentRateLimitStatus', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
 
       // Verify ownership
       const agent = await AgentIdentity.findOne({ agentId, userId });
@@ -484,6 +453,8 @@ export class AgentGovernanceController {
 
       const status = await agentRateLimitService.getRateLimitStatus(agentId);
 
+      ControllerHelper.logRequestSuccess('getAgentRateLimitStatus', req, startTime, { agentId });
+
       res.json({
         success: true,
         data: {
@@ -492,27 +463,23 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get agent rate limit status', {
-        component: 'AgentGovernanceController',
-        operation: 'getAgentRateLimitStatus',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get agent rate limit status' });
+      ControllerHelper.handleError('getAgentRateLimitStatus', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Get agent analytics
    */
-  static async getAgentAnalytics(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = (req as any).user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Authentication required' });
-        return;
-      }
+  static async getAgentAnalytics(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+    const { agentId } = req.params;
+    
+    if (!ControllerHelper.requireAuth(req, res)) return;
+    const userId = req.userId!;
+    
+    ControllerHelper.logRequestStart('getAgentAnalytics', req, { agentId });
 
-      const { agentId } = req.params;
+    try {
 
       // Verify ownership
       const agent = await AgentIdentity.findOne({ agentId, userId });
@@ -572,6 +539,8 @@ export class AgentGovernanceController {
         .select('decisionId decisionType decision reasoning riskLevel timestamp')
         .lean();
 
+      ControllerHelper.logRequestSuccess('getAgentAnalytics', req, startTime, { agentId });
+
       res.json({
         success: true,
         data: {
@@ -594,19 +563,16 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get agent analytics', {
-        component: 'AgentGovernanceController',
-        operation: 'getAgentAnalytics',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get agent analytics' });
+      ControllerHelper.handleError('getAgentAnalytics', error, req, res, startTime, { agentId });
     }
   }
 
   /**
    * Get governance status
    */
-  static async getGovernanceStatus(_req: Request, res: Response): Promise<void> {
+  static async getGovernanceStatus(_req: AuthenticatedRequest, res: Response): Promise<void> {
+    const startTime = Date.now();
+
     try {
 
       // Get basic governance status
@@ -648,12 +614,7 @@ export class AgentGovernanceController {
         }
       });
     } catch (error) {
-      loggingService.error('Failed to get governance status', {
-        component: 'AgentGovernanceController',
-        operation: 'getGovernanceStatus',
-        error: error instanceof Error ? error.message : String(error)
-      });
-      res.status(500).json({ error: 'Failed to get governance status' });
+      ControllerHelper.handleError('getGovernanceStatus', error, _req, res, startTime);
     }
   }
 }
